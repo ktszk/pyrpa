@@ -3,6 +3,7 @@
 #FC=ifx
 FC=flang
 #FC=gfortran
+#FC=amdflang
 ifeq ($(FC),ifort)
   LIBS=-lmkl_intel_lp64 -lmkl_sequential -lmkl_core #-lmkl_avx
   parallel= -mavx -qopenmp
@@ -14,10 +15,10 @@ else
     ifeq ($(FC),flang)
       LIBS= -lblis -lflame -lm -lpthread
       parallel= -mavx2 -fopenmp
-   else
+    else
       LIBS= -lblis -lflame -lm -lpthread
       parallel= -mavx2 -fopenmp
-   endif
+    endif
   endif
 endif
 .SUFFIXES:

@@ -384,7 +384,11 @@ subroutine set_qshift(qpoint,klist,qshift,Nk)
   real(8) tmp
   real(8),dimension(3,Nk):: kqlist
 
+  !$omp parallel
+  !$omp workshare
   kqlist(:,:)=0.0d0
+  !$omp end workshare
+  !$omp do private(i,j)
   do i=1,Nk
      kqlist(:,i)=klist(:,i)+qpoint(:)
      do j=1,3
@@ -395,7 +399,11 @@ subroutine set_qshift(qpoint,klist,qshift,Nk)
         end if
      end do
   end do
+  !$omp end do
+  !$omp workshare
   qshift(:)=1
+  !$omp end workshare
+  !$omp do private(i,j,tmp)
   kq_loop: do i=1,Nk
      k_loop: do j=1,Nk
         tmp=sum(abs(klist(:,j)-kqlist(:,i)))
@@ -406,6 +414,8 @@ subroutine set_qshift(qpoint,klist,qshift,Nk)
         end if
      end do k_loop
   end do kq_loop
+  !$omp end do
+  !$omp end parallel
 end subroutine set_qshift
 
 module calc_irr_chi
@@ -736,18 +746,26 @@ subroutine calc_tdf(tdf,eig,veloc,kweight,tau,Nw,Nk,Norb) bind(C)
   emax=maxval(eig)
   emin=minval(eig)
   dw=(emax-emin)/Nw
+  !$omp parallel
+  !$omp workshare
   tdf(:,:,:)=0.0d0
+  !$omp end workshare
   omega_loop: do iw=1,Nw
      axis1: do l=1,3
         axis2: do m=l,3
+           !$omp do private(i,j) reduction(+:tdf)
            k_loop: do i=1,Nk
               band_loop: do j=1,Norb
                  tdf(m,l,iw)=tdf(m,l,iw)+veloc(m,j,i)*veloc(l,j,i)*tau(j,i)*kweight(i)/((iw*dw+emin-eig(j,i))**2+id*id)
               end do band_loop
            end do k_loop
+           !$omp end do
            tdf(l,m,iw)=tdf(m,l,iw)
         end do axis2
      end do axis1
   end do omega_loop
+  !$omp workshare
   tdf(:,:,:)=tdf(:,:,:)*id/Nk
+  !$omp end workshare
+  !$omp end parallel
 end subroutine calc_tdf

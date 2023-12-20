@@ -277,7 +277,7 @@ def get_conductivity(mu,temp,eig,vk,Nw,Emax,idelta=1.e-3):
     return L11,L12,L22,wlist
 
 def chis_spectrum(mu,temp,Smat,klist,qlist,olist,eig,uni,Nw,Emax,idelta=1.e-3):
-    ffermi=.5*(1.-np.tanh(.5*(eig-mu)/temp))
+    ffermi=.5-.5*np.tanh(.5*(eig-mu)/temp)
     wlist=np.linspace(0,Emax,Nw)
     chisq=[]
     for q in qlist:

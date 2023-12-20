@@ -4,11 +4,15 @@ import numpy as np
 
 #fname,ftype,brav='Cu',2,1
 #fname,ftype,brav='Na',2,2
-fname,ftype,brav='Si',2,1
+#fname,ftype,brav='Si',2,1
+#fname,ftype,brav='000AsP.input',1,0
+#fname,ftype,brav='00010.input',1,2
+fname,ftype,brav='hop3.input',1,0
+sw_dec_axis=False
 """
 ftype: set input hamiltonian's format
-0: .input file named {fname}
-1: ham_r.txt, irvec.txt, ndegen.txt in {fname} dir
+0: ham_r.txt, irvec.txt, ndegen.txt in {fname} dir
+1: .input file named {fname}
 2: {fname}_hr.dat file (wannier90 default hopping file)
 else: Hopping.dat file (ecalj hopping file)
 brav: choose primitive translation vector S,FC,BC etc
@@ -23,8 +27,8 @@ brav: choose primitive translation vector S,FC,BC etc
 else: monoclinic
 """
 
-option=12
-color_option=2
+option=0
+color_option=0
 """
 option defines calculation modes
  0: band plot
@@ -46,31 +50,37 @@ color_option defines the meaning of color on Fermi surfaces
  2: velocity size
 """
 
-Nx,Ny,Nz,Nw=50,50,50,300 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=40,40,1,500 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 
 temp=2.59e-3
-#fill=26.0 #3.0
-#fill=0.5 #Na
-fill=4.0
+#fill=26.0
+fill=2.0
+#fill=3.0 #AsP
+#fill=5.875
+#fill=4.0
 
-Emin,Emax=-10,10
-delta=1.0e-2
+#Emin,Emax=-10,10
+Emin,Emax=-10,5
+delta=1.0e-1
 Ecut=1.0e-3
 tau_const=100
-olist=[0,[1,2],3]
-U,J=1.2,0.15
+olist=[[0,5],[1,2,6,7],[3,8]]
+U,J=0.8, 0.1 #1.2,0.15
 
+alatt=np.array([3.96,3.96,13.02])
 #alatt=np.array([3.96*np.sqrt(2.),3.96*np.sqrt(2.),13.02*0.5])
 #alatt=np.array([4.338,4.338,4.338]) #CoSi
 #alatt=np.array([4.21,4.21,4.21]) #Na
-alatt=np.array([5.431,5.431,5.431])
+#alatt=np.array([5.431,5.431,5.431])
 deg=np.array([90.,90.,90])
 
 #k_sets=[[0.,0.,.5],[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.],[0.,0.,0.]]
 #xlabel=['Z','$\Gamma$','X','Z','$\Gamma$'] 
-k_sets=[[0., 0., 0.],[.5, 0., 0.]]
-xlabel=['$\Gamma$','X']
+#k_sets=[[0., 0., 0.],[.5, .5, 0.]]
+#xlabel=['$\Gamma$','M']
+k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
+xlabel=['$\Gamma$','X','M']
 
 sw_calc_mu=True #calculate mu or not
 sw_unit=True    #set unit values unity (False) or not (True)
@@ -322,12 +332,13 @@ def calc_conductivity_lr(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,Nw,with_spin=False):
     print((kb*kappa[0]*sclin.inv(sigma[0]*temp)).real.round(10))
     print('Seebeck coefficient matrix (V/K)')
     print(Seebeck[0].real.round(10))
+    print(hbar)
     fig=plt.figure()
     ax=fig.add_subplot(211)
     ax.plot(wlist,sigma[:,0,0].real)
     ax.plot(wlist,sigma[:,0,0].imag)
     ax2=fig.add_subplot(212)
-    pol=1.+4*np.pi*1j*(sigma.T/(wlist+1e-8)).T
+    pol=1.+4*hbar*np.pi*1j*(sigma.T/(wlist+1e-8)).T
     ax2.plot(wlist[1:],pol[1:,0,0].real)
     ax2.plot(wlist[1:],pol[1:,0,0].imag)
     #ax2=fig.add_subplot(312)
@@ -365,13 +376,29 @@ def get_mass(mesh,rvec,ham_r,mu,de=3.e-4,meshkz=20):
 def main():
     rvec,ham_r,no,Nr=plibs.import_hoppings(fname,ftype)
     avec,Arot=plibs.get_ptv(alatt,deg,brav)
+    if sw_dec_axis:
+        rvec1=Arot.T.dot(rvec.T).T
+        rvec=rvec1
+        if brav in {1,2}:
+            rvec[:,2]*=2.
+            avec=alatt*np.eye(3)
+            avec[:,2]*=.5
+        elif brav==5:
+            rvec*=2.
+            avec=(alatt*np.eye(3))*.5
+        else:
+            avec=alatt*np.eye(3)
     bvec=plibs.get_bvec(avec)
     print("Hamiltonian name is "+fname)
     print("Lattice Vector")
     print(avec)
     print("Reciprocal Lattice Vector")
     print(bvec)
-
+    print("Number of orbital =",no)
+    if option in {0}:
+        print('kmesh = %d'%kmesh)
+    else:
+        print('k-mesh is %d %d %d'%(Nx,Ny,Nz))
     if option in {5,6}:
         pass
     else:
@@ -440,7 +467,8 @@ def main():
             f.close()
             plt.contourf(sp,w,abs(chisw.imag),100)
             plt.colorbar()
-            plt.jet()
+            #plt.jet()
+            plt.hot()
             plt.show()
         else: #chis spectrum ecut plane
             chis,chi0,qx,qy=plibs.chis_qmap(Nx,Ny,Ecut,mu,temp,Smat,klist,chiolist,eig,uni,idelta=1.e-3)
