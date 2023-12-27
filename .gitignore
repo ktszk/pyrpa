@@ -10,6 +10,14 @@ __pycache__/
 # output files
 chis.dat
 
+# input files
+*_hr.dat
+*.input
+Hopping.dat
+irvec.txt
+ndegen.txxt
+ham_r.txt
+
 # Distribution / packaging
 .Python
 build/

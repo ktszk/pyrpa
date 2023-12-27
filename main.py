@@ -28,7 +28,7 @@ else: monoclinic
 """
 
 option=0
-color_option=0
+color_option=1
 """
 option defines calculation modes
  0: band plot
@@ -65,7 +65,7 @@ Emin,Emax=-10,5
 delta=1.0e-1
 Ecut=1.0e-3
 tau_const=100
-olist=[[0,5],[1,2,6,7],[3,8]]
+olist=[[0],[1],[2]]
 U,J=0.8, 0.1 #1.2,0.15
 
 alatt=np.array([3.96,3.96,13.02])
@@ -155,6 +155,8 @@ def plot_FS(fscolors,klist,color_option):
             else:
                 if color_option==2:
                     clist=cm.jet((fcol-vmin)/(vmax-vmin))
+                else:
+                    clist=fcol
                 for k1,k2,clst in zip(kk,kk[1:],clist):
                     plt.plot([k1[0],k2[0]],[k1[1],k2[1]],c=clst)
     if color_option==2:
