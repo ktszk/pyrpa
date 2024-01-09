@@ -157,9 +157,10 @@ def mk_kf(mesh,rvec,ham_r,mu,kz=0):
             v2.append(ct)
     return v2,fsband
 
-def gen_3d_surf_points(mesh,rvec,ham_r,mu):
+def gen_3d_surf_points(mesh,rvec,ham_r,mu,kscale=1.0):
     import skimage.measure as ski
     Nk,klist=gen_klist(mesh+1,mesh+1,mesh+1)
+    klist=klist*kscale
     ham_k=flibs.gen_ham(klist,ham_r,rvec)
     eig,uni=flibs.get_eig(ham_k)
     fspolys=[]
@@ -223,7 +224,7 @@ def get_ptv(alatt,deg,brav):
     elif brav==1: #face center
         Arot=np.array([[-.5, 0., .5],[0., .5, .5],[-.5,.5, 0.]])
     elif brav==2: #body center
-        Arot=np.array([[.5, .5, .5],[-.5, .5, .5],[-.5,-.5, .5]])
+        Arot=np.array([[.5,-.5, .5],[.5, .5, .5],[-.5,-.5, .5]])
     elif brav==3: #hexagonal
         Arot=np.array([[1., 0., 0.],[-.5,.5*np.sqrt(3.),0.],[0., 0., 1.]])
     elif brav==4: #trigonal
