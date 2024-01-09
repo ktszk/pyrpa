@@ -1,14 +1,5 @@
 #!/usr/bin/env python
 #-*- coding:utf-8 -*-
-import numpy as np
-
-#fname,ftype,brav='Cu',2,1
-#fname,ftype,brav='Na',2,2
-#fname,ftype,brav='Si',2,1
-#fname,ftype,brav='000AsP.input',1,0
-#fname,ftype,brav='00010.input',1,2
-fname,ftype,brav='hop3.input',1,0
-sw_dec_axis=False
 """
 ftype: set input hamiltonian's format
 0: ham_r.txt, irvec.txt, ndegen.txt in {fname} dir
@@ -26,9 +17,12 @@ brav: choose primitive translation vector S,FC,BC etc
 7: body center (common)
 else: monoclinic
 """
+#fname,ftype,brav='Si',2,1
+#fname,ftype,brav='00010.input',1,2
+fname,ftype,brav='hop3.input',1,0
 
-option=0
-color_option=1
+sw_dec_axis=False
+
 """
 option defines calculation modes
  0: band plot
@@ -49,18 +43,19 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
+option=0
+color_option=1
 
 Nx,Ny,Nz,Nw=40,40,1,500 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
+#kscale=[1.0,1.0,1.0]
+#kz=0.5
 
+abc=[3.96,3.96,13.02]
+alpha_beta_gamma=[90.,90.,90]
 temp=2.59e-3
-#fill=26.0
 fill=2.0
-#fill=3.0 #AsP
-#fill=5.875
-#fill=4.0
 
-#Emin,Emax=-10,10
 Emin,Emax=-10,5
 delta=1.0e-1
 Ecut=1.0e-3
@@ -68,29 +63,22 @@ tau_const=100
 olist=[[0],[1],[2]]
 U,J=0.8, 0.1 #1.2,0.15
 
-alatt=np.array([3.96,3.96,13.02])
-#alatt=np.array([3.96*np.sqrt(2.),3.96*np.sqrt(2.),13.02*0.5])
-#alatt=np.array([4.338,4.338,4.338]) #CoSi
-#alatt=np.array([4.21,4.21,4.21]) #Na
-#alatt=np.array([5.431,5.431,5.431])
-deg=np.array([90.,90.,90])
-
-#k_sets=[[0.,0.,.5],[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.],[0.,0.,0.]]
-#xlabel=['Z','$\Gamma$','X','Z','$\Gamma$'] 
-#k_sets=[[0., 0., 0.],[.5, .5, 0.]]
-#xlabel=['$\Gamma$','M']
-k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
-xlabel=['$\Gamma$','X','M']
+#k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
+#xlabel=['$\Gamma$','X','M']
 
 sw_calc_mu=True #calculate mu or not
 sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 #----------------------------------main functions-------------------------------------
+import numpy as np
 import flibs, plibs
 import scipy.linalg as sclin
 import scipy.constants as scconst
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+
+alatt=np.array(abc)
+deg=np.array(alpha_beta_gamma)
 
 if sw_unit:
     hbar=scconst.physical_constants['Planck constant over 2 pi in eV s'][0]
@@ -106,7 +94,7 @@ else:
     eC=1.
     tau_unit=1.
     emass=1.
-def plot_band(eig,spl,xticks,uni,ol,color):
+def plot_band(eig,spl,xlabel,xticks,uni,ol,color):
     def get_col(cl,ol):
         col=(np.abs(cl[ol])**2 if isinstance(ol,int)
              else (np.abs(cl[ol])**2).sum(axis=0)).round(4)
@@ -158,7 +146,7 @@ def plot_FS(fscolors,klist,color_option):
                 else:
                     clist=fcol
                 for k1,k2,clst in zip(kk,kk[1:],clist):
-                    plt.plot([k1[0],k2[0]],[k1[1],k2[1]],c=clst)
+                    plt.plot([k1[0],k2[0]],[k1[1],k2[1]],c=clst,lw=3)
     if color_option==2:
         plt.scatter(k[:,0],k[:,1],s=0.1,c=v)
         plt.jet()
@@ -222,7 +210,7 @@ def set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,olist):
         fscolors=np.array(fscolors)
         return fspolys,fscenters,fscolors
 
-def plot_spectrum(k_sets,kmesh,bvec,mu,ham_r,rvec,Emin,Emax,delta,Nw):
+def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,rvec,Emin,Emax,delta,Nw):
     klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
     ham_k=flibs.gen_ham(klist,ham_r,rvec)
     eig,uni=flibs.get_eig(ham_k)
@@ -238,7 +226,7 @@ def plot_spectrum(k_sets,kmesh,bvec,mu,ham_r,rvec,Emin,Emax,delta,Nw):
     plt.colorbar()
     plt.show()
     
-def calc_conductivity_Bolzmann(rvec,ham_r,avec,fill,temp,Nw=300,with_spin=False):
+def calc_conductivity_Bolzmann(rvec,ham_r,avec,fill,temp,tau_const,Nw=300,with_spin=False):
     #no dep. T and mu or filling
     Nk,eig,vk,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,rvec,avec.T*ihbar,sw_veloc=True)
     Vuc=sclin.det(avec)*1e-30
@@ -277,9 +265,6 @@ def calc_conductivity_Bolzmann(rvec,ham_r,avec,fill,temp,Nw=300,with_spin=False)
     Pertier=K1.dot(sclin.inv(K0))
     sigmaS=gsp*tau_unit*kb*eC*K1*iNV*itemp
     PF=sigma*Seebeck**2
-    #print(K0.round(10))
-    #print(K1.round(10))
-    #print(K2.round(10))
     print('sigma matrix (S/m)')
     print(sigma.round(10))
     print('kappa matrix (K22 only) (W/m/K')
@@ -299,7 +284,7 @@ def calc_conductivity_Bolzmann(rvec,ham_r,avec,fill,temp,Nw=300,with_spin=False)
     print('Power Factor (SA/m^2/K)')
     print(PF.round(10))
 
-def calc_conductivity_lr(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,Nw,with_spin=False):
+def calc_conductivity_lr(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta,with_spin=False):
     '''
     calculation of linear response theory
     electric conductivity of LRT correponds to Boltzmann then delta~O(10-1) (tau~1fs) at 300K
@@ -321,9 +306,6 @@ def calc_conductivity_lr(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,Nw,with_spin=False):
     kappa=kappaSconst*L22
     sigmaS=kappaSconst*L12
     Seebeck=np.array([-sclin.inv(s).dot(sS) for s,sS in zip(sigma,sigmaS)])
-    #print(L11[0].real.round(10))
-    #print(L12[0].real.round(10))
-    #print(L22[0].real.round(10))
     print('sigma matrix (S/m)')
     print(sigma[0].real.round(10))
     print('kappa matrix (L22 only) (W/m/K)')
@@ -413,13 +395,26 @@ def main():
                 mu=get_mu(ham_r,rvec,Arot,temp)
         print('chem. pot. = %7.4f'%mu)
 
+    if option in {0,4,7,12}:
+        try:
+            k_sets
+            xlabel
+        except NameError:
+            print('generate symmetry line')
+            k_sets,xlabel2=plibs.get_symm_line(brav)
+            try:
+                xlabel
+                if len(xlabel)!=len(k_sets):
+                    xlabel=xlabel2
+            except NameError:
+                xlabel=xlabel2
     if option==0: #band plot
         print("calculate band structure")
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         ham_k=flibs.gen_ham(klist,ham_r,rvec)
         eig,uni0=flibs.get_eig(ham_k)
-        uni=np.array([u.T for u in uni0]) #uni(k,band,orb)>uni(k,orb,band)
-        plot_band(eig.T-mu,spa_length,xticks,uni.T,olist,(False if color_option==0 else True))
+        uni=np.array([u.T for u in uni0]) #rotate uni(k,band,orb) to uni(k,orb,band)
+        plot_band(eig.T-mu,spa_length,xlabel,xticks,uni.T,olist,(False if color_option==0 else True))
     elif option==1: #plot dos
         print("calculate Dos")
         Nk,eig,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,rvec,avec)
@@ -429,23 +424,31 @@ def main():
         plt.show()
     elif option==2: #2D Fermi surface plot
         print("plot 2D Fermi surface")
-        klist,blist=plibs.mk_kf(Nx,rvec,ham_r,mu)
+        try:
+            kz
+        except NameError:
+            kz=0.
+        klist,blist=plibs.mk_kf(Nx,rvec,ham_r,mu,kz)
         clist=plibs.get_colors(klist,blist,ihbar*avec.T,rvec,ham_r,olist,color_option,True)
         plot_FS(clist,klist,color_option)
     elif option==3: #3D Fermi surface plot
         print("plot 3D Fermi surface")
-        polys,centers,blist=plibs.gen_3d_surf_points(Nx,rvec,ham_r,mu)
+        try:
+            kscale
+        except NameError:
+            kscale=1.0
+        polys,centers,blist=plibs.gen_3d_surf_points(Nx,rvec,ham_r,mu,kscale)
         fspolys,fscenters,fscolors=set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,olist)
         plot_3d_surf(fspolys,fscenters,fscolors,color_option)
     elif option==4: #plot spectrum
         print("calculate spectrum")
-        plot_spectrum(k_sets,kmesh,bvec,mu,ham_r,rvec,Emin,Emax,delta,Nw)
+        plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,rvec,Emin,Emax,delta,Nw)
     elif option==5: #calc conductivity
         print("calculate conductivities using Boltzmann theory")
-        calc_conductivity_Bolzmann(rvec,ham_r,avec,fill,temp)
+        calc_conductivity_Bolzmann(rvec,ham_r,avec,fill,temp,tau_const)
     elif option==6: #calc_optical conductivity
         print("calculate conductivities")
-        calc_conductivity_lr(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,Nw)
+        calc_conductivity_lr(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta)
     elif option in {7,8}: #calc_chis_spectrum
         print("calculate chis spectrum" if option==7 else "calculate chis qmap at Ecut")
         Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,rvec,avec,sw_uni=True)

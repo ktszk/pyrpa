@@ -84,12 +84,12 @@ def gen_klist_with_kmap(Nx,Ny,Nz):
     klist=np.array([x.ravel()/Nx,y.ravel()/Ny,z.ravel()/Nz]).T.copy()
     return klist,kmap
 
-def gen_klist(Nx,Ny,Nz=None,sw_pp=True):
+def gen_klist(Nx,Ny,Nz=None,sw_pp=True,kz=0):
     if sw_pp:
         kx=np.linspace(-0.5,0.5,Nx,True)
         ky=np.linspace(-0.5,0.5,Ny,True)
         if Nz==None:
-            kz=np.array([0])
+            kz=np.array([kz])
         else:
             kz=np.linspace(-0.5,0.5,Nz,True)
     else:
@@ -144,7 +144,7 @@ def mk_qlist(k_set,Nx,Ny,Nz,bvec):
 
 def mk_kf(mesh,rvec,ham_r,mu,kz=0):
     import skimage.measure as sk
-    Nk,klist=gen_klist(mesh+1,mesh+1)
+    Nk,klist=gen_klist(mesh+1,mesh+1,kz=kz)
     ham_k=flibs.gen_ham(klist,ham_r,rvec)
     eig,uni=flibs.get_eig(ham_k)
     v2=[]
@@ -257,6 +257,26 @@ def get_ptv(alatt,deg,brav):
     else:
         avec=alatt[0]*Arot
     return avec,Arot
+
+def get_symm_line(brav):
+    if brav==0: #simple
+        k_list=[[0.,0.,.5],[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.],[0.,0.,0.]]
+        xlabel=['Z','$\Gamma$','X','M','$\Gamma$']
+    elif brav==1: #face center
+        k_list=[[0.,0.,0.],[.5, 0., .5],[1., 0., 0.],[.5, .5, .5],[.5,.25,.75],[0.,0.,0.]]
+        xlabel=['$\Gamma$','X','$\Gamma$','L','W','$\Gamma$']
+    elif brav==2: #body center
+        k_list=[[.5,.5,.5],[0., 0., 0.],[.5, 0., 0.],[.5, .5,-.5],[0.,0.,0.]]
+        xlabel=['Z','$\Gamma$','X','M','$\Gamma$']
+    elif brav==3: #hexagonal
+        k_list=[[0.,0.,0.],[2./3.,-1./3., 0.],[.5, 0., 0.],[0., 0., 0.],[0.,0.,.5]]
+        xlabel=['$\Gamma$','K','M','$\Gamma$','Z']
+    elif brav==4: #trigonal
+        k_list=[[0.,0.,0.],[.5,0.,.5],[.5,0.,0.],[0.,0.,0.],[.5,.5,.5]]
+        xlabel=['$\Gamma$','K','M','$\Gamma$','Z']
+    else:
+        pass
+    return k_list,xlabel
 
 def BZedge(brav):
     pass
