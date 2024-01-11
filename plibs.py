@@ -142,9 +142,10 @@ def mk_qlist(k_set,Nx,Ny,Nz,bvec):
     xticks+=[splen[-1]]
     return np.array(qlist),np.array(splen),xticks
 
-def mk_kf(mesh,rvec,ham_r,mu,kz=0):
+def mk_kf(mesh,rvec,ham_r,mu,kz):
     import skimage.measure as sk
     Nk,klist=gen_klist(mesh+1,mesh+1,kz=kz)
+    print(klist)
     ham_k=flibs.gen_ham(klist,ham_r,rvec)
     eig,uni=flibs.get_eig(ham_k)
     v2=[]
@@ -163,14 +164,18 @@ def gen_3d_surf_points(mesh,rvec,ham_r,mu,kscale=1.0):
     klist=klist*kscale
     ham_k=flibs.gen_ham(klist,ham_r,rvec)
     eig,uni=flibs.get_eig(ham_k)
+    if isinstance(kscale,int):
+        ks=kscale*np.array([1.,1.,1.])
+    else:
+        ks=np.array(kscale)
     fspolys=[]
     fscenters=[]
     fsband=[]
     for i,e in enumerate(eig.T-mu):
         if(e.max()*e.min()<0.):
             verts,faces, _, _=ski.marching_cubes(e.reshape(mesh+1,mesh+1,mesh+1),0,
-                                                spacing=(2*np.pi/mesh,2*np.pi/mesh,2*np.pi/mesh))
-            verts=verts-np.pi
+                                                spacing=(ks[0]*2*np.pi/mesh,ks[1]*2*np.pi/mesh,ks[2]*2*np.pi/mesh))
+            verts=verts-ks*np.pi
             fspolys.append(verts[faces])
             fscenters.append(verts[faces].mean(axis=1)*.5/np.pi)
             fsband.append(i)

@@ -18,10 +18,10 @@ brav: choose primitive translation vector S,FC,BC etc
 else: monoclinic
 """
 #fname,ftype,brav='Si',2,1
-#fname,ftype,brav='00010.input',1,2
-fname,ftype,brav='hop3.input',1,0
+fname,ftype,brav='inputs/00010.input',1,2
+#fname,ftype,brav='inputs/hop3.input',1,0
 
-sw_dec_axis=False
+sw_dec_axis=True
 
 """
 option defines calculation modes
@@ -43,24 +43,24 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=0
+option=3
 color_option=1
 
-Nx,Ny,Nz,Nw=40,40,1,500 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=40,40,40,500 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
-#kscale=[1.0,1.0,1.0]
-#kz=0.5
+kscale=[1.5,1.5,1.0]
+kz=0.0
 
 abc=[3.96,3.96,13.02]
 alpha_beta_gamma=[90.,90.,90]
 temp=2.59e-3
-fill=2.0
+fill=5.875
 
 Emin,Emax=-10,5
 delta=1.0e-1
 Ecut=1.0e-3
 tau_const=100
-olist=[[0],[1],[2]]
+olist=[[0,5],[1,2,6,7],[3,8]]
 U,J=0.8, 0.1 #1.2,0.15
 
 #k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
@@ -70,16 +70,37 @@ sw_calc_mu=True #calculate mu or not
 sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 #----------------------------------main functions-------------------------------------
+#-------------------------------- import packages ------------------------------------
 import numpy as np
 import flibs, plibs
 import scipy.linalg as sclin
 import scipy.constants as scconst
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-
+#----------------------------- initial settings --------------------------------------
 alatt=np.array(abc)
 deg=np.array(alpha_beta_gamma)
-
+try:
+    kz
+except NameError:
+    kz=0.0
+try:
+    kscale
+except NameError:
+    kscale=1.0
+if option in {0,4,7,12}:
+    try:
+        k_sets
+        xlabel
+    except NameError:
+        print('generate symmetry line')
+        k_sets,xlabel2=plibs.get_symm_line(brav)
+        try:
+            xlabel
+            if len(xlabel)!=len(k_sets):
+                xlabel=xlabel2
+        except NameError:
+            xlabel=xlabel2
 if sw_unit:
     hbar=scconst.physical_constants['Planck constant over 2 pi in eV s'][0]
     ihbar=1.0e-10/hbar
@@ -94,6 +115,7 @@ else:
     eC=1.
     tau_unit=1.
     emass=1.
+#------------------------ define functions -------------------------------------------
 def plot_band(eig,spl,xlabel,xticks,uni,ol,color):
     def get_col(cl,ol):
         col=(np.abs(cl[ol])**2 if isinstance(ol,int)
@@ -157,13 +179,17 @@ def plot_FS(fscolors,klist,color_option):
     plt.yticks([-0.5,0,0.5],['-$\pi$','0','$\pi$'])
     plt.show()
 
-def plot_3d_surf(fspolys,fscenters,fscolors,surface_opt):
+def plot_3d_surf(fspolys,fscenters,fscolors,surface_opt,kscale):
     from mpl_toolkits.mplot3d import axes3d
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
     import matplotlib.colors as colors
     fig=plt.figure()
     ax = fig.add_subplot(111, projection='3d')
     clist=['r','g','b','c','m','y','k','w']
+    if isinstance(kscale,int):
+        ks=kscale*np.array([1.,1.,1.])
+    else:
+        ks=np.array(kscale)
     if surface_opt==0:
         for j,polys in enumerate(fspolys):
             ax.add_collection3d(Poly3DCollection(polys,facecolor=clist[j%6]))
@@ -180,9 +206,9 @@ def plot_3d_surf(fspolys,fscenters,fscolors,surface_opt):
             plt.colorbar(fs,format='%.2e')
         ax.add_collection3d(tri)
     ax.grid(False)
-    ax.set_xlim(-np.pi, np.pi)
-    ax.set_ylim(-np.pi, np.pi)
-    ax.set_zlim(-np.pi, np.pi)
+    ax.set_xlim(-np.pi*ks[0], np.pi*ks[0])
+    ax.set_ylim(-np.pi*ks[1], np.pi*ks[1])
+    ax.set_zlim(-np.pi*ks[2], np.pi*ks[2])
     ax.set_xticks([])
     ax.set_yticks([])
     ax.set_zticks([])
@@ -362,7 +388,7 @@ def main():
     avec,Arot=plibs.get_ptv(alatt,deg,brav)
     if sw_dec_axis:
         rvec1=Arot.T.dot(rvec.T).T
-        rvec=rvec1
+        rvec=rvec1.copy()
         if brav in {1,2}:
             rvec[:,2]*=2.
             avec=alatt*np.eye(3)
@@ -394,21 +420,7 @@ def main():
             except NameError:
                 mu=get_mu(ham_r,rvec,Arot,temp)
         print('chem. pot. = %7.4f'%mu)
-
-    if option in {0,4,7,12}:
-        try:
-            k_sets
-            xlabel
-        except NameError:
-            print('generate symmetry line')
-            k_sets,xlabel2=plibs.get_symm_line(brav)
-            try:
-                xlabel
-                if len(xlabel)!=len(k_sets):
-                    xlabel=xlabel2
-            except NameError:
-                xlabel=xlabel2
-    if option==0: #band plot
+    if option==0: #plot band
         print("calculate band structure")
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         ham_k=flibs.gen_ham(klist,ham_r,rvec)
@@ -424,22 +436,14 @@ def main():
         plt.show()
     elif option==2: #2D Fermi surface plot
         print("plot 2D Fermi surface")
-        try:
-            kz
-        except NameError:
-            kz=0.
         klist,blist=plibs.mk_kf(Nx,rvec,ham_r,mu,kz)
         clist=plibs.get_colors(klist,blist,ihbar*avec.T,rvec,ham_r,olist,color_option,True)
         plot_FS(clist,klist,color_option)
     elif option==3: #3D Fermi surface plot
         print("plot 3D Fermi surface")
-        try:
-            kscale
-        except NameError:
-            kscale=1.0
         polys,centers,blist=plibs.gen_3d_surf_points(Nx,rvec,ham_r,mu,kscale)
         fspolys,fscenters,fscolors=set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,olist)
-        plot_3d_surf(fspolys,fscenters,fscolors,color_option)
+        plot_3d_surf(fspolys,fscenters,fscolors,color_option,kscale)
     elif option==4: #plot spectrum
         print("calculate spectrum")
         plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,rvec,Emin,Emax,delta,Nw)
