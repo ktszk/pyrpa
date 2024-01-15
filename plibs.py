@@ -145,7 +145,6 @@ def mk_qlist(k_set,Nx,Ny,Nz,bvec):
 def mk_kf(mesh,rvec,ham_r,mu,kz):
     import skimage.measure as sk
     Nk,klist=gen_klist(mesh+1,mesh+1,kz=kz)
-    print(klist)
     ham_k=flibs.gen_ham(klist,ham_r,rvec)
     eig,uni=flibs.get_eig(ham_k)
     v2=[]

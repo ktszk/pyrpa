@@ -17,11 +17,12 @@ brav: choose primitive translation vector S,FC,BC etc
 7: body center (common)
 else: monoclinic
 """
-#fname,ftype,brav='Si',2,1
-fname,ftype,brav='inputs/00010.input',1,2
-#fname,ftype,brav='inputs/hop3.input',1,0
 
-sw_dec_axis=True
+#fname,ftype,brav='inputs/00010.input',1,2
+fname,ftype,brav='inputs/000AsP.input',1,0
+#fname,ftype,brav='inputs/square.hop',1,0
+
+sw_dec_axis=False
 
 """
 option defines calculation modes
@@ -43,7 +44,7 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=3
+option=7
 color_option=1
 
 Nx,Ny,Nz,Nw=40,40,40,500 #k and energy(or matsubara freq.) mesh size
@@ -51,20 +52,20 @@ kmesh=200               #kmesh for spaghetti plot
 kscale=[1.5,1.5,1.0]
 kz=0.0
 
-abc=[3.96,3.96,13.02]
+abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 alpha_beta_gamma=[90.,90.,90]
 temp=2.59e-3
-fill=5.875
+fill=2.875
 
-Emin,Emax=-10,5
+Emin,Emax=0,10
 delta=1.0e-1
 Ecut=1.0e-3
 tau_const=100
-olist=[[0,5],[1,2,6,7],[3,8]]
-U,J=0.8, 0.1 #1.2,0.15
+olist=[[0],[1,2],[3]]
+U,J=0., 0. #8, 0.1 #1.2,0.15
 
-#k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
-#xlabel=['$\Gamma$','X','M']
+k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
+xlabel=['$\Gamma$','X','M']
 
 sw_calc_mu=True #calculate mu or not
 sw_unit=True    #set unit values unity (False) or not (True)
@@ -80,6 +81,7 @@ import matplotlib.cm as cm
 #----------------------------- initial settings --------------------------------------
 alatt=np.array(abc)
 deg=np.array(alpha_beta_gamma)
+sw_gen_sym=False
 try:
     kz
 except NameError:
@@ -93,7 +95,7 @@ if option in {0,4,7,12}:
         k_sets
         xlabel
     except NameError:
-        print('generate symmetry line')
+        sw_gen_sym=True
         k_sets,xlabel2=plibs.get_symm_line(brav)
         try:
             xlabel
@@ -215,7 +217,8 @@ def plot_3d_surf(fspolys,fscenters,fscolors,surface_opt,kscale):
     plt.tight_layout()
     plibs.BZedge(0)
     plt.show()
-
+    #plt.savefig(fname='3DFS.png',dpi=300)
+    
 def set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,olist):
     if color_option==0:
         fspolys=polys
@@ -252,7 +255,7 @@ def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,rvec,Emin,Emax,delta,Nw):
     plt.colorbar()
     plt.show()
     
-def calc_conductivity_Bolzmann(rvec,ham_r,avec,fill,temp,tau_const,Nw=300,with_spin=False):
+def calc_conductivity_Bolzmann(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,tau_const,Nw=300,with_spin=False):
     #no dep. T and mu or filling
     Nk,eig,vk,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,rvec,avec.T*ihbar,sw_veloc=True)
     Vuc=sclin.det(avec)*1e-30
@@ -320,10 +323,10 @@ def calc_conductivity_lr(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta,with_spin=F
     Vuc=sclin.det(avec)
     gsp=(1.0 if with_spin else 2.0) #spin weight
     mu=plibs.calc_mu(eig,Nk,fill,temp)
-    #delta=hbar*1.e15/100
+    delta=hbar*1.e15/100
     print('chemical potential = %6.3f'%mu)
     print('tempreture = %6.3f'%(temp/kb))
-    print('about tau = ',(hbar/delta))
+    print('about tau = %6.3ffs'%(1.e15*hbar/delta))
     print('delta = %9.3e'%delta)
     L11,L12,L22,wlist=plibs.get_conductivity(mu,temp,eig,vk,Nw,Emax,delta)
     sigmaconst=gsp*hbar*eC/Vuc*1.0e30
@@ -368,12 +371,15 @@ def calc_flex(Nx,Ny,Nz,Nw,ham_r,rvec,mu,temp,olist):
     chi=flibs.get_chi0_comb(Gk,kmap,olist,Nx,Ny,Nz,Nw)
     print(chi)
 
-def get_carrier_num(kmesh,rvec,ham_r,mu):
+def get_carrier_num(kmesh,rvec,ham_r,mu,Arot):
     Nk,eig,kwieght=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,rvec,Arot)
+    fill=0.0
     for i,en in enumerate(eig.T-mu):
         num_hole=float(np.where(en>0)[0].size)/Nk
         num_particle=float(np.where(en<=0)[0].size)/Nk
         print(i+1,round(num_hole,4),round(num_particle,4))
+        fill+=num_particle
+    print('sum of electrons is %5.3f'%fill)
 
 def get_mu(ham_r,rvec,Arot,temp,kmesh=40):
     Nk,eig,kweight=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,rvec,Arot)
@@ -381,8 +387,18 @@ def get_mu(ham_r,rvec,Arot,temp,kmesh=40):
     return mu
 
 def get_mass(mesh,rvec,ham_r,mu,de=3.e-4,meshkz=20):
-    pass
+    import skimage.measure as sk
+    al=alatt[:2]
+    eV2J=scconst.physical_constants['electron volt-joule relationship'][0]
+    Nkh=mesh**2
+    ABZ=4.*np.pi**2/(al[0]*al[1])
 
+    k0=np.linspace(-np.pi,np.pi,mesh,False)
+    kx,ky=np.meshgrid(k0,k0)
+    kz0=np.linspace(-np.pi,np.pi,meshkz,False)
+    sband=[]
+    sband2=[]
+    
 def main():
     rvec,ham_r,no,Nr=plibs.import_hoppings(fname,ftype)
     avec,Arot=plibs.get_ptv(alatt,deg,brav)
@@ -405,8 +421,12 @@ def main():
     print("Reciprocal Lattice Vector")
     print(bvec)
     print("Number of orbital =",no)
-    if option in {0}:
+    if option in {0,4}:
+        if sw_gen_sym:
+            print('generate symmetry line')
         print('kmesh = %d'%kmesh)
+    elif option in {2,3,9,10}:
+        print('Number of k-mesh = %d'%(Nx))
     else:
         print('k-mesh is %d %d %d'%(Nx,Ny,Nz))
     if option in {5,6}:
@@ -449,7 +469,7 @@ def main():
         plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,rvec,Emin,Emax,delta,Nw)
     elif option==5: #calc conductivity
         print("calculate conductivities using Boltzmann theory")
-        calc_conductivity_Bolzmann(rvec,ham_r,avec,fill,temp,tau_const)
+        calc_conductivity_Bolzmann(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,tau_const)
     elif option==6: #calc_optical conductivity
         print("calculate conductivities")
         calc_conductivity_lr(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta)
@@ -471,14 +491,15 @@ def main():
             f=open('chis.dat','w')
             for ww,ssp,chis in zip(w,sp,chisw):
                 for www,sssp,chi in zip(ww,ssp,chis):
-                    f.write(f'{www} {sssp} {chi.imag}\n')
+                    f.write(f'{www:8.4f} {sssp:8.4f} {chi.imag:9.4f}\n')
                 f.write('\n')
             f.close()
             plt.contourf(sp,w,abs(chisw.imag),100)
             plt.colorbar()
             #plt.jet()
             plt.hot()
-            plt.show()
+            #plt.show()
+            plt.savefig(fname='chis_spa.png',dpi=300)
         else: #chis spectrum ecut plane
             chis,chi0,qx,qy=plibs.chis_qmap(Nx,Ny,Ecut,mu,temp,Smat,klist,chiolist,eig,uni,idelta=1.e-3)
             print('plot chis map')
@@ -493,7 +514,7 @@ def main():
             plt.show()
     elif option==9: #calc carrier number
         print("calculate carrier number")
-        get_carrier_num(Nx,rvec,ham_r,mu)
+        get_carrier_num(Nx,rvec,ham_r,mu,Arot)
     elif option==10: #calc cycrtron mass
         print("calculate cycrtron mass")
         get_mass(Nx,rvec,ham_r,mu)
