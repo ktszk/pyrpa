@@ -3,6 +3,20 @@ module constant
   real(8),parameter:: pi=3.141592653589793238462643383279d0
 end module constant
 
+subroutine openmp_params(omp_num,omp_check) bind(C)
+  !$ use omp_lib
+  implicit none
+  integer(8),intent(out):: omp_num
+  logical(1),intent(out):: omp_check
+  !$ if(.true.)then
+  !$   omp_check=.true.
+  !$   omp_num=omp_get_max_threads()
+  !$ else
+       omp_check=.false.
+       omp_num=0
+  !$ end if
+end subroutine openmp_params
+
 subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,norb) bind(C)
   use constant
   implicit none

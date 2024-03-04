@@ -45,9 +45,9 @@ color_option defines the meaning of color on Fermi surfaces
  2: velocity size
 """
 option=7
-color_option=1
+color_option=2
 
-Nx,Ny,Nz,Nw=40,40,40,500 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=20,20,20,500 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.5,1.5,1.0]
 kz=0.0
@@ -57,7 +57,7 @@ alpha_beta_gamma=[90.,90.,90]
 temp=2.59e-3
 fill=2.875
 
-Emin,Emax=0,10
+Emin,Emax=-4,4
 delta=1.0e-1
 Ecut=1.0e-3
 tau_const=100
@@ -382,6 +382,8 @@ def get_carrier_num(kmesh,rvec,ham_r,mu,Arot):
     print('sum of electrons is %5.3f'%fill)
 
 def get_mu(ham_r,rvec,Arot,temp,kmesh=40):
+    print("calc chem. pot.")
+    print("band filling = %f"%fill)
     Nk,eig,kweight=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,rvec,Arot)
     mu=plibs.calc_mu(eig,Nk,fill,temp)
     return mu
@@ -400,6 +402,7 @@ def get_mass(mesh,rvec,ham_r,mu,de=3.e-4,meshkz=20):
     sband2=[]
     
 def main():
+    omp_num,omp_check=flibs.omp_params()
     rvec,ham_r,no,Nr=plibs.import_hoppings(fname,ftype)
     avec,Arot=plibs.get_ptv(alatt,deg,brav)
     if sw_dec_axis:
@@ -415,11 +418,19 @@ def main():
         else:
             avec=alatt*np.eye(3)
     bvec=plibs.get_bvec(avec)
+    opstr=["calculate band structure","calculate Dos","plot 2D Fermi surface","plot 3D Fermi surface",
+           "calculate spectrum","calculate conductivities using Boltzmann theory",
+           "calculate conductivities with linear response","calculate chis spectrum",
+           "calculate chis qmap at Ecut","calculate carrier number","calculate cycrtron mass",
+           "calc self energy"]
+    cstr=["no color",'orbital weight','velocity size']
+    if omp_check:
+        print("OpenMP mode")
+        print("Number of OpenMP threads = %d"%omp_num)
+    print("calc mode %d: "%option+opstr[option])
+    if option in {0,2,3}:
+        print("color mode: "+cstr[color_option])
     print("Hamiltonian name is "+fname)
-    print("Lattice Vector")
-    print(avec)
-    print("Reciprocal Lattice Vector")
-    print(bvec)
     print("Number of orbital =",no)
     if option in {0,4}:
         if sw_gen_sym:
@@ -429,6 +440,12 @@ def main():
         print('Number of k-mesh = %d'%(Nx))
     else:
         print('k-mesh is %d %d %d'%(Nx,Ny,Nz))
+    print("Lattice Vector")
+    for i,a in enumerate(avec):
+        print("a%d: "%i+"%8.4f %8.4f %8.4f"%tuple(a))
+    print("Reciprocal Lattice Vector")
+    for i,b in enumerate(bvec):
+        print("b%d: "%i+"%8.4f %8.4f %8.4f"%tuple(b))
     if option in {5,6}:
         pass
     else:
@@ -440,41 +457,34 @@ def main():
             except NameError:
                 mu=get_mu(ham_r,rvec,Arot,temp)
         print('chem. pot. = %7.4f'%mu)
+
     if option==0: #plot band
-        print("calculate band structure")
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         ham_k=flibs.gen_ham(klist,ham_r,rvec)
         eig,uni0=flibs.get_eig(ham_k)
         uni=np.array([u.T for u in uni0]) #rotate uni(k,band,orb) to uni(k,orb,band)
         plot_band(eig.T-mu,spa_length,xlabel,xticks,uni.T,olist,(False if color_option==0 else True))
     elif option==1: #plot dos
-        print("calculate Dos")
         Nk,eig,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,rvec,avec)
         wlist=np.linspace(Emin,Emax,Nw,True)
         Dos=flibs.gen_tr_Greenw_0(eig,mu,wlist,delta).sum(axis=0)/Nk
         plt.plot(wlist,Dos,color='black')
         plt.show()
     elif option==2: #2D Fermi surface plot
-        print("plot 2D Fermi surface")
         klist,blist=plibs.mk_kf(Nx,rvec,ham_r,mu,kz)
         clist=plibs.get_colors(klist,blist,ihbar*avec.T,rvec,ham_r,olist,color_option,True)
         plot_FS(clist,klist,color_option)
     elif option==3: #3D Fermi surface plot
-        print("plot 3D Fermi surface")
         polys,centers,blist=plibs.gen_3d_surf_points(Nx,rvec,ham_r,mu,kscale)
         fspolys,fscenters,fscolors=set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,olist)
         plot_3d_surf(fspolys,fscenters,fscolors,color_option,kscale)
     elif option==4: #plot spectrum
-        print("calculate spectrum")
         plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,rvec,Emin,Emax,delta,Nw)
     elif option==5: #calc conductivity
-        print("calculate conductivities using Boltzmann theory")
         calc_conductivity_Bolzmann(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,tau_const)
     elif option==6: #calc_optical conductivity
-        print("calculate conductivities")
         calc_conductivity_lr(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta)
     elif option in {7,8}: #calc_chis_spectrum
-        print("calculate chis spectrum" if option==7 else "calculate chis qmap at Ecut")
         Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,rvec,avec,sw_uni=True)
         try:
             chiolist
@@ -502,7 +512,7 @@ def main():
             plt.savefig(fname='chis_spa.png',dpi=300)
         else: #chis spectrum ecut plane
             chis,chi0,qx,qy=plibs.chis_qmap(Nx,Ny,Ecut,mu,temp,Smat,klist,chiolist,eig,uni,idelta=1.e-3)
-            print('plot chis map')
+            print('%d plot chis map'%option)
             print(chis)
             plt.contourf(qx,qy,abs(chis.imag),100)
             plt.colorbar()
@@ -513,13 +523,10 @@ def main():
             plt.jet()
             plt.show()
     elif option==9: #calc carrier number
-        print("calculate carrier number")
         get_carrier_num(Nx,rvec,ham_r,mu,Arot)
     elif option==10: #calc cycrtron mass
-        print("calculate cycrtron mass")
         get_mass(Nx,rvec,ham_r,mu)
     elif option==11:
-        print("calc self energy")
         Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,rvec,avec,sw_uni=True)
         try:
             chiolist

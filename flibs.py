@@ -3,20 +3,26 @@ import numpy as np
 #import fortran library
 flibs=np.ctypeslib.load_library("fmod.so",".")
 #interface for fmod subroutines
+
+def omp_params():
+    omp_num=c_int64()
+    omp_check=c_bool()
+    flibs.openmp_params.argtypes=[POINTER(c_int64),POINTER(c_bool)]
+    flibs.openmp_params.restype=c_void_p
+    flibs.openmp_params(byref(omp_num),byref(omp_check))
+    return omp_num.value,omp_check.value
+
 def gen_ham(klist,ham_r,rvec):
     Nk,Nr=len(klist),len(rvec)
     Norb=int(np.sqrt(ham_r.size/Nr))
     hamk=np.zeros((Nk,Norb,Norb),dtype=np.complex128)
-    Nk=byref(c_int64(Nk))
-    Nr=byref(c_int64(Nr))
-    Norb=byref(c_int64(Norb))
     flibs.gen_ham.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),
                             np.ctypeslib.ndpointer(dtype=np.float64),
                             np.ctypeslib.ndpointer(dtype=np.complex128),
                             np.ctypeslib.ndpointer(dtype=np.float64),
                             POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)]
     flibs.gen_ham.restype=c_void_p
-    flibs.gen_ham(hamk,klist,ham_r,rvec,Nk,Nr,Norb)
+    flibs.gen_ham(hamk,klist,ham_r,rvec,byref(c_int64(Nk)),byref(c_int64(Nr)),byref(c_int64(Norb)))
     return hamk
 
 def get_eig(hamk,sw=True):
@@ -24,14 +30,12 @@ def get_eig(hamk,sw=True):
     Norb=int(np.sqrt(hamk.size/Nk))
     eig=np.zeros((Nk,Norb),dtype=np.float64)
     uni=np.zeros((Nk,Norb,Norb),dtype=np.complex128)
-    Nk=byref(c_int64(Nk))
-    Norb=byref(c_int64(Norb))
     flibs.get_eig.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64),
                             np.ctypeslib.ndpointer(dtype=np.complex128),
                             np.ctypeslib.ndpointer(dtype=np.complex128),
                             POINTER(c_int64),POINTER(c_int64)]
     flibs.get_eig.restype=c_void_p
-    flibs.get_eig(eig,uni,hamk,Nk,Norb)
+    flibs.get_eig(eig,uni,hamk,byref(c_int64(Nk)),byref(c_int64(Norb)))
     if sw:
         return eig,uni
     else:
@@ -45,46 +49,39 @@ def get_vlm0(klist,ham_r,rvec):
     Nk,Nr=len(klist),len(rvec)
     Norb=int(np.sqrt(ham_r.size/Nr))
     vk=np.zeros((Nk,Norb,Norb,3),dtype=np.complex128)
-    Nk=byref(c_int64(Nk))
-    Nr=byref(c_int64(Nr))
-    Norb=byref(c_int64(Norb))
     flibs.get_vlm0.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),
                             np.ctypeslib.ndpointer(dtype=np.float64),
                             np.ctypeslib.ndpointer(dtype=np.complex128),
                             np.ctypeslib.ndpointer(dtype=np.float64),
                             POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)]
     flibs.get_vlm0.restype=c_void_p
-    flibs.get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,Norb)
+    flibs.get_vlm0(vk,klist,ham_r,rvec,byref(c_int64(Nk)),byref(c_int64(Nr)),byref(c_int64(Norb)))
     return vk
 
 def get_vk(vk0,mrot,uni):
     Nk=len(uni)
     Norb=int(np.sqrt(uni.size/Nk))
     vk=np.zeros((Nk,Norb,3),dtype=np.float64)
-    Nk=byref(c_int64(Nk))
-    Norb=byref(c_int64(Norb))
     flibs.get_veloc.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64),
                               np.ctypeslib.ndpointer(dtype=np.complex128),
                               np.ctypeslib.ndpointer(dtype=np.float64),
                               np.ctypeslib.ndpointer(dtype=np.complex128),
                               POINTER(c_int64),POINTER(c_int64)]
     flibs.get_veloc.restype=c_void_p
-    flibs.get_veloc(vk,vk0,mrot,uni,Nk,Norb)
+    flibs.get_veloc(vk,vk0,mrot,uni,byref(c_int64(Nk)),byref(c_int64(Norb)))
     return vk
 
 def get_vnm(vk0,mrot,uni):
     Nk=len(uni)
     Norb=int(np.sqrt(uni.size/Nk))
     vk=np.zeros((Nk,Norb,Norb,3),dtype=np.complex128)
-    Nk=byref(c_int64(Nk))
-    Norb=byref(c_int64(Norb))
     flibs.get_vnm.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),
                               np.ctypeslib.ndpointer(dtype=np.complex128),
                               np.ctypeslib.ndpointer(dtype=np.float64),
                               np.ctypeslib.ndpointer(dtype=np.complex128),
                               POINTER(c_int64),POINTER(c_int64)]
     flibs.get_vnm.restype=c_void_p
-    flibs.get_vnm(vk,vk0,mrot,uni,Nk,Norb)
+    flibs.get_vnm(vk,vk0,mrot,uni,byref(c_int64(Nk)),byref(c_int64(Norb)))
     return vk
 
 def get_vnmk(klist,ham_r,rvec,mrot,uni):
@@ -199,13 +196,12 @@ def get_chi0_comb(Gk,kmap,olist,Nx,Ny,Nz,Nw):
 def get_qshift(klist,qpoint):
     Nk=len(klist)
     qshift=np.zeros(Nk,dtype=np.int64)
-    Nk=byref(c_int64(Nk))
     flibs.get_qshift.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64), #qpoint
                                np.ctypeslib.ndpointer(dtype=np.float64), #klist
                                np.ctypeslib.ndpointer(dtype=np.int64),   #qshift
                                POINTER(c_int64)]                         #Nk
     flibs.get_qshift.restype=c_void_p
-    flibs.get_qshift(qpoint,klist,qshift,Nk)
+    flibs.get_qshift(qpoint,klist,qshift,byref(c_int64(Nk)))
     return qshift
 
 def get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp):
@@ -272,13 +268,11 @@ def chis_qmap(uni,eig,ffermi,klist,Smat,olist,Nx,Ny,temp,ecut,idelta):
 def get_chis(chi,Smat):
     Nchi=len(Smat)
     Nw=len(chi)
-    Nchi=byref(c_int64(Nchi))
-    Nw=byref(c_int64(Nw))
     flibs.get_chis.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #chi0
                              np.ctypeslib.ndpointer(dtype=np.float64),    #Smat
                              POINTER(c_int64),POINTER(c_int64)]           #Nchi,Nw
     flibs.get_chis.restype=c_void_p
-    flibs.get_chis(chi,Smat,Nchi,Nw)
+    flibs.get_chis(chi,Smat,byref(c_int64(Nchi)),byref(c_int64(Nw)))
     return(chi)
 
 def gen_Smatrix(olist,U,J):
@@ -287,14 +281,12 @@ def gen_Smatrix(olist,U,J):
     Smat=np.zeros((Nchi,Nchi),dtype=np.float64)
     Nchi=byref(c_int64(Nchi))
     Norb=byref(c_int64(Norb))
-    U=byref(c_double(U))
-    J=byref(c_double(J))
     flibs.get_smat.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64),  #Smat
                              np.ctypeslib.ndpointer(dtype=np.int64),    #olist
                              POINTER(c_double),POINTER(c_double),       #U,J
                              POINTER(c_int64),POINTER(c_int64)]         #Nchi,Norb
     flibs.get_smat.restype=c_void_p
-    flibs.get_smat(Smat,olist,U,J,Nchi,Norb)
+    flibs.get_smat(Smat,olist,byref(c_double(U)),byref(c_double(J)),Nchi,Norb)
     return Smat
 
 def calc_Lij(eig,vk,ffermi,mu,w,idelta,temp):
