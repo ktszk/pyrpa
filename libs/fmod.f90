@@ -3,6 +3,28 @@ module constant
   real(8),parameter:: pi=3.141592653589793238462643383279d0
 end module constant
 
+subroutine FFT(cmat,tmp,Nx,Ny,Nz,Nw,SW)
+  implicit none
+  integer(8),intent(in):: Nx,Ny,Nz,Nw
+  logical(4),intent(in):: SW
+  complex(8),intent(inout),dimension(Nx,Ny,Nz,Nw):: cmat,tmp
+
+  integer(8) plan
+  integer(4) Inv
+  integer(4),dimension(4):: Nlist
+  
+  Nlist=(/Nx,Ny,Nx,Nw/)
+  if(SW)then
+     Inv=-1
+  else
+     Inv=1
+  end If
+  call dfftw_plan_dft(plan,4,Nlist,cmat,tmp,Inv,64)
+  call dfftw_execute(plan)
+  call dfftw_destroy_plan(plan)
+  if(.not. SW) cmat=tmp/product(Nlist)
+end subroutine FFT
+
 subroutine openmp_params(omp_num,omp_check) bind(C)
   !$ use omp_lib
   implicit none
@@ -279,10 +301,12 @@ subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,norb) bind(C)
         band_loop: do n=1,norb
            !$omp parallel do private(iw,i,j)
            wloop: do j=1,Nw
-              iw=cmplx(mu,dble(2*(i-1)+1)*pi*temp)
+              iw=cmplx(mu,dble(2*(j-1)+1)*pi*temp)
+              !!$omp simd
               kloop: do i=1,Nk
                  Gk(i,j,m,l)=Gk(i,j,m,l)+uni(l,n,i)*conjg(uni(m,n,i))/(iw-eig(n,i))
               end do kloop
+              !!$omp end simd
            end do wloop
            !$omp end parallel do
         end do band_loop
@@ -291,15 +315,17 @@ subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,norb) bind(C)
 end subroutine gen_green0
 
 subroutine get_chi0_comb(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
+  use constant
   implicit none
   integer(8),intent(in):: Nx,Ny,Nz,Nw,Norb,Nchi,Nk
   integer(8),intent(in),dimension(2,Nchi):: olist
   integer(8),intent(in),dimension(3,Nk):: kmap
   complex(8),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
   complex(8),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
+
   integer(8) i,j,k,l,m,n
-  integer(8) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),in(2*Nw)
-  complex(8),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmp1,tmp2,tmpchi
+  integer(8) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1)
+  complex(8),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmp1,tmp2,tmpchi,tmp
 
   do i=0,Nx-1
      ii(i)=mod(Nx-i,Nx)
@@ -312,36 +338,37 @@ subroutine get_chi0_comb(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
   do k=0,Nz-1
      ik(k)=mod(Nz-k,Nz)
   end do
-  
-  do n=1,2*Nw
-     in(n)=mod(2*Nw-n-1,2*Nw)
-  end do
-  
+
   do l=1,Nchi
      do m=1,Nchi
-        !$omp parallel do private(j,i)
+        !use symmetry G^lm(k,iw)=G^ml(k,-iw)
+        !$omp parallel do private(i)
         do j=1,Nw
            do i=1,Nk
-              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(1,l),olist(2,m))
-              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(2,l),olist(1,m))
-              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),j)=conjg(Gk(i,2*Nw-j+1,olist(2,m),olist(1,l)))
-              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),j)=conjg(Gk(i,2*Nw-j+1,olist(1,m),olist(2,l)))
+              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(1,l),olist(2,m)) !G13(iw)
+              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(2,l),olist(1,m)) !G42(iw)
+              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(2,m),olist(1,l))) !G13(-iw)
+              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(1,m),olist(2,l))) !G42(-iw)
            end do
         end do
         !$omp end parallel do
-        !FFT tmp1,2
-        !$omp parallel do private(i,j,k,n)
-        do n=1,Nw
+        !call FFT(tmp1,tmp,Nx,Ny,Nz,2*Nw,.true.)
+        !call FFT(tmp2,tmp,Nx,Ny,Nz,2*Nw,.true.)
+        !calculate G(r)G(-r)
+        !$omp parallel do private(i,j,k)
+        do n=1,2*Nw
            do k=0,Nz-1
               do j=0,Ny-1
+                 !$omp simd
                  do i=0,Nx-1
-                    tmpchi(i,j,k,n)=tmp1(i,j,k,n)*tmp2(ii(i),ij(j),ik(k),in(n))
+                    tmpchi(i,j,k,n)=tmp1(i,j,k,n)*tmp2(ii(i),ij(j),ik(k),2*nw-n+1)
                  end do
+                 !$omp end simd
               end do
            end do
         end do
         !$omp end parallel do
-        !IFFT tmpchi
+        !call FFT(tmpchi,tmp,Nx,Ny,Nz,2*Nw,.false.)
         !$omp parallel do private(i,j)
         do j=1,Nw
            do i=1,Nk
@@ -403,7 +430,7 @@ subroutine set_qshift(qpoint,klist,qshift,Nk)
   kqlist(:,:)=0.0d0
   !$omp end workshare
   !$omp do private(i,j)
-  do i=1,Nk
+  kloop:do i=1,Nk
      kqlist(:,i)=klist(:,i)+qpoint(:)
      do j=1,3
         if(kqlist(j,i)>=1.0d0)then
@@ -412,7 +439,7 @@ subroutine set_qshift(qpoint,klist,qshift,Nk)
            kqlist(j,i)=kqlist(j,i)+1.0d0           
         end if
      end do
-  end do
+  end do kloop
   !$omp end do
   !$omp workshare
   qshift(:)=1
@@ -423,7 +450,6 @@ subroutine set_qshift(qpoint,klist,qshift,Nk)
         tmp=sum(abs(klist(:,j)-kqlist(:,i)))
         if(tmp<1.0d-9)then
            qshift(i)=j
-           !print'(i,3(1xf6.3))',j,kqlist(:,i)
            exit
         end if
      end do k_loop
@@ -449,18 +475,18 @@ contains
     complex(8),dimension(Nchi,Nchi):: chi,calc_chi
 
     chi(:,:)=0.0d0
-    kloop: do i=1,Nk
+    kloop: do k=1,Nk
        band1_loop: do l=1,Norb
           band2_loop: do m=1,Norb
              chiorb1_loop: do j=1,Nchi
-                chiorb2_loop:do k=1,Nchi
-                   unitmp=uni(ol(1,j),l,qshift(i))*conjg(uni(ol(1,k),l,qshift(i)))&
-                        *uni(ol(2,k),m,i)*conjg(uni(ol(2,j),m,i))
-                   if(abs(w)==0.0d0 .and. abs(eig(m,i)-eig(l,qshift(i)))<1.0d-9)then
-                      chi(k,j)=chi(k,j)+unitmp*ffermi(m,i)*(1.0d0-ffermi(m,i))/temp
+                chiorb2_loop:do i=1,Nchi
+                   unitmp=uni(ol(1,j),l,qshift(k))*conjg(uni(ol(1,i),l,qshift(k)))&
+                        *uni(ol(2,i),m,k)*conjg(uni(ol(2,j),m,k))
+                   if(abs(w)==0.0d0 .and. abs(eig(m,k)-eig(l,qshift(k)))<1.0d-9)then
+                      chi(i,j)=chi(i,j)+unitmp*ffermi(m,k)*(1.0d0-ffermi(m,k))/temp
                    else if(abs(ffermi(l,qshift(i))-ffermi(m,i))>eps)then
-                      chi(k,j)=chi(k,j)+unitmp*(ffermi(l,qshift(i))-ffermi(m,i))&
-                           /cmplx(w+eig(m,i)-eig(l,qshift(i)),idelta)
+                      chi(i,j)=chi(i,j)+unitmp*(ffermi(l,qshift(k))-ffermi(m,k))&
+                           /cmplx(w+eig(m,k)-eig(l,qshift(k)),idelta)
                    end if
                 end do chiorb2_loop
              end do chiorb1_loop
@@ -470,6 +496,30 @@ contains
     calc_chi=chi(:,:)/Nk
   end function calc_chi
 end module calc_irr_chi
+
+subroutine get_tr_chi(trchis,trchi0,chis,chi0,olist,Nw,Nchi) bind(C)
+  implicit none
+  integer(8),intent(in):: Nchi,Nw
+  integer(8),intent(in),dimension(2,Nchi):: olist
+  complex(8),intent(in),dimension(Nchi,Nchi,Nw):: chis,chi0
+  complex(8),intent(out),dimension(Nw):: trchis,trchi0
+
+  integer(8) i,j,k
+  !$omp parallel do private(j,k)
+  wloop:do i=1,Nw
+     orb_lop1:do j=1,Nchi
+        if(olist(1,j)==olist(2,j))then
+           orb_loop2:do k=1,Nchi
+              if(olist(1,k)==olist(2,k))then
+                 trchis(i)=trchis(i)+chis(k,j,i)
+                 trchi0(i)=trchi0(i)+chi0(k,j,i)
+              end if
+           end do orb_loop2
+        end if
+     end do orb_lop1
+  end do wloop
+  !$omp end parallel do
+end subroutine get_tr_chi
 
 subroutine get_chi_irr(chi,uni,eig,ffermi,qshift,ol,wl,Nchi,Norb,Nk,Nw,idelta,eps,temp) bind(C)
   use calc_irr_chi
@@ -504,9 +554,10 @@ subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,e
   complex(8),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(8),intent(out),dimension(Ny,Nx):: trchis,trchi
 
-  integer(8) i,j,info,l,m,n
+  integer(4) info
+  integer(8) i,j,l,m,n
   integer(8),dimension(Nk):: qshift
-  integer(8),dimension(Nchi):: ipiv
+  integer(4),dimension(Nchi):: ipiv
   real(8),dimension(3):: qpoint
   complex(8),dimension(Nchi,Nchi):: chi,tmp,tmp2
   complex(8),dimension(2*Nchi):: work
@@ -528,9 +579,11 @@ subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,e
         do l=1,Nchi
            tmp(l,l)=1.0d0
            do m=1,Nchi
+              !$omp simd
               do n=1,Nchi
                  tmp(m,l)=tmp(m,l)-Smat(m,n)*chi(n,l)
               end do
+              !$omp end simd
            end do
         end do
         call zgetrf(Nchi,Nchi,tmp,Nchi,ipiv,info)
@@ -538,14 +591,23 @@ subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,e
         tmp2(:,:)=0.0d0
         do l=1,Nchi
            do m=1,Nchi
+              !$omp simd
               do n=1,Nchi
                  tmp2(m,l)=tmp2(m,l)+chi(m,n)*tmp(n,l)
               end do
+              !$omp end simd
            end do
         end do
+        !take chis_llmm
         do l=1,Nchi
-           trchis(j,i)=trchis(j,i)+tmp2(l,l)
-           trchi(j,i)=trchi(j,i)+chi(l,l)
+           if(ol(1,l)==ol(2,l))then
+              do m=1,Nchi
+                 if(ol(1,m)==ol(2,m))then
+                    trchis(j,i)=trchis(j,i)+tmp2(l,l)
+                    trchi(j,i)=trchi(j,i)+chi(l,l)
+                 end if
+              end do
+           end if
         end do
      end do
   end do
@@ -553,42 +615,42 @@ subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,e
   !$omp end parallel
 end subroutine chiq_map
 
-subroutine get_chis(chi,Smat,Nchi,Nw) bind(C)
+subroutine get_chis(chis,chi0,Smat,Nchi,Nw) bind(C)
   implicit none
   integer(8),intent(in):: Nchi,Nw
   real(8),dimension(Nchi,Nchi):: Smat
-  complex(8),intent(inout),dimension(Nchi,Nchi,Nw):: chi
-  integer(8) i,l,m,n,info
-  integer(8),dimension(Nchi):: ipiv
-  complex(8),dimension(2*Nchi):: work
-  complex(8),dimension(Nchi,Nchi):: tmp,tmp2
+  complex(8),intent(in),dimension(Nchi,Nchi,Nw):: chi0
+  complex(8),intent(out),dimension(Nchi,Nchi,Nw):: chis
+  integer(8) i,l,m,n
+  integer(4) info
+  integer(4),dimension(Nchi):: ipiv
+  complex(8),dimension(Nchi):: work
+  complex(8),dimension(Nchi,Nchi):: tmp
 
-  !$omp parallel do private(tmp,tmp2,l,m,n,work,ipiv,info)
+  !$omp parallel do private(tmp,l,m,n,work,ipiv,info)
   do i=1,Nw
      tmp(:,:)=0.0d0
      do l=1,Nchi
-        tmp(l,l)=1.0d0
-        do m=1,Nchi
+        do n=1,Nchi
            !$omp simd
-           do n=1,Nchi
-              tmp(m,l)=tmp(m,l)-Smat(m,n)*chi(n,l,i)
+           do m=1,Nchi
+              tmp(m,l)=tmp(m,l)-chi0(m,n,i)*Smat(n,l)
            end do
            !$omp end simd
         end do
+        tmp(l,l)=tmp(l,l)+1.0d0
      end do
      call zgetrf(Nchi,Nchi,tmp,Nchi,ipiv,info)
-     call zgetri(Nchi,tmp,Nchi,ipiv,work,2*Nchi,info)
-     tmp2(:,:)=0.0d0
+     call zgetri(Nchi,tmp,Nchi,ipiv,work,Nchi,info)
      do l=1,Nchi
-        do m=1,Nchi
+        do n=1,Nchi
            !$omp simd
-           do n=1,Nchi
-              tmp2(m,l)=tmp2(m,l)+chi(m,n,i)*tmp(n,l)
+           do m=1,Nchi
+              chis(m,l,i)=chis(m,l,i)+tmp(m,n)*chi0(n,m,i)
            end do
            !$omp end simd
         end do
      end do
-     chi(:,:,i)=tmp2(:,:)
   end do
   !$omp end parallel do 
 end subroutine get_chis
@@ -601,38 +663,24 @@ subroutine get_smat(Smat,ol,Uval,Jval,Nchi,Norb) bind(C)
   real(8),intent(out),dimension(Nchi,Nchi):: Smat
 
   integer(8) i,j
-  real(8),dimension(Norb,Norb):: Umat,Jmat
 
   !$omp parallel
   !$omp workshare
-  Umat(:,:)=0.0d0
-  Jmat(:,:)=0.0d0
   Smat(:,:)=0.0d0
   !$omp end workshare
-  !$omp do
-  do i=1,Nchi
-     if(ol(1,i)==ol(2,i))then
-        Umat(ol(1,i),ol(2,i))=Uval
-        Jmat(ol(1,i),ol(2,i))=0.0d0
-     else
-        Umat(ol(1,i),ol(2,i))=Uval-2.0d0*Jval
-        Jmat(ol(1,i),ol(2,i))=Jval
-     end if
-  end do
-  !$omp end do
   !$omp do private(j)
   do i=1,Nchi
      do j=1,Nchi
         if((ol(1,i)==ol(2,i)).and.(ol(1,j)==ol(2,j)))then
            if(ol(1,i)==ol(1,j))then
-              Smat(j,i)=Umat(ol(1,i),ol(1,i))
+              Smat(j,i)=Uval
            else
-              Smat(j,i)=Jmat(ol(1,i),ol(1,j))
+              Smat(j,i)=Jval
            end if
         else if((ol(1,i)==ol(1,j)).and.(ol(2,i)==ol(2,j)))then
-           Smat(j,i)=Umat(ol(1,i),ol(2,i))
+           Smat(j,i)=Uval-2*Jval
         else if((ol(1,i)==ol(2,j)).and.(ol(2,i)==ol(1,j)))then
-           Smat(j,i)=Jmat(ol(1,i),ol(2,i))
+           Smat(j,i)=Jval
         end if
      end do
   end do

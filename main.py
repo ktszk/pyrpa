@@ -47,22 +47,23 @@ color_option defines the meaning of color on Fermi surfaces
 option=7
 color_option=2
 
-Nx,Ny,Nz,Nw=20,20,20,500 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=32,32,2,150 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.5,1.5,1.0]
 kz=0.0
 
 abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 alpha_beta_gamma=[90.,90.,90]
-temp=2.59e-3
-fill=2.875
+temp=2.59e-2
+fill=2.9375
 
-Emin,Emax=-4,4
-delta=1.0e-1
+Emin,Emax=0,3
+delta=3.0e-2
 Ecut=1.0e-3
 tau_const=100
 olist=[[0],[1,2],[3]]
-U,J=0., 0. #8, 0.1 #1.2,0.15
+U,J=0.2, 0.025
+#U,J=1.2,0.15
 
 k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
 xlabel=['$\Gamma$','X','M']
@@ -73,11 +74,9 @@ sw_tdf=False
 #----------------------------------main functions-------------------------------------
 #-------------------------------- import packages ------------------------------------
 import numpy as np
-import flibs, plibs
-import scipy.linalg as sclin
-import scipy.constants as scconst
-import matplotlib.pyplot as plt
-import matplotlib.cm as cm
+import libs.flibs as flibs, libs.plibs as plibs
+import scipy.linalg as sclin, scipy.constants as scconst
+import matplotlib.pyplot as plt, matplotlib.cm as cm
 #----------------------------- initial settings --------------------------------------
 alatt=np.array(abc)
 deg=np.array(alpha_beta_gamma)
@@ -266,12 +265,12 @@ def calc_conductivity_Bolzmann(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,tau_const,Nw=3
 
     itemp=1./temp
     mu=plibs.calc_mu(eig,Nk,fill,temp)
-    print("T = %6.3f K"%(temp/kb))
-    print("mu = %6.3f eV"%mu)
+    print("T = %6.3f K"%(temp/kb),flush=True)
+    print("mu = %6.3f eV"%mu,flush=True)
     if tauconst:
-        print("tau = %d"%tau_const+('fs' if sw_unit else ''))
+        print("tau = %d"%tau_const+('fs' if sw_unit else ''),flush=True)
     else:
-        print("max tau = %d"%tau.max()+('fs' if sw_unit else ''))
+        print("max tau = %d"%tau.max()+('fs' if sw_unit else ''),flush=True)
     if sw_tdf:
         tdf=flibs.calc_tdf(eig,vk,kweight,tau,Nw)
         wlist=np.linspace(eig.min(),eig.max(),Nw)
@@ -294,24 +293,24 @@ def calc_conductivity_Bolzmann(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,tau_const,Nw=3
     Pertier=K1.dot(sclin.inv(K0))
     sigmaS=gsp*tau_unit*kb*eC*K1*iNV*itemp
     PF=sigma*Seebeck**2
-    print('sigma matrix (S/m)')
-    print(sigma.round(10))
-    print('kappa matrix (K22 only) (W/m/K')
-    print(kappa.round(10))
-    print('kappa matrix (full) (W/m/K)')
-    print(kappa2.round(10))
-    print('sigmaS matrix (A/m/K)')
-    print(sigmaS.round(10))
-    print('Seebeck matrix (V/K)')
-    print(Seebeck.round(10))
-    print('Pertier matrix (V)')
-    print(Pertier.round(13))
-    print('Lorenz matrix (K22 only) (Wohm/K^2)')
-    print(Lorenz.round(10))
-    print('Lorenz matrix? (full) (Wohm/K^2)')
-    print(Lorenz2.round(10))
-    print('Power Factor (SA/m^2/K)')
-    print(PF.round(10))
+    print('sigma matrix (S/m)',flush=True)
+    print(sigma.round(10),flush=True)
+    print('kappa matrix (K22 only) (W/m/K',flush=True)
+    print(kappa.round(10),flush=True)
+    print('kappa matrix (full) (W/m/K)',flush=True)
+    print(kappa2.round(10),flush=True)
+    print('sigmaS matrix (A/m/K)',flush=True)
+    print(sigmaS.round(10),flush=True)
+    print('Seebeck matrix (V/K)',flush=True)
+    print(Seebeck.round(10),flush=True)
+    print('Pertier matrix (V)',flush=True)
+    print(Pertier.round(13),flush=True)
+    print('Lorenz matrix (K22 only) (Wohm/K^2)',flush=True)
+    print(Lorenz.round(10),flush=True)
+    print('Lorenz matrix? (full) (Wohm/K^2)',flush=True)
+    print(Lorenz2.round(10),flush=True)
+    print('Power Factor (SA/m^2/K)',flush=True)
+    print(PF.round(10),flush=True)
 
 def calc_conductivity_lr(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta,with_spin=False):
     '''
@@ -324,10 +323,10 @@ def calc_conductivity_lr(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta,with_spin=F
     gsp=(1.0 if with_spin else 2.0) #spin weight
     mu=plibs.calc_mu(eig,Nk,fill,temp)
     delta=hbar*1.e15/100
-    print('chemical potential = %6.3f'%mu)
-    print('tempreture = %6.3f'%(temp/kb))
-    print('about tau = %6.3ffs'%(1.e15*hbar/delta))
-    print('delta = %9.3e'%delta)
+    print('chemical potential = %6.3f'%mu,flush=True)
+    print('tempreture = %6.3f'%(temp/kb),flush=True)
+    print('about tau = %6.3ffs'%(1.e15*hbar/delta),flush=True)
+    print('delta = %9.3e'%delta,flush=True)
     L11,L12,L22,wlist=plibs.get_conductivity(mu,temp,eig,vk,Nw,Emax,delta)
     sigmaconst=gsp*hbar*eC/Vuc*1.0e30
     kappaSconst=sigmaconst*kb/temp
@@ -335,17 +334,17 @@ def calc_conductivity_lr(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta,with_spin=F
     kappa=kappaSconst*L22
     sigmaS=kappaSconst*L12
     Seebeck=np.array([-sclin.inv(s).dot(sS) for s,sS in zip(sigma,sigmaS)])
-    print('sigma matrix (S/m)')
-    print(sigma[0].real.round(10))
-    print('kappa matrix (L22 only) (W/m/K)')
-    print(kappa[0].real.round(10))
-    print('sigmaS matrix (A/m/K)')
-    print(sigmaS[0].real.round(10))
-    print('Lorenz number (Wohm/K^2)')
-    print((kb*kappa[0]*sclin.inv(sigma[0]*temp)).real.round(10))
-    print('Seebeck coefficient matrix (V/K)')
-    print(Seebeck[0].real.round(10))
-    print(hbar)
+    print('sigma matrix (S/m)',flush=True)
+    print(sigma[0].real.round(10),flush=True)
+    print('kappa matrix (L22 only) (W/m/K)',flush=True)
+    print(kappa[0].real.round(10),flush=True)
+    print('sigmaS matrix (A/m/K)',flush=True)
+    print(sigmaS[0].real.round(10),flush=True)
+    print('Lorenz number (Wohm/K^2)',flush=True)
+    print((kb*kappa[0]*sclin.inv(sigma[0]*temp)).real.round(10),flush=True)
+    print('Seebeck coefficient matrix (V/K)',flush=True)
+    print(Seebeck[0].real.round(10),flush=True)
+    print(hbar,flush=True)
     fig=plt.figure()
     ax=fig.add_subplot(211)
     ax.plot(wlist,sigma[:,0,0].real)
@@ -367,9 +366,11 @@ def calc_flex(Nx,Ny,Nz,Nw,ham_r,rvec,mu,temp,olist):
     klist,kmap=plibs.gen_klist_with_kmap(Nx,Ny,Nz)
     ham_k=flibs.gen_ham(klist,ham_r,rvec)
     eig,uni=flibs.get_eig(ham_k)
+    print("calc green function")
     Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
+    print("calc chi0 with convolution")
     chi=flibs.get_chi0_comb(Gk,kmap,olist,Nx,Ny,Nz,Nw)
-    print(chi)
+    print(chi,flush=True)
 
 def get_carrier_num(kmesh,rvec,ham_r,mu,Arot):
     Nk,eig,kwieght=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,rvec,Arot)
@@ -377,13 +378,13 @@ def get_carrier_num(kmesh,rvec,ham_r,mu,Arot):
     for i,en in enumerate(eig.T-mu):
         num_hole=float(np.where(en>0)[0].size)/Nk
         num_particle=float(np.where(en<=0)[0].size)/Nk
-        print(i+1,round(num_hole,4),round(num_particle,4))
+        print(i+1,round(num_hole,4),round(num_particle,4),flush=True)
         fill+=num_particle
-    print('sum of electrons is %5.3f'%fill)
+    print('sum of electrons is %5.3f'%fill,flush=True)
 
 def get_mu(ham_r,rvec,Arot,temp,kmesh=40):
-    print("calc chem. pot.")
-    print("band filling = %f"%fill)
+    print("calc chem. pot.",flush=True)
+    print("band filling = %f"%fill,flush=True)
     Nk,eig,kweight=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,rvec,Arot)
     mu=plibs.calc_mu(eig,Nk,fill,temp)
     return mu
@@ -425,27 +426,27 @@ def main():
            "calc self energy"]
     cstr=["no color",'orbital weight','velocity size']
     if omp_check:
-        print("OpenMP mode")
-        print("Number of OpenMP threads = %d"%omp_num)
-    print("calc mode %d: "%option+opstr[option])
+        print("OpenMP mode",flush=True)
+        print("Number of OpenMP threads = %d"%omp_num,flush=True)
+    print("calc mode %d: "%option+opstr[option],flush=True)
     if option in {0,2,3}:
-        print("color mode: "+cstr[color_option])
-    print("Hamiltonian name is "+fname)
-    print("Number of orbital =",no)
+        print("color mode: "+cstr[color_option],flush=True)
+    print("Hamiltonian name is "+fname,flush=True)
+    print("Number of orbital =",no,flush=True)
     if option in {0,4}:
         if sw_gen_sym:
-            print('generate symmetry line')
-        print('kmesh = %d'%kmesh)
+            print('generate symmetry line',flush=True)
+        print('kmesh = %d'%kmesh,flush=True)
     elif option in {2,3,9,10}:
-        print('Number of k-mesh = %d'%(Nx))
+        print('Number of k-mesh = %d'%(Nx),flush=True)
     else:
-        print('k-mesh is %d %d %d'%(Nx,Ny,Nz))
-    print("Lattice Vector")
+        print('k-mesh is %d %d %d'%(Nx,Ny,Nz),flush=True)
+    print("Lattice Vector",flush=True)
     for i,a in enumerate(avec):
-        print("a%d: "%i+"%8.4f %8.4f %8.4f"%tuple(a))
-    print("Reciprocal Lattice Vector")
+        print("a%d: "%i+"%8.4f %8.4f %8.4f"%tuple(a),flush=True)
+    print("Reciprocal Lattice Vector",flush=True)
     for i,b in enumerate(bvec):
-        print("b%d: "%i+"%8.4f %8.4f %8.4f"%tuple(b))
+        print("b%d: "%i+"%8.4f %8.4f %8.4f"%tuple(b),flush=True)
     if option in {5,6}:
         pass
     else:
@@ -456,7 +457,7 @@ def main():
                 mu=mu0
             except NameError:
                 mu=get_mu(ham_r,rvec,Arot,temp)
-        print('chem. pot. = %7.4f'%mu)
+        print('chem. pot. = %7.4f'%mu,flush=True)
 
     if option==0: #plot band
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
@@ -485,6 +486,7 @@ def main():
     elif option==6: #calc_optical conductivity
         calc_conductivity_lr(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta)
     elif option in {7,8}: #calc_chis_spectrum
+        print("calculate electron band",flush=True)
         Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,rvec,avec,sw_uni=True)
         try:
             chiolist
@@ -493,17 +495,26 @@ def main():
             tmp=np.arange(Norb)+1
             o1,o2=np.meshgrid(tmp,tmp)
             chiolist=np.array([o1.flatten(),o2.flatten()]).T
+        print("generate coulomb vertex matrix S")
         Smat=flibs.gen_Smatrix(chiolist,U,J)
         if option==7: #chis spectrum with symmetry line
+            print("generate qlist for chi",flush=True)
             qlist,spa_length,xticks=plibs.mk_qlist(k_sets,Nx,Ny,Nz,bvec)
+            print("calculate spn susceptibility",flush=True)
+            import time
+            tstart=time.time()
             chisw,wlist=plibs.chis_spectrum(mu,temp,Smat,klist,qlist,chiolist,eig,uni,Nw,Emax,delta)
+            tend=time.time()
+            print('calc time is %f'%(tend-tstart))
             w,sp=np.meshgrid(wlist,spa_length)
+            print("write chis data",flush=True)
             f=open('chis.dat','w')
             for ww,ssp,chis in zip(w,sp,chisw):
                 for www,sssp,chi in zip(ww,ssp,chis):
-                    f.write(f'{www:8.4f} {sssp:8.4f} {chi.imag:9.4f}\n')
+                    f.write(f'{sssp:8.4f} {www:8.4f} {chi.imag:9.4f}\n')
                 f.write('\n')
             f.close()
+            print("write chis spectrum in png file",flush=True)
             plt.contourf(sp,w,abs(chisw.imag),100)
             plt.colorbar()
             #plt.jet()
@@ -512,8 +523,6 @@ def main():
             plt.savefig(fname='chis_spa.png',dpi=300)
         else: #chis spectrum ecut plane
             chis,chi0,qx,qy=plibs.chis_qmap(Nx,Ny,Ecut,mu,temp,Smat,klist,chiolist,eig,uni,idelta=1.e-3)
-            print('%d plot chis map'%option)
-            print(chis)
             plt.contourf(qx,qy,abs(chis.imag),100)
             plt.colorbar()
             plt.jet()
@@ -526,7 +535,7 @@ def main():
         get_carrier_num(Nx,rvec,ham_r,mu,Arot)
     elif option==10: #calc cycrtron mass
         get_mass(Nx,rvec,ham_r,mu)
-    elif option==11:
+    elif option==11: #calc self-energy using flex
         Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,rvec,avec,sw_uni=True)
         try:
             chiolist
@@ -542,6 +551,6 @@ def main():
         eig,uni=flibs.get_eig(ham_k)
         mass=flibs.get_mass(klist,ham_r,rvec,avec.T*ihbar,uni)*eC/emass
         print(mass[:,3,:,:])
-        
+
 if __name__=="__main__":
     main()

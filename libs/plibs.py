@@ -1,10 +1,8 @@
 #!/usr/bin/env python
 #-*- coding:utf-8 -*-
 from __future__ import print_function, division
-import flibs
-import numpy as np
-import scipy.optimize as scopt
-import scipy.linalg as sclin
+import libs.fibs as flibs
+import numpy as np, scipy.optimize as scopt, scipy.linalg as sclin
 
 def import_hoppings(fname,ftype):
     def import_hop(name):
@@ -242,17 +240,12 @@ def get_ptv(alatt,deg,brav):
     elif brav==7: #body center 2
         Arot=np.array([[-.5, .5, .5],[.5, -.5, .5],[.5, .5, -.5]])
     else:
-        phase=np.pi*deg[0]/180.
-        phase2=np.pi*deg[1]/180.
-        phase3=np.pi*deg[2]/180.
-        ax1=alatt[1]/alatt[0]
-        ax2=alatt[2]/alatt[0]
-        r1=ax1*np.cos(phase3)
-        r2=ax1*np.sin(phase3)
-        r3=ax2*np.cos(phase2)
-        r4=ax2*(np.cos(phase)-np.cos(phase2)*np.cos(phase3))/np.sin(phase3)
-        r5=ax2*np.sqrt(1+2*np.cos(phase)*np.cos(phase2)*np.cos(phase3)
-                       -(np.cos(phase)**2+np.cos(phase2)**2+np.cos(phase3)**2))/np.sin(phase3)
+        phase=[np.pi*deg[0]/180.,np.pi*deg[1]/180.,np.pi*deg[2]/180.]
+        ax1,a2=alatt[1]/alatt[0],alatt[2]/alatt[0]
+        r1,r2,r3=ax1*np.cos(phase[2]),ax1*np.sin(phase[2]),ax2*np.cos(phase[1])
+        r4=ax2*(np.cos(phase[0])-np.cos(phase[1])*np.cos(phase[2]))/np.sin(phase[2])
+        r5=ax2*np.sqrt(1+2*np.cos(phase[0])*np.cos(phase[1])*np.cos(phase[2])
+                       -(np.cos(phase[0])**2+np.cos(phase[1])**2+np.cos(phase[2])**2))/np.sin(phase[2])
         Arot=np.array([[ 1., 0.,  0.],
                       [ r1, r2,  0.],
                       [ r3, r4, r5]])
@@ -305,12 +298,31 @@ def chis_spectrum(mu,temp,Smat,klist,qlist,olist,eig,uni,Nw,Emax,idelta=1.e-3):
     ffermi=.5-.5*np.tanh(.5*(eig-mu)/temp)
     wlist=np.linspace(0,Emax,Nw)
     chisq=[]
-    for q in qlist:
+    f=open('chi0.dat','w')
+    fq=open('writeq.dat','w')
+    for i,q in enumerate(qlist):
+        fq.write(f'{i:d} {q[0]:5.3f} {q[1]:5.3f} {q[2]:5.3f}\n')
+        fq.flush()
         qshift=flibs.get_qshift(klist,q)
         chi0=flibs.get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp)
         chis=flibs.get_chis(chi0,Smat)
-        chisq.append([c.diagonal().sum() for c in chis])
+        trchis,trchi0=flibs.get_tr_chi(chis,chi0,olist)
+        chisq.append(trchis)
+        for w,trchi in zip(wlist,trchi0):
+            f.write(f'{i:8.4f} {w:8.4f} {trchi.imag:9.4f} {trchi.real:9.4f}\n')
+        f.write('\n')
+        f.flush()
+    f.close()
+    fq.close()
     chis=np.array(chisq)
+    return chis,wlist
+
+def chis_q_point(q):
+    ffermi=.5-.5*np.tanh(.5*(eig-mu)/temp)
+    wlist=np.linspace(0,Emax,Nw)
+    qshift=flibs.get_qshift(klist,q)
+    chi0=flibs.get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp)
+    chis=flibs.get_chis(chi0,Smat)
     return chis,wlist
 
 def chis_qmap(Nx,Ny,Ecut,mu,temp,Smat,klist,olist,eig,uni,idelta=1.e-3):

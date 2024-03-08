@@ -6,9 +6,13 @@ __pycache__/
 # C & Fortran extensions
 *.so
 *.mod
+*.o
 
 # output files
 chis.dat
+chi0.dat
+writeq.dat
+*.png
 
 # input files
 *_hr.dat
