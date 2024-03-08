@@ -34,20 +34,21 @@ option defines calculation modes
  5: calc conductivity (Boltzmann Theory)
  6: calc conductivity (Purtubation Theory)
  7: calc chis spectrum with symmetry line
- 8: calc chis on xy plane at Ecut
- 9: calc carrier num.
-10: calc cycrotron mass
-11: calc selfenergy using flex
-12: mass calculation
+ 8: calc chis at q-point
+ 9: calc chis on xy plane at Ecut
+10: calc carrier num.
+11: calc cycrotron mass
+12: calc selfenergy using flex
+13: mass calculation
 color_option defines the meaning of color on Fermi surfaces
  0: band or mono color
  1: orbital weight settled by olist
  2: velocity size
 """
-option=7
+option=12
 color_option=2
 
-Nx,Ny,Nz,Nw=32,32,2,150 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=8,8,4,64  #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.5,1.5,1.0]
 kz=0.0
@@ -57,17 +58,17 @@ alpha_beta_gamma=[90.,90.,90]
 temp=2.59e-2
 fill=2.9375
 
-Emin,Emax=0,3
-delta=3.0e-2
+Emin,Emax=0,1
+delta=5.0e-2
 Ecut=1.0e-3
 tau_const=100
 olist=[[0],[1,2],[3]]
-U,J=0.2, 0.025
+U,J=0.4, 0.05
 #U,J=1.2,0.15
 
 k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
 xlabel=['$\Gamma$','X','M']
-
+at_point=[ 0., .5, 0.]
 sw_calc_mu=True #calculate mu or not
 sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
@@ -419,11 +420,12 @@ def main():
         else:
             avec=alatt*np.eye(3)
     bvec=plibs.get_bvec(avec)
-    opstr=["calculate band structure","calculate Dos","plot 2D Fermi surface","plot 3D Fermi surface",
-           "calculate spectrum","calculate conductivities using Boltzmann theory",
+    opstr=["calculate band structure","calculate Dos","plot 2D Fermi surface",
+           "plot 3D Fermi surface","calculate spectrum",
+           "calculate conductivities using Boltzmann theory",
            "calculate conductivities with linear response","calculate chis spectrum",
-           "calculate chis qmap at Ecut","calculate carrier number","calculate cycrtron mass",
-           "calc self energy"]
+           "calculate chis at q-point","calculate chis qmap at Ecut","calculate carrier number",
+           "calculate cycrtron mass","calc self energy"]
     cstr=["no color",'orbital weight','velocity size']
     if omp_check:
         print("OpenMP mode",flush=True)
@@ -485,8 +487,8 @@ def main():
         calc_conductivity_Bolzmann(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,tau_const)
     elif option==6: #calc_optical conductivity
         calc_conductivity_lr(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta)
-    elif option in {7,8}: #calc_chis_spectrum
-        print("calculate electron band",flush=True)
+    elif option in {7,8,9}: #calc_chis_spectrum
+        print("calculate electron energy",flush=True)
         Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,rvec,avec,sw_uni=True)
         try:
             chiolist
@@ -521,6 +523,12 @@ def main():
             plt.hot()
             #plt.show()
             plt.savefig(fname='chis_spa.png',dpi=300)
+        elif option==8:
+            q_point=np.array(at_point)
+            chis,wlist=plibs.chis_q_point(q_point,eig,uni,Emax,Nw,mu,temp,Smat,klist,chiolist,delta)
+            print(len(klist))
+            plt.plot(wlist,chis.imag)
+            plt.show()
         else: #chis spectrum ecut plane
             chis,chi0,qx,qy=plibs.chis_qmap(Nx,Ny,Ecut,mu,temp,Smat,klist,chiolist,eig,uni,idelta=1.e-3)
             plt.contourf(qx,qy,abs(chis.imag),100)
@@ -531,11 +539,11 @@ def main():
             plt.colorbar()
             plt.jet()
             plt.show()
-    elif option==9: #calc carrier number
+    elif option==10: #calc carrier number
         get_carrier_num(Nx,rvec,ham_r,mu,Arot)
-    elif option==10: #calc cycrtron mass
+    elif option==11: #calc cycrtron mass
         get_mass(Nx,rvec,ham_r,mu)
-    elif option==11: #calc self-energy using flex
+    elif option==12: #calc self-energy using flex
         Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,rvec,avec,sw_uni=True)
         try:
             chiolist
@@ -545,7 +553,7 @@ def main():
             o1,o2=np.meshgrid(tmp,tmp)
             chiolist=np.array([o1.flatten(),o2.flatten()]).T
         calc_flex(Nx,Ny,Nz,Nw,ham_r,rvec,mu,temp,chiolist)
-    elif option==12: #mass calc
+    elif option==13: #mass calc
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         ham_k=flibs.gen_ham(klist,ham_r,rvec)
         eig,uni=flibs.get_eig(ham_k)

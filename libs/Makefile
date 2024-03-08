@@ -24,7 +24,7 @@ else
 endif
 
 FFLAGS= -O2 $(parallel) -shared -fPIC
-objmain= fmod.o
+objmain= fmod.o fcond.o fchi.o
 .SUFFIXES:
 main: $(objmain)
 	$(FC) $(FFLAGS) $(LIBS) -o fmod.so ${objmain}

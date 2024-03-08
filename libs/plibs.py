@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 #-*- coding:utf-8 -*-
 from __future__ import print_function, division
-import libs.fibs as flibs
+import libs.flibs as flibs
 import numpy as np, scipy.optimize as scopt, scipy.linalg as sclin
 
 def import_hoppings(fname,ftype):
@@ -317,13 +317,14 @@ def chis_spectrum(mu,temp,Smat,klist,qlist,olist,eig,uni,Nw,Emax,idelta=1.e-3):
     chis=np.array(chisq)
     return chis,wlist
 
-def chis_q_point(q):
+def chis_q_point(q,eig,uni,Emax,Nw,mu,temp,Smat,klist,olist,idelta):
     ffermi=.5-.5*np.tanh(.5*(eig-mu)/temp)
     wlist=np.linspace(0,Emax,Nw)
     qshift=flibs.get_qshift(klist,q)
     chi0=flibs.get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp)
     chis=flibs.get_chis(chi0,Smat)
-    return chis,wlist
+    trchis,trchi0=flibs.get_tr_chi(chis,chi0,olist)
+    return trchis,wlist
 
 def chis_qmap(Nx,Ny,Ecut,mu,temp,Smat,klist,olist,eig,uni,idelta=1.e-3):
     ffermi=.5*(1.-np.tanh(.5*(eig-mu)/temp))
