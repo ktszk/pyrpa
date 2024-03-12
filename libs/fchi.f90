@@ -59,7 +59,7 @@ contains
     implicit none
     integer(8),intent(in):: Nk,Norb,Nchi
     integer(8),intent(in),dimension(Nk):: qshift
-    integer(8),intent(in),dimension(2,Nchi):: ol
+    integer(8),intent(in),dimension(Nchi,2):: ol
     real(8),intent(in):: temp,eps,idelta,w
     real(8),intent(in),dimension(Norb,Nk):: eig,ffermi
     complex(8),intent(in),dimension(Norb,Norb,Nk):: uni
@@ -74,8 +74,8 @@ contains
           band2_loop: do m=1,Norb
              chiorb1_loop: do j=1,Nchi
                 chiorb2_loop:do i=1,Nchi
-                   unitmp=uni(ol(1,j),l,qshift(k))*conjg(uni(ol(1,i),l,qshift(k)))&
-                        *uni(ol(2,i),m,k)*conjg(uni(ol(2,j),m,k))
+                   unitmp=uni(ol(j,1),l,qshift(k))*conjg(uni(ol(i,1),l,qshift(k)))&
+                        *uni(ol(i,2),m,k)*conjg(uni(ol(j,2),m,k))
                    if(abs(w)==0.0d0 .and. abs(eig(m,k)-eig(l,qshift(k)))<1.0d-9)then
                       chi(i,j)=chi(i,j)+unitmp*ffermi(m,k)*(1.0d0-ffermi(m,k))/temp
                    else if(abs(ffermi(l,qshift(i))-ffermi(m,i))>eps)then
@@ -94,17 +94,18 @@ end module calc_irr_chi
 subroutine get_tr_chi(trchis,trchi0,chis,chi0,olist,Nw,Nchi) bind(C)
   implicit none
   integer(8),intent(in):: Nchi,Nw
-  integer(8),intent(in),dimension(2,Nchi):: olist
+  integer(8),intent(in),dimension(Nchi,2):: olist
   complex(8),intent(in),dimension(Nchi,Nchi,Nw):: chis,chi0
   complex(8),intent(out),dimension(Nw):: trchis,trchi0
 
   integer(8) i,j,k
+ 
   !$omp parallel do private(j,k)
   wloop:do i=1,Nw
      orb_lop1:do j=1,Nchi
-        if(olist(1,j)==olist(2,j))then
+        if(olist(j,1)==olist(j,2))then
            orb_loop2:do k=1,Nchi
-              if(olist(1,k)==olist(2,k))then
+              if(olist(k,1)==olist(k,2))then
                  trchis(i)=trchis(i)+chis(k,j,i)
                  trchi0(i)=trchi0(i)+chi0(k,j,i)
               end if
@@ -120,7 +121,7 @@ subroutine get_chi_irr(chi,uni,eig,ffermi,qshift,ol,wl,Nchi,Norb,Nk,Nw,idelta,ep
   implicit none
   integer(8),intent(in):: Nk,Norb,Nw,Nchi
   integer(8),intent(in),dimension(Nk):: qshift
-  integer(8),intent(in),dimension(2,Nchi):: ol
+  integer(8),intent(in),dimension(Nchi,2):: ol
   real(8),intent(in):: temp,eps,idelta
   real(8),intent(in),dimension(Norb,Nk):: eig,ffermi
   real(8),intent(in),dimension(Nw):: wl
@@ -140,7 +141,7 @@ subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,e
   use calc_irr_chi
   implicit none
   integer(8),intent(in):: Nx,Ny,Nk,Norb,Nchi
-  integer(8),intent(in),dimension(2,Nchi):: ol
+  integer(8),intent(in),dimension(Nchi,2):: ol
   real(8),intent(in):: ecut,idelta,eps,temp
   real(8),intent(in),dimension(3,Nk):: klist
   real(8),intent(in),dimension(Norb,Nk):: eig,ffermi
@@ -194,9 +195,9 @@ subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,e
         end do
         !take chis_llmm
         do l=1,Nchi
-           if(ol(1,l)==ol(2,l))then
+           if(ol(l,1)==ol(l,2))then
               do m=1,Nchi
-                 if(ol(1,m)==ol(2,m))then
+                 if(ol(m,2)==ol(m,2))then
                     trchis(j,i)=trchis(j,i)+tmp2(l,l)
                     trchi(j,i)=trchi(j,i)+chi(l,l)
                  end if

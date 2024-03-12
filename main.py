@@ -45,10 +45,10 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=12
+option=7
 color_option=2
 
-Nx,Ny,Nz,Nw=8,8,4,64  #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=32,32,2,150  #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.5,1.5,1.0]
 kz=0.0
@@ -58,18 +58,19 @@ alpha_beta_gamma=[90.,90.,90]
 temp=2.59e-2
 fill=2.9375
 
-Emin,Emax=0,1
-delta=5.0e-2
+Emin,Emax=0,3
+delta=3.0e-2
 Ecut=1.0e-3
 tau_const=100
 olist=[[0],[1,2],[3]]
-U,J=0.4, 0.05
+U,J=0.8, 0.1
 #U,J=1.2,0.15
 
+mu0=9.85114560061123
 k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
 xlabel=['$\Gamma$','X','M']
 at_point=[ 0., .5, 0.]
-sw_calc_mu=True #calculate mu or not
+sw_calc_mu=False #calculate mu or not
 sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 #----------------------------------main functions-------------------------------------
@@ -435,6 +436,8 @@ def main():
         print("color mode: "+cstr[color_option],flush=True)
     print("Hamiltonian name is "+fname,flush=True)
     print("Number of orbital =",no,flush=True)
+    if option in {7,8,9,12}:
+        print(f'U= {U:4.2f} and J= {J:4.2f}')
     if option in {0,4}:
         if sw_gen_sym:
             print('generate symmetry line',flush=True)
@@ -457,6 +460,7 @@ def main():
         else:
             try:
                 mu=mu0
+                print('chem. pot. is fixed')
             except NameError:
                 mu=get_mu(ham_r,rvec,Arot,temp)
         print('chem. pot. = %7.4f'%mu,flush=True)

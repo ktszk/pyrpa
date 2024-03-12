@@ -317,7 +317,7 @@ end subroutine gen_green0
 subroutine get_chi0_comb(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
   implicit none
   integer(8),intent(in):: Nx,Ny,Nz,Nw,Norb,Nchi,Nk
-  integer(8),intent(in),dimension(2,Nchi):: olist
+  integer(8),intent(in),dimension(Nchi,2):: olist
   integer(8),intent(in),dimension(3,Nk):: kmap
   complex(8),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
   complex(8),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
@@ -344,10 +344,10 @@ subroutine get_chi0_comb(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
         !$omp parallel do private(i)
         do j=1,Nw
            do i=1,Nk
-              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(1,l),olist(2,m)) !G13(iw)
-              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(2,l),olist(1,m)) !G42(iw)
-              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(2,m),olist(1,l))) !G13(-iw)
-              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(1,m),olist(2,l))) !G42(-iw)
+              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(l,1),olist(m,2)) !G13(iw)
+              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(l,2),olist(m,1)) !G42(iw)
+              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(m,2),olist(l,1))) !G13(-iw)
+              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(m,1),olist(l,2))) !G42(-iw)
            end do
         end do
         !$omp end parallel do
@@ -405,7 +405,7 @@ end subroutine gen_tr_greenw_0
 subroutine get_smat(Smat,ol,Uval,Jval,Nchi,Norb) bind(C)
   implicit none
   integer(8),intent(in):: Nchi,Norb
-  integer(8),intent(in),dimension(2,Nchi):: ol
+  integer(8),intent(in),dimension(Nchi,2):: ol
   real(8),intent(in):: Uval,Jval
   real(8),intent(out),dimension(Nchi,Nchi):: Smat
 
@@ -418,15 +418,15 @@ subroutine get_smat(Smat,ol,Uval,Jval,Nchi,Norb) bind(C)
   !$omp do private(j)
   do i=1,Nchi
      do j=1,Nchi
-        if((ol(1,i)==ol(2,i)).and.(ol(1,j)==ol(2,j)))then
-           if(ol(1,i)==ol(1,j))then
+        if((ol(i,1)==ol(i,2)).and.(ol(j,1)==ol(j,2)))then
+           if(ol(i,1)==ol(j,1))then
               Smat(j,i)=Uval
            else
               Smat(j,i)=Jval
            end if
-        else if((ol(1,i)==ol(1,j)).and.(ol(2,i)==ol(2,j)))then
+        else if((ol(i,1)==ol(j,1)).and.(ol(i,2)==ol(j,2)))then
            Smat(j,i)=Uval-2*Jval
-        else if((ol(1,i)==ol(2,j)).and.(ol(2,i)==ol(1,j)))then
+        else if((ol(i,1)==ol(j,2)).and.(ol(i,2)==ol(j,1)))then
            Smat(j,i)=Jval
         end if
      end do
