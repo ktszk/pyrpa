@@ -298,6 +298,7 @@ def chis_spectrum(mu,temp,Smat,klist,qlist,olist,eig,uni,Nw,Emax,idelta=1.e-3):
     ffermi=.5-.5*np.tanh(.5*(eig-mu)/temp)
     wlist=np.linspace(0,Emax,Nw)
     chisq=[]
+    chis_orbq=[]
     f=open('chi0.dat','w')
     fq=open('writeq.dat','w')
     for i,q in enumerate(qlist):
@@ -306,16 +307,16 @@ def chis_spectrum(mu,temp,Smat,klist,qlist,olist,eig,uni,Nw,Emax,idelta=1.e-3):
         qshift=flibs.get_qshift(klist,q)
         chi0=flibs.get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp)
         chis=flibs.get_chis(chi0,Smat)
-        trchis,trchi0=flibs.get_tr_chi(chis,chi0,olist)
+        trchis,trchi0,chis_orb=flibs.get_tr_chi(chis,chi0,olist)
         chisq.append(trchis)
+        chis_orbq.append(chis_orb)
         for w,trchi in zip(wlist,trchi0):
             f.write(f'{i:8.4f} {w:8.4f} {trchi.imag:9.4f} {trchi.real:9.4f}\n')
         f.write('\n')
         f.flush()
     f.close()
     fq.close()
-    chis=np.array(chisq)
-    return chis,wlist
+    return np.array(chisq),np.array(chis_orbq),wlist
 
 def chis_q_point(q,eig,uni,Emax,Nw,mu,temp,Smat,klist,olist,idelta):
     ffermi=.5-.5*np.tanh(.5*(eig-mu)/temp)
@@ -323,8 +324,8 @@ def chis_q_point(q,eig,uni,Emax,Nw,mu,temp,Smat,klist,olist,idelta):
     qshift=flibs.get_qshift(klist,q)
     chi0=flibs.get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp)
     chis=flibs.get_chis(chi0,Smat)
-    trchis,trchi0=flibs.get_tr_chi(chis,chi0,olist)
-    return trchis,wlist
+    trchis,trchi0,chis_orb=flibs.get_tr_chi(chis,chi0,olist)
+    return trchis,chis_orb,wlist
 
 def chis_qmap(Nx,Ny,Ecut,mu,temp,Smat,klist,olist,eig,uni,idelta=1.e-3):
     ffermi=.5*(1.-np.tanh(.5*(eig-mu)/temp))

@@ -9,8 +9,9 @@ __pycache__/
 *.o
 
 # output files
-chis.dat
+chis*
 chi0.dat
+
 writeq.dat
 *.png
 

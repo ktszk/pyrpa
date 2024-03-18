@@ -70,7 +70,7 @@ mu0=9.85114560061123
 k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
 xlabel=['$\Gamma$','X','M']
 at_point=[ 0., .5, 0.]
-sw_calc_mu=False #calculate mu or not
+sw_calc_mu=True #calculate mu or not
 sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 #----------------------------------main functions-------------------------------------
@@ -509,7 +509,7 @@ def main():
             print("calculate spn susceptibility",flush=True)
             import time
             tstart=time.time()
-            chisw,wlist=plibs.chis_spectrum(mu,temp,Smat,klist,qlist,chiolist,eig,uni,Nw,Emax,delta)
+            chisw,chisw_orb,wlist=plibs.chis_spectrum(mu,temp,Smat,klist,qlist,chiolist,eig,uni,Nw,Emax,delta)
             tend=time.time()
             print('calc time is %f'%(tend-tstart))
             w,sp=np.meshgrid(wlist,spa_length)
@@ -520,6 +520,13 @@ def main():
                     f.write(f'{sssp:8.4f} {www:8.4f} {chi.imag:9.4f}\n')
                 f.write('\n')
             f.close()
+            for i,chiso in enumerate(chisw_orb.T):
+                f=open(f'chis_{i}.dat','w')
+                for ww,ssp,chis in zip(w,sp,chiso.T):
+                    for www,sssp,chi in zip(ww,ssp,chis):
+                        f.write(f'{sssp:8.4f} {www:8.4f} {chi.imag:9.4f}\n')
+                    f.write('\n')
+                f.close()
             print("write chis spectrum in png file",flush=True)
             plt.contourf(sp,w,abs(chisw.imag),100)
             plt.colorbar()
@@ -529,8 +536,7 @@ def main():
             plt.savefig(fname='chis_spa.png',dpi=300)
         elif option==8:
             q_point=np.array(at_point)
-            chis,wlist=plibs.chis_q_point(q_point,eig,uni,Emax,Nw,mu,temp,Smat,klist,chiolist,delta)
-            print(len(klist))
+            chis,chis_orb,wlist=plibs.chis_q_point(q_point,eig,uni,Emax,Nw,mu,temp,Smat,klist,chiolist,delta)
             plt.plot(wlist,chis.imag)
             plt.show()
         else: #chis spectrum ecut plane

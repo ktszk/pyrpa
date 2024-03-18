@@ -91,13 +91,13 @@ contains
   end function calc_chi
 end module calc_irr_chi
 
-subroutine get_tr_chi(trchis,trchi0,chis,chi0,olist,Nw,Nchi) bind(C)
+subroutine get_tr_chi(trchis,trchi0,chis_orb,chis,chi0,olist,Nw,Nchi,Norb) bind(C)
   implicit none
-  integer(8),intent(in):: Nchi,Nw
+  integer(8),intent(in):: Nchi,Nw,Norb
   integer(8),intent(in),dimension(Nchi,2):: olist
   complex(8),intent(in),dimension(Nchi,Nchi,Nw):: chis,chi0
   complex(8),intent(out),dimension(Nw):: trchis,trchi0
-
+  complex(8),intent(out),dimension(Norb,Nw):: chis_orb
   integer(8) i,j,k
  
   !$omp parallel do private(j,k)
@@ -108,6 +108,9 @@ subroutine get_tr_chi(trchis,trchi0,chis,chi0,olist,Nw,Nchi) bind(C)
               if(olist(k,1)==olist(k,2))then
                  trchis(i)=trchis(i)+chis(k,j,i)
                  trchi0(i)=trchi0(i)+chi0(k,j,i)
+                 if(olist(j,1)==olist(k,1))then
+                    chis_orb(olist(j,1),i)=chis(k,j,i)
+                 end if
               end if
            end do orb_loop2
         end if

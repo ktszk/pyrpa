@@ -32,4 +32,4 @@ main: $(objmain)
 	$(FC) $(FFLAGS) -c $<
 .PHONY: clean
 clean:
-	rm -rf *.mod *.so __pycache__
+	rm -rf *.mod *.o *.so __pycache__

@@ -235,18 +235,21 @@ def chis_qmap(uni,eig,ffermi,klist,Smat,olist,Nx,Ny,temp,ecut,idelta):
     return chis,chi
 
 def get_tr_chi(chis,chi0,olist):
-    Nchi,Nw=len(olist),len(chi0)
+    Nchi,Nw,Norb=len(olist),len(chi0),olist.max()
     trchis=np.zeros(Nw,dtype=np.complex128)
     trchi0=np.zeros(Nw,dtype=np.complex128)
+    chis_orb=np.zeros((Nw,Norb),dtype=np.complex128)
     flibs.get_tr_chi.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #trchis
                                np.ctypeslib.ndpointer(dtype=np.complex128), #trchi0
+                               np.ctypeslib.ndpointer(dtype=np.complex128), #chis_orb
                                np.ctypeslib.ndpointer(dtype=np.complex128), #chis
                                np.ctypeslib.ndpointer(dtype=np.complex128), #chi0
                                np.ctypeslib.ndpointer(dtype=np.int64),      #olist
-                               POINTER(c_int64),POINTER(c_int64)]           #Nw,Nchi
+                               POINTER(c_int64),POINTER(c_int64),           #Nw,Nchi
+                               POINTER(c_int64)]                            #Norb
     flibs.get_tr_chi.restype=c_void_p
-    flibs.get_tr_chi(trchis,trchi0,chis,chi0,olist,byref(c_int64(Nw)),byref(c_int64(Nchi)))
-    return trchis,trchi0
+    flibs.get_tr_chi(trchis,trchi0,chis_orb,chis,chi0,olist,byref(c_int64(Nw)),byref(c_int64(Nchi)),byref(c_int64(Norb)))
+    return trchis,trchi0,chis_orb
 
 def get_chis(chi0,Smat):
     Nchi,Nw=len(Smat),len(chi0)
