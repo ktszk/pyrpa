@@ -250,5 +250,5 @@ subroutine get_chis(chis,chi0,Smat,Nchi,Nw) bind(C)
         end do
      end do
   end do
-  !$omp end parallel do 
+  !$omp end parallel do
 end subroutine get_chis
