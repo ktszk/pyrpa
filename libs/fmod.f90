@@ -39,7 +39,7 @@ subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,norb) bind(C)
               ham_k(m,l,i)=ham_k(m,l,i)+ham_r(m,l,j)*cmplx(cos(phase),-sin(phase))
            end do rloop
            !$omp end simd
-           ham_k(l,m,i)=conjg(ham_k(m,l,i))
+           ham_k(l,m,i)=conjg(ham_k(m,l,i)) !Hamiltonian is Hermite
         end do
      end do
   end do klop
@@ -88,7 +88,8 @@ subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,norb) bind(C)
               phase=2*pi*sum(klist(:,i)*rvec(:,j))
               axis1: do k=1,3
                  axis2: do n=k,3
-                    imk(n,k,m,l,i)=imk(n,k,m,l,i)-rvec(n,j)*rvec(k,j)*ham_r(m,l,j)*cmplx(cos(phase),-sin(phase))
+                    imk(n,k,m,l,i)=imk(n,k,m,l,i)-rvec(n,j)*rvec(k,j)&
+                         *ham_r(m,l,j)*cmplx(cos(phase),-sin(phase))
                  end do axis2
               end do axis1
            end do rloop
@@ -154,7 +155,7 @@ subroutine get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,norb) bind(C)
   integer(8),intent(in):: Nk,Nr,norb
   real(8),intent(in),dimension(3,Nk):: klist
   real(8),intent(in),dimension(3,Nr):: rvec
-  complex(8),intent(in),dimension(norb,norb,Nr):: ham_r  
+  complex(8),intent(in),dimension(norb,norb,Nr):: ham_r
   complex(8),intent(out),dimension(3,norb,norb,Nk):: vk
 
   integer(8) i,j,k,l,m
@@ -347,4 +348,3 @@ subroutine get_smat(Smat,ol,Uval,Jval,Nchi,Norb) bind(C)
   !$omp end do
   !$omp end parallel
 end subroutine get_smat
-

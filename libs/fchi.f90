@@ -30,7 +30,7 @@ subroutine set_qshift(qpoint,klist,qshift,Nk)
         if(kqlist(j,i)>=1.0d0)then
            kqlist(j,i)=kqlist(j,i)-1.0d0
         else if(kqlist(j,i)<0.0d0)then
-           kqlist(j,i)=kqlist(j,i)+1.0d0           
+           kqlist(j,i)=kqlist(j,i)+1.0d0
         end if
      end do
   end do kloop
@@ -97,7 +97,7 @@ subroutine get_tr_chi(trchis,trchi0,chis_orb,chis,chi0,olist,Nw,Nchi,Norb) bind(
   integer(8),intent(in),dimension(Nchi,2):: olist
   complex(8),intent(in),dimension(Nchi,Nchi,Nw):: chis,chi0
   complex(8),intent(out),dimension(Nw):: trchis,trchi0
-  complex(8),intent(out),dimension(Norb,Nw):: chis_orb
+  complex(8),intent(out),dimension(Norb+2,Nw):: chis_orb
   integer(8) i,j,k
  
   !$omp parallel do private(j,k)
@@ -111,6 +111,8 @@ subroutine get_tr_chi(trchis,trchi0,chis_orb,chis,chi0,olist,Nw,Nchi,Norb) bind(
                  if(olist(j,1)==olist(k,1))then
                     chis_orb(olist(j,1),i)=chis(k,j,i)
                  end if
+                 if(olist(k,1)==2 .and. olist(j,1)==3)chis_orb(Norb+1,i)=chis(k,j,i)
+                 if(olist(k,1)==2 .and. olist(j,1)==4)chis_orb(Norb+2,i)=chis(k,j,i)
               end if
            end do orb_loop2
         end if
@@ -119,10 +121,10 @@ subroutine get_tr_chi(trchis,trchi0,chis_orb,chis,chi0,olist,Nw,Nchi,Norb) bind(
   !$omp end parallel do
 end subroutine get_tr_chi
 
-subroutine get_chi_irr(chi,uni,eig,ffermi,qshift,ol,wl,Nchi,Norb,Nk,Nw,idelta,eps,temp) bind(C)
+subroutine get_chi_irr(chi,uni,eig,ffermi,qshift,ol,wl,Nchi,Norb,Nk,Nw,idelta,eps,temp,qi) bind(C)
   use calc_irr_chi
   implicit none
-  integer(8),intent(in):: Nk,Norb,Nw,Nchi
+  integer(8),intent(in):: Nk,Norb,Nw,Nchi,qi
   integer(8),intent(in),dimension(Nk):: qshift
   integer(8),intent(in),dimension(Nchi,2):: ol
   real(8),intent(in):: temp,eps,idelta
@@ -132,7 +134,15 @@ subroutine get_chi_irr(chi,uni,eig,ffermi,qshift,ol,wl,Nchi,Norb,Nk,Nw,idelta,ep
   complex(8),intent(out),dimension(Nchi,Nchi,Nw):: chi
 
   integer(8) i
+  !character fname*128
 
+  !write(fname,'("shift",(i3.3),".dat")')qi
+  !open(70,file=trim(fname),status='replace')
+  !do i=1,Nk
+  !   write(70,'(3(1x,i4))') qshift(i)
+  !end do
+  !close(70)
+  
   !$omp parallel do private(i)
   wloop: do i=1,Nw
      chi(:,:,i)=calc_chi(Nk,Norb,Nchi,uni,eig,ffermi,ol,temp,qshift,wl(i),idelta,eps)
@@ -244,7 +254,7 @@ subroutine get_chis(chis,chi0,Smat,Nchi,Nw) bind(C)
         do n=1,Nchi
            !$omp simd
            do m=1,Nchi
-              chis(m,l,i)=chis(m,l,i)+tmp(m,n)*chi0(n,m,i)
+              chis(m,l,i)=chis(m,l,i)+tmp(m,n)*chi0(n,l,i)
            end do
            !$omp end simd
         end do

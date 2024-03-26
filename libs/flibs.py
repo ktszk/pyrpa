@@ -174,6 +174,7 @@ def get_chi0_comb(Gk,kmap,olist,Nx,Ny,Nz,Nw):
     flibs.get_chi0_comb(chi,Gk,kmap,olist,byref(c_int64(Nx)),byref(c_int64(Ny)),
                         byref(c_int64(Nz)),byref(c_int64(Nw)),byref(c_int64(Nk)),
                         byref(c_int64(Norb)),byref(c_int64(Nchi)))
+    #flibs.get_chi0_comb(chi,Gk,olist,byref(c_int64(Nw)),byref(c_int64(Nk)),byref(c_int64(Norb)),byref(c_int64(Nchi))) #,byref(c_int64(Nx)),byref(c_int64(Ny)),byref(c_int64(Nz)))
     return chi
 
 def get_qshift(klist,qpoint):
@@ -187,7 +188,7 @@ def get_qshift(klist,qpoint):
     flibs.get_qshift(qpoint,klist,qshift,byref(c_int64(Nk)))
     return qshift
 
-def get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp):
+def get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp,i):
     Nk,Nw=len(eig),len(wlist)
     Norb,Nchi=int(eig.size/Nk),len(olist)
     chi=np.zeros((Nw,Nchi,Nchi),dtype=np.complex128)
@@ -202,11 +203,13 @@ def get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp):
                                 POINTER(c_int64),POINTER(c_int64),           #Nchi,Norb
                                 POINTER(c_int64),POINTER(c_int64),           #Nk,Nw
                                 POINTER(c_double),                           #idelta
-                                POINTER(c_double),POINTER(c_double)]         #eps,temp
+                                POINTER(c_double),POINTER(c_double)
+                                ,POINTER(c_int64)]         #eps,temp
     flibs.get_chi_irr.restype=c_void_p
     flibs.get_chi_irr(chi,uni,eig,ffermi,qshift,olist,wlist,byref(c_int64(Nchi)),
                       byref(c_int64(Norb)),byref(c_int64(Nk)),byref(c_int64(Nw)),
-                      byref(c_double(idelta)),byref(c_double(eps)),byref(c_double(temp)))
+                      byref(c_double(idelta)),byref(c_double(eps)),byref(c_double(temp))
+                      ,byref(c_int64(i)))
     return chi
 
 def chis_qmap(uni,eig,ffermi,klist,Smat,olist,Nx,Ny,temp,ecut,idelta):
@@ -238,7 +241,7 @@ def get_tr_chi(chis,chi0,olist):
     Nchi,Nw,Norb=len(olist),len(chi0),olist.max()
     trchis=np.zeros(Nw,dtype=np.complex128)
     trchi0=np.zeros(Nw,dtype=np.complex128)
-    chis_orb=np.zeros((Nw,Norb),dtype=np.complex128)
+    chis_orb=np.zeros((Nw,Norb+2),dtype=np.complex128)
     flibs.get_tr_chi.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #trchis
                                np.ctypeslib.ndpointer(dtype=np.complex128), #trchi0
                                np.ctypeslib.ndpointer(dtype=np.complex128), #chis_orb

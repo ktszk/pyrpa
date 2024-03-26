@@ -21,8 +21,9 @@ subroutine FFT(cmat,tmp,Nx,Ny,Nz,Nw,SW)
 end subroutine FFT
 
 subroutine get_chi0_comb(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
+!subroutine get_chi0_comb(chi,Gk,olist,Nw,Nk,Norb,Nchi) bind(C)
   implicit none
-  integer(8),intent(in):: Nx,Ny,Nz,Nw,Norb,Nchi,Nk
+  integer(8),intent(in):: Nw,Norb,Nchi,Nk,Nx,Ny,Nz
   integer(8),intent(in),dimension(Nchi,2):: olist
   integer(8),intent(in),dimension(3,Nk):: kmap
   complex(8),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
@@ -30,7 +31,8 @@ subroutine get_chi0_comb(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
 
   integer(8) i,j,k,l,m,n
   integer(8) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1)
-  complex(8),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmp1,tmp2,tmpchi,tmp
+  complex(8),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpchi,tmp,tmp1,tmp2
+!  complex(8),dimension(Nk,Nw):: tmp1,tmp2,tmp
 
   do i=0,Nx-1
      ii(i)=mod(Nx-i,Nx)
@@ -50,15 +52,15 @@ subroutine get_chi0_comb(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
         !$omp parallel do private(i)
         do j=1,Nw
            do i=1,Nk
-              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(l,1),olist(m,2)) !G13(iw)
-              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(l,2),olist(m,1)) !G42(iw)
-              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(m,2),olist(l,1))) !G13(-iw)
-              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(m,1),olist(l,2))) !G42(-iw)
+              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),j)=1.0d0 !Gk(i,j,olist(l,1),olist(m,2)) !G13(iw)
+              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),j)=1.0d0 !Gk(i,j,olist(l,2),olist(m,1)) !G42(iw)
+              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=1.0d0 !conjg(Gk(i,j,olist(m,2),olist(l,1))) !G13(-iw)
+              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=1.0d0 !conjg(Gk(i,j,olist(m,1),olist(l,2))) !G42(-iw)
            end do
         end do
         !$omp end parallel do
-        call FFT(tmp1,tmp,Nx,Ny,Nz,2*Nw,.true.)
-        call FFT(tmp2,tmp,Nx,Ny,Nz,2*Nw,.true.)
+        !call FFT(tmp1,tmp,Nk,1,1,Nw,.true.)
+        !call FFT(tmp2,tmp,Nk,1,1,Nw,.true.)
         !calculate G(r)G(-r)
         !$omp parallel do private(i,j,k)
         do n=1,2*Nw
@@ -73,7 +75,7 @@ subroutine get_chi0_comb(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
            end do
         end do
         !$omp end parallel do
-        call FFT(tmpchi,tmp,Nx,Ny,Nz,2*Nw,.false.)
+        !call FFT(tmpchi,tmp,Nx,Ny,Nz,2*Nw,.false.)
         !$omp parallel do private(i,j)
         do j=1,Nw
            do i=1,Nk
