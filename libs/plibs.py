@@ -304,6 +304,7 @@ def chis_spectrum(mu,temp,Smat,klist,qlist,olist,eig,uni,Nw,Emax,idelta=1.e-3):
     for i,q in enumerate(qlist):
         fq.write(f'{i:d} {q[0]:5.3f} {q[1]:5.3f} {q[2]:5.3f}\n')
         fq.flush()
+        #qshift=flibs.get_qshift(klist,q)
         qshift=flibs.get_qshift(klist,q)
         #fkq=open(f'kq_{i:d}.dat','w')
         #for j,qs in enumerate(qshift):
@@ -338,3 +339,28 @@ def chis_qmap(Nx,Ny,Ecut,mu,temp,Smat,klist,olist,eig,uni,idelta=1.e-3):
     y0=np.linspace(0,1,Ny,False)
     qx,qy=np.meshgrid(x0,y0)
     return chis,chi0,qx,qy
+
+def phi_spectrum(mu,temp,klist,qlist,olist,eig,uni,Nw,Emax,idelta=1.e-3):
+    ffermi=.5-.5*np.tanh(.5*(eig-mu)/temp)
+    wlist=np.linspace(0,Emax,Nw)
+    phiq=[]
+    phi_orbq=[]
+    fq=open('writeq.dat','w')
+    for i,q in enumerate(qlist):
+        fq.write(f'{i:d} {q[0]:5.3f} {q[1]:5.3f} {q[2]:5.3f}\n')
+        fq.flush()
+        qshift=flibs.get_iqshift(klist,q)
+        phi=flibs.get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp,i)
+        trphi,phi_orb=flibs.get_tr_phi(phi,olist)
+        phiq.append(trphi)
+        phi_orbq.append(phi_orb)
+    fq.close()
+    return np.array(phiq),np.array(phi_orbq),wlist
+
+def phi_qmap(Nx,Ny,Ecut,mu,temp,klist,olist,eig,uni,idelta=1.e-3):
+    ffermi=.5*(1.-np.tanh(.5*(eig-mu)/temp))
+    phi=flibs.phi_qmap(uni,eig,ffermi,klist,olist,Nx,Ny,temp,Ecut,idelta)
+    x0=np.linspace(0,1,Nx,False)
+    y0=np.linspace(0,1,Ny,False)
+    qx,qy=np.meshgrid(x0,y0)
+    return phi,qx,qy

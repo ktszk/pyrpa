@@ -21,7 +21,6 @@ subroutine FFT(cmat,tmp,Nx,Ny,Nz,Nw,SW)
 end subroutine FFT
 
 subroutine get_chi0_comb(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
-!subroutine get_chi0_comb(chi,Gk,olist,Nw,Nk,Norb,Nchi) bind(C)
   implicit none
   integer(8),intent(in):: Nw,Norb,Nchi,Nk,Nx,Ny,Nz
   integer(8),intent(in),dimension(Nchi,2):: olist
@@ -34,16 +33,19 @@ subroutine get_chi0_comb(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
   complex(8),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpchi,tmp,tmp1,tmp2
 !  complex(8),dimension(Nk,Nw):: tmp1,tmp2,tmp
 
-  do i=0,Nx-1
-     ii(i)=mod(Nx-i,Nx)
+  ii(0)=0
+  ij(0)=0
+  ik(0)=0
+  do i=1,Nx-1
+     ii(i)=Nx-i
+  end do
+
+  do i=1,Ny-1
+     ij(i)=Ny-j
   end do
   
-  do j=0,Ny-1
-     ij(j)=mod(Ny-j,Ny)
-  end do
-  
-  do k=0,Nz-1
-     ik(k)=mod(Nz-k,Nz)
+  do i=1,Nz-1
+     ik(i)=Nz-k
   end do
 
   do l=1,Nchi
@@ -52,10 +54,10 @@ subroutine get_chi0_comb(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
         !$omp parallel do private(i)
         do j=1,Nw
            do i=1,Nk
-              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),j)=1.0d0 !Gk(i,j,olist(l,1),olist(m,2)) !G13(iw)
-              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),j)=1.0d0 !Gk(i,j,olist(l,2),olist(m,1)) !G42(iw)
-              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=1.0d0 !conjg(Gk(i,j,olist(m,2),olist(l,1))) !G13(-iw)
-              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=1.0d0 !conjg(Gk(i,j,olist(m,1),olist(l,2))) !G42(-iw)
+              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(l,1),olist(m,2)) !G13(iw)
+              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(l,2),olist(m,1)) !G42(iw)
+              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(m,2),olist(l,1))) !G13(-iw)
+              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(m,1),olist(l,2))) !G42(-iw)
            end do
         end do
         !$omp end parallel do

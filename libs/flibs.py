@@ -188,6 +188,17 @@ def get_qshift(klist,qpoint):
     flibs.get_qshift(qpoint,klist,qshift,byref(c_int64(Nk)))
     return qshift
 
+def get_iqshift(klist,qpoint):
+    Nk=len(klist)
+    qshift=np.zeros(Nk,dtype=np.int64)
+    flibs.get_iqshift.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64), #qpoint
+                               np.ctypeslib.ndpointer(dtype=np.float64), #klist
+                               np.ctypeslib.ndpointer(dtype=np.int64),   #qshift
+                               POINTER(c_int64)]                         #Nk
+    flibs.get_iqshift.restype=c_void_p
+    flibs.get_iqshift(qpoint,klist,qshift,byref(c_int64(Nk)))
+    return qshift
+
 def get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp,i):
     Nk,Nw=len(eig),len(wlist)
     Norb,Nchi=int(eig.size/Nk),len(olist)
@@ -237,6 +248,28 @@ def chis_qmap(uni,eig,ffermi,klist,Smat,olist,Nx,Ny,temp,ecut,idelta):
                    byref(c_int64(Norb)),byref(c_int64(Nchi)))
     return chis,chi
 
+def phi_qmap(uni,eig,ffermi,klist,olist,Nx,Ny,temp,ecut,idelta):
+    Nk=len(eig)
+    Norb,Nchi=int(eig.size/Nk),len(olist)
+    phi=np.zeros((Nx,Ny),dtype=np.complex128)
+    eps=idelta*1e-3
+    flibs.phiq_map.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),        #phi
+                             np.ctypeslib.ndpointer(dtype=np.complex128),        #uni
+                             np.ctypeslib.ndpointer(dtype=np.float64),           #eig
+                             np.ctypeslib.ndpointer(dtype=np.float64),           #ffermi
+                             np.ctypeslib.ndpointer(dtype=np.float64),           #klist
+                             np.ctypeslib.ndpointer(dtype=np.int64),             #olist
+                             POINTER(c_double),POINTER(c_double),                #temp,ecut
+                             POINTER(c_double),POINTER(c_double),                #idelta,eps
+                             POINTER(c_int64),POINTER(c_int64),                  #Nx,Ny
+                             POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)] #Nk,Norb,Nchi
+    flibs.phiq_map.restype=c_void_p
+    flibs.phiq_map(phi,uni,eig,ffermi,klist,olist,byref(c_double(temp)),
+                   byref(c_double(ecut)),byref(c_double(idelta)),byref(c_double(eps)),
+                   byref(c_int64(Nx)),byref(c_int64(Ny)),byref(c_int64(Nk)),
+                   byref(c_int64(Norb)),byref(c_int64(Nchi)))
+    return phi
+
 def get_tr_chi(chis,chi0,olist):
     Nchi,Nw,Norb=len(olist),len(chi0),olist.max()
     trchis=np.zeros(Nw,dtype=np.complex128)
@@ -253,6 +286,21 @@ def get_tr_chi(chis,chi0,olist):
     flibs.get_tr_chi.restype=c_void_p
     flibs.get_tr_chi(trchis,trchi0,chis_orb,chis,chi0,olist,byref(c_int64(Nw)),byref(c_int64(Nchi)),byref(c_int64(Norb)))
     return trchis,trchi0,chis_orb
+
+def get_tr_phi(phi,olist):
+    Nchi,Nw,Norb=len(olist),len(phi),olist.max()
+    trphi=np.zeros(Nw,dtype=np.complex128)
+    phi_orb=np.zeros((Nw,Norb+2),dtype=np.complex128)
+    flibs.get_tr_phi.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #trphi
+                               np.ctypeslib.ndpointer(dtype=np.complex128), #phi_orb
+                               np.ctypeslib.ndpointer(dtype=np.complex128), #phi
+                               np.ctypeslib.ndpointer(dtype=np.int64),      #olist
+                               POINTER(c_int64),POINTER(c_int64),           #Nw,Nchi
+                               POINTER(c_int64)]                            #Norb
+    flibs.get_tr_phi.restype=c_void_p
+    flibs.get_tr_phi(trphi,phi_orb,phi,olist,byref(c_int64(Nw)),
+                     byref(c_int64(Nchi)),byref(c_int64(Norb)))
+    return trphi,phi_orb
 
 def get_chis(chi0,Smat):
     Nchi,Nw=len(Smat),len(chi0)

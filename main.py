@@ -36,10 +36,12 @@ option defines calculation modes
  7: calc chis spectrum with symmetry line
  8: calc chis at q-point
  9: calc chis on xy plane at Ecut
-10: calc carrier num.
-11: calc cycrotron mass
-12: calc selfenergy using flex
-13: mass calculation
+10: calc phi spectrum with symmetry line
+11: calc phi on xy plane at Ecut
+12: calc carrier num.
+13: calc cycrotron mass
+14: calc selfenergy using flex
+15: mass calculation
 color_option defines the meaning of color on Fermi surfaces
  0: band or mono color
  1: orbital weight settled by olist
@@ -364,6 +366,37 @@ def calc_conductivity_lr(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta,with_spin=F
     #ax3.plot(wlist,(sigmaS[:,0,0]+sigmaS[:,1,1]+sigmaS[:,2,2]).imag)
     plt.show()
 
+def calc_chis_spectrum(mu,temp,Smat,klist,qlist,chiolist,eig,uni,spa_length,Nw,Emax,delta):
+    print("calculate spn susceptibility",flush=True)
+    chisw,chisw_orb,wlist=plibs.chis_spectrum(mu,temp,Smat,klist,qlist,chiolist,eig,uni,Nw,Emax,delta)
+    w,sp=np.meshgrid(wlist,spa_length)
+    f=open('chis.dat','w')
+    for ww,ssp,chis in zip(w,sp,chisw):
+        for www,sssp,chi in zip(ww,ssp,chis):
+            f.write(f'{sssp:8.4f} {www:8.4f} {chi.imag:9.4f}\n')
+        f.write('\n')
+    f.close()
+    for i,chiso in enumerate(chisw_orb.T):
+        f=open(f'chis_{i}.dat','w')
+        for ww,ssp,chis in zip(w,sp,chiso.T):
+            for www,sssp,chi in zip(ww,ssp,chis):
+                f.write(f'{sssp:8.4f} {www:8.4f} {chi.imag:9.4f}\n')
+            f.write('\n')
+        f.close()
+    return(w,sp,chisw)
+
+def calc_phi_spectrum(mu,temp,klist,qlist,chiolist,eig,uni,spa_length,Nw,Emax,delta):
+    print("calculate sc susceptibility",flush=True)
+    phiw,phiw_orb,wlist=plibs.phi_spectrum(mu,temp,klist,qlist,chiolist,eig,uni,Nw,Emax,delta)
+    w,sp=np.meshgrid(wlist,spa_length)
+    f=open('phi.dat','w')
+    for ww,ssp,phi in zip(w,sp,phiw):
+        for www,sssp,ph in zip(ww,ssp,phi):
+            f.write(f'{sssp:8.4f} {www:8.4f} {ph.imag:9.4f}\n')
+        f.write('\n')
+    f.close()
+    return(w,sp,phiw)
+
 def calc_flex(Nx,Ny,Nz,Nw,ham_r,rvec,mu,temp,olist):
     klist,kmap=plibs.gen_klist_with_kmap(Nx,Ny,Nz)
     ham_k=flibs.gen_ham(klist,ham_r,rvec)
@@ -403,7 +436,7 @@ def get_mass(mesh,rvec,ham_r,mu,de=3.e-4,meshkz=20):
     kz0=np.linspace(-np.pi,np.pi,meshkz,False)
     sband=[]
     sband2=[]
-    
+
 def main():
     omp_num,omp_check=flibs.omp_params()
     rvec,ham_r,no,Nr=plibs.import_hoppings(fname,ftype)
@@ -425,8 +458,9 @@ def main():
            "plot 3D Fermi surface","calculate spectrum",
            "calculate conductivities using Boltzmann theory",
            "calculate conductivities with linear response","calculate chis spectrum",
-           "calculate chis at q-point","calculate chis qmap at Ecut","calculate carrier number",
-           "calculate cycrtron mass","calc self energy"]
+           "calculate chis at q-point","calculate chis qmap at Ecut",
+           "calc phi spectrum with symmetry line","calc phi on xy plane at Ecut",
+           "calculate carrier number","calculate cycrtron mass","calc self energy"]
     cstr=["no color",'orbital weight','velocity size']
     if omp_check:
         print("OpenMP mode",flush=True)
@@ -491,7 +525,7 @@ def main():
         calc_conductivity_Bolzmann(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,tau_const)
     elif option==6: #calc_optical conductivity
         calc_conductivity_lr(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta)
-    elif option in {7,8,9}: #calc_chis_spectrum
+    elif option in {7,8,9,10,11}: #calc_chis_spectrum
         print("calculate electron energy",flush=True)
         Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,rvec,avec,sw_uni=True)
         try:
@@ -501,59 +535,50 @@ def main():
             tmp=np.arange(Norb)+1
             o1,o2=np.meshgrid(tmp,tmp)
             chiolist=np.array([o1.flatten(),o2.flatten()]).T
-        print("generate coulomb vertex matrix S")
-        Smat=flibs.gen_Smatrix(chiolist,U,J)
-        if option==7: #chis spectrum with symmetry line
-            print("generate qlist for chi",flush=True)
+        if option in {7,8,9}:
+            print("generate coulomb vertex matrix S")
+            Smat=flibs.gen_Smatrix(chiolist,U,J)
+        if option in {7,10}: #chis/phi spectrum with symmetry line
+            print("generate qlist",flush=True)
             qlist,spa_length,xticks=plibs.mk_qlist(k_sets,Nx,Ny,Nz,bvec)
-            print("calculate spn susceptibility",flush=True)
-            import time
-            tstart=time.time()
-            chisw,chisw_orb,wlist=plibs.chis_spectrum(mu,temp,Smat,klist,qlist,chiolist,eig,uni,Nw,Emax,delta)
-            tend=time.time()
-            print('calc time is %f'%(tend-tstart))
-            w,sp=np.meshgrid(wlist,spa_length)
-            print("write chis data",flush=True)
-            f=open('chis.dat','w')
-            for ww,ssp,chis in zip(w,sp,chisw):
-                for www,sssp,chi in zip(ww,ssp,chis):
-                    f.write(f'{sssp:8.4f} {www:8.4f} {chi.imag:9.4f}\n')
-                f.write('\n')
-            f.close()
-            for i,chiso in enumerate(chisw_orb.T):
-                f=open(f'chis_{i}.dat','w')
-                for ww,ssp,chis in zip(w,sp,chiso.T):
-                    for www,sssp,chi in zip(ww,ssp,chis):
-                        f.write(f'{sssp:8.4f} {www:8.4f} {chi.imag:9.4f}\n')
-                    f.write('\n')
-                f.close()
-            print("write chis spectrum in png file",flush=True)
-            plt.contourf(sp,w,abs(chisw.imag),100)
+            if option==7:
+                w,sp,sus=calc_chis_spectrum(mu,temp,Smat,klist,qlist,chiolist,eig,uni,spa_length,Nw,Emax,delta)
+                print("write chis spectrum in png file",flush=True)
+                susfname='chis_spec.png'
+            elif option==10:
+                w,sp,sus=calc_phi_spectrum(mu,temp,klist,qlist,chiolist,eig,uni,spa_length,Nw,Emax,delta)
+                print("write phi spectrum in png file",flush=True)
+                susfname='phi_spec.png'
+            plt.contourf(sp,w,abs(sus.imag),100)
             plt.colorbar()
-            #plt.jet()
             plt.hot()
-            #plt.show()
-            plt.savefig(fname='chis_spa.png',dpi=300)
+            plt.savefig(fname=susfname,dpi=300)
         elif option==8:
             q_point=np.array(at_point)
             chis,chis_orb,wlist=plibs.chis_q_point(q_point,eig,uni,Emax,Nw,mu,temp,Smat,klist,chiolist,delta)
             plt.plot(wlist,chis.imag)
             plt.show()
-        else: #chis spectrum ecut plane
-            chis,chi0,qx,qy=plibs.chis_qmap(Nx,Ny,Ecut,mu,temp,Smat,klist,chiolist,eig,uni,idelta=1.e-3)
-            plt.contourf(qx,qy,abs(chis.imag),100)
+        else:
+            if option==9: #chis spectrum ecut plane
+                sus,chi0,qx,qy=plibs.chis_qmap(Nx,Ny,Ecut,mu,temp,Smat,klist,chiolist,eig,uni,idelta=1.e-3)
+                plt.contourf(qx,qy,abs(chi0.imag),100)
+                plt.colorbar()
+                plt.jet()
+                plt.show()
+                susfname='chismap.png'
+            elif option==11:
+                sus,qx,qy=plibs.phi_qmap(Nx,Ny,Ecut,mu,temp,klist,chiolist,eig,uni,idelta=1.e-3)
+                susfname='phimap.png'
+            plt.contourf(qx,qy,abs(sus.imag),100)
             plt.colorbar()
             plt.jet()
             plt.show()
-            plt.contourf(qx,qy,abs(chi0.imag),100)
-            plt.colorbar()
-            plt.jet()
-            plt.show()
-    elif option==10: #calc carrier number
+            plt.savefig(susfname=fname,dpi=300)
+    elif option==12: #calc carrier number
         get_carrier_num(Nx,rvec,ham_r,mu,Arot)
-    elif option==11: #calc cycrtron mass
+    elif option==13: #calc cycrtron mass
         get_mass(Nx,rvec,ham_r,mu)
-    elif option==12: #calc self-energy using flex
+    elif option==14: #calc self-energy using flex
         Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,rvec,avec,sw_uni=True)
         try:
             chiolist
@@ -563,7 +588,7 @@ def main():
             o1,o2=np.meshgrid(tmp,tmp)
             chiolist=np.array([o1.flatten(),o2.flatten()]).T
         calc_flex(Nx,Ny,Nz,Nw,ham_r,rvec,mu,temp,chiolist)
-    elif option==13: #mass calc
+    elif option==15: #mass calc
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         ham_k=flibs.gen_ham(klist,ham_r,rvec)
         eig,uni=flibs.get_eig(ham_k)
