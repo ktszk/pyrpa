@@ -59,6 +59,18 @@ def import_hoppings(fname,ftype):
         rvec,ham_r,no,nr=import_Hopping(fname)
     return(rvec,ham_r,no,nr)
 
+def import_MLO_hoppings(name):
+    tmp=[f.split() for f in open(f'{name}','r')]
+    tmp1=np.array([[float(t) for t in tp] for tp in tmp])
+    no=int(tmp1[:,0].max())
+    nr=int(len(tmp1)/(no*no))
+    tmp=np.array([complex(tp[5],tp[6]) for tp in tmp1])
+    tmpS=np.array([complex(tp[7],tp[8]) for tp in tmp1])
+    rvec=np.array([tmp1[i][2:5] for i in range(nr)])
+    ham_r=tmp.reshape((no,no,nr)).copy().T*13.6
+    S_r=tmpS.reshape((no,no,nr)).copy().T*13.6
+    return rvec,ham_r,S_r,no,nr
+
 def get_bvec(avec):
     bvec=2*np.pi*sclin.inv(avec).T
     return bvec
@@ -202,10 +214,14 @@ def get_colors(klist,blist,mrot,rvec,ham_r,ol,color_option,sw_2d=False):
                     if sw_2d else np.sqrt((abs(vkk)*abs(vkk)).sum(axis=1))) for vkk in vk]
         return clist
 
-def get_emesh(Nx,Ny,Nz,ham_r,rvec,avec,sw_uni=False,sw_veloc=False):
+def get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=False,sw_veloc=False):
     Nk,klist=gen_klist(Nx,Ny,Nz,sw_pp=False)
-    ham_k=flibs.gen_ham(klist,ham_r,rvec)
-    eig,uni=flibs.get_eig(ham_k)
+    if len(S_r)==0:
+        ham_k=flibs.gen_ham(klist,ham_r,rvec)
+        eig,uni=flibs.get_eig(ham_k)
+    else:
+        ham_k,S_k=flibs.gen_ham(klist,ham_r,rvec,Ovl_r=S_r)
+        eig,uni=flibs.get_eig(ham_k,S_k)
     kweight=np.ones(len(eig),dtype=np.float64)
     if sw_veloc:
         if sw_uni:

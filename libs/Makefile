@@ -2,28 +2,37 @@
 #FC=ifort
 FC=ifx
 #FC=flang
-#FC=gfortran
 #FC=amdflang
+#FC=gfortran
 ifeq ($(FC),ifort)
   LIBS=-lmkl_intel_lp64 -lmkl_sequential -lmkl_core #-lmkl_avx
-  FFLAGS= -O2 -mavx -qopenmp -IPO
+  FFLAGS= -O2 -mavx -qopenmp -IPO -fPIC -heap-arrays
+  FFLAGS2= -shared
 else
   ifeq ($(FC),ifx)
-    LIBS=-lmkl_intel_lp64 -lmkl_sequential -lmkl_core
-    FFLAGS= -fPIC -O2 -mavx2 -fopenmp -finline-functions -fPIC
+    LIBS= -qmkl
+    FFLAGS= -O2 -mavx2 -fopenmp -finline-functions -fPIC -heap-arrays
+    FFLAGS2= -shared
   else
     ifeq ($(FC),flang)
       LIBS= -lblis -lflame -lfftw3 -lm -lpthread
       FFLAGS= -O2 -mavx2 -fopenmp -finline-functions
+      FFLAGS2= -shared -fPIC
     else
-      #LIBS=-lmkl_intel_lp64 -lmkl_sequential -lmkl_core
-      LIBS= -lblis -lflame -lfftw3 -lm -lpthread
-      FFLAGS= -O2 -mavx2 -fopenmp -finlne-functions
+      ifeq ($(FC),amdflang)
+        LIBS= -lblis -lflame -lfftw3 -lm -lpthread
+        FFLAGS= -O2 -mavx2 -fopenmp -finline-functions -fPIC
+        FFLAGS2= -shared
+      else
+        #LIBS=-lmkl_intel_lp64 -lmkl_sequential -lmkl_core
+        LIBS= -lblis -lflame -lfftw3 -lm -lpthread
+        FFLAGS= -O2 -mavx2 -fopenmp -finline-functions
+        FFLAGS2= -shared -fPIC
+      endif
     endif
   endif
 endif
 
-FFLAGS2= -shared -fPIC
 objmain= fmod.o fcond.o fchi.o fself.o
 .SUFFIXES:
 main: $(objmain)

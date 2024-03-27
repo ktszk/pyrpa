@@ -123,8 +123,8 @@ subroutine calc_tdf(tdf,eig,veloc,kweight,tau,Nw,Nk,Norb) bind(C)
   tdf(:,:,:)=0.0d0
   !$omp end workshare
   omega_loop: do iw=1,Nw
-     axis1: do l=1,3
-        axis2: do m=l,3
+     axis1: do concurrent(l=1:3)
+        axis2: do concurrent(m=l:3)
            !$omp do private(i,j) reduction(+:tdf)
            k_loop: do i=1,Nk
               band_loop: do j=1,Norb

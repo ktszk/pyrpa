@@ -67,6 +67,52 @@ subroutine get_eig(eig,uni,ham_k,Nk,norb) bind(C)
   !$omp end parallel do
 end subroutine get_eig
 
+subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,norb) bind(C)
+  implicit none
+  integer(8),intent(in):: Nk,norb
+  complex(8),intent(in),dimension(norb,norb,Nk):: ham_k,Ovlk
+  real(8),intent(out),dimension(norb,Nk):: eig
+  complex(8),intent(out),dimension(norb,norb,Nk):: uni
+
+  integer(8) i,j,k,l,m,info
+  real(8) rwork(3*norb-2),eq(norb),norm
+  complex(8) work(2*norb-1),tmp3(norb)
+  complex(8),dimension(norb,norb):: tmp,tmp2
+
+  !$omp parallel do private(tmp,tmp2,tmp3,norm,eq,work,rwork,info)
+  kloop: do i=1,Nk
+     tmp(:,:)=Ovlk(:,:,i)
+     call zheev('V','U',norb,tmp,norb,eq,work,2*norb-1,rwork,info)
+     print*,eq
+     do j=1,norb
+        tmp2(:,j)=tmp(:,j)/sqrt(cmplx(eq(j)))
+     end do
+     tmp(:,:)=0.0d0
+     do concurrent(j=1:norb)
+        do concurrent(k=1:norb)
+           do l=1,norb
+              do m=1,norb
+                 tmp(k,j)=tmp(k,j)+conjg(tmp2(m,k))*ham_k(m,l,i)*tmp2(l,j)
+              end do
+           end do
+        end do
+     end do
+     call zheev('V','U',norb,tmp,norb,eq,work,2*norb-1,rwork,info)
+     eig(:,i)=eq(:)
+     do concurrent(j=1:norb)
+        tmp3(:)=0.0d0
+        do k=1,norb
+           do l=1,norb
+              tmp3(k)=tmp3(k)+tmp2(j,l)*tmp(l,k)
+           end do
+        end do
+        norm=sqrt(sum(abs(tmp3(:))*abs(tmp3(:))))
+        uni(:,j,i)=tmp3(:)/norm
+     end do
+  end do kloop
+  !$omp end parallel do
+end subroutine get_eig_mlo
+
 subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,norb) bind(C)
   use constant
   implicit none
@@ -263,36 +309,6 @@ subroutine get_vnm(vk,vk0,mrot,uni,Nk,norb) bind(C)
   !$omp end parallel
 end subroutine get_vnm
 
-subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,norb) bind(C)
-  use constant
-  implicit none
-  integer(8),intent(in):: Nk,Nw,norb
-  real(8),intent(in):: mu,temp
-  real(8),intent(in),dimension(norb,Nk):: eig
-  complex(8),intent(in),dimension(norb,norb,Nk):: uni
-  complex(8),intent(out),dimension(Nk,Nw,norb,norb):: Gk
-  
-  integer(8) i,j,l,m,n
-  complex(8) iw
-
-  do l=1,norb
-     do m=1,norb
-        band_loop: do n=1,norb
-           !$omp parallel do private(iw,i,j)
-           wloop: do j=1,Nw
-              iw=cmplx(mu,dble(2*(j-1)+1)*pi*temp)
-              !!$omp simd
-              kloop: do i=1,Nk
-                 Gk(i,j,m,l)=Gk(i,j,m,l)+uni(l,n,i)*conjg(uni(m,n,i))/(iw-eig(n,i))
-              end do kloop
-              !!$omp end simd
-           end do wloop
-           !$omp end parallel do
-        end do band_loop
-     end do
-  end do
-end subroutine gen_green0
-
 subroutine gen_tr_greenw_0(trGk,wl,eig,mu,delta,Nk,Nw,Norb) bind(C)
   implicit none
   integer(8),intent(in):: Nk,Nw,Norb
@@ -315,36 +331,3 @@ subroutine gen_tr_greenw_0(trGk,wl,eig,mu,delta,Nk,Nw,Norb) bind(C)
   end do kloop
   !$omp end parallel do
 end subroutine gen_tr_greenw_0
-
-subroutine get_smat(Smat,ol,Uval,Jval,Nchi,Norb) bind(C)
-  implicit none
-  integer(8),intent(in):: Nchi,Norb
-  integer(8),intent(in),dimension(Nchi,2):: ol
-  real(8),intent(in):: Uval,Jval
-  real(8),intent(out),dimension(Nchi,Nchi):: Smat
-
-  integer(8) i,j
-
-  !$omp parallel
-  !$omp workshare
-  Smat(:,:)=0.0d0
-  !$omp end workshare
-  !$omp do private(j)
-  do i=1,Nchi
-     do j=1,Nchi
-        if((ol(i,1)==ol(i,2)).and.(ol(j,1)==ol(j,2)))then
-           if(ol(i,1)==ol(j,1))then
-              Smat(j,i)=Uval
-           else
-              Smat(j,i)=Jval
-           end if
-        else if((ol(i,1)==ol(j,1)).and.(ol(i,2)==ol(j,2)))then
-           Smat(j,i)=Uval-2*Jval
-        else if((ol(i,1)==ol(j,2)).and.(ol(i,2)==ol(j,1)))then
-           Smat(j,i)=Jval
-        end if
-     end do
-  end do
-  !$omp end do
-  !$omp end parallel
-end subroutine get_smat

@@ -4,7 +4,8 @@
 ftype: set input hamiltonian's format
 0: ham_r.txt, irvec.txt, ndegen.txt in {fname} dir
 1: .input file named {fname}
-2: {fname}_hr.dat file (wannier90 default hopping file)
+2: {fname}_hr.dat file (wannier90 default hopping file
+3: for non-orthogonal basehoppings as MLO basis
 else: Hopping.dat file (ecalj hopping file)
 brav: choose primitive translation vector S,FC,BC etc
 0: simple 
@@ -47,10 +48,10 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=7
+option=0
 color_option=2
 
-Nx,Ny,Nz,Nw=32,32,2,150  #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=16,16,4,128 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.5,1.5,1.0]
 kz=0.0
@@ -72,7 +73,7 @@ mu0=9.85114560061123
 k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
 xlabel=['$\Gamma$','X','M']
 at_point=[ 0., .5, 0.]
-sw_calc_mu=True #calculate mu or not
+sw_calc_mu=False #calculate mu or not
 sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 #----------------------------------main functions-------------------------------------
@@ -242,7 +243,7 @@ def set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,olist):
         fscolors=np.array(fscolors)
         return fspolys,fscenters,fscolors
 
-def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,rvec,Emin,Emax,delta,Nw):
+def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw):
     klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
     ham_k=flibs.gen_ham(klist,ham_r,rvec)
     eig,uni=flibs.get_eig(ham_k)
@@ -258,9 +259,9 @@ def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,rvec,Emin,Emax,delta,Nw):
     plt.colorbar()
     plt.show()
     
-def calc_conductivity_Bolzmann(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,tau_const,Nw=300,with_spin=False):
+def calc_conductivity_Bolzmann(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,tau_const,Nw=300,with_spin=False):
     #no dep. T and mu or filling
-    Nk,eig,vk,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,rvec,avec.T*ihbar,sw_veloc=True)
+    Nk,eig,vk,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec.T*ihbar,sw_veloc=True)
     Vuc=sclin.det(avec)*1e-30
     gsp=(1.0 if with_spin else 2.0) #spin weight
     iNV=1./(Nk*Vuc)
@@ -316,13 +317,13 @@ def calc_conductivity_Bolzmann(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,tau_const,Nw=3
     print('Power Factor (SA/m^2/K)',flush=True)
     print(PF.round(10),flush=True)
 
-def calc_conductivity_lr(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta,with_spin=False):
+def calc_conductivity_lr(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta,with_spin=False):
     '''
     calculation of linear response theory
     electric conductivity of LRT correponds to Boltzmann then delta~O(10-1) (tau~1fs) at 300K
     thermal conductivity and L12 of LRT correspond to Boltzmann then delta~O(10-3) (tau~100fs) at 300K
     '''
-    Nk,eig,vk,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,rvec,avec.T*ihbar,True,True)
+    Nk,eig,vk,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec.T*ihbar,True,True)
     Vuc=sclin.det(avec)
     gsp=(1.0 if with_spin else 2.0) #spin weight
     mu=plibs.calc_mu(eig,Nk,fill,temp)
@@ -407,8 +408,8 @@ def calc_flex(Nx,Ny,Nz,Nw,ham_r,rvec,mu,temp,olist):
     chi=flibs.get_chi0_comb(Gk,kmap,olist,Nx,Ny,Nz,Nw)
     print(chi,flush=True)
 
-def get_carrier_num(kmesh,rvec,ham_r,mu,Arot):
-    Nk,eig,kwieght=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,rvec,Arot)
+def get_carrier_num(kmesh,rvec,ham_r,S_r,mu,Arot):
+    Nk,eig,kwieght=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,S_r,rvec,Arot)
     fill=0.0
     for i,en in enumerate(eig.T-mu):
         num_hole=float(np.where(en>0)[0].size)/Nk
@@ -417,10 +418,10 @@ def get_carrier_num(kmesh,rvec,ham_r,mu,Arot):
         fill+=num_particle
     print('sum of electrons is %5.3f'%fill,flush=True)
 
-def get_mu(ham_r,rvec,Arot,temp,kmesh=40):
+def get_mu(ham_r,S_r,rvec,Arot,temp,kmesh=40):
     print("calc chem. pot.",flush=True)
     print("band filling = %f"%fill,flush=True)
-    Nk,eig,kweight=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,rvec,Arot)
+    Nk,eig,kweight=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,S_r,rvec,Arot)
     mu=plibs.calc_mu(eig,Nk,fill,temp)
     return mu
 
@@ -439,7 +440,11 @@ def get_mass(mesh,rvec,ham_r,mu,de=3.e-4,meshkz=20):
 
 def main():
     omp_num,omp_check=flibs.omp_params()
-    rvec,ham_r,no,Nr=plibs.import_hoppings(fname,ftype)
+    if ftype==3:
+        rvec,ham_r,S_r,no,Nr=plibs.import_MLO_hoppings(fname)
+    else:
+        rvec,ham_r,no,Nr=plibs.import_hoppings(fname,ftype)
+        S_r=[]
     avec,Arot=plibs.get_ptv(alatt,deg,brav)
     if sw_dec_axis:
         rvec1=Arot.T.dot(rvec.T).T
@@ -490,23 +495,27 @@ def main():
         pass
     else:
         if sw_calc_mu:
-            mu=get_mu(ham_r,rvec,Arot,temp)
+            mu=get_mu(ham_r,S_r,rvec,Arot,temp)
         else:
             try:
                 mu=mu0
                 print('chem. pot. is fixed')
             except NameError:
-                mu=get_mu(ham_r,rvec,Arot,temp)
+                mu=get_mu(ham_r,S_r,rvec,Arot,temp)
         print('chem. pot. = %7.4f'%mu,flush=True)
 
     if option==0: #plot band
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
-        ham_k=flibs.gen_ham(klist,ham_r,rvec)
-        eig,uni0=flibs.get_eig(ham_k)
+        if len(S_r)==0:
+            ham_k=flibs.gen_ham(klist,ham_r,rvec)
+            eig,uni0=flibs.get_eig(ham_k)
+        else:
+            ham_k,S_k=flibs.gen_ham(klist,ham_r,rvec,Ovl_r=S_r)
+            eig,uni0=flibs.get_eig(ham_k,S_k)
         uni=np.array([u.T for u in uni0]) #rotate uni(k,band,orb) to uni(k,orb,band)
         plot_band(eig.T-mu,spa_length,xlabel,xticks,uni.T,olist,(False if color_option==0 else True))
     elif option==1: #plot dos
-        Nk,eig,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,rvec,avec)
+        Nk,eig,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec)
         wlist=np.linspace(Emin,Emax,Nw,True)
         Dos=flibs.gen_tr_Greenw_0(eig,mu,wlist,delta).sum(axis=0)/Nk
         plt.plot(wlist,Dos,color='black')
@@ -520,14 +529,14 @@ def main():
         fspolys,fscenters,fscolors=set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,olist)
         plot_3d_surf(fspolys,fscenters,fscolors,color_option,kscale)
     elif option==4: #plot spectrum
-        plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,rvec,Emin,Emax,delta,Nw)
+        plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw)
     elif option==5: #calc conductivity
-        calc_conductivity_Bolzmann(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,tau_const)
+        calc_conductivity_Bolzmann(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,tau_const)
     elif option==6: #calc_optical conductivity
-        calc_conductivity_lr(rvec,ham_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta)
+        calc_conductivity_lr(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta)
     elif option in {7,8,9,10,11}: #calc_chis_spectrum
         print("calculate electron energy",flush=True)
-        Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,rvec,avec,sw_uni=True)
+        Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=True)
         try:
             chiolist
         except NameError:
@@ -579,7 +588,7 @@ def main():
     elif option==13: #calc cycrtron mass
         get_mass(Nx,rvec,ham_r,mu)
     elif option==14: #calc self-energy using flex
-        Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,rvec,avec,sw_uni=True)
+        Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=True)
         try:
             chiolist
         except NameError:

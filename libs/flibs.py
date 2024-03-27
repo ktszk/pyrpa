@@ -12,7 +12,7 @@ def omp_params():
     flibs.openmp_params(byref(omp_num),byref(omp_check))
     return omp_num.value,omp_check.value
 
-def gen_ham(klist,ham_r,rvec):
+def gen_ham(klist,ham_r,rvec,Ovl_r=[]):
     Nk,Nr=len(klist),len(rvec)
     Norb=int(np.sqrt(ham_r.size/Nr))
     hamk=np.zeros((Nk,Norb,Norb),dtype=np.complex128)
@@ -23,26 +23,40 @@ def gen_ham(klist,ham_r,rvec):
                             POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)]
     flibs.gen_ham.restype=c_void_p
     flibs.gen_ham(hamk,klist,ham_r,rvec,byref(c_int64(Nk)),byref(c_int64(Nr)),byref(c_int64(Norb)))
-    return hamk
+    if len(Ovl_r)!=0:
+        Ovlk=np.zeros((Nk,Norb,Norb),dtype=np.complex128)
+        flibs.gen_ham(Ovlk,klist,Ovl_r,rvec,byref(c_int64(Nk)),byref(c_int64(Nr)),byref(c_int64(Norb)))
+        return hamk,Ovlk
+    else:
+        return hamk
 
-def get_eig(hamk,sw=True):
+def get_eig(hamk,Ovlk=[],sw=True):
     Nk=len(hamk)
     Norb=int(np.sqrt(hamk.size/Nk))
     eig=np.zeros((Nk,Norb),dtype=np.float64)
     uni=np.zeros((Nk,Norb,Norb),dtype=np.complex128)
-    flibs.get_eig.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64),
-                            np.ctypeslib.ndpointer(dtype=np.complex128),
-                            np.ctypeslib.ndpointer(dtype=np.complex128),
-                            POINTER(c_int64),POINTER(c_int64)]
-    flibs.get_eig.restype=c_void_p
-    flibs.get_eig(eig,uni,hamk,byref(c_int64(Nk)),byref(c_int64(Norb)))
+    if len(Ovlk)==0:
+        flibs.get_eig.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64),    #eig
+                                np.ctypeslib.ndpointer(dtype=np.complex128), #uni
+                                np.ctypeslib.ndpointer(dtype=np.complex128), #hamk
+                                POINTER(c_int64),POINTER(c_int64)]           #Nk,Norb
+        flibs.get_eig.restype=c_void_p
+        flibs.get_eig(eig,uni,hamk,byref(c_int64(Nk)),byref(c_int64(Norb)))
+    else:
+        flibs.get_eig_mlo.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64),    #eig
+                                    np.ctypeslib.ndpointer(dtype=np.complex128), #uni
+                                    np.ctypeslib.ndpointer(dtype=np.complex128), #hamk
+                                    np.ctypeslib.ndpointer(dtype=np.complex128), #Ovlk
+                                    POINTER(c_int64),POINTER(c_int64)]           #Nk,Norb
+        flibs.get_eig_mlo.restype=c_void_p
+        flibs.get_eig_mlo(eig,uni,hamk,Ovlk,byref(c_int64(Nk)),byref(c_int64(Norb)))
     if sw:
         return eig,uni
     else:
         return eig
 
-def get_uni(hamk):
-    eig,uni=get_eig(hamk)
+def get_uni(hamk,Ovlk=[]):
+    eig,uni=get_eig(hamk,Ovlk)
     return uni
     
 def get_vlm0(klist,ham_r,rvec):

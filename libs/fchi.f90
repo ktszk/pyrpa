@@ -24,10 +24,10 @@ subroutine set_qshift(qpoint,klist,qshift,Nk)
   !$omp workshare
   kqlist(:,:)=0.0d0
   !$omp end workshare
-  !$omp do private(i,j)
+  !$omp do private(j)
   kloop:do i=1,Nk
      kqlist(:,i)=klist(:,i)+qpoint(:)
-     do j=1,3
+     do concurrent(j=1:3)
         if(kqlist(j,i)>=1.0d0)then
            kqlist(j,i)=kqlist(j,i)-1.0d0
         else if(kqlist(j,i)<0.0d0)then
@@ -39,7 +39,7 @@ subroutine set_qshift(qpoint,klist,qshift,Nk)
   !$omp workshare
   qshift(:)=1
   !$omp end workshare
-  !$omp do private(i,j,tmp)
+  !$omp do private(j,tmp)
   kq_loop: do i=1,Nk
      k_loop: do j=1,Nk
         tmp=sum(abs(klist(:,j)-kqlist(:,i)))
@@ -79,10 +79,10 @@ subroutine set_iqshift(qpoint,klist,qshift,Nk)
   !$omp workshare
   kqlist(:,:)=0.0d0
   !$omp end workshare
-  !$omp do private(i,j)
+  !$omp do private(j)
   kloop:do i=1,Nk
      kqlist(:,i)=1.0d0-klist(:,i)+qpoint(:)
-     do j=1,3
+     do concurrent(j=1:3)
         if(kqlist(j,i)>=1.0d0)then
            kqlist(j,i)=kqlist(j,i)-1.0d0
         else if(kqlist(j,i)<0.0d0)then
@@ -94,7 +94,7 @@ subroutine set_iqshift(qpoint,klist,qshift,Nk)
   !$omp workshare
   qshift(:)=1
   !$omp end workshare
-  !$omp do private(i,j,tmp)
+  !$omp do private(j,tmp)
   kq_loop: do i=1,Nk
      k_loop: do j=1,Nk
         tmp=sum(abs(klist(:,j)-kqlist(:,i)))
@@ -129,7 +129,7 @@ contains
        band1_loop: do l=1,Norb
           band2_loop: do m=1,Norb
              chiorb1_loop: do j=1,Nchi
-                chiorb2_loop:do i=1,Nchi
+                chiorb2_loop:do concurrent(i=1:Nchi)
                    unitmp=uni(ol(j,1),l,qshift(k))*conjg(uni(ol(i,1),l,qshift(k)))&
                         *uni(ol(i,2),m,k)*conjg(uni(ol(j,2),m,k))
                    if(abs(w)==0.0d0 .and. abs(eig(m,k)-eig(l,qshift(k)))<1.0d-9)then
@@ -387,3 +387,36 @@ subroutine phiq_map(trphi,uni,eig,ffermi,klist,ol,temp,ecut,idelta,eps,Nx,Ny,Nk,
   !$omp end do
   !$omp end parallel
 end subroutine phiq_map
+
+subroutine get_smat(Smat,ol,Uval,Jval,Nchi,Norb) bind(C)
+   implicit none
+   integer(8),intent(in):: Nchi,Norb
+   integer(8),intent(in),dimension(Nchi,2):: ol
+   real(8),intent(in):: Uval,Jval
+   real(8),intent(out),dimension(Nchi,Nchi):: Smat
+ 
+   integer(8) i,j
+ 
+   !$omp parallel
+   !$omp workshare
+   Smat(:,:)=0.0d0
+   !$omp end workshare
+   !$omp do private(j)
+   do i=1,Nchi
+      do j=1,Nchi
+         if((ol(i,1)==ol(i,2)).and.(ol(j,1)==ol(j,2)))then
+            if(ol(i,1)==ol(j,1))then
+               Smat(j,i)=Uval
+            else
+               Smat(j,i)=Jval
+            end if
+         else if((ol(i,1)==ol(j,1)).and.(ol(i,2)==ol(j,2)))then
+            Smat(j,i)=Uval-2*Jval
+         else if((ol(i,1)==ol(j,2)).and.(ol(i,2)==ol(j,1)))then
+            Smat(j,i)=Jval
+         end if
+      end do
+   end do
+   !$omp end do
+   !$omp end parallel
+ end subroutine get_smat
