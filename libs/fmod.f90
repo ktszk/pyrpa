@@ -76,20 +76,19 @@ subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,norb) bind(C)
 
   integer(8) i,j,k,l,m,info
   real(8) rwork(3*norb-2),eq(norb),norm
-  complex(8) work(2*norb-1),tmp3(norb)
-  complex(8),dimension(norb,norb):: tmp,tmp2
+  complex(8) work(2*norb-1)
+  complex(8),dimension(norb,norb):: tmp,tmp2,tmp3
 
   !$omp parallel do private(tmp,tmp2,tmp3,norm,eq,work,rwork,info)
   kloop: do i=1,Nk
      tmp(:,:)=Ovlk(:,:,i)
      call zheev('V','U',norb,tmp,norb,eq,work,2*norb-1,rwork,info)
-     print*,eq
      do j=1,norb
         tmp2(:,j)=tmp(:,j)/sqrt(cmplx(eq(j)))
      end do
      tmp(:,:)=0.0d0
-     do concurrent(j=1:norb)
-        do concurrent(k=1:norb)
+     do j=1,norb
+        do k=1,norb
            do l=1,norb
               do m=1,norb
                  tmp(k,j)=tmp(k,j)+conjg(tmp2(m,k))*ham_k(m,l,i)*tmp2(l,j)
@@ -99,16 +98,15 @@ subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,norb) bind(C)
      end do
      call zheev('V','U',norb,tmp,norb,eq,work,2*norb-1,rwork,info)
      eig(:,i)=eq(:)
-     do concurrent(j=1:norb)
-        tmp3(:)=0.0d0
+     tmp3(:,:)=0.0d0
+     do j=1,norb
         do k=1,norb
            do l=1,norb
-              tmp3(k)=tmp3(k)+tmp2(j,l)*tmp(l,k)
+              tmp3(k,j)=tmp3(k,j)+tmp2(k,l)*tmp(l,j)
            end do
         end do
-        norm=sqrt(sum(abs(tmp3(:))*abs(tmp3(:))))
-        uni(:,j,i)=tmp3(:)/norm
      end do
+     uni(:,:,i)=tmp3(:,:)
   end do kloop
   !$omp end parallel do
 end subroutine get_eig_mlo

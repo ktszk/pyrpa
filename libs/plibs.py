@@ -67,8 +67,8 @@ def import_MLO_hoppings(name):
     tmp=np.array([complex(tp[5],tp[6]) for tp in tmp1])
     tmpS=np.array([complex(tp[7],tp[8]) for tp in tmp1])
     rvec=np.array([tmp1[i][2:5] for i in range(nr)])
-    ham_r=tmp.reshape((no,no,nr)).copy().T*13.6
-    S_r=tmpS.reshape((no,no,nr)).copy().T*13.6
+    ham_r=tmp.reshape((no*no,nr)).T.reshape((nr,no,no)).round(6).copy()*13.6
+    S_r=tmpS.reshape((no*no,nr)).T.reshape((nr,no,no)).round(6).copy()*13.6
     return rvec,ham_r,S_r,no,nr
 
 def get_bvec(avec):
@@ -190,7 +190,7 @@ def gen_3d_surf_points(mesh,rvec,ham_r,mu,kscale=1.0):
             fsband.append(i)
     return fspolys,fscenters,fsband
 
-def get_colors(klist,blist,mrot,rvec,ham_r,ol,color_option,sw_2d=False):
+def get_colors(klist,blist,mrot,rvec,ham_r,S_r,ol,color_option,sw_2d=False):
     def get_col(cl,ol):
         col=(np.abs(cl[:,ol])**2 if isinstance(ol,int)
              else (np.abs(cl[:,ol])**2).sum(axis=1)).round(4)
@@ -198,15 +198,29 @@ def get_colors(klist,blist,mrot,rvec,ham_r,ol,color_option,sw_2d=False):
     if color_option==0:
         return []
     else:
-        ham_k=[([flibs.gen_ham(k,ham_r,rvec) for k in kk] if sw_2d else flibs.gen_ham(kk,ham_r,rvec)) for kk in klist]
+        if len(S_r)==0:
+            ham_k=[([flibs.gen_ham(k,ham_r,rvec) for k in kk] if sw_2d else flibs.gen_ham(kk,ham_r,rvec)) for kk in klist]
+        else:
+            ham_k,S_k=[([flibs.gen_ham(k,ham_r,rvec,Ovl_r=S_r) for k in kk]
+                        if sw_2d else flibs.gen_ham(kk,ham_r,rvec,Ovl_r=S_r))  for kk in klist]
         if color_option==1:
-            uni=[([flibs.get_uni(hk)[:,b] for hk in ham] if sw_2d else flibs.get_uni(ham)[:,b])
-                 for ham,b in zip(ham_k,blist)]
+            if len(S_r)==0:
+                uni0=[([flibs.get_uni(hk)[:,b] for hk in ham] if sw_2d else flibs.get_uni(ham)[:,b])
+                      for ham,b in zip(ham_k,blist)]
+            else:
+                uni0=[([flibs.get_uni(hk,Sk)[:,b] for hk,Sk in zip(ham,Ovl)]
+                       if sw_2d else flibs.get_uni(ham,Ovl)[:,b]) for ham,Ovl,b in zip(ham_k,S_k,blist)]
+            ck=[([np.sqrt((abs(cl)**2).sum(axis=1)) for cl in clst] if sw_2d else np.sqrt((abs(clst)**2).sum(axis=1))) for clst in uni0]
+            uni=[([cl/np.sqrt((abs(cl)**2).sum()) for cl in clst] if sw_2d else clst/np.sqrt((abs(clst)**2).sum())) for clst in uni0]
             clist=[([np.array([get_col(cl,ol[0]),get_col(cl,ol[1]),get_col(cl,ol[2])]).T for cl in clst]
                     if sw_2d else np.array([get_col(clst,ol[0]),get_col(clst,ol[1]),get_col(clst,ol[2])]).T)
                    for clst in uni]
         elif color_option==2:
-            uni=[([flibs.get_uni(hk) for hk in ham] if sw_2d else flibs.get_uni(ham)) for ham in ham_k]
+            if len(S_r)==0:
+                uni=[([flibs.get_uni(hk) for hk in ham] if sw_2d else flibs.get_uni(ham)) for ham in ham_k]
+            else:
+                uni=[([flibs.get_uni(hk,Sk) for hk,Sk in zip(ham,Ovl)] if sw_2d else flibs.get_uni(ham,Ovl))
+                     for ham,Ovl in zip(ham_k,S_k)]
             vk=[([flibs.get_veloc(k,ham_r,rvec,mrot,unkk)[:,b,:] for k,unkk in zip(kk,unk)]
                  if sw_2d else flibs.get_veloc(kk,ham_r,rvec,mrot,unk)[:,b,:])
                 for kk,unk,b in zip(klist,uni,blist)]
@@ -287,6 +301,9 @@ def get_symm_line(brav):
     elif brav==4: #trigonal
         k_list=[[0.,0.,0.],[.5,0.,.5],[.5,0.,0.],[0.,0.,0.],[.5,.5,.5]]
         xlabel=['$\Gamma$','K','M','$\Gamma$','Z']
+    elif brav==6:
+        k_list=[[0.,0.,0.],[0., .5, .5],[.5, .5, .5],[.25,.75,.5],[0.,0.,0.]]
+        xlabel=['$\Gamma$','X','L','W','$\Gamma$']
     else:
         pass
     return k_list,xlabel

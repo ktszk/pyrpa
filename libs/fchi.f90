@@ -27,7 +27,7 @@ subroutine set_qshift(qpoint,klist,qshift,Nk)
   !$omp do private(j)
   kloop:do i=1,Nk
      kqlist(:,i)=klist(:,i)+qpoint(:)
-     do concurrent(j=1:3)
+     do j=1,3
         if(kqlist(j,i)>=1.0d0)then
            kqlist(j,i)=kqlist(j,i)-1.0d0
         else if(kqlist(j,i)<0.0d0)then
@@ -82,7 +82,7 @@ subroutine set_iqshift(qpoint,klist,qshift,Nk)
   !$omp do private(j)
   kloop:do i=1,Nk
      kqlist(:,i)=1.0d0-klist(:,i)+qpoint(:)
-     do concurrent(j=1:3)
+     do j=1,3
         if(kqlist(j,i)>=1.0d0)then
            kqlist(j,i)=kqlist(j,i)-1.0d0
         else if(kqlist(j,i)<0.0d0)then
@@ -129,7 +129,7 @@ contains
        band1_loop: do l=1,Norb
           band2_loop: do m=1,Norb
              chiorb1_loop: do j=1,Nchi
-                chiorb2_loop:do concurrent(i=1:Nchi)
+                chiorb2_loop:do i=1,Nchi
                    unitmp=uni(ol(j,1),l,qshift(k))*conjg(uni(ol(i,1),l,qshift(k)))&
                         *uni(ol(i,2),m,k)*conjg(uni(ol(j,2),m,k))
                    if(abs(w)==0.0d0 .and. abs(eig(m,k)-eig(l,qshift(k)))<1.0d-9)then

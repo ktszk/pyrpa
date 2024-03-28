@@ -20,8 +20,9 @@ else: monoclinic
 """
 
 #fname,ftype,brav='inputs/00010.input',1,2
-fname,ftype,brav='inputs/000AsP.input',1,0
+#fname,ftype,brav='inputs/000AsP.input',1,0
 #fname,ftype,brav='inputs/square.hop',1,0
+fname,ftype,brav='inputs/SiMLO.input',3,6
 
 sw_dec_axis=False
 
@@ -48,8 +49,8 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=0
-color_option=2
+option=7
+color_option=1
 
 Nx,Ny,Nz,Nw=16,16,4,128 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
@@ -59,21 +60,21 @@ kz=0.0
 abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 alpha_beta_gamma=[90.,90.,90]
 temp=2.59e-2
-fill=2.9375
+fill=3.0 #2.9375
 
 Emin,Emax=0,3
 delta=3.0e-2
 Ecut=1.0e-3
 tau_const=100
-olist=[[0],[1,2],[3]]
+olist=[[0,4],[1,2,5,6],[3,7]]
 U,J=0.8, 0.1
 #U,J=1.2,0.15
 
 mu0=9.85114560061123
-k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
-xlabel=['$\Gamma$','X','M']
+#k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
+#xlabel=['$\Gamma$','X','M']
 at_point=[ 0., .5, 0.]
-sw_calc_mu=False #calculate mu or not
+sw_calc_mu=True #calculate mu or not
 sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 #----------------------------------main functions-------------------------------------
@@ -131,9 +132,11 @@ def plot_band(eig,spl,xlabel,xticks,uni,ol,color):
     ax=plt.axes()
     for e,cl in zip(eig,uni):
         if color:
-            c1=get_col(cl,ol[0])
-            c2=get_col(cl,ol[1])
-            c3=get_col(cl,ol[2])
+            norm=np.sqrt((abs(cl)**2).sum(axis=0))
+            cls=cl/norm
+            c1=get_col(cls,ol[0])
+            c2=get_col(cls,ol[1])
+            c3=get_col(cls,ol[2])
             clist=np.array([c1,c2,c3]).T
             for i in range(len(e)):
                 plt.plot(spl[i:i+2],e[i:i+2],c=clist[i])
@@ -223,13 +226,13 @@ def plot_3d_surf(fspolys,fscenters,fscolors,surface_opt,kscale):
     plt.show()
     #plt.savefig(fname='3DFS.png',dpi=300)
     
-def set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,olist):
+def set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist):
     if color_option==0:
         fspolys=polys
         fscenters=[]
         fscolors=[]
     else:
-        colors=plibs.get_colors(centers,blist,ihbar*avec.T,rvec,ham_r,olist,color_option)
+        colors=plibs.get_colors(centers,blist,ihbar*avec.T,rvec,ham_r,S_r,olist,color_option)
         fspolys=[]
         fscenters=[]
         fscolors=[]
@@ -245,8 +248,12 @@ def set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,olist):
 
 def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw):
     klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
-    ham_k=flibs.gen_ham(klist,ham_r,rvec)
-    eig,uni=flibs.get_eig(ham_k)
+    if len(S_r)==0:
+        ham_k=flibs.gen_ham(klist,ham_r,rvec)
+        eig,uni=flibs.get_eig(ham_k)
+    else:
+        ham_k,S_k=flibs.gen_ham(klist,ham_r,rvec,Ovl_r=S_r)
+        eig,uni=flibs.get_eig(ham_k,S_k)
     wlist=np.linspace(Emin,Emax,Nw)
     Gk=flibs.gen_tr_Greenw_0(eig,mu,wlist,delta)
     w,x=np.meshgrid(wlist,spa_length)
@@ -398,10 +405,14 @@ def calc_phi_spectrum(mu,temp,klist,qlist,chiolist,eig,uni,spa_length,Nw,Emax,de
     f.close()
     return(w,sp,phiw)
 
-def calc_flex(Nx,Ny,Nz,Nw,ham_r,rvec,mu,temp,olist):
+def calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,olist):
     klist,kmap=plibs.gen_klist_with_kmap(Nx,Ny,Nz)
-    ham_k=flibs.gen_ham(klist,ham_r,rvec)
-    eig,uni=flibs.get_eig(ham_k)
+    if len(S_r)==0:
+        ham_k=flibs.gen_ham(klist,ham_r,rvec)
+        eig,uni=flibs.get_eig(ham_k)
+    else:
+        ham_k,S_k=flibs.gen_ham(klist,ham_r,rvec,Ovl_r=S_r)
+        eig,uni=flibs.get_eig(ham_k,S_k)
     print("calc green function")
     Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
     print("calc chi0 with convolution")
@@ -522,11 +533,11 @@ def main():
         plt.show()
     elif option==2: #2D Fermi surface plot
         klist,blist=plibs.mk_kf(Nx,rvec,ham_r,mu,kz)
-        clist=plibs.get_colors(klist,blist,ihbar*avec.T,rvec,ham_r,olist,color_option,True)
+        clist=plibs.get_colors(klist,blist,ihbar*avec.T,rvec,ham_r,S_r,olist,color_option,True)
         plot_FS(clist,klist,color_option)
     elif option==3: #3D Fermi surface plot
-        polys,centers,blist=plibs.gen_3d_surf_points(Nx,rvec,ham_r,mu,kscale)
-        fspolys,fscenters,fscolors=set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,olist)
+        polys,centers,blist=plibs.gen_3d_surf_points(Nx,rvec,ham_r,S_r,mu,kscale)
+        fspolys,fscenters,fscolors=set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist)
         plot_3d_surf(fspolys,fscenters,fscolors,color_option,kscale)
     elif option==4: #plot spectrum
         plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw)
@@ -599,8 +610,12 @@ def main():
         calc_flex(Nx,Ny,Nz,Nw,ham_r,rvec,mu,temp,chiolist)
     elif option==15: #mass calc
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
-        ham_k=flibs.gen_ham(klist,ham_r,rvec)
-        eig,uni=flibs.get_eig(ham_k)
+        if len(S_r)==0:
+            ham_k=flibs.gen_ham(klist,ham_r,rvec)
+            eig,uni=flibs.get_eig(ham_k)
+        else:
+            ham_k,S_k=flibs.gen_ham(klist,ham_r,rvec,Ovl_r=S_r)
+            eig,uni=flibs.get_eig(ham_k,S_k)
         mass=flibs.get_mass(klist,ham_r,rvec,avec.T*ihbar,uni)*eC/emass
         print(mass[:,3,:,:])
 
