@@ -75,6 +75,15 @@ def get_bvec(avec):
     bvec=2*np.pi*sclin.inv(avec).T
     return bvec
 
+def get_eigs(klist,ham_r,S_r,rvec):
+    if len(S_r)==0:
+        ham_k=flibs.gen_ham(klist,ham_r,rvec)
+        eig,uni=flibs.get_eig(ham_k)
+    else:
+        ham_k,S_k=flibs.gen_ham(klist,ham_r,rvec,Ovl_r=S_r)
+        eig,uni=flibs.get_eig(ham_k,S_k)
+    return eig,uni
+
 def calc_mu(eig,Nk,fill,temp):
     no=int(eig.size/len(eig))
     def func(mu):
@@ -230,12 +239,7 @@ def get_colors(klist,blist,mrot,rvec,ham_r,S_r,ol,color_option,sw_2d=False):
 
 def get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=False,sw_veloc=False):
     Nk,klist=gen_klist(Nx,Ny,Nz,sw_pp=False)
-    if len(S_r)==0:
-        ham_k=flibs.gen_ham(klist,ham_r,rvec)
-        eig,uni=flibs.get_eig(ham_k)
-    else:
-        ham_k,S_k=flibs.gen_ham(klist,ham_r,rvec,Ovl_r=S_r)
-        eig,uni=flibs.get_eig(ham_k,S_k)
+    eig,uni=get_eigs(klist,ham_r,S_r,rvec)
     kweight=np.ones(len(eig),dtype=np.float64)
     if sw_veloc:
         if sw_uni:

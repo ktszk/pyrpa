@@ -49,7 +49,7 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=7
+option=0
 color_option=1
 
 Nx,Ny,Nz,Nw=16,16,4,128 #k and energy(or matsubara freq.) mesh size
@@ -248,12 +248,7 @@ def set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist
 
 def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw):
     klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
-    if len(S_r)==0:
-        ham_k=flibs.gen_ham(klist,ham_r,rvec)
-        eig,uni=flibs.get_eig(ham_k)
-    else:
-        ham_k,S_k=flibs.gen_ham(klist,ham_r,rvec,Ovl_r=S_r)
-        eig,uni=flibs.get_eig(ham_k,S_k)
+    eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     wlist=np.linspace(Emin,Emax,Nw)
     Gk=flibs.gen_tr_Greenw_0(eig,mu,wlist,delta)
     w,x=np.meshgrid(wlist,spa_length)
@@ -407,12 +402,7 @@ def calc_phi_spectrum(mu,temp,klist,qlist,chiolist,eig,uni,spa_length,Nw,Emax,de
 
 def calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,olist):
     klist,kmap=plibs.gen_klist_with_kmap(Nx,Ny,Nz)
-    if len(S_r)==0:
-        ham_k=flibs.gen_ham(klist,ham_r,rvec)
-        eig,uni=flibs.get_eig(ham_k)
-    else:
-        ham_k,S_k=flibs.gen_ham(klist,ham_r,rvec,Ovl_r=S_r)
-        eig,uni=flibs.get_eig(ham_k,S_k)
+    eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     print("calc green function")
     Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
     print("calc chi0 with convolution")
@@ -517,12 +507,7 @@ def main():
 
     if option==0: #plot band
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
-        if len(S_r)==0:
-            ham_k=flibs.gen_ham(klist,ham_r,rvec)
-            eig,uni0=flibs.get_eig(ham_k)
-        else:
-            ham_k,S_k=flibs.gen_ham(klist,ham_r,rvec,Ovl_r=S_r)
-            eig,uni0=flibs.get_eig(ham_k,S_k)
+        eig,uni0=plibs.get_eigs(klist,ham_r,S_r,rvec)
         uni=np.array([u.T for u in uni0]) #rotate uni(k,band,orb) to uni(k,orb,band)
         plot_band(eig.T-mu,spa_length,xlabel,xticks,uni.T,olist,(False if color_option==0 else True))
     elif option==1: #plot dos
@@ -610,12 +595,7 @@ def main():
         calc_flex(Nx,Ny,Nz,Nw,ham_r,rvec,mu,temp,chiolist)
     elif option==15: #mass calc
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
-        if len(S_r)==0:
-            ham_k=flibs.gen_ham(klist,ham_r,rvec)
-            eig,uni=flibs.get_eig(ham_k)
-        else:
-            ham_k,S_k=flibs.gen_ham(klist,ham_r,rvec,Ovl_r=S_r)
-            eig,uni=flibs.get_eig(ham_k,S_k)
+        eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
         mass=flibs.get_mass(klist,ham_r,rvec,avec.T*ihbar,uni)*eC/emass
         print(mass[:,3,:,:])
 
