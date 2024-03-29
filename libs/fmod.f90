@@ -17,22 +17,22 @@ subroutine openmp_params(omp_num,omp_check) bind(C)
   !$ end if
 end subroutine openmp_params
 
-subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,norb) bind(C)
+subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   use constant
   implicit none
-  integer(8),intent(in):: Nk,Nr,norb
+  integer(8),intent(in):: Nk,Nr,Norb
   real(8),intent(in),dimension(3,Nk):: klist
   real(8),intent(in),dimension(3,Nr):: rvec
-  complex(8),intent(in),dimension(norb,norb,Nr):: ham_r
-  complex(8),intent(out),dimension(norb,norb,Nk):: ham_k
+  complex(8),intent(in),dimension(Norb,Norb,Nr):: ham_r
+  complex(8),intent(out),dimension(Norb,Norb,Nk):: ham_k
 
   integer(8) i,j,l,m
   real(8) phase
 
   !$omp parallel do private(l,m,j,phase)
   klop: do i=1,Nk
-     do l=1,norb
-        do m=l,norb
+     do l=1,Norb
+        do m=l,Norb
            !$omp simd
            rloop: do j=1,Nr
               phase=2*pi*sum(klist(:,i)*rvec(:,j))
@@ -46,21 +46,21 @@ subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,norb) bind(C)
   !$omp end parallel do
 end subroutine gen_ham
 
-subroutine get_eig(eig,uni,ham_k,Nk,norb) bind(C)
+subroutine get_eig(eig,uni,ham_k,Nk,Norb) bind(C)
   implicit none
-  integer(8),intent(in):: Nk,norb
-  complex(8),intent(in),dimension(norb,norb,Nk):: ham_k
-  real(8),intent(out),dimension(norb,Nk):: eig
-  complex(8),intent(out),dimension(norb,norb,Nk):: uni
+  integer(8),intent(in):: Nk,Norb
+  complex(8),intent(in),dimension(Norb,Norb,Nk):: ham_k
+  real(8),intent(out),dimension(Norb,Nk):: eig
+  complex(8),intent(out),dimension(Norb,Norb,Nk):: uni
 
   integer(8) i,info
-  real(8) rwork(3*norb-2),eq(norb)
-  complex(8) work(2*norb-1),en(norb,norb)
+  real(8) rwork(3*Norb-2),eq(Norb)
+  complex(8) work(2*Norb-1),en(Norb,Norb)
 
   !$omp parallel do private(en,eq,work,rwork,info)
   kloop: do i=1,Nk
      en(:,:)=ham_k(:,:,i)
-     call zheev('V','U',norb,en,norb,eq,work,2*norb-1,rwork,info)
+     call zheev('V','U',Norb,en,Norb,eq,work,2*Norb-1,rwork,info)
      uni(:,:,i)=en(:,:)
      eig(:,i)=eq(:)
   end do kloop
@@ -110,6 +110,28 @@ subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,norb) bind(C)
   end do kloop
   !$omp end parallel do
 end subroutine get_eig_mlo
+
+subroutine get_ffermi(ffermi,eig,mu,temp,Nk,Norb) bind(C)
+  implicit none
+  integer(8),intent(in):: Nk,Norb
+  real(8),intent(in):: mu,temp
+  real(8),intent(in),dimension(Norb,Nk):: eig
+  real(8),intent(out),dimension(Norb,Nk):: ffermi
+
+  integer(8) i,j
+  real(8) itemp
+
+  itemp=0.5d0/temp
+  !$omp parallel do private(j)
+  do i=1,Nk
+     !$omp simd
+     do j=1,Norb
+        ffermi(j,i)=0.5d0-0.5d0*tanh((eig(j,i)-mu)*itemp)
+     end do
+     !$omp end simd
+  end do
+  !$omp end parallel do
+end subroutine get_ffermi
 
 subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,norb) bind(C)
   use constant

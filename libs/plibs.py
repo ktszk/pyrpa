@@ -75,20 +75,34 @@ def get_bvec(avec):
     bvec=2*np.pi*sclin.inv(avec).T
     return bvec
 
-def get_eigs(klist,ham_r,S_r,rvec):
+def get_eigs(klist,ham_r,S_r,rvec,sw_uni=False,sw_std=False):
     if len(S_r)==0:
         ham_k=flibs.gen_ham(klist,ham_r,rvec)
         eig,uni=flibs.get_eig(ham_k)
+        if sw_uni:
+            return uni
+        else:
+            return eig,uni
     else:
         ham_k,S_k=flibs.gen_ham(klist,ham_r,rvec,Ovl_r=S_r)
         eig,uni=flibs.get_eig(ham_k,S_k)
-    return eig,uni
+        if sw_std:
+            norm=np.sqrt((abs(uni)**2).sum(axis=2))
+            if sw_uni:
+                return np.array([[u/nm for u,nm in zip(un,nor)] for un,nor in zip(uni,norm)])
+            else:
+                return eig,np.array([[u/nor for u,nm in zip(un,nor)] for un,nor in zip(uni,norm)])
+        else:
+            if sw_uni:
+                return uni
+            else:
+                return eig,uni
 
 def calc_mu(eig,Nk,fill,temp):
     no=int(eig.size/len(eig))
     def func(mu):
-        sum_tanh=np.tanh(0.5*(eig-mu)/temp).sum()
-        return((2*fill-no)*Nk+sum_tanh)
+        sum_fermi=flibs.get_ffermi(eig,mu,temp).sum()
+        return(fill*Nk-sum_fermi)
     emax=eig.max()
     emin=eig.min()
     mu=scopt.brentq(func,emin,emax)
@@ -161,11 +175,10 @@ def mk_qlist(k_set,Nx,Ny,Nz,bvec):
     xticks+=[splen[-1]]
     return np.array(qlist),np.array(splen),xticks
 
-def mk_kf(mesh,rvec,ham_r,mu,kz):
+def mk_kf(mesh,rvec,ham_r,S_r,mu,kz):
     import skimage.measure as sk
     Nk,klist=gen_klist(mesh+1,mesh+1,kz=kz)
-    ham_k=flibs.gen_ham(klist,ham_r,rvec)
-    eig,uni=flibs.get_eig(ham_k)
+    eig,uni=get_eigs(klist,ham_r,S_r,rvec)
     v2=[]
     fsband=[]
     for i,e in enumerate(eig.T-mu):
@@ -176,12 +189,11 @@ def mk_kf(mesh,rvec,ham_r,mu,kz):
             v2.append(ct)
     return v2,fsband
 
-def gen_3d_surf_points(mesh,rvec,ham_r,mu,kscale=1.0):
+def gen_3d_surf_points(mesh,rvec,ham_r,S_r,mu,kscale=1.0):
     import skimage.measure as ski
     Nk,klist=gen_klist(mesh+1,mesh+1,mesh+1)
     klist=klist*kscale
-    ham_k=flibs.gen_ham(klist,ham_r,rvec)
-    eig,uni=flibs.get_eig(ham_k)
+    eig,uni=get_eigs(klist,ham_r,S_r,rvec)
     if isinstance(kscale,int):
         ks=kscale*np.array([1.,1.,1.])
     else:
@@ -206,35 +218,24 @@ def get_colors(klist,blist,mrot,rvec,ham_r,S_r,ol,color_option,sw_2d=False):
         return col
     if color_option==0:
         return []
-    else:
-        if len(S_r)==0:
-            ham_k=[([flibs.gen_ham(k,ham_r,rvec) for k in kk] if sw_2d else flibs.gen_ham(kk,ham_r,rvec)) for kk in klist]
+    elif color_option==1: #orbital weight color
+        if sw_2d:
+            uni=[[get_eigs(k,ham_r,S_r,rvec,True,True)[:,b] for k in kk] for kk,b in zip(klist,blist)]
+            clist=[[np.array([get_col(cl,ol[0]),get_col(cl,ol[1]),get_col(cl,ol[2])]).T for cl in clst] for clst in uni]
         else:
-            ham_k,S_k=[([flibs.gen_ham(k,ham_r,rvec,Ovl_r=S_r) for k in kk]
-                        if sw_2d else flibs.gen_ham(kk,ham_r,rvec,Ovl_r=S_r))  for kk in klist]
-        if color_option==1:
-            if len(S_r)==0:
-                uni0=[([flibs.get_uni(hk)[:,b] for hk in ham] if sw_2d else flibs.get_uni(ham)[:,b])
-                      for ham,b in zip(ham_k,blist)]
-            else:
-                uni0=[([flibs.get_uni(hk,Sk)[:,b] for hk,Sk in zip(ham,Ovl)]
-                       if sw_2d else flibs.get_uni(ham,Ovl)[:,b]) for ham,Ovl,b in zip(ham_k,S_k,blist)]
-            ck=[([np.sqrt((abs(cl)**2).sum(axis=1)) for cl in clst] if sw_2d else np.sqrt((abs(clst)**2).sum(axis=1))) for clst in uni0]
-            uni=[([cl/np.sqrt((abs(cl)**2).sum()) for cl in clst] if sw_2d else clst/np.sqrt((abs(clst)**2).sum())) for clst in uni0]
-            clist=[([np.array([get_col(cl,ol[0]),get_col(cl,ol[1]),get_col(cl,ol[2])]).T for cl in clst]
-                    if sw_2d else np.array([get_col(clst,ol[0]),get_col(clst,ol[1]),get_col(clst,ol[2])]).T)
-                   for clst in uni]
-        elif color_option==2:
-            if len(S_r)==0:
-                uni=[([flibs.get_uni(hk) for hk in ham] if sw_2d else flibs.get_uni(ham)) for ham in ham_k]
-            else:
-                uni=[([flibs.get_uni(hk,Sk) for hk,Sk in zip(ham,Ovl)] if sw_2d else flibs.get_uni(ham,Ovl))
-                     for ham,Ovl in zip(ham_k,S_k)]
-            vk=[([flibs.get_veloc(k,ham_r,rvec,mrot,unkk)[:,b,:] for k,unkk in zip(kk,unk)]
-                 if sw_2d else flibs.get_veloc(kk,ham_r,rvec,mrot,unk)[:,b,:])
+            uni=[get_eigs(k,ham_r,S_r,rvec,True,True)[:,b] for k,b in zip(klist,blist)]
+            clist=[np.array([get_col(clst,ol[0]),get_col(clst,ol[1]),get_col(clst,ol[2])]).T for clst in uni]
+        return clist
+    elif color_option==2: #velocity size color
+        if sw_2d:
+            uni=[[get_eigs(k,ham_r,S_r,rvec,True,False) for k in kk] for kk in klist]
+            vk=[[flibs.get_veloc(k,ham_r,rvec,mrot,unkk)[:,b,:] for k,unkk in zip(kk,unk)]
                 for kk,unk,b in zip(klist,uni,blist)]
-            clist=[([np.sqrt((abs(vkkk)*abs(vkkk)).sum(axis=1)) for vkkk in vkk]
-                    if sw_2d else np.sqrt((abs(vkk)*abs(vkk)).sum(axis=1))) for vkk in vk]
+            clist=[[np.sqrt((abs(vkkk)*abs(vkkk)).sum(axis=1)) for vkkk in vkk] for vkk in vk]
+        else:
+            uni=[get_eigs(k,ham_r,S_r,rvec,True,False) for k in klist]
+            vk=[flibs.get_veloc(kk,ham_r,rvec,mrot,unk)[:,b,:] for kk,unk,b in zip(klist,uni,blist)]
+            clist=[np.sqrt((abs(vkk)*abs(vkk)).sum(axis=1)) for vkk in vk]
         return clist
 
 def get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=False,sw_veloc=False):
@@ -317,7 +318,7 @@ def BZedge(brav):
 
 def get_conductivity(mu,temp,eig,vk,Nw,Emax,idelta=1.e-3):
     wlist=np.linspace(0,Emax,Nw)
-    ffermi=.5*(1.-np.tanh(.5*(eig-mu)/temp))
+    ffermi=flibs.get_ffermi(eig,mu,temp)
     L11=[]
     L12=[]
     L22=[]
@@ -332,7 +333,7 @@ def get_conductivity(mu,temp,eig,vk,Nw,Emax,idelta=1.e-3):
     return L11,L12,L22,wlist
 
 def chis_spectrum(mu,temp,Smat,klist,qlist,olist,eig,uni,Nw,Emax,idelta=1.e-3):
-    ffermi=.5-.5*np.tanh(.5*(eig-mu)/temp)
+    ffermi=flibs.get_ffermi(eig,mu,temp)
     wlist=np.linspace(0,Emax,Nw)
     chisq=[]
     chis_orbq=[]
@@ -361,7 +362,7 @@ def chis_spectrum(mu,temp,Smat,klist,qlist,olist,eig,uni,Nw,Emax,idelta=1.e-3):
     return np.array(chisq),np.array(chis_orbq),wlist
 
 def chis_q_point(q,eig,uni,Emax,Nw,mu,temp,Smat,klist,olist,idelta):
-    ffermi=.5-.5*np.tanh(.5*(eig-mu)/temp)
+    ffermi=flibs.get_ffermi(eig,mu,temp)
     wlist=np.linspace(0,Emax,Nw)
     qshift=flibs.get_qshift(klist,q)
     chi0=flibs.get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp)
@@ -370,7 +371,7 @@ def chis_q_point(q,eig,uni,Emax,Nw,mu,temp,Smat,klist,olist,idelta):
     return trchis,chis_orb,wlist
 
 def chis_qmap(Nx,Ny,Ecut,mu,temp,Smat,klist,olist,eig,uni,idelta=1.e-3):
-    ffermi=.5*(1.-np.tanh(.5*(eig-mu)/temp))
+    ffermi=flibs.get_ffermi(eig,mu,temp)
     chis,chi0=flibs.chis_qmap(uni,eig,ffermi,klist,Smat,olist,Nx,Ny,temp,Ecut,idelta)
     x0=np.linspace(0,1,Nx,False)
     y0=np.linspace(0,1,Ny,False)
@@ -378,7 +379,7 @@ def chis_qmap(Nx,Ny,Ecut,mu,temp,Smat,klist,olist,eig,uni,idelta=1.e-3):
     return chis,chi0,qx,qy
 
 def phi_spectrum(mu,temp,klist,qlist,olist,eig,uni,Nw,Emax,idelta=1.e-3):
-    ffermi=.5-.5*np.tanh(.5*(eig-mu)/temp)
+    ffermi=flibs.get_ffermi(eig,mu,temp)
     wlist=np.linspace(0,Emax,Nw)
     phiq=[]
     phi_orbq=[]
@@ -395,7 +396,7 @@ def phi_spectrum(mu,temp,klist,qlist,olist,eig,uni,Nw,Emax,idelta=1.e-3):
     return np.array(phiq),np.array(phi_orbq),wlist
 
 def phi_qmap(Nx,Ny,Ecut,mu,temp,klist,olist,eig,uni,idelta=1.e-3):
-    ffermi=.5*(1.-np.tanh(.5*(eig-mu)/temp))
+    ffermi=flibs.get_ffermi(eig,mu,temp)
     phi=flibs.phi_qmap(uni,eig,ffermi,klist,olist,Nx,Ny,temp,Ecut,idelta)
     x0=np.linspace(0,1,Nx,False)
     y0=np.linspace(0,1,Ny,False)

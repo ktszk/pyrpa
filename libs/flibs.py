@@ -55,10 +55,19 @@ def get_eig(hamk,Ovlk=[],sw=True):
     else:
         return eig
 
-def get_uni(hamk,Ovlk=[]):
-    eig,uni=get_eig(hamk,Ovlk)
-    return uni
-    
+def get_ffermi(eig,mu,temp):
+    Nk=len(eig)
+    Norb=int(eig.size/Nk)
+    ffermi=np.zeros((Nk,Norb),dtype=np.float64)
+    flibs.get_ffermi.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64), #ffermi
+                               np.ctypeslib.ndpointer(dtype=np.float64), #eig
+                               POINTER(c_double),POINTER(c_double),      #mu,temp
+                               POINTER(c_int64),POINTER(c_int64)]        #Nk,Norb
+    flibs.get_ffermi.restype=c_void_p
+    flibs.get_ffermi(ffermi,eig,byref(c_double(mu)),byref(c_double(temp)),
+                     byref(c_int64(Nk)),byref(c_int64(Norb)))
+    return ffermi
+
 def get_vlm0(klist,ham_r,rvec):
     Nk,Nr=len(klist),len(rvec)
     Norb=int(np.sqrt(ham_r.size/Nr))

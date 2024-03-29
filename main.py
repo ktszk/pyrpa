@@ -20,9 +20,9 @@ else: monoclinic
 """
 
 #fname,ftype,brav='inputs/00010.input',1,2
-#fname,ftype,brav='inputs/000AsP.input',1,0
+fname,ftype,brav='inputs/000AsP.input',1,0
 #fname,ftype,brav='inputs/square.hop',1,0
-fname,ftype,brav='inputs/SiMLO.input',3,6
+#fname,ftype,brav='inputs/SiMLO.input',3,6
 
 sw_dec_axis=False
 
@@ -49,10 +49,10 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=0
+option=2
 color_option=1
 
-Nx,Ny,Nz,Nw=16,16,4,128 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=32,32,4,128 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.5,1.5,1.0]
 kz=0.0
@@ -60,13 +60,14 @@ kz=0.0
 abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 alpha_beta_gamma=[90.,90.,90]
 temp=2.59e-2
-fill=3.0 #2.9375
+fill=2.9375
 
 Emin,Emax=0,3
 delta=3.0e-2
 Ecut=1.0e-3
 tau_const=100
-olist=[[0,4],[1,2,5,6],[3,7]]
+olist=[[0],[1,2],[3]]
+#olist=[[0,4],[1,2,5,6],[3,7]]
 U,J=0.8, 0.1
 #U,J=1.2,0.15
 
@@ -130,7 +131,7 @@ def plot_band(eig,spl,xlabel,xticks,uni,ol,color):
         return col
     fig=plt.figure()
     ax=plt.axes()
-    for e,cl in zip(eig,uni):
+    for e,cl in zip(eig,uni): #band loop
         if color:
             norm=np.sqrt((abs(cl)**2).sum(axis=0))
             cls=cl/norm
@@ -517,7 +518,7 @@ def main():
         plt.plot(wlist,Dos,color='black')
         plt.show()
     elif option==2: #2D Fermi surface plot
-        klist,blist=plibs.mk_kf(Nx,rvec,ham_r,mu,kz)
+        klist,blist=plibs.mk_kf(Nx,rvec,ham_r,S_r,mu,kz)
         clist=plibs.get_colors(klist,blist,ihbar*avec.T,rvec,ham_r,S_r,olist,color_option,True)
         plot_FS(clist,klist,color_option)
     elif option==3: #3D Fermi surface plot
