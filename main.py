@@ -20,9 +20,9 @@ else: monoclinic
 """
 
 #fname,ftype,brav='inputs/00010.input',1,2
-fname,ftype,brav='inputs/000AsP.input',1,0
+#fname,ftype,brav='inputs/000AsP.input',1,0
 #fname,ftype,brav='inputs/square.hop',1,0
-#fname,ftype,brav='inputs/SiMLO.input',3,6
+fname,ftype,brav='inputs/SiMLO.input',3,6
 
 sw_dec_axis=False
 
@@ -49,10 +49,10 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=2
-color_option=1
+option=3
+color_option=2
 
-Nx,Ny,Nz,Nw=32,32,4,128 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=50,50,50,128 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.5,1.5,1.0]
 kz=0.0
@@ -178,7 +178,7 @@ def plot_FS(fscolors,klist,color_option):
                 else:
                     clist=fcol
                 for k1,k2,clst in zip(kk,kk[1:],clist):
-                    plt.plot([k1[0],k2[0]],[k1[1],k2[1]],c=clst,lw=3)
+                    plt.plot([k1[0],k2[0]],[k1[1],k2[1]],c=clst,lw=2)
     if color_option==2:
         plt.scatter(k[:,0],k[:,1],s=0.1,c=v)
         plt.jet()

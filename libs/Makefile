@@ -1,7 +1,7 @@
 #Makefile
 #FC=ifort
-FC=ifx
-#FC=flang
+#FC=ifx
+FC=flang
 #FC=amdflang
 #FC=gfortran
 ifeq ($(FC),ifort)
@@ -11,7 +11,7 @@ ifeq ($(FC),ifort)
 else
   ifeq ($(FC),ifx)
     LIBS= -qmkl
-    FFLAGS= -O2 -mavx2 -fopenmp -finline-functions -fPIC -heap-arrays
+    FFLAGS= -O0 -mavx -fopenmp -finline-functions -fPIC -heap-arrays
     FFLAGS2= -shared
   else
     ifeq ($(FC),flang)
@@ -24,8 +24,9 @@ else
         FFLAGS= -O2 -mavx2 -fopenmp -finline-functions -fPIC
         FFLAGS2= -shared
       else
-        #LIBS=-lmkl_intel_lp64 -lmkl_sequential -lmkl_core
-        LIBS= -lblis -lflame -lfftw3 -lm -lpthread
+        LIBS= -lmkl_gf_lp64 -lmkl_sequential -lmkl_core -liomp5
+        #LIBS= -lblis -lflame -lfftw3 -lm -lpthread
+        #LIBS= -lopenblas -lfftw3
         FFLAGS= -O2 -mavx2 -fopenmp -finline-functions
         FFLAGS2= -shared -fPIC
       endif

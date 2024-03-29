@@ -124,31 +124,29 @@ subroutine get_ffermi(ffermi,eig,mu,temp,Nk,Norb) bind(C)
   itemp=0.5d0/temp
   !$omp parallel do private(j)
   do i=1,Nk
-     !$omp simd
      do j=1,Norb
         ffermi(j,i)=0.5d0-0.5d0*tanh((eig(j,i)-mu)*itemp)
      end do
-     !$omp end simd
   end do
   !$omp end parallel do
 end subroutine get_ffermi
 
-subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,norb) bind(C)
+subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   use constant
   implicit none
   integer(8),intent(in):: Nk,Nr,norb
   real(8),intent(in),dimension(3,Nk):: klist
   real(8),intent(in),dimension(3,Nr):: rvec
-  complex(8),intent(in),dimension(norb,norb,Nr):: ham_r
-  complex(8),intent(out),dimension(3,3,norb,norb,Nk):: imk
+  complex(8),intent(in),dimension(Norb,Norb,Nr):: ham_r
+  complex(8),intent(out),dimension(3,3,Norb,Norb,Nk):: imk
 
   integer(8) i,j,k,l,m,n
   real(8) phase
 
   !$omp parallel do private(l,m,j,phase)
   kloop: do i=1,Nk
-     do l=1,norb
-        do m=l,norb
+     do l=1,Norb
+        do m=l,Norb
            !$omp simd
            rloop: do j=1,Nr
               phase=2*pi*sum(klist(:,i)*rvec(:,j))
@@ -173,16 +171,16 @@ subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,norb) bind(C)
   !$omp end parallel do
 end subroutine get_imass0
 
-subroutine get_imassk(imk,imk0,mrot,uni,Nk,norb) bind(C)
+subroutine get_imassk(imk,imk0,mrot,uni,Nk,Norb) bind(C)
   implicit none
-  integer(8),intent(in):: Nk,norb
+  integer(8),intent(in):: Nk,Norb
   real(8),intent(in),dimension(3,3):: mrot
-  complex(8),intent(in),dimension(3,3,norb,norb,Nk):: imk0
-  complex(8),intent(in),dimension(norb,norb,Nk):: uni
-  real(8),intent(out),dimension(3,3,norb,Nk):: imk
+  complex(8),intent(in),dimension(3,3,Norb,Norb,Nk):: imk0
+  complex(8),intent(in),dimension(Norb,Norb,Nk):: uni
+  real(8),intent(out),dimension(3,3,Norb,Nk):: imk
 
   integer(8) i,j,k,l,m,n
-  complex(8) tmp(3,3,norb)
+  complex(8) tmp(3,3,Norb)
 
   !$omp parallel do private(tmp,l,m,n,j)
   kloop: do i=1,Nk
@@ -215,22 +213,22 @@ subroutine get_imassk(imk,imk0,mrot,uni,Nk,norb) bind(C)
   !$omp end parallel do
 end subroutine get_imassk
 
-subroutine get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,norb) bind(C)
+subroutine get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   use constant
   implicit none
-  integer(8),intent(in):: Nk,Nr,norb
+  integer(8),intent(in):: Nk,Nr,Norb
   real(8),intent(in),dimension(3,Nk):: klist
   real(8),intent(in),dimension(3,Nr):: rvec
-  complex(8),intent(in),dimension(norb,norb,Nr):: ham_r
-  complex(8),intent(out),dimension(3,norb,norb,Nk):: vk
+  complex(8),intent(in),dimension(Norb,Norb,Nr):: ham_r
+  complex(8),intent(out),dimension(3,Norb,Norb,Nk):: vk
 
   integer(8) i,j,k,l,m
   real(8) phase
 
   !$omp parallel do private(l,m,j,phase)
   kloop: do i=1,Nk
-     do l=1,norb
-        do m=l,norb
+     do l=1,Norb
+        do m=l,Norb
            !$omp simd
            rloop: do j=1,Nr
               phase=2*pi*sum(klist(:,i)*rvec(:,j))
@@ -248,24 +246,24 @@ subroutine get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,norb) bind(C)
   !$omp end parallel do
 end subroutine get_vlm0
 
-subroutine get_veloc(vk,vk0,mrot,uni,Nk,norb) bind(C)
+subroutine get_veloc(vk,vk0,mrot,uni,Nk,Norb) bind(C)
   implicit none
-  integer(8),intent(in):: Nk,norb
+  integer(8),intent(in):: Nk,Norb
   real(8),intent(in),dimension(3,3):: mrot
-  complex(8),intent(in),dimension(3,norb,norb,Nk):: vk0
-  complex(8),intent(in),dimension(norb,norb,Nk):: uni
-  real(8),intent(out),dimension(3,norb,Nk):: vk
+  complex(8),intent(in),dimension(3,Norb,Norb,Nk):: vk0
+  complex(8),intent(in),dimension(Norb,Norb,Nk):: uni
+  real(8),intent(out),dimension(3,Norb,Nk):: vk
 
   integer(8) i,j,l,m,n
-  complex(8) tmp(3,norb)
+  complex(8) tmp(3,Norb)
 
   !$omp parallel do private(tmp,l,m,n,j)
   kloop: do i=1,Nk
      !rotate orb to band
      tmp(:,:)=0.0d0
-     do l=1,norb
-        do m=1,norb
-           band_loop: do n=1,norb
+     do l=1,Norb
+        do m=1,Norb
+           band_loop: do n=1,Norb
               do j=1,3
                  tmp(j,n)=tmp(j,n)+conjg(uni(l,n,i))*vk0(j,l,m,i)*uni(m,n,i)
               end do
@@ -273,7 +271,7 @@ subroutine get_veloc(vk,vk0,mrot,uni,Nk,norb) bind(C)
         end do
      end do
      !rotate axis
-     band_loop2: do n=1,norb
+     band_loop2: do n=1,Norb
         do l=1,3
            do m=1,3
               vk(m,n,i)=vk(m,n,i)+mrot(m,l)*dble(tmp(l,n))
@@ -284,16 +282,16 @@ subroutine get_veloc(vk,vk0,mrot,uni,Nk,norb) bind(C)
   !$omp end parallel do
 end subroutine get_veloc
 
-subroutine get_vnm(vk,vk0,mrot,uni,Nk,norb) bind(C)
+subroutine get_vnm(vk,vk0,mrot,uni,Nk,Norb) bind(C)
   implicit none
-  integer(8),intent(in):: Nk,norb
+  integer(8),intent(in):: Nk,Norb
   real(8),intent(in),dimension(3,3):: mrot
-  complex(8),intent(in),dimension(3,norb,norb,Nk):: vk0
-  complex(8),intent(in),dimension(norb,norb,Nk):: uni
-  complex(8),intent(out),dimension(3,norb,norb,Nk):: vk
+  complex(8),intent(in),dimension(3,Norb,Norb,Nk):: vk0
+  complex(8),intent(in),dimension(Norb,Norb,Nk):: uni
+  complex(8),intent(out),dimension(3,Norb,Norb,Nk):: vk
 
   integer(8) i,j,l,m,n,k
-  complex(8) tmp(3,norb,norb)
+  complex(8) tmp(3,Norb,Norb)
 
   !$omp parallel
   !$omp workshare
@@ -303,10 +301,10 @@ subroutine get_vnm(vk,vk0,mrot,uni,Nk,norb) bind(C)
   kloop: do i=1,Nk
      !rotate orb to band
      tmp(:,:,:)=0.0d0
-     orb_loop: do l=1,norb
-        orb_loop2: do m=1,norb
-           band_loop: do n=1,norb
-              band_loop2: do k=1,norb
+     orb_loop: do l=1,Norb
+        orb_loop2: do m=1,Norb
+           band_loop: do n=1,Norb
+              band_loop2: do k=1,Norb
                  do j=1,3
                     tmp(j,k,n)=tmp(j,k,n)+conjg(uni(m,k,i))*vk0(j,m,l,i)*uni(l,n,i)
                  end do
@@ -315,8 +313,8 @@ subroutine get_vnm(vk,vk0,mrot,uni,Nk,norb) bind(C)
         end do orb_loop2
      end do orb_loop
      !rotate axis
-     band_loop3: do n=1,norb
-        do k=1,norb
+     band_loop3: do n=1,Norb
+        do k=1,Norb
            do l=1,3
               do m=1,3
                  vk(m,k,n,i)=vk(m,k,n,i)+mrot(m,l)*dble(tmp(l,k,n))
