@@ -20,9 +20,9 @@ else: monoclinic
 """
 
 #fname,ftype,brav='inputs/00010.input',1,2
-#fname,ftype,brav='inputs/000AsP.input',1,0
+fname,ftype,brav='inputs/000AsP.input',1,0
 #fname,ftype,brav='inputs/square.hop',1,0
-fname,ftype,brav='inputs/SiMLO.input',3,6
+#fname,ftype,brav='inputs/SiMLO.input',3,6
 
 sw_dec_axis=False
 
@@ -49,10 +49,10 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=3
+option=9
 color_option=2
 
-Nx,Ny,Nz,Nw=50,50,50,128 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=128,128,4,150 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.5,1.5,1.0]
 kz=0.0
@@ -64,7 +64,7 @@ fill=2.9375
 
 Emin,Emax=0,3
 delta=3.0e-2
-Ecut=1.0e-3
+Ecut=1.0e-2
 tau_const=100
 olist=[[0],[1,2],[3]]
 #olist=[[0,4],[1,2,5,6],[3,7]]

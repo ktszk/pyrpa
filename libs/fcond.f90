@@ -1,14 +1,15 @@
 subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int64,real64
   implicit none
-  integer(8),intent(in):: Nk,Norb
-  real(8),intent(in):: temp,eps,w,idelta,mu
-  real(8),intent(in),dimension(Norb,Nk):: eig,ffermi
-  complex(8),intent(in),dimension(3,Norb,Norb,Nk):: vk
-  complex(8),intent(out),dimension(3,3):: L11,L12,L22
+  integer(int64),intent(in):: Nk,Norb
+  real(real64),intent(in):: temp,eps,w,idelta,mu
+  real(real64),intent(in),dimension(Norb,Nk):: eig,ffermi
+  complex(real64),intent(in),dimension(3,Norb,Norb,Nk):: vk
+  complex(real64),intent(out),dimension(3,3):: L11,L12,L22
   
-  integer(8) i,j,k,l,m
-  complex(8) tmp
-  complex(8),parameter::ii=(0.0d0,1.0d0)
+  integer(int64) i,j,k,l,m
+  complex(real64) tmp
+  complex(real64),parameter::ii=(0.0d0,1.0d0)
 
   !$omp parallel
   !$omp workshare
@@ -55,17 +56,18 @@ subroutine calc_kn(K0,K1,K2,eig,veloc,kweight,tau,temp,mu,Nk,Norb) bind(C)
   ! calc_Kn
   ! Kn_ij=sum_k(v_ki*v_kj*(e_k-mu)^n*(-df(e_k)/de))
   !
+  use,intrinsic:: iso_fortran_env, only:int64,real64
   implicit none
-  integer(8),intent(in):: Nk,Norb
-  real(8),intent(in):: temp,mu
-  real(8),intent(in),dimension(Norb,Nk):: eig,tau
-  real(8),intent(in),dimension(Nk):: kweight
-  real(8),intent(in),dimension(3,Norb,Nk):: veloc
-  real(8),intent(out),dimension(3,3):: K0,K1,K2
+  integer(int64),intent(in):: Nk,Norb
+  real(real64),intent(in):: temp,mu
+  real(real64),intent(in),dimension(Norb,Nk):: eig,tau
+  real(real64),intent(in),dimension(Nk):: kweight
+  real(real64),intent(in),dimension(3,Norb,Nk):: veloc
+  real(real64),intent(out),dimension(3,3):: K0,K1,K2
 
-  real(8),dimension(Norb,Nk):: dfermi
-  integer(8) i,j,l,m
-  real(8) tmp
+  real(real64),dimension(Norb,Nk):: dfermi
+  integer(int64) i,j,l,m
+  real(real64) tmp
 
   !$omp parallel
   !$omp do private(j)
@@ -105,15 +107,16 @@ subroutine calc_tdf(tdf,eig,veloc,kweight,tau,Nw,Nk,Norb) bind(C)
   ! calc tdf function
   ! sum_k(v_ki*v_kj*tau)
   !
+  use,intrinsic:: iso_fortran_env, only:int64,real64
   implicit none
-  integer(8),intent(in):: Nk,Norb,Nw
-  real(8),intent(in),dimension(Norb,Nk):: eig,tau
-  real(8),intent(in),dimension(Nk):: kweight
-  real(8),intent(in),dimension(3,Norb,Nk):: veloc
-  real(8),intent(out),dimension(3,3,Nw):: tdf
+  integer(int64),intent(in):: Nk,Norb,Nw
+  real(real64),intent(in),dimension(Norb,Nk):: eig,tau
+  real(real64),intent(in),dimension(Nk):: kweight
+  real(real64),intent(in),dimension(3,Norb,Nk):: veloc
+  real(real64),intent(out),dimension(3,3,Nw):: tdf
 
-  integer(8) i,j,l,m,iw
-  real(8) tmp,emax,emin,id,dw
+  integer(int64) i,j,l,m,iw
+  real(real64) tmp,emax,emin,id,dw
   id=1.0d-3
   emax=maxval(eig)
   emin=minval(eig)

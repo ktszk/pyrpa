@@ -1,12 +1,14 @@
 module constant
+  use,intrinsic:: iso_fortran_env, only:real64
   implicit none
-  real(8),parameter:: pi=3.141592653589793238462643383279d0
+  real(real64),parameter:: pi=3.141592653589793238462643383279d0
 end module constant
 
 subroutine openmp_params(omp_num,omp_check) bind(C)
   !$ use omp_lib
+  use,intrinsic:: iso_fortran_env, only:int64
   implicit none
-  integer(8),intent(out):: omp_num
+  integer(int64),intent(out):: omp_num
   logical(1),intent(out):: omp_check
   !$ if(.true.)then
   !$   omp_check=.true.
@@ -19,15 +21,16 @@ end subroutine openmp_params
 
 subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   use constant
+  use,intrinsic:: iso_fortran_env, only:int64,real64
   implicit none
-  integer(8),intent(in):: Nk,Nr,Norb
-  real(8),intent(in),dimension(3,Nk):: klist
-  real(8),intent(in),dimension(3,Nr):: rvec
-  complex(8),intent(in),dimension(Norb,Norb,Nr):: ham_r
-  complex(8),intent(out),dimension(Norb,Norb,Nk):: ham_k
+  integer(int64),intent(in):: Nk,Nr,Norb
+  real(real64),intent(in),dimension(3,Nk):: klist
+  real(real64),intent(in),dimension(3,Nr):: rvec
+  complex(real64),intent(in),dimension(Norb,Norb,Nr):: ham_r
+  complex(real64),intent(out),dimension(Norb,Norb,Nk):: ham_k
 
-  integer(8) i,j,l,m
-  real(8) phase
+  integer(int64) i,j,l,m
+  real(real64) phase
 
   !$omp parallel do private(l,m,j,phase)
   klop: do i=1,Nk
@@ -47,15 +50,16 @@ subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
 end subroutine gen_ham
 
 subroutine get_eig(eig,uni,ham_k,Nk,Norb) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int64,real64
   implicit none
-  integer(8),intent(in):: Nk,Norb
-  complex(8),intent(in),dimension(Norb,Norb,Nk):: ham_k
-  real(8),intent(out),dimension(Norb,Nk):: eig
-  complex(8),intent(out),dimension(Norb,Norb,Nk):: uni
+  integer(int64),intent(in):: Nk,Norb
+  complex(real64),intent(in),dimension(Norb,Norb,Nk):: ham_k
+  real(real64),intent(out),dimension(Norb,Nk):: eig
+  complex(real64),intent(out),dimension(Norb,Norb,Nk):: uni
 
-  integer(8) i,info
-  real(8) rwork(3*Norb-2),eq(Norb)
-  complex(8) work(2*Norb-1),en(Norb,Norb)
+  integer(int64) i,info
+  real(real64) rwork(3*Norb-2),eq(Norb)
+  complex(real64) work(2*Norb-1),en(Norb,Norb)
 
   !$omp parallel do private(en,eq,work,rwork,info)
   kloop: do i=1,Nk
@@ -68,16 +72,17 @@ subroutine get_eig(eig,uni,ham_k,Nk,Norb) bind(C)
 end subroutine get_eig
 
 subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,norb) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int64,real64
   implicit none
-  integer(8),intent(in):: Nk,norb
-  complex(8),intent(in),dimension(norb,norb,Nk):: ham_k,Ovlk
-  real(8),intent(out),dimension(norb,Nk):: eig
-  complex(8),intent(out),dimension(norb,norb,Nk):: uni
+  integer(int64),intent(in):: Nk,norb
+  complex(real64),intent(in),dimension(norb,norb,Nk):: ham_k,Ovlk
+  real(real64),intent(out),dimension(norb,Nk):: eig
+  complex(real64),intent(out),dimension(norb,norb,Nk):: uni
 
-  integer(8) i,j,k,l,m,info
-  real(8) rwork(3*norb-2),eq(norb),norm
-  complex(8) work(2*norb-1)
-  complex(8),dimension(norb,norb):: tmp,tmp2,tmp3
+  integer(int64) i,j,k,l,m,info
+  real(real64) rwork(3*norb-2),eq(norb),norm
+  complex(real64) work(2*norb-1)
+  complex(real64),dimension(norb,norb):: tmp,tmp2,tmp3
 
   !$omp parallel do private(tmp,tmp2,tmp3,norm,eq,work,rwork,info)
   kloop: do i=1,Nk
@@ -112,14 +117,15 @@ subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,norb) bind(C)
 end subroutine get_eig_mlo
 
 subroutine get_ffermi(ffermi,eig,mu,temp,Nk,Norb) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int64,real64
   implicit none
-  integer(8),intent(in):: Nk,Norb
-  real(8),intent(in):: mu,temp
-  real(8),intent(in),dimension(Norb,Nk):: eig
-  real(8),intent(out),dimension(Norb,Nk):: ffermi
+  integer(int64),intent(in):: Nk,Norb
+  real(real64),intent(in):: mu,temp
+  real(real64),intent(in),dimension(Norb,Nk):: eig
+  real(real64),intent(out),dimension(Norb,Nk):: ffermi
 
-  integer(8) i,j
-  real(8) itemp
+  integer(int64) i,j
+  real(real64) itemp
 
   itemp=0.5d0/temp
   !$omp parallel do private(j)
@@ -132,16 +138,17 @@ subroutine get_ffermi(ffermi,eig,mu,temp,Nk,Norb) bind(C)
 end subroutine get_ffermi
 
 subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int64,real64
   use constant
   implicit none
-  integer(8),intent(in):: Nk,Nr,norb
-  real(8),intent(in),dimension(3,Nk):: klist
-  real(8),intent(in),dimension(3,Nr):: rvec
-  complex(8),intent(in),dimension(Norb,Norb,Nr):: ham_r
-  complex(8),intent(out),dimension(3,3,Norb,Norb,Nk):: imk
+  integer(int64),intent(in):: Nk,Nr,norb
+  real(real64),intent(in),dimension(3,Nk):: klist
+  real(real64),intent(in),dimension(3,Nr):: rvec
+  complex(real64),intent(in),dimension(Norb,Norb,Nr):: ham_r
+  complex(real64),intent(out),dimension(3,3,Norb,Norb,Nk):: imk
 
-  integer(8) i,j,k,l,m,n
-  real(8) phase
+  integer(int64) i,j,k,l,m,n
+  real(real64) phase
 
   !$omp parallel do private(l,m,j,phase)
   kloop: do i=1,Nk
@@ -172,15 +179,16 @@ subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
 end subroutine get_imass0
 
 subroutine get_imassk(imk,imk0,mrot,uni,Nk,Norb) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int64,real64
   implicit none
-  integer(8),intent(in):: Nk,Norb
-  real(8),intent(in),dimension(3,3):: mrot
-  complex(8),intent(in),dimension(3,3,Norb,Norb,Nk):: imk0
-  complex(8),intent(in),dimension(Norb,Norb,Nk):: uni
-  real(8),intent(out),dimension(3,3,Norb,Nk):: imk
+  integer(int64),intent(in):: Nk,Norb
+  real(real64),intent(in),dimension(3,3):: mrot
+  complex(real64),intent(in),dimension(3,3,Norb,Norb,Nk):: imk0
+  complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
+  real(real64),intent(out),dimension(3,3,Norb,Nk):: imk
 
-  integer(8) i,j,k,l,m,n
-  complex(8) tmp(3,3,Norb)
+  integer(int64) i,j,k,l,m,n
+  complex(real64) tmp(3,3,Norb)
 
   !$omp parallel do private(tmp,l,m,n,j)
   kloop: do i=1,Nk
@@ -214,16 +222,17 @@ subroutine get_imassk(imk,imk0,mrot,uni,Nk,Norb) bind(C)
 end subroutine get_imassk
 
 subroutine get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int64,real64
   use constant
   implicit none
-  integer(8),intent(in):: Nk,Nr,Norb
-  real(8),intent(in),dimension(3,Nk):: klist
-  real(8),intent(in),dimension(3,Nr):: rvec
-  complex(8),intent(in),dimension(Norb,Norb,Nr):: ham_r
-  complex(8),intent(out),dimension(3,Norb,Norb,Nk):: vk
+  integer(int64),intent(in):: Nk,Nr,Norb
+  real(real64),intent(in),dimension(3,Nk):: klist
+  real(real64),intent(in),dimension(3,Nr):: rvec
+  complex(real64),intent(in),dimension(Norb,Norb,Nr):: ham_r
+  complex(real64),intent(out),dimension(3,Norb,Norb,Nk):: vk
 
-  integer(8) i,j,k,l,m
-  real(8) phase
+  integer(int64) i,j,k,l,m
+  real(real64) phase
 
   !$omp parallel do private(l,m,j,phase)
   kloop: do i=1,Nk
@@ -247,15 +256,16 @@ subroutine get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
 end subroutine get_vlm0
 
 subroutine get_veloc(vk,vk0,mrot,uni,Nk,Norb) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int64,real64
   implicit none
-  integer(8),intent(in):: Nk,Norb
-  real(8),intent(in),dimension(3,3):: mrot
-  complex(8),intent(in),dimension(3,Norb,Norb,Nk):: vk0
-  complex(8),intent(in),dimension(Norb,Norb,Nk):: uni
-  real(8),intent(out),dimension(3,Norb,Nk):: vk
+  integer(int64),intent(in):: Nk,Norb
+  real(real64),intent(in),dimension(3,3):: mrot
+  complex(real64),intent(in),dimension(3,Norb,Norb,Nk):: vk0
+  complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
+  real(real64),intent(out),dimension(3,Norb,Nk):: vk
 
-  integer(8) i,j,l,m,n
-  complex(8) tmp(3,Norb)
+  integer(int64) i,j,l,m,n
+  complex(real64) tmp(3,Norb)
 
   !$omp parallel do private(tmp,l,m,n,j)
   kloop: do i=1,Nk
@@ -283,15 +293,16 @@ subroutine get_veloc(vk,vk0,mrot,uni,Nk,Norb) bind(C)
 end subroutine get_veloc
 
 subroutine get_vnm(vk,vk0,mrot,uni,Nk,Norb) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int64,real64
   implicit none
-  integer(8),intent(in):: Nk,Norb
-  real(8),intent(in),dimension(3,3):: mrot
-  complex(8),intent(in),dimension(3,Norb,Norb,Nk):: vk0
-  complex(8),intent(in),dimension(Norb,Norb,Nk):: uni
-  complex(8),intent(out),dimension(3,Norb,Norb,Nk):: vk
+  integer(int64),intent(in):: Nk,Norb
+  real(real64),intent(in),dimension(3,3):: mrot
+  complex(real64),intent(in),dimension(3,Norb,Norb,Nk):: vk0
+  complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
+  complex(real64),intent(out),dimension(3,Norb,Norb,Nk):: vk
 
-  integer(8) i,j,l,m,n,k
-  complex(8) tmp(3,Norb,Norb)
+  integer(int64) i,j,l,m,n,k
+  complex(real64) tmp(3,Norb,Norb)
 
   !$omp parallel
   !$omp workshare
@@ -328,14 +339,15 @@ subroutine get_vnm(vk,vk0,mrot,uni,Nk,Norb) bind(C)
 end subroutine get_vnm
 
 subroutine gen_tr_greenw_0(trGk,wl,eig,mu,delta,Nk,Nw,Norb) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int64,real64
   implicit none
-  integer(8),intent(in):: Nk,Nw,Norb
-  real(8),intent(in):: mu,delta
-  real(8),intent(in),dimension(Norb,Nk):: eig
-  real(8),intent(in),dimension(Nw):: wl
-  complex(8),intent(out),dimension(Nw,Nk):: trGk
+  integer(int64),intent(in):: Nk,Nw,Norb
+  real(real64),intent(in):: mu,delta
+  real(real64),intent(in),dimension(Norb,Nk):: eig
+  real(real64),intent(in),dimension(Nw):: wl
+  complex(real64),intent(out),dimension(Nw,Nk):: trGk
 
-  integer(8) i,j,n
+  integer(int64) i,j,n
 
   !$omp parallel do private(i,n)
   kloop: do j=1,Nk
