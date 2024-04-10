@@ -23,6 +23,8 @@ irvec.txt
 ndegen.txxt
 ham_r.txt
 
+.vscode/
+
 # Distribution / packaging
 .Python
 build/

@@ -19,12 +19,12 @@ brav: choose primitive translation vector S,FC,BC etc
 else: monoclinic
 """
 
-#fname,ftype,brav='inputs/00010.input',1,2
-fname,ftype,brav='inputs/000AsP.input',1,0
+fname,ftype,brav='inputs/Sr2RuO4',2,2
+#fname,ftype,brav='inputs/000AsP.input',1,0
 #fname,ftype,brav='inputs/square.hop',1,0
 #fname,ftype,brav='inputs/SiMLO.input',3,6
 
-sw_dec_axis=False
+sw_dec_axis=True
 
 """
 option defines calculation modes
@@ -49,31 +49,32 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=9
+option=10
 color_option=2
 
-Nx,Ny,Nz,Nw=128,128,4,150 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=32,32,4,150 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.5,1.5,1.0]
 kz=0.0
 
-abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
+#abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
+abc=[3.90,3.90,12.68]
 alpha_beta_gamma=[90.,90.,90]
 temp=2.59e-2
-fill=2.9375
+fill=4.0 #2.9375
 
 Emin,Emax=0,3
 delta=3.0e-2
 Ecut=1.0e-2
 tau_const=100
-olist=[[0],[1,2],[3]]
+olist=[[0,3],[1,4],[2,5]]
 #olist=[[0,4],[1,2,5,6],[3,7]]
 U,J=0.8, 0.1
 #U,J=1.2,0.15
 
 mu0=9.85114560061123
-#k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
-#xlabel=['$\Gamma$','X','M']
+k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
+xlabel=['$\Gamma$','X','M']
 at_point=[ 0., .5, 0.]
 sw_calc_mu=True #calculate mu or not
 sw_unit=True    #set unit values unity (False) or not (True)
@@ -477,13 +478,13 @@ def main():
         print("color mode: "+cstr[color_option],flush=True)
     print("Hamiltonian name is "+fname,flush=True)
     print("Number of orbital =",no,flush=True)
-    if option in {7,8,9,12}:
+    if option in {7,8,9,14}:
         print(f'U= {U:4.2f} and J= {J:4.2f}')
     if option in {0,4}:
         if sw_gen_sym:
             print('generate symmetry line',flush=True)
         print('kmesh = %d'%kmesh,flush=True)
-    elif option in {2,3,9,10}:
+    elif option in {2,3,9,11,12,13}:
         print('Number of k-mesh = %d'%(Nx),flush=True)
     else:
         print('k-mesh is %d %d %d'%(Nx,Ny,Nz),flush=True)
@@ -578,8 +579,8 @@ def main():
             plt.contourf(qx,qy,abs(sus.imag),100)
             plt.colorbar()
             plt.jet()
-            plt.show()
-            plt.savefig(susfname=fname,dpi=300)
+            #plt.show()
+            plt.savefig(fname=susfname,dpi=300)
     elif option==12: #calc carrier number
         get_carrier_num(Nx,rvec,ham_r,mu,Arot)
     elif option==13: #calc cycrtron mass
@@ -593,7 +594,7 @@ def main():
             tmp=np.arange(Norb)+1
             o1,o2=np.meshgrid(tmp,tmp)
             chiolist=np.array([o1.flatten(),o2.flatten()]).T
-        calc_flex(Nx,Ny,Nz,Nw,ham_r,rvec,mu,temp,chiolist)
+        calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist)
     elif option==15: #mass calc
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)

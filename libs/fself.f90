@@ -15,10 +15,10 @@ subroutine FFT(cmat,tmp,Nx,Ny,Nz,Nw,SW)
   else
      Inv=1
   end If
-  !call dfftw_plan_dft(plan,4,Nlist,cmat,tmp,Inv,64)
-  !call dfftw_execute(plan)
-  !call dfftw_destroy_plan(plan)
-  !if(.not. SW) cmat=tmp/product(Nlist)
+  call dfftw_plan_dft(plan,4,Nlist,cmat,tmp,Inv,64)
+  call dfftw_execute(plan)
+  call dfftw_destroy_plan(plan)
+  if(.not. SW) cmat=tmp/product(Nlist)
 end subroutine FFT
 
 subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,norb) bind(C)

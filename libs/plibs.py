@@ -365,7 +365,7 @@ def chis_q_point(q,eig,uni,Emax,Nw,mu,temp,Smat,klist,olist,idelta):
     ffermi=flibs.get_ffermi(eig,mu,temp)
     wlist=np.linspace(0,Emax,Nw)
     qshift=flibs.get_qshift(klist,q)
-    chi0=flibs.get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp)
+    chi0=flibs.get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp,0)
     chis=flibs.get_chis(chi0,Smat)
     trchis,trchi0,chis_orb=flibs.get_tr_chi(chis,chi0,olist)
     return trchis,chis_orb,wlist
@@ -388,7 +388,7 @@ def phi_spectrum(mu,temp,klist,qlist,olist,eig,uni,Nw,Emax,idelta=1.e-3):
         fq.write(f'{i:d} {q[0]:5.3f} {q[1]:5.3f} {q[2]:5.3f}\n')
         fq.flush()
         qshift=flibs.get_iqshift(klist,q)
-        phi=flibs.get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp,i)
+        phi=flibs.get_phi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,mu,temp)
         trphi,phi_orb=flibs.get_tr_phi(phi,olist)
         phiq.append(trphi)
         phi_orbq.append(phi_orb)
@@ -397,7 +397,7 @@ def phi_spectrum(mu,temp,klist,qlist,olist,eig,uni,Nw,Emax,idelta=1.e-3):
 
 def phi_qmap(Nx,Ny,Ecut,mu,temp,klist,olist,eig,uni,idelta=1.e-3):
     ffermi=flibs.get_ffermi(eig,mu,temp)
-    phi=flibs.phi_qmap(uni,eig,ffermi,klist,olist,Nx,Ny,temp,Ecut,idelta)
+    phi=flibs.phi_qmap(uni,eig,ffermi,klist,olist,Nx,Ny,mu,temp,Ecut,idelta)
     x0=np.linspace(0,1,Nx,False)
     y0=np.linspace(0,1,Ny,False)
     qx,qy=np.meshgrid(x0,y0)
