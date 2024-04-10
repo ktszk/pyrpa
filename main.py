@@ -49,7 +49,7 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=10
+option=11
 color_option=2
 
 Nx,Ny,Nz,Nw=32,32,4,150 #k and energy(or matsubara freq.) mesh size
