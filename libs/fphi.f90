@@ -103,7 +103,7 @@ subroutine get_phi_irr(phi,uni,eig,ffermi,qshift,ol,wl,Nchi,Norb,Nk,Nw,idelta,ep
   complex(real64),intent(out),dimension(Nchi,Nchi,Nw):: phi
 
   integer(int64) i
-    
+
   !$omp parallel do private(i)
   wloop: do i=1,Nw
      phi(:,:,i)=calc_phi(Nk,Norb,Nchi,uni,eig,ffermi,ol,mu,temp,qshift,wl(i),idelta,eps)
@@ -142,7 +142,7 @@ subroutine get_tr_phi(trphi,phi_orb,phi,olist,Nw,Nchi,Norb) bind(C)
   !$omp end parallel do
 end subroutine get_tr_phi
 
-subroutine phiq_map(trphi,uni,eig,ffermi,klist,ol,mu,temp,ecut,idelta,eps,Nx,Ny,Nk,Norb,Nchi) bind(C)
+subroutine phiq_map(trphi,uni,eig,ffermi,klist,ol,mu,temp,ecut,idelta,eps,Nx,Ny,Nk,Norb,Nchi,sw_omega) bind(C)
   use calc_irr_phi
   implicit none
   integer(int64),intent(in):: Nx,Ny,Nk,Norb,Nchi
@@ -152,15 +152,24 @@ subroutine phiq_map(trphi,uni,eig,ffermi,klist,ol,mu,temp,ecut,idelta,eps,Nx,Ny,
   real(real64),intent(in),dimension(Norb,Nk):: eig,ffermi
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(real64),intent(out),dimension(Ny,Nx):: trphi
-  
+  logical(1),intent(in):: sw_omega
+
   integer(int32) info
   integer(int64) i,j,l,m,n
   integer(int64),dimension(Nk):: qshift
   integer(int32),dimension(Nchi):: ipiv
+  real(real64) wre,wim
   real(real64),dimension(3):: qpoint
   complex(real64),dimension(Nchi,Nchi):: phi
   complex(real64),dimension(2*Nchi):: work
-  
+
+  if(sw_omega)then !set omega=cmplex(w,idelta)
+     wre=ecut
+     wim=idelta
+  else             !set omega=cmplex(0,omega_n)
+     wre=0.0d0
+     wim=0.0d0
+  end if
   !$omp parallel
   !$omp workshare
   trphi(:,:)=0.0d0
@@ -172,7 +181,7 @@ subroutine phiq_map(trphi,uni,eig,ffermi,klist,ol,mu,temp,ecut,idelta,eps,Nx,Ny,
         qpoint(2)=dble(j-1)/Ny
         qpoint(3)=0.0d0
         call set_iqshift(qpoint,klist,qshift,Nk)
-        phi(:,:)=calc_phi(Nk,Norb,Nchi,uni,eig,ffermi,ol,mu,temp,qshift,ecut,idelta,eps)
+        phi(:,:)=calc_phi(Nk,Norb,Nchi,uni,eig,ffermi,ol,mu,temp,qshift,wre,wim,eps)
         do l=1,Nchi
            trphi(j,i)=trphi(j,i)+phi(l,l)
         end do

@@ -395,9 +395,9 @@ def phi_spectrum(mu,temp,klist,qlist,olist,eig,uni,Nw,Emax,idelta=1.e-3):
     fq.close()
     return np.array(phiq),np.array(phi_orbq),wlist
 
-def phi_qmap(Nx,Ny,Ecut,mu,temp,klist,olist,eig,uni,idelta=1.e-3):
+def phi_qmap(Nx,Ny,Ecut,mu,temp,klist,olist,eig,uni,idelta=1.e-3,sw_omega=True):
     ffermi=flibs.get_ffermi(eig,mu,temp)
-    phi=flibs.phi_qmap(uni,eig,ffermi,klist,olist,Nx,Ny,mu,temp,Ecut,idelta)
+    phi=flibs.phi_qmap(uni,eig,ffermi,klist,olist,Nx,Ny,mu,temp,Ecut,idelta,sw_omega)
     x0=np.linspace(0,1,Nx,False)
     y0=np.linspace(0,1,Ny,False)
     qx,qy=np.meshgrid(x0,y0)

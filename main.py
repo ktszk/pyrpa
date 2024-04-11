@@ -52,7 +52,7 @@ color_option defines the meaning of color on Fermi surfaces
 option=11
 color_option=2
 
-Nx,Ny,Nz,Nw=32,32,4,150 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=64,64,2,150 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.5,1.5,1.0]
 kz=0.0
@@ -79,6 +79,7 @@ at_point=[ 0., .5, 0.]
 sw_calc_mu=True #calculate mu or not
 sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
+sw_omega=False #True: real freq, False: Matsubara freq.
 #----------------------------------main functions-------------------------------------
 #-------------------------------- import packages ------------------------------------
 import numpy as np
@@ -574,9 +575,12 @@ def main():
                 plt.show()
                 susfname='chismap.png'
             elif option==11:
-                sus,qx,qy=plibs.phi_qmap(Nx,Ny,Ecut,mu,temp,klist,chiolist,eig,uni,idelta=1.e-3)
+                sus,qx,qy=plibs.phi_qmap(Nx,Ny,Ecut,mu,temp,klist,chiolist,eig,uni,idelta=1.e-3,sw_omega=sw_omega)
                 susfname='phimap.png'
-            plt.contourf(qx,qy,abs(sus.imag),100)
+            if sw_omega:
+                plt.contourf(qx,qy,abs(sus.imag),100)
+            else:
+                plt.contourf(qx,qy,abs(sus.real),100)
             plt.colorbar()
             plt.jet()
             #plt.show()

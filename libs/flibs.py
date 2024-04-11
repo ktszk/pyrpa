@@ -311,7 +311,7 @@ def get_phi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,mu,temp):
                       byref(c_double(mu)),byref(c_double(temp)))
     return phi
 
-def phi_qmap(uni,eig,ffermi,klist,olist,Nx,Ny,mu,temp,ecut,idelta):
+def phi_qmap(uni,eig,ffermi,klist,olist,Nx,Ny,mu,temp,ecut,idelta,sw_omega):
     Nk=len(eig)
     Norb,Nchi=int(eig.size/Nk),len(olist)
     phi=np.zeros((Nx,Ny),dtype=np.complex128)
@@ -326,12 +326,13 @@ def phi_qmap(uni,eig,ffermi,klist,olist,Nx,Ny,mu,temp,ecut,idelta):
                              POINTER(c_double),POINTER(c_double),                #,ecut,idelta
                              POINTER(c_double),                                  #eps
                              POINTER(c_int64),POINTER(c_int64),                  #Nx,Ny
-                             POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)] #Nk,Norb,Nchi
+                             POINTER(c_int64),POINTER(c_int64),                  #Nk,Norb
+                             POINTER(c_int64),POINTER(c_bool)] #Nchi
     flibs.phiq_map.restype=c_void_p
     flibs.phiq_map(phi,uni,eig,ffermi,klist,olist,byref(c_double(mu)),byref(c_double(temp)),
                    byref(c_double(ecut)),byref(c_double(idelta)),byref(c_double(eps)),
                    byref(c_int64(Nx)),byref(c_int64(Ny)),byref(c_int64(Nk)),
-                   byref(c_int64(Norb)),byref(c_int64(Nchi)))
+                   byref(c_int64(Norb)),byref(c_int64(Nchi)),byref(c_bool(sw_omega)))
     return phi
 
 def get_tr_phi(phi,olist):
