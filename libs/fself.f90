@@ -15,8 +15,11 @@ subroutine FFT(cmat,tmp,Nx,Ny,Nz,Nw,SW)
   else
      Inv=1
   end If
+  print*,'init fft'
   call dfftw_plan_dft(plan,4,Nlist,cmat,tmp,Inv,64)
+  print*,'execute'
   call dfftw_execute(plan)
+  print*,'destroy'
   call dfftw_destroy_plan(plan)
   if(.not. SW) cmat=tmp/product(Nlist)
 end subroutine FFT
@@ -112,7 +115,7 @@ subroutine get_chi0_comb(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
            end do z_loop
         end do w_loop_conv
         !$omp end parallel do
-        call FFT(tmpchi,tmp,Nx,Ny,Nz,2*Nw,.false.)
+        !call FFT(tmpchi,tmp,Nx,Ny,Nz,2*Nw,.false.)
         !$omp parallel do private(i,j)
         w_loop_tmp_to_chi:do j=1,Nw
            k_loop_tmp_to_chi:do i=1,Nk

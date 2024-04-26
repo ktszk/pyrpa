@@ -431,3 +431,36 @@ def calc_tdf(eig,veloc,kweight,tau,Nw):
     flibs.calc_tdf(tdf,eig,veloc,kweight,tau,byref(c_int64(Nw)),
                    byref(c_int64(Nk)),byref(c_int64(Norb)))
     return tdf
+
+def gen_imp_ham(rvec,ham_r,ham_i,rlist,imp_list,eps=1.0e-5):
+    Nr,Nimp,Nsite=len(rvec),len(imp_list),len(rlist)
+    Norb=int(np.sqrt(ham_r.size/Nr))
+    ham_imp=np.zeros((Norb*Nsite,Norb*Nsite),dtype=np.complex128)
+    flibs.gen_imp_ham.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #ham_imp
+                                np.ctypeslib.ndpointer(dtype=np.complex128), #ham_r
+                                np.ctypeslib.ndpointer(dtype=np.float64),    #rvec
+                                np.ctypeslib.ndpointer(dtype=np.complex128), #ham_i
+                                np.ctypeslib.ndpointer(dtype=np.int64),      #imp_list
+                                np.ctypeslib.ndpointer(dtype=np.float64),    #rlist
+                                POINTER(c_double),                           #eps
+                                POINTER(c_int64),POINTER(c_int64),           #Nimp,Nsite
+                                POINTER(c_int64),POINTER(c_int64)]           #Nr,Norb
+    flibs.gen_imp_ham.restype=c_void_p
+    flibs.gen_imp_ham(ham_imp,ham_r,rvec,ham_i,imp_list,rlist,byref(c_double(eps)),
+                      byref(c_int64(Nimp)),byref(c_int64(Nsite)),byref(c_int64(Nr)),byref(c_int64(Norb)))
+    return ham_imp
+
+def dft_imp_ham(ham_imp,klist,rlist):
+    Nk,Nsite=len(klist),len(rlist)
+    Norb=int(len(ham_imp)/Nsite)
+    ham_imp=np.zeros((Norb*Nk,Norb*Nk),dtype=np.complex128)
+    flibs.get_dft_imp_ham.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #ham_k
+                                    np.ctypeslib.ndpointer(dtype=np.complex128), #ham_imp
+                                    np.ctypeslib.ndpointer(dtype=np.float64),    #klist
+                                    np.ctypeslib.ndpointer(dtype=np.float64),    #rlist
+                                    POINTER(c_int64),POINTER(c_int64),           #Nk,Nsite
+                                    POINTER(c_int64)]                            #Norb
+    flibs.get_dft_imp_ham.restype=c_void_p
+    flibs.get_dft_imp_ham(ham_k,ham_imp,klist,rlist,byref(c_int64(Nk)),
+                          byref(c_int64(Nsite)),byref(c_int64(Norb)))
+    return ham_k

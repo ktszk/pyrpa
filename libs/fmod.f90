@@ -1,5 +1,5 @@
 module constant
-  use,intrinsic:: iso_fortran_env, only:real64
+  use,intrinsic:: iso_fortran_env, only:int64,real64
   implicit none
   real(real64),parameter:: pi=3.141592653589793238462643383279d0
 end module constant
@@ -138,7 +138,6 @@ subroutine get_ffermi(ffermi,eig,mu,temp,Nk,Norb) bind(C)
 end subroutine get_ffermi
 
 subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int64,real64
   use constant
   implicit none
   integer(int64),intent(in):: Nk,Nr,norb
@@ -222,7 +221,6 @@ subroutine get_imassk(imk,imk0,mrot,uni,Nk,Norb) bind(C)
 end subroutine get_imassk
 
 subroutine get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int64,real64
   use constant
   implicit none
   integer(int64),intent(in):: Nk,Nr,Norb
