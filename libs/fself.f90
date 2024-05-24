@@ -41,7 +41,7 @@ subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,norb) bind(C)
      do m=1,norb
         band_loop: do n=1,norb
            !$omp parallel do private(iw,i,j)
-           wloop: do j=1,Nw
+           wloop: do j=1,Nw !ien=pi(2l+1)/beta l=0,1,...
               iw=cmplx(mu,dble(2*(j-1)+1)*pi*temp)
               kloop: do i=1,Nk
                  Gk(i,j,m,l)=Gk(i,j,m,l)+uni(l,n,i)*conjg(uni(m,n,i))/(iw-eig(n,i))

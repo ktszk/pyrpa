@@ -20,8 +20,8 @@ else: monoclinic
 """
 
 #fname,ftype,brav='inputs/Sr2RuO4',2,2
-fname,ftype,brav='inputs/000AsP.input',1,0
-#fname,ftype,brav='inputs/square.hop',1,0
+#fname,ftype,brav='inputs/000AsP.input',1,0
+fname,ftype,brav='inputs/square.hop',1,0
 #fname,ftype,brav='inputs/SiMLO.input',3,6
 
 sw_dec_axis=False
@@ -44,15 +44,16 @@ option defines calculation modes
 13: calc cycrotron mass
 14: calc selfenergy using flex
 15: mass calculation
+16: spectrum with impurity
 color_option defines the meaning of color on Fermi surfaces
  0: band or mono color
  1: orbital weight settled by olist
  2: velocity size
 """
-option=11
+option=14
 color_option=2
 
-Nx,Ny,Nz,Nw=32,32,2,150 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=32,32,1,256 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.5,1.5,1.0]
 kz=0.0
@@ -61,9 +62,9 @@ abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 #abc=[3.90,3.90,12.68]
 alpha_beta_gamma=[90.,90.,90]
 temp=2.59e-2
-fill= 2.9375
+fill= 0.5 #2.9375
 
-Emin,Emax=0,3
+Emin,Emax=-5,5
 delta=3.0e-2
 Ecut=1.0e-2
 tau_const=100
@@ -408,6 +409,10 @@ def calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,olist):
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     print("calc green function")
     Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
+    plt.plot(temp*np.pi*(2*np.arange(Nw)+1),Gk[0,0,:,15].imag)
+    plt.plot(temp*np.pi*(2*np.arange(Nw)+1),Gk[0,0,:,15].real)
+    plt.show()
+    exit()
     print("calc chi0 with convolution")
     chi=flibs.get_chi0_comb(Gk,kmap,olist,Nx,Ny,Nz,Nw)
     print(chi,flush=True)
@@ -469,7 +474,8 @@ def main():
            "calculate conductivities with linear response","calculate chis spectrum",
            "calculate chis at q-point","calculate chis qmap at Ecut",
            "calc phi spectrum with symmetry line","calc phi on xy plane at Ecut",
-           "calculate carrier number","calculate cycrtron mass","calc self energy"]
+           "calculate carrier number","calculate cycrtron mass","calc self energy",
+           "calculate electron mass","spectrum with impurity"]
     cstr=["no color",'orbital weight','velocity size']
     if omp_check:
         print("OpenMP mode",flush=True)
@@ -495,7 +501,7 @@ def main():
     print("Reciprocal Lattice Vector",flush=True)
     for i,b in enumerate(bvec):
         print("b%d: "%i+"%8.4f %8.4f %8.4f"%tuple(b),flush=True)
-    if option in {5,6}:
+    if option in {5,6,16}:
         pass
     else:
         if sw_calc_mu:
@@ -604,6 +610,21 @@ def main():
         eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
         mass=flibs.get_mass(klist,ham_r,rvec,avec.T*ihbar,uni)*eC/emass
         print(mass[:,3,:,:])
-
+    elif option==16:
+        klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
+        rlist=plibs.gen_rlist(Nx,Ny,Nz)
+        wlist=np.linspace(Emin,Emax,Nw,True)
+        ham_i=ham_r
+        imp_list=np.array([0])
+        print("get imp Ham",flush=True)
+        ham_imp=flibs.gen_imp_ham(rvec,ham_r,ham_i,rlist,imp_list)
+        eigs,uni=sclin.eigh(ham_imp)
+        print("get mu",flush=True)
+        mu=plibs.calc_mu_imp(eigs,len(rlist),fill,temp)
+        print('chem. pot. = %7.4f'%mu,flush=True)
+        spectrum=flibs.get_imp_spectrum(uni,eigs,mu,wlist,klist,rlist)
+        w,k=np.meshgrid(wlist,spa_length)
+        plt.contourf(k,w,abs(spectrum.imag),100)
+        plt.show()
 if __name__=="__main__":
     main()

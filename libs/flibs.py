@@ -446,14 +446,14 @@ def gen_imp_ham(rvec,ham_r,ham_i,rlist,imp_list,eps=1.0e-5):
                                 POINTER(c_int64),POINTER(c_int64),           #Nimp,Nsite
                                 POINTER(c_int64),POINTER(c_int64)]           #Nr,Norb
     flibs.gen_imp_ham.restype=c_void_p
-    flibs.gen_imp_ham(ham_imp,ham_r,rvec,ham_i,imp_list,rlist,byref(c_double(eps)),
-                      byref(c_int64(Nimp)),byref(c_int64(Nsite)),byref(c_int64(Nr)),byref(c_int64(Norb)))
+    flibs.gen_imp_ham(ham_imp,ham_r,rvec,ham_i,imp_list,rlist,byref(c_double(eps)),byref(c_int64(Nimp)),
+                      byref(c_int64(Nsite)),byref(c_int64(Nr)),byref(c_int64(Norb)))
     return ham_imp
 
 def dft_imp_ham(ham_imp,klist,rlist):
     Nk,Nsite=len(klist),len(rlist)
     Norb=int(len(ham_imp)/Nsite)
-    ham_imp=np.zeros((Norb*Nk,Norb*Nk),dtype=np.complex128)
+    ham_k=np.zeros((Norb*Nk,Norb*Nk),dtype=np.complex128)
     flibs.get_dft_imp_ham.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #ham_k
                                     np.ctypeslib.ndpointer(dtype=np.complex128), #ham_imp
                                     np.ctypeslib.ndpointer(dtype=np.float64),    #klist
@@ -464,3 +464,21 @@ def dft_imp_ham(ham_imp,klist,rlist):
     flibs.get_dft_imp_ham(ham_k,ham_imp,klist,rlist,byref(c_int64(Nk)),
                           byref(c_int64(Nsite)),byref(c_int64(Norb)))
     return ham_k
+
+def get_imp_spectrum(uni,eigs,mu,wlist,klist,rlist,eta=1.0e-3):
+    Nw,Nk,Nsite=len(wlist),len(klist),len(rlist)
+    Norb=int(len(eigs)/Nsite)
+    spectrum=np.zeros((Nk,Nw),dtype=np.complex128)
+    flibs.get_spectrum_spagehtti.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #spectrum
+                                           np.ctypeslib.ndpointer(dtype=np.complex128), #uni
+                                           np.ctypeslib.ndpointer(dtype=np.float64),    #eigs
+                                           np.ctypeslib.ndpointer(dtype=np.float64),    #klist
+                                           np.ctypeslib.ndpointer(dtype=np.float64),    #rlist
+                                           np.ctypeslib.ndpointer(dtype=np.float64),    #wlist
+                                           POINTER(c_int64),POINTER(c_int64),           #Nw,Nk
+                                           POINTER(c_int64),POINTER(c_int64),           #Nsite,Norb
+                                           POINTER(c_double),POINTER(c_double)]         #mu,eta
+    flibs.get_spectrum_spagehtti.retype=c_void_p
+    flibs.get_spectrum_spagehtti(spectrum,uni,eigs,klist,rlist,wlist,byref(c_int64(Nw)),byref(c_int64(Nk)),
+                                 byref(c_int64(Nsite)),byref(c_int64(Norb)),byref(c_double(mu)),byref(c_double(eta)))
+    return spectrum

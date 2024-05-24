@@ -108,6 +108,24 @@ def calc_mu(eig,Nk,fill,temp):
     mu=scopt.brentq(func,emin,emax)
     return mu
 
+def calc_mu_imp(eigs,Nsite,fill,temp):
+    itemp=1./temp
+    def func(mu):
+        return(fill*Nsite-0.5*(1.0-np.tanh(0.5*(eigs-mu)*itemp)).sum())
+    emax=eigs.max()
+    emin=eigs.min()
+    mu=scopt.brentq(func,emin,emax)
+    return mu
+
+def gen_rlist(Nx,Ny,Nz):
+    x0=np.linspace(0,Nx,Nx,False)
+    y0=np.linspace(0,Ny,Ny,False)
+    z0=np.linspace(0,Nz,Nz,False)
+    x,y,z=np.meshgrid(x0,y0,z0)
+    rlist=np.array([x.ravel(),y.ravel(),z.ravel()]).T.copy()
+    
+    return rlist
+
 def gen_klist_with_kmap(Nx,Ny,Nz):
     x0=np.linspace(0,Nx,Nx,False,dtype=int)
     y0=np.linspace(0,Ny,Ny,False,dtype=int)
@@ -131,8 +149,7 @@ def gen_klist(Nx,Ny,Nz=None,sw_pp=True,kz=0):
         kz=np.linspace(0,1,Nz,False)
     x,y,z=np.meshgrid(kx,ky,kz)
     klist=np.array([x.ravel(),y.ravel(),z.ravel()]).T.copy()
-    Nk=len(klist)
-    return Nk,klist
+    return len(klist),klist
 
 def mk_klist(k_list,N,bvec):
     klist=[]

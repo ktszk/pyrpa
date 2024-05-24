@@ -6,12 +6,12 @@ FC=flang
 #FC=gfortran
 ifeq ($(FC),ifort)
   LIBS=-lmkl_intel_lp64 -lmkl_sequential -lmkl_core #-lmkl_avx
-  FFLAGS= -O2 -mavx -qopenmp -IPO -fPIC -heap-arrays
+  FFLAGS= -O2 -mavx2 -qopenmp -IPO -fPIC -heap-arrays
   FFLAGS2= -shared
 else
   ifeq ($(FC),ifx)
     LIBS= -qmkl
-    FFLAGS= -O0 -mavx -fopenmp -finline-functions -fPIC -heap-arrays
+    FFLAGS= -O2 -mavx2 -fopenmp -finline-functions -fPIC -heap-arrays
     FFLAGS2= -shared
   else
     ifeq ($(FC),flang)
