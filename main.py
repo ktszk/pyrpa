@@ -41,10 +41,10 @@ option defines calculation modes
 10: calc phi spectrum with symmetry line
 11: calc phi on xy plane at Ecut
 12: calc carrier num.
-13: calc cycrotron mass
-14: calc selfenergy using flex
-15: mass calculation
-16: spectrum with impurity
+13: calc cycrotron mass (not implement)
+14: calc selfenergy using flex (not implement)
+15: mass calculation (not implement)
+16: spectrum with impurity (not implement)
 color_option defines the meaning of color on Fermi surfaces
  0: band or mono color
  1: orbital weight settled by olist

@@ -6,11 +6,11 @@ import numpy as np, scipy.optimize as scopt, scipy.linalg as sclin
 
 def import_hoppings(fname,ftype):
     def import_hop(name):
-        rvec=np.loadtxt(name+'/irvec.txt')
+        rvec=np.loadtxt(f'{name}/irvec.txt')
         nr=rvec[:,0].size
-        ndegen=np.loadtxt(name+'/ndegen.txt')
+        ndegen=np.loadtxt(f'{name}/ndegen.txt')
         tmp=np.array([complex(float(tp[0]),float(tp[1])) for tp in
-                      [f.strip(' ()\n').split(',') for f in open(fname+'/ham_r.txt','r')]])
+                      [f.strip(' ()\n').split(',') for f in open(f'{name}/ham_r.txt','r')]])
         no=int(np.sqrt(tmp.size/nr))
         ham_r=(tmp.reshape(nr,no,no).T/ndegen).T
         return(rvec,ham_r,no,nr)
