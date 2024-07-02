@@ -7,20 +7,20 @@
  - lapack and blas (we check OpenBLAS, MKL, AOCL(BLIS and Flame))
  - python3
  - python standard library
-  - __future__
-  - ctypes
+  -- __future__
+  -- ctypes
  - python external packages
-  - numpy
-  - scipy
-  - scikit-image
-  - matplotlib
+  -- numpy
+  -- scipy
+  -- scikit-image
+  -- matplotlib
 
 # Composition
  - main.py: main program written python
  - fmod.so: fortran library
  - plibs.py: python functions
  - flibs.py: wrapper functions of fmod.so for python
- fmod.so,plibs.py and flibs.py are placed with the fortran codes in the libs dir.
+fmod.so,plibs.py and flibs.py are placed with the fortran codes in the libs dir.
 
 # How to compile
  - clone this repository
