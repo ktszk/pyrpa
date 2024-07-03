@@ -11,14 +11,14 @@ end subroutine get_qshift
 
 subroutine set_qshift(qpoint,klist,qshift,Nk)
   !shift k to k+q
-  use,intrinsic:: iso_fortran_env, only:int64,real64
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nk
   real(real64),intent(in),dimension(3,Nk):: klist
   real(real64),intent(in),dimension(3):: qpoint
   integer(int64),intent(out),dimension(Nk):: qshift
 
-  integer(int64) i,j,k,ck
+  integer(int32) i,j,k
   real(real64) tmp
   real(real64),dimension(3,Nk):: kqlist
 
@@ -45,7 +45,7 @@ subroutine set_qshift(qpoint,klist,qshift,Nk)
   kq_loop: do i=1,Nk
      k_loop: do j=1,Nk
         tmp=sum(abs(klist(:,j)-kqlist(:,i)))
-        if(tmp<1.0d-9)then
+        if(tmp<1.0d-9)then !may be Nk=O(10^9) calc is too difficult
            qshift(i)=j
            exit
         end if
@@ -67,7 +67,7 @@ contains
     real(real64),intent(in),dimension(Norb,Nk):: eig,ffermi
     complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
 
-    integer(int64) i,j,k,l,m
+    integer(int32) i,j,k,l,m
     complex(real64) unitmp
     complex(real64),dimension(Nchi,Nchi):: chi,calc_chi
 
@@ -81,7 +81,7 @@ contains
                         *uni(ol(i,2),m,k)*conjg(uni(ol(j,2),m,k))
                    if(abs(w)==0.0d0 .and. abs(eig(m,k)-eig(l,qshift(k)))<1.0d-9)then
                       chi(i,j)=chi(i,j)+unitmp*ffermi(m,k)*(1.0d0-ffermi(m,k))/temp
-                   else if(abs(ffermi(l,qshift(i))-ffermi(m,i))>eps)then
+                   else if(abs(ffermi(l,qshift(k))-ffermi(m,k))>eps)then
                       chi(i,j)=chi(i,j)+unitmp*(ffermi(l,qshift(k))-ffermi(m,k))&
                            /cmplx(w+eig(m,k)-eig(l,qshift(k)),idelta)
                    end if
@@ -95,7 +95,7 @@ contains
 end module calc_irr_chi
 
 subroutine get_tr_chi(trchis,trchi0,chis_orb,chis,chi0,olist,Nw,Nchi,Norb) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int64,real64
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nchi,Nw,Norb
   integer(int64),intent(in),dimension(Nchi,2):: olist
@@ -103,7 +103,7 @@ subroutine get_tr_chi(trchis,trchi0,chis_orb,chis,chi0,olist,Nw,Nchi,Norb) bind(
   complex(real64),intent(out),dimension(Nw):: trchis,trchi0
   complex(real64),intent(out),dimension(Norb+2,Nw):: chis_orb
 
-  integer(int64) i,j,k
+  integer(int32) i,j,k
  
   !$omp parallel do private(j,k)
   wloop:do i=1,Nw
@@ -138,7 +138,7 @@ subroutine get_chi_irr(chi,uni,eig,ffermi,qshift,ol,wl,Nchi,Norb,Nk,Nw,idelta,ep
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(real64),intent(out),dimension(Nchi,Nchi,Nw):: chi
 
-  integer(int64) i
+  integer(int32) i
   !character fname*128
 
   !write(fname,'("shift",(i3.3),".dat")')qi
@@ -167,8 +167,7 @@ subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,e
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(real64),intent(out),dimension(Ny,Nx):: trchis,trchi
 
-  integer(int32) info
-  integer(int64) i,j,l,m,n
+  integer(int32) i,j,l,m,n,info
   integer(int64),dimension(Nk):: qshift
   integer(int32),dimension(Nchi):: ipiv
   real(real64),dimension(3):: qpoint
@@ -235,7 +234,8 @@ subroutine get_chis(chis,chi0,Smat,Nchi,Nw) bind(C)
   real(real64),dimension(Nchi,Nchi):: Smat
   complex(real64),intent(in),dimension(Nchi,Nchi,Nw):: chi0
   complex(real64),intent(out),dimension(Nchi,Nchi,Nw):: chis
-  integer(int64) i,l,m,n
+
+  integer(int32) i,l,m,n
   integer(int32) info
   integer(int32),dimension(Nchi):: ipiv
   complex(real64),dimension(Nchi):: work
@@ -270,14 +270,14 @@ subroutine get_chis(chis,chi0,Smat,Nchi,Nw) bind(C)
 end subroutine get_chis
 
 subroutine get_smat(Smat,ol,Uval,Jval,Nchi,Norb) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int64,real64
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nchi,Norb
   integer(int64),intent(in),dimension(Nchi,2):: ol
   real(real64),intent(in):: Uval,Jval
   real(real64),intent(out),dimension(Nchi,Nchi):: Smat
  
-  integer(int64) i,j
+  integer(int32) i,j
  
   !$omp parallel
   !$omp workshare

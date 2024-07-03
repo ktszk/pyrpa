@@ -25,7 +25,7 @@ subroutine FFT(cmat,tmp,Nx,Ny,Nz,Nw,SW)
 end subroutine FFT
 
 subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,norb) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int64,real64
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   use constant
   implicit none
   integer(int64),intent(in):: Nk,Nw,norb
@@ -34,27 +34,115 @@ subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,norb) bind(C)
   complex(real64),intent(in),dimension(norb,norb,Nk):: uni
   complex(real64),intent(out),dimension(Nk,Nw,norb,norb):: Gk
   
-  integer(int64) i,j,l,m,n
+  integer(int32) i,j,l,m,n
   complex(real64) iw
 
+  !$omp parallel private(l,m,n)
   do l=1,norb
      do m=1,norb
         band_loop: do n=1,norb
-           !$omp parallel do private(iw,i,j)
+           !$omp do private(iw,i,j)
            wloop: do j=1,Nw !ien=pi(2l+1)/beta l=0,1,...
               iw=cmplx(mu,dble(2*(j-1)+1)*pi*temp)
               kloop: do i=1,Nk
                  Gk(i,j,m,l)=Gk(i,j,m,l)+uni(l,n,i)*conjg(uni(m,n,i))/(iw-eig(n,i))
               end do kloop
            end do wloop
-           !$omp end parallel do
+           !$omp end do
         end do band_loop
      end do
   end do
+  !$omp end parallel
 end subroutine gen_green0
 
+subroutine gen_green_inv(Gk,self,hamk,mu,temp,Nk,Nw,norb) bind(C)
+  use,intrinsic:: iso_fortran_env, only: int64,real64,int32
+  use constant
+  implicit none
+  integer(int64),intent(in):: Nk,Nw,norb
+  real(real64),intent(in):: mu,temp
+  complex(real64),intent(in),dimension(norb,norb,Nk):: hamk
+  complex(real64),intent(in),dimension(Nk,Nw,norb,norb):: self
+  complex(real64),intent(out),dimension(Nk,Nw,norb,norb):: Gk
+
+  integer(int32)i,j,l,m
+  complex(real64) iw
+
+  !G^-1=G^-1_0-sigma (=iwI-Hk-sigma)
+  !$omp parallel private(l,m)
+  do l=1,norb
+     do m=1,norb
+        !$omp do private(iw,i)
+        do j=1,Nw
+           iw=cmplx(mu,dble(2*(j-1)+1)*pi*temp)
+           do i=1,Nk
+              Gk(i,j,m,l)=-(hamk(m,l,i)+self(i,j,m,l))
+              if(l==m)then
+                 Gk(i,j,l,l)=Gk(i,j,l,l)+iw
+              end if
+           end do
+        end do
+        !$omp end do
+     end do
+  end do
+  !$omp end parallel
+end subroutine gen_green_inv
+
+subroutine gen_green_inv_from_eig(Gk,self,uni,eig,mu,temp,Nk,Nw,Norb) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use constant
+  implicit none
+  integer(int64),intent(in):: Nk,Nw,norb
+  real(real64),intent(in):: mu,temp
+  real(real64),intent(in),dimension(norb,Nk):: eig
+  complex(real64),intent(in),dimension(norb,norb,Nk):: uni
+  complex(real64),intent(in),dimension(Nk,Nw,norb,norb):: self
+  complex(real64),intent(out),dimension(Nk,Nw,norb,norb):: Gk
+
+  integer(int32)i,j,l,m,n
+  complex(real64) iw
+
+  !$omp parallel private(l,m)
+  do l=1,norb
+     do m=1,norb
+        !$omp do private(iw,i,n)
+        wloop: do j=1,Nw
+           iw=cmplx(mu,dble(2*(j-1)+1)*pi*temp)
+           kloop: do i=1,Nk
+              band_loop: do n=1,norb
+                 Gk(i,j,m,l)=uni(m,n,i)*conjg(uni(l,n,i))*(iw-eig(n,i))
+              end do band_loop
+              Gk(i,j,m,l)=Gk(i,j,m,l)-self(i,j,m,l)
+           end do kloop
+        end do wloop
+        !$omp end do
+     end do
+  end do
+  !$omp end parallel
+end subroutine gen_green_inv_from_eig
+
+subroutine getinv(Gk,Nk,Nw,Norb) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  implicit none
+  integer(int64),intent(in):: Nk,Nw,Norb
+  complex(real64),intent(inout),dimension(Nk,Nw,Norb,Norb):: Gk
+
+  integer(int32) i,j,ipiv(Norb),info
+  complex(real64) tmp(Norb,Norb),work(2*Norb)
+
+  !$omp parallel do private(i,j,tmp,work,ipiv,info)
+  do i=1,Nw
+     do j=1,Nk
+        tmp(:,:)=Gk(i,j,:,:)
+        call zgetrf(Norb,Norb,tmp,Norb,ipiv,info)
+        call zgetri(Norb,tmp,Norb,ipiv,work,2*Norb,info)
+     end do
+  end do
+  !$omp end parallel do
+end subroutine getinv
+
 subroutine get_chi0_comb(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int64,real64
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nw,Norb,Nchi,Nk,Nx,Ny,Nz
   integer(int64),intent(in),dimension(Nchi,2):: olist
@@ -62,8 +150,8 @@ subroutine get_chi0_comb(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
   complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
   complex(real64),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
 
-  integer(int64) i,j,k,l,m,n
-  integer(int64) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1)
+  integer(int32) i,j,k,l,m,n
+  integer(int32) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1)
   complex(real64),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpchi,tmp,tmp1,tmp2
 
   ii(0)=0

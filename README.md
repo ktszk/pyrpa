@@ -21,7 +21,7 @@ pyrpa can calculate band structure, Dos, Fermi surface, conductivity, and etc. u
 - plibs.py: python functions
 - flibs.py: wrapper functions of fmod.so for python
 
-fmod.so,plibs.py and flibs.py are placed with the fortran codes in the libs dir.
+fmod.so, plibs.py and flibs.py are placed with the fortran codes in the libs dir.
 
 # How to compile
 - clone this repository

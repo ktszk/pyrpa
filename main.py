@@ -50,12 +50,12 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=14
+option=7
 color_option=2
 
-Nx,Ny,Nz,Nw=32,32,1,256 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=64,64,1,512 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
-kscale=[1.5,1.5,1.0]
+kscale=[1.0,1.0,1.0]
 kz=0.0
 
 abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
@@ -65,7 +65,7 @@ temp=2.59e-2
 fill= 0.5 #2.9375
 
 Emin,Emax=-5,5
-delta=3.0e-2
+delta=6.0e-2
 Ecut=1.0e-2
 tau_const=100
 #olist=[[0,3],[1,4],[2,5]]

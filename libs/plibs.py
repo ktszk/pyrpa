@@ -359,7 +359,6 @@ def chis_spectrum(mu,temp,Smat,klist,qlist,olist,eig,uni,Nw,Emax,idelta=1.e-3):
     for i,q in enumerate(qlist):
         fq.write(f'{i:d} {q[0]:5.3f} {q[1]:5.3f} {q[2]:5.3f}\n')
         fq.flush()
-        #qshift=flibs.get_qshift(klist,q)
         qshift=flibs.get_qshift(klist,q)
         #fkq=open(f'kq_{i:d}.dat','w')
         #for j,qs in enumerate(qshift):
@@ -367,7 +366,9 @@ def chis_spectrum(mu,temp,Smat,klist,qlist,olist,eig,uni,Nw,Emax,idelta=1.e-3):
         #fkq.close()
         chi0=flibs.get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp,i)
         chis=flibs.get_chis(chi0,Smat)
+        #print(i,q,chis.max())
         trchis,trchi0,chis_orb=flibs.get_tr_chi(chis,chi0,olist)
+        print(i,trchi0.max())
         chisq.append(trchis)
         chis_orbq.append(chis_orb)
         for w,trchi in zip(wlist,trchi0):
