@@ -126,10 +126,10 @@ subroutine get_tr_chi(trchis,trchi0,chis_orb,chis,chi0,olist,Nw,Nchi,Norb) bind(
   !$omp end parallel do
 end subroutine get_tr_chi
 
-subroutine get_chi_irr(chi,uni,eig,ffermi,qshift,ol,wl,Nchi,Norb,Nk,Nw,idelta,eps,temp,qi) bind(C)
+subroutine get_chi_irr(chi,uni,eig,ffermi,qshift,ol,wl,Nchi,Norb,Nk,Nw,idelta,eps,temp) bind(C)
   use calc_irr_chi
   implicit none
-  integer(int64),intent(in):: Nk,Norb,Nw,Nchi,qi
+  integer(int64),intent(in):: Nk,Norb,Nw,Nchi
   integer(int64),intent(in),dimension(Nk):: qshift
   integer(int64),intent(in),dimension(Nchi,2):: ol
   real(real64),intent(in):: temp,eps,idelta
@@ -139,15 +139,7 @@ subroutine get_chi_irr(chi,uni,eig,ffermi,qshift,ol,wl,Nchi,Norb,Nk,Nw,idelta,ep
   complex(real64),intent(out),dimension(Nchi,Nchi,Nw):: chi
 
   integer(int32) i
-  !character fname*128
-
-  !write(fname,'("shift",(i3.3),".dat")')qi
-  !open(70,file=trim(fname),status='replace')
-  !do i=1,Nk
-  !   write(70,'(3(1x,i4))') qshift(i)
-  !end do
-  !close(70)
-  
+ 
   !$omp parallel do private(i)
   wloop: do i=1,Nw
      chi(:,:,i)=calc_chi(Nk,Norb,Nchi,uni,eig,ffermi,ol,temp,qshift,wl(i),idelta,eps)

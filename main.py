@@ -20,8 +20,8 @@ else: monoclinic
 """
 
 #fname,ftype,brav='inputs/Sr2RuO4',2,2
-#fname,ftype,brav='inputs/000AsP.input',1,0
-fname,ftype,brav='inputs/square.hop',1,0
+fname,ftype,brav='inputs/000AsP.input',1,0
+#fname,ftype,brav='inputs/square.hop',1,0
 #fname,ftype,brav='inputs/SiMLO.input',3,6
 
 sw_dec_axis=False
@@ -53,7 +53,7 @@ color_option defines the meaning of color on Fermi surfaces
 option=7
 color_option=2
 
-Nx,Ny,Nz,Nw=64,64,1,512 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=32,32,1,200 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
@@ -62,10 +62,10 @@ abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 #abc=[3.90,3.90,12.68]
 alpha_beta_gamma=[90.,90.,90]
 temp=2.59e-2
-fill= 0.5 #2.9375
+fill= 2.9375
 
-Emin,Emax=-5,5
-delta=6.0e-2
+Emin,Emax=-5,1
+delta=3.0e-2
 Ecut=1.0e-2
 tau_const=100
 #olist=[[0,3],[1,4],[2,5]]
