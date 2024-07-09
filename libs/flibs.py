@@ -519,3 +519,28 @@ def get_imp_spectrum(uni,eigs,mu,wlist,klist,rlist,eta=1.0e-3):
     flibs.get_spectrum_spagehtti(spectrum,uni,eigs,klist,rlist,wlist,byref(c_int64(Nw)),byref(c_int64(Nk)),
                                  byref(c_int64(Nsite)),byref(c_int64(Norb)),byref(c_double(mu)),byref(c_double(eta)))
     return spectrum
+
+def get_a(inp_data,xlist):
+    Np=len(inp_data)
+    a=np.zeros(Np,dtype=np.compex128)
+    flibs.get_a.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #a
+                          np.ctypeslib.ndpointer(dtype=np.complex128), #xlist
+                          np.ctypeslib.ndpointer(dtype=np.complex128), #inpdata
+                          POINTER(c_int64)]                            #Np
+    flibs.get_a.retype=c_void_p
+    flibs.get_a(a,xlist,inp_data,byref(c_int64(Np)))
+    return a
+
+def get_QP(a,xlist,wlist):
+    Nw,Np=len(wlist),len(a)
+    Q=np.zeros(Nw,dtype=np.compex128)
+    P=np.zeros(Nw,dtype=np.compex128)
+    flibs.get_qp.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #P
+                           np.ctypeslib.ndpointer(dtype=np.complex128), #Q
+                           np.ctypeslib.ndpointer(dtype=np.complex128), #a
+                           np.ctypeslib.ndpointer(dtype=np.complex128), #xlist
+                           np.ctypeslib.ndpointer(dtype=np.complex128), #wlist
+                           POINTER(c_int64),POINTER(c_int64)]           #Nw,Np
+    flibs.get_qp.retype=c_void_p
+    flibs.get_qp(P,Q,a,xlist,wlist,byref(c_int64(Nw)),byref(c_int64(Np)))
+    return Q,P

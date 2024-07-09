@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 #-*- coding:utf-8 -*-
-from __future__ import print_function, division
 import libs.flibs as flibs
 import numpy as np, scipy.optimize as scopt, scipy.linalg as sclin
 

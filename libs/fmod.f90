@@ -1,5 +1,5 @@
 module constant
-  use,intrinsic:: iso_fortran_env, only:int64,real64
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   real(real64),parameter:: pi=3.141592653589793238462643383279d0
 end module constant
@@ -21,7 +21,6 @@ end subroutine openmp_params
 
 subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   use constant
-  use,intrinsic:: iso_fortran_env, only:int64,real64
   implicit none
   integer(int64),intent(in):: Nk,Nr,Norb
   real(real64),intent(in),dimension(3,Nk):: klist
@@ -29,7 +28,7 @@ subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   complex(real64),intent(in),dimension(Norb,Norb,Nr):: ham_r
   complex(real64),intent(out),dimension(Norb,Norb,Nk):: ham_k
 
-  integer(int64) i,j,l,m
+  integer(int32) i,j,l,m
   real(real64) phase
 
   !$omp parallel do private(l,m,j,phase)
@@ -50,14 +49,14 @@ subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
 end subroutine gen_ham
 
 subroutine get_eig(eig,uni,ham_k,Nk,Norb) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int64,real64
+  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nk,Norb
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: ham_k
   real(real64),intent(out),dimension(Norb,Nk):: eig
   complex(real64),intent(out),dimension(Norb,Norb,Nk):: uni
 
-  integer(int64) i,info
+  integer(int32) i,info
   real(real64) rwork(3*Norb-2),eq(Norb)
   complex(real64) work(2*Norb-1),en(Norb,Norb)
 
@@ -72,14 +71,14 @@ subroutine get_eig(eig,uni,ham_k,Nk,Norb) bind(C)
 end subroutine get_eig
 
 subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,norb) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int64,real64
+  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nk,norb
   complex(real64),intent(in),dimension(norb,norb,Nk):: ham_k,Ovlk
   real(real64),intent(out),dimension(norb,Nk):: eig
   complex(real64),intent(out),dimension(norb,norb,Nk):: uni
 
-  integer(int64) i,j,k,l,m,info
+  integer(int32) i,j,k,l,m,info
   real(real64) rwork(3*norb-2),eq(norb),norm
   complex(real64) work(2*norb-1)
   complex(real64),dimension(norb,norb):: tmp,tmp2,tmp3
@@ -117,14 +116,14 @@ subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,norb) bind(C)
 end subroutine get_eig_mlo
 
 subroutine get_ffermi(ffermi,eig,mu,temp,Nk,Norb) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int64,real64
+  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nk,Norb
   real(real64),intent(in):: mu,temp
   real(real64),intent(in),dimension(Norb,Nk):: eig
   real(real64),intent(out),dimension(Norb,Nk):: ffermi
 
-  integer(int64) i,j
+  integer(int32) i,j
   real(real64) itemp
 
   itemp=0.5d0/temp
@@ -146,7 +145,7 @@ subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   complex(real64),intent(in),dimension(Norb,Norb,Nr):: ham_r
   complex(real64),intent(out),dimension(3,3,Norb,Norb,Nk):: imk
 
-  integer(int64) i,j,k,l,m,n
+  integer(int32) i,j,k,l,m,n
   real(real64) phase
 
   !$omp parallel do private(l,m,j,phase)
@@ -178,7 +177,7 @@ subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
 end subroutine get_imass0
 
 subroutine get_imassk(imk,imk0,mrot,uni,Nk,Norb) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int64,real64
+  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nk,Norb
   real(real64),intent(in),dimension(3,3):: mrot
@@ -186,7 +185,7 @@ subroutine get_imassk(imk,imk0,mrot,uni,Nk,Norb) bind(C)
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
   real(real64),intent(out),dimension(3,3,Norb,Nk):: imk
 
-  integer(int64) i,j,k,l,m,n
+  integer(int32) i,j,k,l,m,n
   complex(real64) tmp(3,3,Norb)
 
   !$omp parallel do private(tmp,l,m,n,j)
@@ -229,7 +228,7 @@ subroutine get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   complex(real64),intent(in),dimension(Norb,Norb,Nr):: ham_r
   complex(real64),intent(out),dimension(3,Norb,Norb,Nk):: vk
 
-  integer(int64) i,j,k,l,m
+  integer(int32) i,j,k,l,m
   real(real64) phase
 
   !$omp parallel do private(l,m,j,phase)
@@ -254,7 +253,7 @@ subroutine get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
 end subroutine get_vlm0
 
 subroutine get_veloc(vk,vk0,mrot,uni,Nk,Norb) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int64,real64
+  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nk,Norb
   real(real64),intent(in),dimension(3,3):: mrot
@@ -262,7 +261,7 @@ subroutine get_veloc(vk,vk0,mrot,uni,Nk,Norb) bind(C)
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
   real(real64),intent(out),dimension(3,Norb,Nk):: vk
 
-  integer(int64) i,j,l,m,n
+  integer(int32) i,j,l,m,n
   complex(real64) tmp(3,Norb)
 
   !$omp parallel do private(tmp,l,m,n,j)
@@ -291,7 +290,7 @@ subroutine get_veloc(vk,vk0,mrot,uni,Nk,Norb) bind(C)
 end subroutine get_veloc
 
 subroutine get_vnm(vk,vk0,mrot,uni,Nk,Norb) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int64,real64
+  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nk,Norb
   real(real64),intent(in),dimension(3,3):: mrot
@@ -299,7 +298,7 @@ subroutine get_vnm(vk,vk0,mrot,uni,Nk,Norb) bind(C)
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(real64),intent(out),dimension(3,Norb,Norb,Nk):: vk
 
-  integer(int64) i,j,l,m,n,k
+  integer(int32) i,j,l,m,n,k
   complex(real64) tmp(3,Norb,Norb)
 
   !$omp parallel
@@ -337,7 +336,7 @@ subroutine get_vnm(vk,vk0,mrot,uni,Nk,Norb) bind(C)
 end subroutine get_vnm
 
 subroutine gen_tr_greenw_0(trGk,wl,eig,mu,delta,Nk,Nw,Norb) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int64,real64
+  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nk,Nw,Norb
   real(real64),intent(in):: mu,delta
@@ -345,7 +344,7 @@ subroutine gen_tr_greenw_0(trGk,wl,eig,mu,delta,Nk,Nw,Norb) bind(C)
   real(real64),intent(in),dimension(Nw):: wl
   complex(real64),intent(out),dimension(Nw,Nk):: trGk
 
-  integer(int64) i,j,n
+  integer(int32) i,j,n
 
   !$omp parallel do private(i,n)
   kloop: do j=1,Nk

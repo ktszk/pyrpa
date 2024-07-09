@@ -34,7 +34,7 @@ else
   endif
 endif
 
-objmain= fmod.o fcond.o fchi.o fphi.o fself.o fimp.o
+objmain= fmod.o fcond.o fchi.o fphi.o fself.o fimp.o fpade.o
 .SUFFIXES:
 main: $(objmain)
 	$(FC) $(FFLAGS) $(FFLAGS2) $(LIBS) -o fmod.so ${objmain}

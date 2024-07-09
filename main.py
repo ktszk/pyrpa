@@ -50,7 +50,7 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=7
+option=14
 color_option=2
 
 Nx,Ny,Nz,Nw=32,32,1,200 #k and energy(or matsubara freq.) mesh size
@@ -409,13 +409,9 @@ def calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,olist):
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     print("calc green function")
     Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
-    plt.plot(temp*np.pi*(2*np.arange(Nw)+1),Gk[0,0,:,15].imag)
-    plt.plot(temp*np.pi*(2*np.arange(Nw)+1),Gk[0,0,:,15].real)
-    plt.show()
-    exit()
     print("calc chi0 with convolution")
     chi=flibs.get_chi0_comb(Gk,kmap,olist,Nx,Ny,Nz,Nw)
-    print(chi,flush=True)
+    print(len(chi),chi.size,flush=True)
 
 def get_carrier_num(kmesh,rvec,ham_r,S_r,mu,Arot):
     Nk,eig,kwieght=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,S_r,rvec,Arot)
@@ -628,3 +624,4 @@ def main():
         plt.show()
 if __name__=="__main__":
     main()
+__license__="MIT"

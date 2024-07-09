@@ -182,13 +182,13 @@ subroutine get_chi0_comb(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
            k_loop_Gk_to_tmp:do i=1,Nk
               tmp1(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(l,1),olist(m,2)) !G13(iw)
               tmp2(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(l,2),olist(m,1)) !G42(iw)
-              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(m,2),olist(l,1))) !G13(-iw)
-              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(m,1),olist(l,2))) !G42(-iw)
+              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(m,2),olist(l,1))) !G13(-iw)=G^*31(iw)
+              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(m,1),olist(l,2))) !G42(-iw)=G^*24(iw)
            end do k_loop_Gk_to_tmp
         end do w_loop_Gk_to_tmp
         !$omp end parallel do
-        call FFT(tmp1,tmp,Nx,Ny,Nz,2*Nw,.true.)
-        call FFT(tmp2,tmp,Nx,Ny,Nz,2*Nw,.true.)
+        !call FFT(tmp1,tmp,Nx,Ny,Nz,2*Nw,.true.)
+        !call FFT(tmp2,tmp,Nx,Ny,Nz,2*Nw,.true.)
         !calculate G(r)G(-r)
         !$omp parallel do private(i,j,k)
         w_loop_conv:do n=1,2*Nw

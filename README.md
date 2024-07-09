@@ -4,10 +4,9 @@ pyrpa can calculate band structure, Dos, Fermi surface, conductivity, and etc. u
 
 # Requirements
 - fortran compiler (we check gcc 11.4 and newest aocc and ifx)
-- lapack and blas (we check OpenBLAS, MKL, AOCL(BLIS and Flame))
-- python3
+- lapack, blas, and FFTW (we check OpenBLAS, MKL, and AOCL(BLIS and Flame))
+- python3 (we check 3.11.2)
 - python standard library
-  - __future__
   - ctypes
 - python external packages
   - numpy
