@@ -1,15 +1,4 @@
-subroutine get_qshift(qpoint,klist,qshift,Nk) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int64,real64
-  implicit none
-  integer(int64),intent(in):: Nk
-  real(real64),intent(in),dimension(3,Nk):: klist
-  real(real64),intent(in),dimension(3):: qpoint
-  integer(int64),intent(out),dimension(Nk):: qshift
-
-  call set_qshift(qpoint,klist,qshift,Nk)
-end subroutine get_qshift
-
-subroutine set_qshift(qpoint,klist,qshift,Nk)
+subroutine get_qshift(qpoint,klist,qshift,Nk) bind(C,name="get_qshift_")
   !shift k to k+q
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
@@ -53,7 +42,7 @@ subroutine set_qshift(qpoint,klist,qshift,Nk)
   end do kq_loop
   !$omp end do
   !$omp end parallel
-end subroutine set_qshift
+end subroutine get_qshift
 
 module calc_irr_chi
   use,intrinsic:: iso_fortran_env, only:int32,int64,real64
@@ -177,7 +166,7 @@ subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,e
         qpoint(1)=dble(i-1)/Nx
         qpoint(2)=dble(j-1)/Ny
         qpoint(3)=0.0d0
-        call set_qshift(qpoint,klist,qshift,Nk)
+        call get_qshift(qpoint,klist,qshift,Nk)
         chi(:,:)=calc_chi(Nk,Norb,Nchi,uni,eig,ffermi,ol,temp,qshift,ecut,idelta,eps)
         tmp(:,:)=0.0d0
         do l=1,Nchi

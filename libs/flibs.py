@@ -170,7 +170,7 @@ def gen_Green0(eig,uni,mu,temp,Nw):
 
 def gen_green(selfen,hamk,mu,temp):
     Nk=len(hamk)
-    Norb=int(sqrt(hamk.size/Nk))
+    Norb=int(np.sqrt(hamk.size/Nk))
     Nw=int(selfen.size/(Nk*Norb*Norb))
     Gk=np.zeros((Norb,Norb,Nw,Nk),dtype=np.complex128)
     flibs.gen_green_inv.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),        #Gk
@@ -242,23 +242,23 @@ def get_chi0_comb(Gk,kmap,olist,Nx,Ny,Nz,Nw):
 def get_qshift(klist,qpoint):
     Nk=len(klist)
     qshift=np.zeros(Nk,dtype=np.int64)
-    flibs.get_qshift.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64), #qpoint
+    flibs.get_qshift_.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64), #qpoint
                                np.ctypeslib.ndpointer(dtype=np.float64), #klist
                                np.ctypeslib.ndpointer(dtype=np.int64),   #qshift
                                POINTER(c_int64)]                         #Nk
-    flibs.get_qshift.restype=c_void_p
-    flibs.get_qshift(qpoint,klist,qshift,byref(c_int64(Nk)))
+    flibs.get_qshift_.restype=c_void_p
+    flibs.get_qshift_(qpoint,klist,qshift,byref(c_int64(Nk)))
     return qshift
 
 def get_iqshift(klist,qpoint):
     Nk=len(klist)
     qshift=np.zeros(Nk,dtype=np.int64)
-    flibs.get_iqshift.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64), #qpoint
+    flibs.get_iqshift_.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64), #qpoint
                                np.ctypeslib.ndpointer(dtype=np.float64), #klist
                                np.ctypeslib.ndpointer(dtype=np.int64),   #qshift
                                POINTER(c_int64)]                         #Nk
-    flibs.get_iqshift.restype=c_void_p
-    flibs.get_iqshift(qpoint,klist,qshift,byref(c_int64(Nk)))
+    flibs.get_iqshift_.restype=c_void_p
+    flibs.get_iqshift_(qpoint,klist,qshift,byref(c_int64(Nk)))
     return qshift
 
 def get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp):
@@ -522,25 +522,40 @@ def get_imp_spectrum(uni,eigs,mu,wlist,klist,rlist,eta=1.0e-3):
 
 def get_a(inp_data,xlist):
     Np=len(inp_data)
-    a=np.zeros(Np,dtype=np.compex128)
-    flibs.get_a.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #a
+    a=np.zeros(Np,dtype=np.complex128)
+    flibs.get_a_.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #a
                           np.ctypeslib.ndpointer(dtype=np.complex128), #xlist
                           np.ctypeslib.ndpointer(dtype=np.complex128), #inpdata
                           POINTER(c_int64)]                            #Np
-    flibs.get_a.retype=c_void_p
-    flibs.get_a(a,xlist,inp_data,byref(c_int64(Np)))
+    flibs.get_a_.retype=c_void_p
+    flibs.get_a_(a,xlist,inp_data,byref(c_int64(Np)))
     return a
 
 def get_QP(a,xlist,wlist):
     Nw,Np=len(wlist),len(a)
-    Q=np.zeros(Nw,dtype=np.compex128)
-    P=np.zeros(Nw,dtype=np.compex128)
-    flibs.get_qp.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #P
+    Q=np.zeros(Nw,dtype=np.complex128)
+    P=np.zeros(Nw,dtype=np.complex128)
+    flibs.get_qp_.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #P
                            np.ctypeslib.ndpointer(dtype=np.complex128), #Q
                            np.ctypeslib.ndpointer(dtype=np.complex128), #a
                            np.ctypeslib.ndpointer(dtype=np.complex128), #xlist
                            np.ctypeslib.ndpointer(dtype=np.complex128), #wlist
                            POINTER(c_int64),POINTER(c_int64)]           #Nw,Np
-    flibs.get_qp.retype=c_void_p
-    flibs.get_qp(P,Q,a,xlist,wlist,byref(c_int64(Nw)),byref(c_int64(Np)))
+    flibs.get_qp_.retype=c_void_p
+    flibs.get_qp_(P,Q,a,xlist,wlist,byref(c_int64(Nw)),byref(c_int64(Np)))
     return Q,P
+
+def pade_with_trace(A,iwlist,wlist):
+    Nk,Nw,Niw=len(A.T),len(wlist),len(iwlist)
+    Norb=int(np.sqrt(A.size/(Nk*Niw)))
+    B=np.zeros((Nk,Nw),dtype=np.complex128)
+    flibs.pade_with_trace.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #A
+                                    np.ctypeslib.ndpointer(dtype=np.complex128), #B
+                                    np.ctypeslib.ndpointer(dtype=np.complex128), #iwlist
+                                    np.ctypeslib.ndpointer(dtype=np.complex128), #wlist
+                                    POINTER(c_int64),POINTER(c_int64),           #Nk,Niw
+                                    POINTER(c_int64),POINTER(c_int64)]           #Nw,Norb
+    flibs.pade_with_trace.retype=c_void_p
+    flibs.pade_with_trace(A,B,iwlist,wlist,byref(c_int64(Nk)),byref(c_int64(Niw)),
+                          byref(c_int64(Nw)),byref(c_int64(Norb)))
+    return B

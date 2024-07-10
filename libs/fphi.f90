@@ -1,15 +1,4 @@
-subroutine get_iqshift(qpoint,klist,qshift,Nk) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int64,real64
-  implicit none
-  integer(int64),intent(in):: Nk
-  real(real64),intent(in),dimension(3,Nk):: klist
-  real(real64),intent(in),dimension(3):: qpoint
-  integer(int64),intent(out),dimension(Nk):: qshift
-  
-  call set_iqshift(qpoint,klist,qshift,Nk)
-end subroutine get_iqshift
-  
-subroutine set_iqshift(qpoint,klist,qshift,Nk)
+subroutine get_iqshift(qpoint,klist,qshift,Nk) bind(C,name="get_iqshift_")
   !shift k to -k+q
   use,intrinsic:: iso_fortran_env, only:int64,real64
   implicit none
@@ -53,7 +42,7 @@ subroutine set_iqshift(qpoint,klist,qshift,Nk)
   end do kq_loop
   !$omp end do
   !$omp end parallel
-end subroutine set_iqshift
+end subroutine get_iqshift
 
 module calc_irr_phi
   use,intrinsic:: iso_fortran_env, only:int32,int64,real64
@@ -184,7 +173,7 @@ subroutine phiq_map(trphi,uni,eig,ffermi,klist,ol,mu,temp,ecut,idelta,eps,Nx,Ny,
         qpoint(1)=dble(i-1)/Nx
         qpoint(2)=dble(j-1)/Ny
         qpoint(3)=0.0d0
-        call set_iqshift(qpoint,klist,qshift,Nk)
+        call get_iqshift(qpoint,klist,qshift,Nk)
         phi(:,:)=calc_phi(Nk,Norb,Nchi,uni,eig,ffermi,ol,mu,temp,qshift,wre,wim,eps)
         do l=1,Nchi
            trphi(j,i)=trphi(j,i)+phi(l,l)

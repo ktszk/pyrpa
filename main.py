@@ -50,7 +50,7 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=14
+option=4
 color_option=2
 
 Nx,Ny,Nz,Nw=32,32,1,200 #k and energy(or matsubara freq.) mesh size
@@ -64,7 +64,7 @@ alpha_beta_gamma=[90.,90.,90]
 temp=2.59e-2
 fill= 2.9375
 
-Emin,Emax=-5,1
+Emin,Emax=-3,3
 delta=3.0e-2
 Ecut=1.0e-2
 tau_const=100
@@ -81,6 +81,7 @@ sw_calc_mu=True #calculate mu or not
 sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 sw_omega=False #True: real freq, False: Matsubara freq.
+sw_self=True  #True: use calculated self energy for spectrum band plot
 #----------------------------------main functions-------------------------------------
 #-------------------------------- import packages ------------------------------------
 import numpy as np
@@ -250,13 +251,23 @@ def set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist
         fscolors=np.array(fscolors)
         return fspolys,fscenters,fscolors
 
-def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw):
+def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw,sw_self=True):
     klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     wlist=np.linspace(Emin,Emax,Nw)
-    Gk=flibs.gen_tr_Greenw_0(eig,mu,wlist,delta)
-    w,x=np.meshgrid(wlist,spa_length)
-    plt.contourf(x,w,Gk,cmap=plt.hot())
+    if sw_self:
+        Gk0=flibs.gen_Green0(eig,uni,mu,temp,Nw)
+        iwlist=np.pi*temp*(2*np.linspace(0,Nw,Nw,False)+1)*1j
+        hamk=flibs.gen_ham(klist,ham_r,rvec)
+        sen=-0.5*Gk0
+        Gk0=flibs.gen_green(sen,hamk,mu,temp)
+        Gk=flibs.pade_with_trace(Gk0,iwlist,wlist-1j*delta).imag
+        w,x=np.meshgrid(wlist,spa_length)
+        plt.contourf(x,w,Gk,cmap=plt.hot())
+    else:
+        Gk=flibs.gen_tr_Greenw_0(eig,mu,wlist,delta)
+        w,x=np.meshgrid(wlist,spa_length)
+        plt.contourf(x,w,Gk,cmap=plt.hot())
     for x in xticks[1:-1]:
         plt.axvline(x,ls='-',lw=0.25,color='black')
     plt.xlim(0,spa_length.max())
@@ -530,7 +541,7 @@ def main():
         fspolys,fscenters,fscolors=set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist)
         plot_3d_surf(fspolys,fscenters,fscolors,color_option,kscale)
     elif option==4: #plot spectrum
-        plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw)
+        plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw,sw_self)
     elif option==5: #calc conductivity
         calc_conductivity_Bolzmann(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,tau_const)
     elif option==6: #calc_optical conductivity
