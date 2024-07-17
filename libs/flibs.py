@@ -158,13 +158,13 @@ def gen_Green0(eig,uni,mu,temp,Nw):
     Nk=len(eig)
     Norb=int(eig.size/Nk)
     Gk=np.zeros((Norb,Norb,Nw,Nk),dtype=np.complex128)
-    flibs.gen_green0.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),        #Gk
+    flibs.gen_green0_.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),        #Gk
                                np.ctypeslib.ndpointer(dtype=np.float64),           #eig
                                np.ctypeslib.ndpointer(dtype=np.complex128),        #uni
                                POINTER(c_double),POINTER(c_double),                #mu,temp
                                POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)] #Nk,Nw,Norb
-    flibs.gen_green0.restype=c_void_p
-    flibs.gen_green0(Gk,eig,uni,byref(c_double(mu)),byref(c_double(temp)),
+    flibs.gen_green0_.restype=c_void_p
+    flibs.gen_green0_(Gk,eig,uni,byref(c_double(mu)),byref(c_double(temp)),
                      byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Norb)))
     return Gk
 
@@ -173,18 +173,18 @@ def gen_green(selfen,hamk,mu,temp):
     Norb=int(np.sqrt(hamk.size/Nk))
     Nw=int(selfen.size/(Nk*Norb*Norb))
     Gk=np.zeros((Norb,Norb,Nw,Nk),dtype=np.complex128)
-    flibs.gen_green_inv.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),        #Gk
+    flibs.gen_green_inv_.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),        #Gk
                                   np.ctypeslib.ndpointer(dtype=np.complex128),        #selfen
                                   np.ctypeslib.ndpointer(dtype=np.complex128),        #hamk
                                   POINTER(c_double),POINTER(c_double),                #mu,temp
                                   POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)] #Nk,Nw,Norb
-    flibs.gen_green_inv.restype=c_void_p
-    flibs.gen_green_inv(Gk,selfen,hamk,byref(c_double(mu)),byref(c_double(temp)),
+    flibs.gen_green_inv_.restype=c_void_p
+    flibs.gen_green_inv_(Gk,selfen,hamk,byref(c_double(mu)),byref(c_double(temp)),
                         byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Norb)))
-    flibs.getinv.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),        #Gk
+    flibs.getinv_.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),        #Gk
                            POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)] #Nk,Nw,Norb
-    flibs.getinv.restype=c_void_p
-    flibs.getinv(Gk,byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Norb)))
+    flibs.getinv_.restype=c_void_p
+    flibs.getinv_(Gk,byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Norb)))
     return Gk
 
 def gen_green_from_eig(selfen,eig,uni,mu,temp):
@@ -238,6 +238,23 @@ def get_chi0_comb(Gk,kmap,olist,Nx,Ny,Nz,Nw):
                         byref(c_int64(Nz)),byref(c_int64(Nw)),byref(c_int64(Nk)),
                         byref(c_int64(Norb)),byref(c_int64(Nchi)))
     return chi
+
+def mkself(hamk,eig,uni,mu,temp,Nw,scf_loop=5,eps=1.0e-3):
+    Nk=len(hamk)
+    Norb=int(np.sqrt(hamk.size/Nk))
+    selfen=np.zeros((Norb,Norb,Nw,Nk),dtype=np.complex128)
+    flibs.mkself.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),        #selfen
+                           np.ctypeslib.ndpointer(dtype=np.complex128),        #hamk
+                           np.ctypeslib.ndpointer(dtype=np.float64),           #eig
+                           np.ctypeslib.ndpointer(dtype=np.complex128),        #uni
+                           POINTER(c_double),POINTER(c_double),                #mu,temp
+                           POINTER(c_int64),POINTER(c_double),                 #scf_loop,eps
+                           POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)] #Nk,Nw,Norb
+    flibs.mkself.restype=c_void_p
+    flibs.mkself(selfen,hamk,eig,uni,byref(c_double(mu)),byref(c_double(temp)),
+                 byref(c_int64(scf_loop)),byref(c_double(eps)),byref(c_int64(Nk)),
+                 byref(c_int64(Nw)),byref(c_int64(Norb)))
+    return selfen
 
 def get_qshift(klist,qpoint):
     Nk=len(klist)

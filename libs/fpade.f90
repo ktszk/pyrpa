@@ -1,4 +1,4 @@
-subroutine get_ap(a,xn,inp_data,Np) bind(C,name="get_a_")
+subroutine get_a(a,xn,inp_data,Np) bind(C,name="get_a_")
   !
   !> calculate pade's constants a
   !
@@ -39,9 +39,9 @@ subroutine get_ap(a,xn,inp_data,Np) bind(C,name="get_a_")
   end do
 
   return
-end subroutine get_ap
+end subroutine get_a
 
-subroutine get_QPz(P,Q,a,xn,wlist,Nw,Np) bind(C,name='get_qp_')
+subroutine get_QP(P,Q,a,xn,wlist,Nw,Np) bind(C,name='get_qp_')
   !
   !>  calculate rational function P,Q for pade
   !
@@ -81,7 +81,7 @@ subroutine get_QPz(P,Q,a,xn,wlist,Nw,Np) bind(C,name='get_qp_')
   end do
 
   return
-end subroutine get_QPz
+end subroutine get_QP
 
 subroutine pade_analytic_continuation_arrays(arrayin,arrayout,iwlist,wlist,Nk,Niw,Nw) bind(C,name="pade_analytic_continuation_arrays_")
   use,intrinsic:: iso_fortran_env, only:int32,int64,real64

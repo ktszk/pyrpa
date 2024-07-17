@@ -24,23 +24,23 @@ subroutine FFT(cmat,tmp,Nx,Ny,Nz,Nw,SW)
   if(.not. SW) cmat=tmp/product(Nlist)
 end subroutine FFT
 
-subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,norb) bind(C)
+subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb) bind(C,name="gen_green0_")
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   use constant
   implicit none
   integer(int64),intent(in):: Nk,Nw,norb
   real(real64),intent(in):: mu,temp
-  real(real64),intent(in),dimension(norb,Nk):: eig
-  complex(real64),intent(in),dimension(norb,norb,Nk):: uni
-  complex(real64),intent(out),dimension(Nk,Nw,norb,norb):: Gk
+  real(real64),intent(in),dimension(Norb,Nk):: eig
+  complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
+  complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: Gk
   
   integer(int32) i,j,l,m,n
   complex(real64) iw
 
   !$omp parallel private(l,m,n)
-  do l=1,norb
-     do m=1,norb
-        band_loop: do n=1,norb
+  do l=1,Norb
+     do m=1,Norb
+        band_loop: do n=1,Norb
            !$omp do private(iw,i,j)
            wloop: do j=1,Nw !ien=pi(2l+1)/beta l=0,1,...
               iw=cmplx(mu,dble(2*(j-1)+1)*pi*temp)
@@ -55,11 +55,11 @@ subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,norb) bind(C)
   !$omp end parallel
 end subroutine gen_green0
 
-subroutine gen_green_inv(Gk,self,hamk,mu,temp,Nk,Nw,norb) bind(C)
+subroutine gen_green_inv(Gk,self,hamk,mu,temp,Nk,Nw,Norb) bind(C,name="gen_green_inv_")
   use,intrinsic:: iso_fortran_env, only: int64,real64,int32
   use constant
   implicit none
-  integer(int64),intent(in):: Nk,Nw,norb
+  integer(int64),intent(in):: Nk,Nw,Norb
   real(real64),intent(in):: mu,temp
   complex(real64),intent(in),dimension(norb,norb,Nk):: hamk
   complex(real64),intent(in),dimension(Nk,Nw,norb,norb):: self
@@ -70,8 +70,8 @@ subroutine gen_green_inv(Gk,self,hamk,mu,temp,Nk,Nw,norb) bind(C)
 
   !G^-1=G^-1_0-sigma (=iwI-Hk-sigma)
   !$omp parallel private(l,m)
-  do l=1,norb
-     do m=1,norb
+  do l=1,Norb
+     do m=1,Norb
         !$omp do private(iw,i)
         do j=1,Nw
            iw=cmplx(mu,dble(2*(j-1)+1)*pi*temp)
@@ -121,7 +121,7 @@ subroutine gen_green_inv_from_eig(Gk,self,uni,eig,mu,temp,Nk,Nw,Norb) bind(C)
   !$omp end parallel
 end subroutine gen_green_inv_from_eig
 
-subroutine getinv(Gk,Nk,Nw,Norb) bind(C)
+subroutine getinv(Gk,Nk,Nw,Norb) bind(C,name="getinv_")
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nk,Nw,Norb
@@ -133,7 +133,7 @@ subroutine getinv(Gk,Nk,Nw,Norb) bind(C)
   !$omp parallel do private(i,j,tmp,work,ipiv,info)
   do i=1,Nw
      do j=1,Nk
-        tmp(:,:)=Gk(i,j,:,:)
+        tmp(:,:)=Gk(j,i,:,:)
         call zgetrf(Norb,Norb,tmp,Norb,ipiv,info)
         call zgetri(Norb,tmp,Norb,ipiv,work,2*Norb,info)
      end do
@@ -214,3 +214,32 @@ subroutine get_chi0_comb(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
      end do chi_orb_loo2
   end do chi_orb_loop1
 end subroutine get_chi0_comb
+
+subroutine mkself(selfen,hamk,eig,uni,mu,temp,scf_loop,eps,Nk,Nw,Norb) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  implicit none
+  integer(int64),intent(in):: Nk,Nw,Norb,scf_loop
+  real(real64),intent(in):: mu,temp,eps
+  real(real64),intent(in),dimension(Norb,Nk):: eig
+  complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni,hamk
+  complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: selfen
+
+  integer(int32) scf_i
+  complex(real64),dimension(Nk,Nw,Norb,Norb):: Gk,selfen0
+  
+  selfen0(:,:,:,:)=0.0d0
+  call gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb)
+  do scf_i=1,scf_loop
+     print*,'iter=',scf_i
+     selfen(:,:,:,:)=-1.5*Gk(:,:,:,:)
+     print*,'gen self energy'
+     if(sum(abs(selfen(:,:,:,:)-selfen0(:,:,:,:)))<eps)then
+        exit
+     end if
+     call gen_green_inv(Gk,selfen,hamk,mu,temp,Nk,Nw,Norb)
+     print*,'calc gk inv'
+     call getinv(Gk,Nk,Nw,Norb)
+     print*,'calc gk'
+     selfen0(:,:,:,:)=selfen(:,:,:,:)
+  end do
+end subroutine mkself

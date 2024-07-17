@@ -256,12 +256,12 @@ def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw,
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     wlist=np.linspace(Emin,Emax,Nw)
     if sw_self:
-        Gk0=flibs.gen_Green0(eig,uni,mu,temp,Nw)
+        #Gk0=flibs.gen_Green0(eig,uni,mu,temp,Nw)
         iwlist=np.pi*temp*(2*np.linspace(0,Nw,Nw,False)+1)*1j
         hamk=flibs.gen_ham(klist,ham_r,rvec)
-        sen=-0.5*Gk0
-        Gk0=flibs.gen_green(sen,hamk,mu,temp)
-        Gk=flibs.pade_with_trace(Gk0,iwlist,wlist-1j*delta).imag
+        selfen=flibs.mkself(hamk,eig,uni,mu,temp,Nw)
+        Gk0=flibs.gen_green(selfen,hamk,mu,temp)
+        Gk=flibs.pade_with_trace(selfen,iwlist,wlist-1j*delta).imag
         w,x=np.meshgrid(wlist,spa_length)
         plt.contourf(x,w,Gk,cmap=plt.hot())
     else:
