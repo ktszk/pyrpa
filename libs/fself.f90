@@ -141,7 +141,7 @@ subroutine getinv(Gk,Nk,Nw,Norb) bind(C,name="getinv_")
   !$omp end parallel do
 end subroutine getinv
 
-subroutine get_chi0_comb(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
+subroutine get_chi0_conv(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nw,Norb,Nchi,Nk,Nx,Ny,Nz
@@ -180,15 +180,15 @@ subroutine get_chi0_comb(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
         !$omp parallel do private(i)
         w_loop_Gk_to_tmp:do j=1,Nw
            k_loop_Gk_to_tmp:do i=1,Nk
-              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(l,1),olist(m,2)) !G13(iw)
-              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(l,2),olist(m,1)) !G42(iw)
-              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(m,2),olist(l,1))) !G13(-iw)=G^*31(iw)
-              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(m,1),olist(l,2))) !G42(-iw)=G^*24(iw)
+              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(l,1),olist(m,1)) !G13(iw)
+              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(m,2),olist(l,2)) !G42(iw)
+              tmp1(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(m,1),olist(l,1))) !G13(-iw)=G^*31(iw)
+              tmp2(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(l,2),olist(m,2))) !G42(-iw)=G^*24(iw)
            end do k_loop_Gk_to_tmp
         end do w_loop_Gk_to_tmp
         !$omp end parallel do
-        !call FFT(tmp1,tmp,Nx,Ny,Nz,2*Nw,.true.)
-        !call FFT(tmp2,tmp,Nx,Ny,Nz,2*Nw,.true.)
+        call FFT(tmp1,tmp,Nx,Ny,Nz,2*Nw,.true.)
+        call FFT(tmp2,tmp,Nx,Ny,Nz,2*Nw,.true.)
         !calculate G(r)G(-r)
         !$omp parallel do private(i,j,k)
         w_loop_conv:do n=1,2*Nw
@@ -213,7 +213,59 @@ subroutine get_chi0_comb(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
         !$omp end parallel do
      end do chi_orb_loo2
   end do chi_orb_loop1
-end subroutine get_chi0_comb
+end subroutine get_chi0_conv
+
+subroutine get_chi0_sum(chi,Gk,klist,olist,Nw,Nk,Norb,Nchi) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  implicit none
+  integer(int64),intent(in):: Nw,Norb,Nchi,Nk
+  integer(int64),intent(in),dimension(Nchi,2):: olist
+  integer(int64),intent(in),dimension(3,Nk):: klist
+  complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
+  complex(real64),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
+
+  integer(int32) i,j,l,m,iq,iw
+  integer(int32),dimension(2*Nw):: wshift
+  integer(int64),dimension(Nk):: qshift
+  complex(real64),dimension(Nk,2*Nw):: tmpgk13,tmpgk42
+
+  chi(:,:,:,:)=0.0d0
+  do l=1,Nchi
+     do m=1,Nchi
+        !$omp parallel
+        !$omp do private(i,j)
+        do j=1,Nw
+           do i=1,Nk
+              tmpgk13(i,j)=Gk(i,j,olist(m,1),olist(l,1))
+              tmpgk42(i,j)=Gk(i,j,olist(l,2),olist(m,2))
+              tmpgk13(i,2*Nw-j+1)=conjg(Gk(i,j,olist(l,1),olist(m,1)))
+              tmpgk42(i,2*Nw-j+1)=conjg(Gk(i,j,olist(m,2),olist(l,2)))
+           end do
+        end do
+        !$omp end do
+        !$omp do private(iw,j,iq,i,wshift,qshift)
+        wloop: do iw=1,Nw
+           do j=1,2*Nw
+              wshift(j)=mod(j+iw-1,2*Nw)
+              if(wshift(j)==2*Nw)then
+                 wshift(j)=2*Nw
+              end if
+           end do
+           qloop: do iq=1,Nk
+              call get_qshift(klist(:,iq),klist,qshift,Nk)
+              wloop2: do j=1,2*Nw
+                 kloop: do i=1,Nk
+                    chi(iq,iw,m,l)=chi(iq,iw,m,l)-tmpgk13(i,j)*tmpgk42(qshift(i),wshift(j))
+                 end do kloop
+              end do wloop2
+           end do qloop
+        end do wloop
+        !$omp end do
+        !$omp end parallel
+     end do
+  end do
+  chi(:,:,:,:)=chi(:,:,:,:)/Nk
+end subroutine get_chi0_sum
 
 subroutine mkself(selfen,hamk,eig,uni,mu,temp,scf_loop,eps,Nk,Nw,Norb) bind(C)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32

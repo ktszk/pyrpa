@@ -222,21 +222,38 @@ def gen_tr_Greenw_0(eig,mu,wlist,delta):
                           byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Norb)))
     return -trGk.imag
 
-def get_chi0_comb(Gk,kmap,olist,Nx,Ny,Nz,Nw):
+def get_chi0_conv(Gk,kmap,olist,Nx,Ny,Nz):
     Nk=len(Gk[0,0,0])
     Norb,Nchi=len(Gk),len(olist)
+    Nw=int(Gk.size/(Norb*Norb*Nk))
     chi=np.zeros((Nchi,Nchi,Nw,Nk),dtype=np.complex128)
-    flibs.get_chi0_comb.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),        #chi
+    flibs.get_chi0_conv.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),        #chi
                                   np.ctypeslib.ndpointer(dtype=np.complex128),        #Gk
                                   np.ctypeslib.ndpointer(dtype=np.int64),             #kmap
                                   np.ctypeslib.ndpointer(dtype=np.int64),             #olist
                                   POINTER(c_int64),POINTER(c_int64),POINTER(c_int64), #Nx,Ny,Nz
                                   POINTER(c_int64),POINTER(c_int64),                  #Nw,Nk
                                   POINTER(c_int64),POINTER(c_int64)]                  #Norb,Nchi
-    flibs.get_chi0_comb.restype=c_void_p
-    flibs.get_chi0_comb(chi,Gk,kmap,olist,byref(c_int64(Nx)),byref(c_int64(Ny)),
+    flibs.get_chi0_conv.restype=c_void_p
+    flibs.get_chi0_conv(chi,Gk,kmap,olist,byref(c_int64(Nx)),byref(c_int64(Ny)),
                         byref(c_int64(Nz)),byref(c_int64(Nw)),byref(c_int64(Nk)),
                         byref(c_int64(Norb)),byref(c_int64(Nchi)))
+    return chi
+
+def get_chi0_sum(Gk,klist,olist):
+    Nk=len(klist)
+    Norb,Nchi=len(Gk),len(olist)
+    Nw=int(Gk.size/(Norb*Norb*Nk))
+    chi=np.zeros((Nchi,Nchi,Nw,Nk),dtype=np.complex128)
+    flibs.get_chi0_sum.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),        #chi
+                                 np.ctypeslib.ndpointer(dtype=np.complex128),        #Gk
+                                 np.ctypeslib.ndpointer(dtype=np.int64),             #klist
+                                 np.ctypeslib.ndpointer(dtype=np.int64),             #olist
+                                 POINTER(c_int64),POINTER(c_int64),                  #Nw,Nk
+                                 POINTER(c_int64),POINTER(c_int64)]                  #Norb,Nchi
+    flibs.get_chi0_sum.restype=c_void_p
+    flibs.get_chi0_sum(chi,Gk,klist,olist,byref(c_int64(Nw)),byref(c_int64(Nk)),
+                       byref(c_int64(Norb)),byref(c_int64(Nchi)))
     return chi
 
 def mkself(hamk,eig,uni,mu,temp,Nw,scf_loop=5,eps=1.0e-3):
