@@ -82,6 +82,8 @@ sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 sw_omega=False #True: real freq, False: Matsubara freq.
 sw_self=True  #True: use calculated self energy for spectrum band plot
+
+#------------------------ initial parameters are above -------------------------------
 #----------------------------------main functions-------------------------------------
 #-------------------------------- import packages ------------------------------------
 import numpy as np

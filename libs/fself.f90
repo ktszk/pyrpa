@@ -236,11 +236,9 @@ subroutine get_chi0_sum(chi,Gk,klist,olist,temp,Nw,Nk,Norb,Nchi) bind(C)
   complex(real64),dimension(Nk,2*Nw):: tmpgk13,tmpgk42
 
   weight=temp/dble(Nk)
-  chi(:,:,:,:)=0.0d0
   do l=1,Nchi
      do m=1,Nchi
-        !$omp parallel
-        !$omp do private(i,j)
+        !$omp parallel do private(i)
         do j=1,Nw
            do i=1,Nk
               tmpgk13(i,j)=Gk(i,j,olist(m,1),olist(l,1))
@@ -249,26 +247,27 @@ subroutine get_chi0_sum(chi,Gk,klist,olist,temp,Nw,Nk,Norb,Nchi) bind(C)
               tmpgk42(i,2*Nw-j+1)=conjg(Gk(i,j,olist(m,2),olist(l,2)))
            end do
         end do
-        !$omp end do
-        !$omp do private(iw,j,iq,i,wshift,qshift)
+        !$omp end parallel do
         wloop: do iw=1,Nw
-           do j=1,2*Nw
+           wl_loop: do j=1,2*Nw
               wshift(j)=mod(j+iw-1,2*Nw)
-              if(wshift(j)==2*Nw)then
+              if(wshift(j)==0)then
                  wshift(j)=2*Nw
               end if
-           end do
+           end do wl_loop
            qloop: do iq=1,Nk
               call get_qshift(klist(:,iq),klist,qshift,Nk)
+              !$omp parallel do private(i) reduction(+: chi)
               wloop2: do j=1,2*Nw
+                 !$omp simd
                  kloop: do i=1,Nk
                     chi(iq,iw,m,l)=chi(iq,iw,m,l)-tmpgk13(i,j)*tmpgk42(qshift(i),wshift(j))
                  end do kloop
+                 !$omp end simd
               end do wloop2
+              !$omp end parallel do
            end do qloop
         end do wloop
-        !$omp end do
-        !$omp end parallel
      end do
   end do
   chi(:,:,:,:)=chi(:,:,:,:)*weight
