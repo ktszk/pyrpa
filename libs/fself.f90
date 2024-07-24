@@ -141,19 +141,22 @@ subroutine getinv(Gk,Nk,Nw,Norb) bind(C,name="getinv_")
   !$omp end parallel do
 end subroutine getinv
 
-subroutine get_chi0_conv(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
+subroutine get_chi0_conv(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nw,Norb,Nchi,Nk,Nx,Ny,Nz
   integer(int64),intent(in),dimension(Nchi,2):: olist
   integer(int64),intent(in),dimension(3,Nk):: kmap
+  real(real64),intent(in):: temp
   complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
   complex(real64),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
 
   integer(int32) i,j,k,l,m,n
   integer(int32) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1)
+  real(real64) weight
   complex(real64),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpchi,tmp,tmp1,tmp2
 
+  weight=temp/dble(Nk)
   ii(0)=0
   ij(0)=0
   ik(0)=0
@@ -213,22 +216,26 @@ subroutine get_chi0_conv(chi,Gk,kmap,olist,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
         !$omp end parallel do
      end do chi_orb_loo2
   end do chi_orb_loop1
+  chi(:,:,:,:)=chi(:,:,:,:)*weight
 end subroutine get_chi0_conv
 
-subroutine get_chi0_sum(chi,Gk,klist,olist,Nw,Nk,Norb,Nchi) bind(C)
+subroutine get_chi0_sum(chi,Gk,klist,olist,temp,Nw,Nk,Norb,Nchi) bind(C)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nw,Norb,Nchi,Nk
   integer(int64),intent(in),dimension(Nchi,2):: olist
-  integer(int64),intent(in),dimension(3,Nk):: klist
+  real(real64),intent(in),dimension(3,Nk):: klist
+  real(real64),intent(in):: temp
   complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
   complex(real64),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
 
   integer(int32) i,j,l,m,iq,iw
   integer(int32),dimension(2*Nw):: wshift
   integer(int64),dimension(Nk):: qshift
+  real(real64) weight
   complex(real64),dimension(Nk,2*Nw):: tmpgk13,tmpgk42
 
+  weight=temp/dble(Nk)
   chi(:,:,:,:)=0.0d0
   do l=1,Nchi
      do m=1,Nchi
@@ -264,8 +271,27 @@ subroutine get_chi0_sum(chi,Gk,klist,olist,Nw,Nk,Norb,Nchi) bind(C)
         !$omp end parallel
      end do
   end do
-  chi(:,:,:,:)=chi(:,:,:,:)/Nk
+  chi(:,:,:,:)=chi(:,:,:,:)*weight
 end subroutine get_chi0_sum
+
+subroutine get_trace_chi(trchi,chi,Nk,Nw,Nchi) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  implicit none
+  integer(int64),intent(in):: Nk,Nw,Nchi
+  complex(real64),intent(in),dimension(Nk,Nw,Nchi,Nchi):: chi
+  complex(real64),intent(out),dimension(Nk,Nw):: trchi
+
+  integer(int32) i,j,k
+
+  !trchi(:,:)=0.0d0
+  do k=1,Nchi
+     do j=1,Nw
+        do i=1,Nk
+           trchi(i,j)=trchi(i,j)+chi(i,j,k,k)
+        end do
+     end do
+  end do
+end subroutine get_trace_chi
 
 subroutine mkself(selfen,hamk,eig,uni,mu,temp,scf_loop,eps,Nk,Nw,Norb) bind(C)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32

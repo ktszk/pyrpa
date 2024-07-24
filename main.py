@@ -53,7 +53,7 @@ color_option defines the meaning of color on Fermi surfaces
 option=14
 color_option=2
 
-Nx,Ny,Nz,Nw=8,8,1,128 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=32,32,1,128 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
@@ -422,11 +422,13 @@ def calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,olist):
     Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
     if True:
         print("calc chi0 with summation")
-        chi=flibs.get_chi0_sum(Gk,kmap,olist)
+        chi=flibs.get_chi0_sum(Gk,klist,olist,temp)
     else:
         print("calc chi0 with convolution")
-        chi=flibs.get_chi0_conv(Gk,kmap,olist,Nx,Ny,Nz)
-    print(chi)
+        chi=flibs.get_chi0_conv(Gk,kmap,olist,temp,Nx,Ny,Nz)
+    trchi=chi[12,12,0]
+    plt.contourf(klist[:,0].reshape(Nx,Ny),klist[:,1].reshape(Nx,Ny),trchi.reshape(Nx,Ny).real,100)
+    plt.show()
 
 def get_carrier_num(kmesh,rvec,ham_r,S_r,mu,Arot):
     Nk,eig,kwieght=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,S_r,rvec,Arot)
