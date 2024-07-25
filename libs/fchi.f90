@@ -249,37 +249,3 @@ subroutine get_chis(chis,chi0,Smat,Nchi,Nw) bind(C)
   end do
   !$omp end parallel do
 end subroutine get_chis
-
-subroutine get_smat(Smat,ol,Uval,Jval,Nchi,Norb) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
-  implicit none
-  integer(int64),intent(in):: Nchi,Norb
-  integer(int64),intent(in),dimension(Nchi,2):: ol
-  real(real64),intent(in):: Uval,Jval
-  real(real64),intent(out),dimension(Nchi,Nchi):: Smat
- 
-  integer(int32) i,j
- 
-  !$omp parallel
-  !$omp workshare
-  Smat(:,:)=0.0d0
-  !$omp end workshare
-  !$omp do private(j)
-  do i=1,Nchi
-     do j=1,Nchi
-        if((ol(i,1)==ol(i,2)).and.(ol(j,1)==ol(j,2)))then
-           if(ol(i,1)==ol(j,1))then
-              Smat(j,i)=Uval
-           else
-              Smat(j,i)=Jval
-           end if
-        else if((ol(i,1)==ol(j,1)).and.(ol(i,2)==ol(j,2)))then
-           Smat(j,i)=Uval-2*Jval
-        else if((ol(i,1)==ol(j,2)).and.(ol(i,2)==ol(j,1)))then
-           Smat(j,i)=Jval
-        end if
-     end do
-  end do
-  !$omp end do
-  !$omp end parallel
-end subroutine get_smat

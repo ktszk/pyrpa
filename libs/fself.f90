@@ -142,7 +142,7 @@ subroutine getinv(Gk,Nk,Nw,Norb) bind(C,name="getinv_")
   !$omp end parallel do
 end subroutine getinv
 
-subroutine get_chi0_conv(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C)
+subroutine get_chi0_conv(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C,name='get_chi0_conv_')
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nw,Norb,Nchi,Nk,Nx,Ny,Nz
@@ -155,8 +155,8 @@ subroutine get_chi0_conv(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C
   integer(int32) i,j,k,l,m,n
   integer(int32) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1)
   real(real64) weight
-  complex(real64),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpchi,tmp,tmpgk13,tmpgk42
-
+  complex(real64),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmp,tmpgk13,tmpgk42
+  
   weight=temp/dble(Nk)
   ii(0)=0
   ij(0)=0
@@ -169,12 +169,12 @@ subroutine get_chi0_conv(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C
   !$omp end do
   !$omp do
   do i=1,Ny-1
-     ij(i)=Ny-j
+     ij(i)=Ny-i
   end do
   !$omp end do
   !$omp do
   do i=1,Nz-1
-     ik(i)=Nz-k
+     ik(i)=Nz-i
   end do
   !$omp end do
   !$omp end parallel
@@ -200,18 +200,18 @@ subroutine get_chi0_conv(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C
               y_loop:do j=0,Ny-1
                  !$omp simd
                  x_loop:do i=0,Nx-1
-                    tmpchi(i,j,k,n)=-tmpgk13(i,j,k,n)*tmpgk42(ii(i),ij(j),ik(k),2*Nw-n+1)
+                    tmp(i,j,k,n)=-tmpgk13(i,j,k,n)*tmpgk42(ii(i),ij(j),ik(k),2*Nw-n+1)
                  end do x_loop
                  !$omp end simd
               end do y_loop
            end do z_loop
         end do w_loop_conv
         !$omp end parallel do
-        call FFT(tmpchi,tmp,Nx,Ny,Nz,2*Nw,.false.)
+        call FFT(tmp,tmpgk13,Nx,Ny,Nz,2*Nw,.false.)
         !$omp parallel do private(i,j)
         w_loop_tmp_to_chi:do j=1,Nw
            k_loop_tmp_to_chi:do i=1,Nk
-              chi(i,j,m,l)=tmpchi(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight
+              chi(i,j,m,l)=tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight
            end do k_loop_tmp_to_chi
         end do w_loop_tmp_to_chi
         !$omp end parallel do
@@ -220,6 +220,9 @@ subroutine get_chi0_conv(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C
 end subroutine get_chi0_conv
 
 subroutine get_chi0_sum(chi,Gk,klist,olist,temp,Nw,Nk,Norb,Nchi) bind(C)
+  !
+  !> It obtains chi_0 using summation. Its cost is O(Nk^2), so it is heavy. You should use get_chi0_conv.
+  !
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nw,Norb,Nchi,Nk
@@ -273,6 +276,162 @@ subroutine get_chi0_sum(chi,Gk,klist,olist,temp,Nw,Nk,Norb,Nchi) bind(C)
   chi(:,:,:,:)=chi(:,:,:,:)*weight
 end subroutine get_chi0_sum
 
+subroutine get_Vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi)
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  implicit none
+  integer(int64),intent(in):: Nk,Nw,Nchi
+  real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  complex(real64),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
+
+  integer(int32) i,j,l,m,n,info
+  integer(int32),dimension(Nchi):: ipiv
+  complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,cmat5
+  complex(real64),dimension(2*Nchi):: work
+
+  do j=1,Nw
+     do i=1,Nk
+        !$omp parallel
+        !$omp workshare
+        cmat1(:,:)=0.0d0
+        cmat2(:,:)=0.0d0
+        !$omp end workshare
+        !$omp do private(m,n)
+        do l=1,Nchi
+           do m=1,Nchi
+              do n=1,Nchi
+                 cmat1(m,l)=cmat1(m,l)-chi(i,j,m,n)*Smat(n,l) !-chi0S
+                 cmat2(m,l)=cmat2(m,l)+chi(i,j,m,n)*Cmat(n,l) !chi0C
+              end do
+           end do
+        end do
+        !$omp end do
+        !$omp workshare
+        cmat3(:,:)=-cmat1(:,:) !chi0S
+        cmat4(:,:)=cmat2(:,:)  !chi0C
+        !$omp end workshare
+        !$omp do 
+        do l=1,Nchi
+           cmat1(l,l)=cmat1(l,l)+1.0d0 !I-chi0S
+           cmat2(l,l)=cmat2(l,l)+1.0d0 !I+chi0C
+        end do
+        !$omp end do
+        !$omp end parallel
+        call zgetrf(Nchi,Nchi,cmat1,Nchi,ipiv,info)
+        call zgetri(Nchi,cmat1,Nchi,ipiv,work,2*Nchi,info)
+        call zgetrf(Nchi,Nchi,cmat2,Nchi,ipiv,info)
+        call zgetri(Nchi,cmat2,Nchi,ipiv,work,2*Nchi,info)
+        !$omp parallel
+        !$omp workshare
+        cmat5(:,:)=0.0d0
+        !$omp end workshare
+        !$omp do private(m,n)
+        do l=1,Nchi
+           do m=1,Nchi
+              do n=1,Nchi
+                 cmat5(m,l)=cmat5(m,l)+cmat1(m,n)*cmat3(n,l) !(1-chi0S)^-1chi0S
+              end do
+           end do
+        end do
+        !$omp end do
+        !$omp workshare
+        cmat1(:,:)=cmat5(:,:)
+        cmat5(:,:)=0.0d0
+        !$omp end workshare
+        !$omp do private(m,n)
+        do l=1,Nchi
+           do m=1,Nchi
+              do n=1,Nchi
+                 cmat5(m,l)=cmat5(m,l)+cmat2(m,n)*cmat4(n,l) !(1-chi0S)^-1chi0S
+              end do
+           end do
+        end do
+        !$omp end do
+        !$omp workshare
+        cmat2(:,:)=cmat5(:,:)
+        cmat5(:,:)=cmat3(:,:)+cmat4(:,:)
+        cmat4(:,:)=1.5d0*Smat(:,:)-0.5d0*Cmat(:,:)
+        !$omp end workshare
+        !$omp do private(m,n)
+        do l=1,Nchi
+           do m=1,Nchi
+              do n=1,Nchi
+                 cmat4(m,l)=cmat4(m,l)+1.5d0*Smat(m,n)*cmat1(n,l)+0.5d0*Cmat(m,n)*cmat2(n,l)&
+                      -0.25*(Cmat(m,n)+Smat(m,n))*cmat5(n,l) !subtract double count 2nd order buble(ladder)
+              end do
+           end do
+        end do
+        !$omp end do
+        !$omp workshare
+        chi(i,j,:,:)=cmat4(:,:)
+        !$omp end workshare
+        !$omp end parallel
+     end do
+  end do
+end subroutine get_Vsigma_flex_nosoc
+
+subroutine calc_sigma(sigmak,Gk,Vsigma,kmap,olist,temp,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  implicit none
+  integer(int64),intent(in):: Nk,Nw,Nchi,Norb,Nx,Ny,Nz
+  integer(int64),intent(in),dimension(3,Nk):: kmap
+  integer(int64),intent(in),dimension(Nchi,2):: olist
+  real(real64),intent(in):: temp
+  complex(real64),intent(in),dimension(Nk,Nw,Nchi,Nchi):: Vsigma
+  complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
+  complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: sigmak
+
+  integer(int32) i,j,k,n,l,m
+  real(real64) weight
+  complex(real64),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpVsigma,tmp,tmpgk
+
+  weight=temp/dble(Nk)
+  sigmak(:,:,:,:)=0.0d0
+  do l=1,Nchi
+     do m=1,Nchi
+        !$omp parallel do private(i)
+        do j=1,Nw
+           do i=1,Nk
+              tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vsigma(i,j,m,l) !Vsigma(iw)
+              tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Vsigma(i,j,l,m)) !Vsigma(-iw)ml=Vsigma^*lm(iw)
+              tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(m,2),olist(l,2)) !G42(iw)
+              tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(l,2),olist(m,2))) !G42(-iw)=G^*24(iw)
+           end do
+        end do
+        !$omp end parallel do
+        print *,'FFT'
+        call FFT(tmpVsigma,tmp,Nx,Ny,Nz,2*Nw,.true.)
+        call FFT(tmpgk,tmp,Nx,Ny,Nz,2*Nw,.true.)
+        !$omp parallel
+        !$omp do private(i,j,k,n)
+        do n=1,2*Nw
+           do k=0,Nz-1
+              do j=0,Ny-1
+                 do i=0,Nx-1
+                    tmp(i,j,k,n)=tmpVsigma(i,j,k,n)*tmpgk(i,j,k,n)
+                 end do
+              end do
+           end do
+        end do
+        !$omp end do
+        !$omp workshare
+        tmpgk=0.0d0
+        !$omp end workshare
+        !$omp end parallel
+        call FFT(tmp,tmpgk,Nx,Ny,Nz,2*Nw,.false.)
+        !$omp parallel do private(i,j)
+        do j=1,Nw
+           do i=1,Nk
+              sigmak(i,j,olist(m,1),olist(l,1))=sigmak(i,j,olist(m,1),olist(l,1))+tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)
+           end do
+        end do
+        !$omp end parallel do
+     end do
+  end do
+  !$Omp parallel workshare
+  sigmak(:,:,:,:)=sigmak(:,:,:,:)*weight
+  !$omp end parallel workshare
+end subroutine calc_sigma
+
 subroutine get_trace_chi(trchi,chi,Nk,Nw,Nchi) bind(C)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
@@ -292,31 +451,72 @@ subroutine get_trace_chi(trchi,chi,Nk,Nw,Nchi) bind(C)
   end do
 end subroutine get_trace_chi
 
-subroutine mkself(selfen,hamk,eig,uni,mu,temp,scf_loop,eps,Nk,Nw,Norb) bind(C)
+subroutine mkself(sigmak,Smat,Cmat,kmap,olist,hamk,eig,uni,mu,temp,scf_loop,pp,eps,Nk,Nw,Norb,Nchi,Nx,Ny,Nz) bind(C)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
-  integer(int64),intent(in):: Nk,Nw,Norb,scf_loop
-  real(real64),intent(in):: mu,temp,eps
+  integer(int64),intent(in):: Nw,Norb,Nchi,Nk,Nx,Ny,Nz,scf_loop
+  integer(int64),intent(in),dimension(Nchi,2):: olist
+  integer(int64),intent(in),dimension(3,Nk):: kmap
+  real(real64),intent(in):: mu,temp,eps,pp
   real(real64),intent(in),dimension(Norb,Nk):: eig
+  real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni,hamk
-  complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: selfen
+  complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: sigmak
 
   integer(int32) scf_i
-  complex(real64),dimension(Nk,Nw,Norb,Norb):: Gk,selfen0
-  
-  selfen0(:,:,:,:)=0.0d0
+  real(real64)esterr
+  complex(real64),dimension(Nk,Nw,Norb,Norb):: Gk,sigmak0
+  complex(real64),dimension(Nk,Nw,Nchi,Nchi):: chi
+
+  sigmak0(:,:,:,:)=0.0d0
   call gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb)
   do scf_i=1,scf_loop
      print*,'iter=',scf_i
-     selfen(:,:,:,:)=-1.5*Gk(:,:,:,:)
-     print*,'gen self energy'
-     if(sum(abs(selfen(:,:,:,:)-selfen0(:,:,:,:)))<eps)then
+     print*,'calculate chi_0 with convolution'
+     call get_chi0_conv(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nk,Norb,Nchi)
+     print*,'get V_sigma'
+     call get_Vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi)
+     print *,'calculate self-energy'
+     call calc_sigma(sigmak,Gk,chi,kmap,olist,temp,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
+     call compair_sigma()
+     if(esterr<eps)then
         exit
      end if
-     call gen_green_inv(Gk,selfen,hamk,mu,temp,Nk,Nw,Norb)
-     print*,'calc gk inv'
+     !renew mu here
+     call gen_green_inv(Gk,sigmak,hamk,mu,temp,Nk,Nw,Norb)
      call getinv(Gk,Nk,Nw,Norb)
-     print*,'calc gk'
-     selfen0(:,:,:,:)=selfen(:,:,:,:)
+     sigmak0(:,:,:,:)=sigmak(:,:,:,:)
   end do
+contains
+  subroutine compair_sigma()
+    integer(int32) i,j,l,m
+    integer(int32) kerr,iwerr,lerr,merr
+    real(real64) est
+    complex(real64) cksigm
+
+    est=100
+    do l=1,Norb
+       do m=1,Norb
+          do j=1,Nw
+             do i=1,Nk
+                cksigm=sigmak(i,j,m,l)
+                if(abs(cksigm)>1.0d-10)then
+                   est=abs((sigmak0(i,j,m,l)-cksigm)/cksigm)
+                   if(est>esterr)then
+                      esterr=est
+                      kerr=i
+                      iwerr=j
+                      lerr=l
+                      merr=m
+                   end if
+                end if
+                sigmak(i,j,m,l)=pp*cksigm+(1-pp)*sigmak0(i,j,m,l)
+             end do
+          end do
+       end do
+    end do
+    print *,'*** esterr=', esterr
+    print *,'*** pp =',pp
+    print '(A22,6I5)','   at  ik,iw,m,l=',kerr,iwerr,merr,lerr
+  end subroutine compair_sigma
 end subroutine mkself

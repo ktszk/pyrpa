@@ -258,11 +258,8 @@ def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw,
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     wlist=np.linspace(Emin,Emax,Nw)
     if sw_self:
-        #Gk0=flibs.gen_Green0(eig,uni,mu,temp,Nw)
+        Gk0=flibs.gen_Green0(eig,uni,mu,temp,Nw)
         iwlist=np.pi*temp*(2*np.linspace(0,Nw,Nw,False)+1)*1j
-        hamk=flibs.gen_ham(klist,ham_r,rvec)
-        selfen=flibs.mkself(hamk,eig,uni,mu,temp,Nw)
-        Gk0=flibs.gen_green(selfen,hamk,mu,temp)
         Gk=flibs.pade_with_trace(selfen,iwlist,wlist-1j*delta).imag
         w,x=np.meshgrid(wlist,spa_length)
         plt.contourf(x,w,Gk,cmap=plt.hot())
@@ -420,18 +417,17 @@ def calc_phi_spectrum(mu,temp,klist,qlist,chiolist,eig,uni,spa_length,Nw,Emax,de
 def calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,olist):
     klist,kmap=plibs.gen_klist_with_kmap(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
-    print("calc green function")
-    Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
-    if False:
-        print("calc chi0 with summation")
-        chi=flibs.get_chi0_sum(Gk,klist,olist,temp)
-    else:
-        print("calc chi0 with convolution")
-        chi=flibs.get_chi0_conv(Gk,kmap,olist,temp,Nx,Ny,Nz)
-    trchi=chi[0,0,0] #[12,12,0]
-    plt.contourf(klist[:,0].reshape(Nx,Ny,Nz)[:,:,0],klist[:,1].reshape(Nx,Ny,Nz)[:,:,0],trchi.reshape(Nx,Ny,Nz)[:,:,0].real,100)
-    plt.colorbar()
-    plt.show()
+    ham_k=flibs.gen_ham(klist,ham_r,rvec)
+    #print("calc green function")
+    #Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
+    #print("calc chi0 with convolution")
+    #chi=flibs.get_chi0_conv(Gk,kmap,olist,temp,Nx,Ny,Nz)
+    #trchi=chi[0,0,0]
+    #plt.contourf(kmap[:,0].reshape(Nx,Ny,Nz)[:,:,0],kmap[:,1].reshape(Nx,Ny,Nz)[:,:,0],trchi.reshape(Nx,Ny,Nz)[:,:,0].real,100)
+    #plt.colorbar()
+    #plt.show()
+    Smat,Cmat=flibs.gen_SCmatrix(olist,U,J)
+    sigmak=flibs.mkself(Smat,Cmat,kmap,olist,ham_k,eig,uni,mu,temp,Nw,Nx,Ny,Nz)
 
 def get_carrier_num(kmesh,rvec,ham_r,S_r,mu,Arot):
     Nk,eig,kwieght=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,S_r,rvec,Arot)
@@ -567,7 +563,7 @@ def main():
             chiolist=np.array([o1.flatten(),o2.flatten()]).T
         if option in {7,8,9}:
             print("generate coulomb vertex matrix S")
-            Smat=flibs.gen_Smatrix(chiolist,U,J)
+            Smat,Cmat=flibs.gen_SCmatrix(chiolist,U,J)
         if option in {7,10}: #chis/phi spectrum with symmetry line
             print("generate qlist",flush=True)
             qlist,spa_length,xticks=plibs.mk_qlist(k_sets,Nx,Ny,Nz,bvec)

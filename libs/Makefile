@@ -1,7 +1,7 @@
 #Makefile
 #FC=ifort
-FC=ifx
-#FC=flang
+#FC=ifx
+FC=flang
 #FC=amdflang
 #FC=gfortran
 ifeq ($(FC),ifort)
@@ -34,7 +34,7 @@ else
   endif
 endif
 
-objmain= fmod.o fcond.o fchi.o fphi.o fself.o fimp.o fpade.o
+objmain= fmod.o fcond.o fUJ.o fchi.o fphi.o fself.o fimp.o fpade.o
 .SUFFIXES:
 main: $(objmain)
 	$(FC) $(FFLAGS) $(FFLAGS2) $(LIBS) -o fmod.so ${objmain}
