@@ -53,7 +53,7 @@ color_option defines the meaning of color on Fermi surfaces
 option=14
 color_option=2
 
-Nx,Ny,Nz,Nw=32,32,2,128 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=16,16,1,128 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
@@ -61,7 +61,7 @@ kz=0.0
 abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 #abc=[3.90,3.90,12.68]
 alpha_beta_gamma=[90.,90.,90]
-temp=2.59e-2
+temp=3.0e-2 #2.59e-2
 fill= 0.5 #2.9375
 
 Emin,Emax=-3,3
@@ -70,8 +70,8 @@ Ecut=1.0e-2
 tau_const=100
 #olist=[[0,3],[1,4],[2,5]]
 olist=[[0,4],[1,2,5,6],[3,7]]
-U,J=0.8, 0.1
-#U,J=1.2,0.15
+#U,J=0.8, 0.1
+U,J=1.2,0.15
 
 mu0=9.85114560061123
 k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
@@ -418,16 +418,18 @@ def calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,olist):
     klist,kmap=plibs.gen_klist_with_kmap(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     ham_k=flibs.gen_ham(klist,ham_r,rvec)
-    #print("calc green function")
-    #Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
-    #print("calc chi0 with convolution")
-    #chi=flibs.get_chi0_conv(Gk,kmap,olist,temp,Nx,Ny,Nz)
-    #trchi=chi[0,0,0]
-    #plt.contourf(kmap[:,0].reshape(Nx,Ny,Nz)[:,:,0],kmap[:,1].reshape(Nx,Ny,Nz)[:,:,0],trchi.reshape(Nx,Ny,Nz)[:,:,0].real,100)
-    #plt.colorbar()
-    #plt.show()
     Smat,Cmat=flibs.gen_SCmatrix(olist,U,J)
-    sigmak=flibs.mkself(Smat,Cmat,kmap,olist,ham_k,eig,uni,mu,temp,Nw,Nx,Ny,Nz)
+    print("calc green function")
+    Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
+    print("calc chi0 with convolution")
+    chi=flibs.get_chi0_conv(Gk,kmap,olist,temp,Nx,Ny,Nz)
+    Vsigma=flibs.get_Vsigma_nosoc_flex(chi,Smat,Cmat)
+    print(Vsigma.round(6))
+    plt.contourf(kmap[:,0].reshape(Nx,Ny,Nz)[:,:,0],kmap[:,1].reshape(Nx,Ny,Nz)[:,:,0],
+                 Vsigma[:,0,0].reshape(Nx,Ny,Nz)[:,:,0].real,100)
+    plt.colorbar()
+    plt.show()
+    #sigmak=flibs.mkself(Smat,Cmat,kmap,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz)
 
 def get_carrier_num(kmesh,rvec,ham_r,S_r,mu,Arot):
     Nk,eig,kwieght=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,S_r,rvec,Arot)
