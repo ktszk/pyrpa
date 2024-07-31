@@ -104,6 +104,9 @@ subroutine gen_green_inv_from_eig(Gk,self,uni,eig,mu,temp,Nk,Nw,Norb) bind(C)
   complex(real64) iw
 
   !$omp parallel private(l,m)
+  !$omp workshare
+  Gk(:,:,:,:)=0.0d0
+  !$omp end workshare
   do l=1,norb
      do m=1,norb
         !$omp do private(iw,i,n)
@@ -111,7 +114,7 @@ subroutine gen_green_inv_from_eig(Gk,self,uni,eig,mu,temp,Nk,Nw,Norb) bind(C)
            iw=cmplx(mu,dble(2*(j-1)+1)*pi*temp)
            kloop: do i=1,Nk
               band_loop: do n=1,norb
-                 Gk(i,j,m,l)=uni(m,n,i)*conjg(uni(l,n,i))*(iw-eig(n,i))
+                 Gk(i,j,m,l)=Gk(i,j,m,l)+uni(m,n,i)*conjg(uni(l,n,i))*(iw-eig(n,i))
               end do band_loop
               Gk(i,j,m,l)=Gk(i,j,m,l)-self(i,j,m,l)
            end do kloop
@@ -137,6 +140,7 @@ subroutine getinv(Gk,Nk,Nw,Norb) bind(C,name="getinv_")
         tmp(:,:)=Gk(j,i,:,:)
         call zgetrf(Norb,Norb,tmp,Norb,ipiv,info)
         call zgetri(Norb,tmp,Norb,ipiv,work,2*Norb,info)
+        Gk(j,i,:,:)=tmp(:,:)
      end do
   end do
   !$omp end parallel do
@@ -398,7 +402,6 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,kmap,olist,temp,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
            end do
         end do
         !$omp end parallel do
-        print *,'FFT'
         call FFT(tmpVsigma,tmp,Nx,Ny,Nz,2*Nw,.true.)
         call FFT(tmpgk,tmp,Nx,Ny,Nz,2*Nw,.true.)
         !$omp parallel
@@ -451,29 +454,14 @@ subroutine mkself(sigmak,Smat,Cmat,kmap,olist,hamk,eig,uni,mu,rfill,temp,scf_loo
 
   sigmak0(:,:,:,:)=0.0d0
   mu_old=mu*1.2
+  Gk(:,:,:,:)=0.0d0 !gen_green0 need to initialization of Gk
   call gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb)
-  do i=1,Nk
-     if(kmap(3,i)==0)then
-        write(40,*)kmap(1,i),kmap(2,i),dble(Gk(i,1,1,1))
-     end if
-  end do
 
   do scf_i=1,scf_loop
      print*,'iter=',scf_i
-     print*,'calculate chi_0 with convolution'
      call get_chi0_conv(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nk,Norb,Nchi)
-     print*,maxval(dble(chi))
-     if( scf_i==1)then
-        do i=1,Nk
-           if(kmap(3,i)==0)then
-              write(30,*)kmap(1,i),kmap(2,i),dble(chi(i,1,1,1))
-           end if
-        end do
-     end if
-     print*,'get V_sigma'
      call get_Vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi)
-     print*,maxval(dble(chi))
-     print *,'calculate self-energy'
+     print'(A16,E12.4,A5,E12.4)','Re V_sigma: max:',maxval(dble(chi)),' min:',minval(dble(chi))
      call calc_sigma(sigmak,Gk,chi,kmap,olist,temp,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
      call compair_sigma()
      if(esterr<eps)then
@@ -487,11 +475,11 @@ subroutine mkself(sigmak,Smat,Cmat,kmap,olist,hamk,eig,uni,mu,rfill,temp,scf_loo
   call renew_mu()
 contains
   subroutine compair_sigma()
-    integer(int32) i,j,l,m
-    integer(int32) kerr,iwerr,lerr,merr
+    integer(int32) i,j,l,m, kerr,iwerr,lerr,merr
     real(real64) est
     complex(real64) cksigm
 
+    esterr=0.0d0
     est=100
     do l=1,Norb
        do m=1,Norb
@@ -513,17 +501,14 @@ contains
           end do
        end do
     end do
-    print *,'*** esterr=', esterr
-    print *,'*** pp =',pp
-    print '(A22,6I5)','   at  ik,iw,m,l=',kerr,iwerr,merr,lerr
+    print '(A7,E12.4,A14,2I5,2I3)','esterr=',esterr,' at ik,iw,m,l=',kerr,iwerr,merr,lerr
   end subroutine compair_sigma
 
   subroutine renew_mu()
-    integer(int32) i,j,l,i_iter
+    integer(int32) i_iter
     integer(int32),parameter:: itemax=100
     logical(int32) flag
-    real(real64) tmp,deltagk,rnS,rnL,rnc,rnM,muc,mud,muL,muS,muM,eps,dmu
-    complex(real64),dimension(Nk,Nw,Norb,Norb):: Gk0
+    real(real64) rnS,rnL,rnc,rnM,muc,mud,muL,muS,muM,eps,dmu
 
     if(esterr>1.0d-2)then
        eps= 1.0d-8
@@ -532,16 +517,57 @@ contains
     end if
     dmu= abs(mu-mu_OLD)*2.0d0
     if (dmu<eps*4.0d0) dmu= eps*4.0d0
-    mu_OLD= mu
     muL= mu+dmu
     muS= mu-dmu
-    rnS=rnS-rfill
+    upper_lim: do i_iter=1,itemax
+       mu=muL
+       rnL=00d0
+       call get_rn(rnL,mu)
+       if(rnL<rfill)then
+          if(abs(rfill-rnL)>0.5d0)then
+             muL=muL+1.0d0
+          else if(abs(rfill-rnL)>dmu)then
+             muL=muL+0.5d0
+          else
+             muL= muL +dmu
+          end if
+       else
+          exit
+       end if
+       if(i_iter==itemax)then
+          print*,'Too many'
+          stop
+       end if
+    end do upper_lim
+    
+    lower_lim: do i_iter=1,itemax
+       mu=muS
+       rnS=0.0d0
+       call get_rn(rnS,mu)
+       if(rnS>rfill)then
+          if(abs(rnS-rfill)>0.5d0)then
+             muS=muS-1.0d0
+          else if(abs(rnS-rfill)>dmu)then
+             muS=muS-0.5d0
+          else
+             muS=muS-dmu
+          end if
+       else
+          exit
+       end if
+       if(i_iter==itemax)then
+          print*,'Too many'
+          stop
+       end if
+    end do lower_lim
+    
     rnL=rnL-rfill
+    rnS=rnS-rfill
     rnc=rnS
     muc=muS
     mud=0.0d0
     flag=.false.
-    do i_iter=1,itemax
+    brent_loop: do i_iter=1,itemax
        if(rnc/=rnS .and. rnc/=rnL)then
           muM=(muL*rnS*rnc*(rnS-rnc)+muS*rnL*rnc*(rnc-rnL)+muc*rnL*rnS*(rnL-rnS))&
                /((rnL-rnS)*(rnc-rnL)*(rnc-rnS))
@@ -559,16 +585,8 @@ contains
           flag=.false.
        end if
        if(abs(muL-muM)<eps)exit
-       tmp=sum(0.5d0*(1.0d0-tanh(0.5d0*(eig(:,:)-muM)/temp)))
-       call gen_green0(Gk0,eig,uni,muM,temp,Nk,Nw,Norb)
-       call gen_green_inv(Gk,sigmak,hamk,mu,temp,Nk,Nw,Norb)
-       call getinv(Gk,Nk,Nw,Norb)
-       deltagk=0.0d0
-       do l=1,Norb
-          deltagk=deltagk+sum(dble(Gk0(:,:,l,l)-Gk0(:,:,l,l)))
-       end do
-       rnM=(tmp+2*temp*deltagk)/Nk
-       print '(1x,a,2f22.16,l2)','muM,rnM=   ',muM,rnM,flag
+       call get_rn(rnM,muM)
+       !print '(1x,a,2f22.16,l2)','muM,rnM=   ',muM,rnM,flag
        mud=muc
        muc=muL
        rnc=rnL
@@ -587,27 +605,38 @@ contains
           rnL=rnS
           rnS=rnM
        end if
-       if(i==itemax)then
+       if(i_iter==itemax)then
           print *,'Too many loop!'
           stop
        end if
-    end do
+    end do brent_loop
     if(rnL==rnS)then
        mu=(muS+muL)*0.5d0
     else
        mu= (muS*rnL-muL*rnS)/(rnL-rnS)
     end if
-    tmp=sum(0.5d0*(1.0d0-tanh(0.5d0*(eig(:,:)-mu)/temp)))
+    call get_rn(rnM,mu)
+    mu_old=mu
+    print'(A4,F8.4,A5,F8.4)','mu  =',mu,' rn =',rnM
+  end subroutine renew_mu
+  
+  subroutine get_rn(rn,rmu)
+    real(real64),intent(in):: rmu
+    real(real64),intent(out):: rn
+
+    integer(int32) l
+    real(real64) tmp,deltagk
+    complex(real64),dimension(Nk,Nw,Norb,Norb):: Gk0
+
+    tmp=sum(0.5d0*(1.0d0-tanh(0.5d0*(eig(:,:)-rmu)/temp)))
+    Gk0(:,:,:,:)=0.0d0
     call gen_green0(Gk0,eig,uni,mu,temp,Nk,Nw,Norb)
-    call gen_green_inv(Gk,sigmak,hamk,mu,temp,Nk,Nw,Norb)
+    call gen_green_inv(Gk,sigmak,hamk,rmu,temp,Nk,Nw,Norb)
     call getinv(Gk,Nk,Nw,Norb)
     deltagk=0.0d0
     do l=1,Norb
        deltagk=deltagk+sum(dble(Gk(:,:,l,l)-Gk0(:,:,l,l)))
     end do
-    rnM=(tmp+2*temp*deltagk)/Nk
-    print *,'mu  =',mu
-    print *,'rn   =',rnM
-    print *,'temp = ',temp
-  end subroutine renew_mu
+    rn=(tmp+2*temp*deltagk)/Nk
+  end subroutine get_rn
 end subroutine mkself

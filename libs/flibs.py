@@ -265,9 +265,9 @@ def get_Vsigma_nosoc_flex(chi,Smat,Cmat):
     flibs.get_vsigma_flex_nosoc_.restype=c_void_p
     flibs.get_vsigma_flex_nosoc_(chi,Smat,Cmat,byref(c_int64(Nk)),
                                  byref(c_int64(Nw)),byref(c_int64(Nchi)))
-    return chi
+    return chi.copy()
 
-def mkself(Smat,Cmat,kmap,olist,hamk,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,scf_loop=10,eps=1.0e-3,pp=0.5):
+def mkself(Smat,Cmat,kmap,olist,hamk,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,scf_loop=100,eps=1.0e-3,pp=0.4):
     Nk,Nchi=len(hamk),len(Smat)
     Norb=int(np.sqrt(hamk.size/Nk))
     sigmak=np.zeros((Norb,Norb,Nw,Nk),dtype=np.complex128)
