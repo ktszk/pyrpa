@@ -290,7 +290,7 @@ def mkself(Smat,Cmat,kmap,olist,hamk,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out,sw_
     flibs.mkself(sigmak,Smat,Cmat,kmap,olist,hamk,eig,uni,byref(c_double(mu)),byref(c_double(fill)),byref(c_double(temp)),
                  byref(c_int64(scf_loop)),byref(c_double(pp)),byref(c_double(eps)),byref(c_int64(Nk)),byref(c_int64(Nw)),
                  byref(c_int64(Norb)),byref(c_int64(Nchi)),byref(c_int64(Nx)),byref(c_int64(Ny)),byref(c_int64(Nz)),
-                 byref(c_bool(sw_out)),,byref(c_bool(sw_in)))
+                 byref(c_bool(sw_out)),byref(c_bool(sw_in)))
     return sigmak
 
 def get_qshift(klist,qpoint):
