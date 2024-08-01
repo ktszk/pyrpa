@@ -435,12 +435,13 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,kmap,olist,temp,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
   !$omp end parallel workshare
 end subroutine calc_sigma
 
-subroutine mkself(sigmak,Smat,Cmat,kmap,olist,hamk,eig,uni,mu,rfill,temp,scf_loop,pp,eps,Nk,Nw,Norb,Nchi,Nx,Ny,Nz) bind(C)
+subroutine mkself(sigmak,Smat,Cmat,kmap,olist,hamk,eig,uni,mu,rfill,temp,scf_loop,pp,eps,Nk,Nw,Norb,Nchi,Nx,Ny,Nz,sw_out,sw_in) bind(C)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nw,Norb,Nchi,Nk,Nx,Ny,Nz,scf_loop
   integer(int64),intent(in),dimension(Nchi,2):: olist
   integer(int64),intent(in),dimension(3,Nk):: kmap
+  logical(1),intent(in):: sw_in,sw_out
   real(real64),intent(in):: mu,temp,eps,pp,rfill
   real(real64),intent(in),dimension(Norb,Nk):: eig
   real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
@@ -452,11 +453,16 @@ subroutine mkself(sigmak,Smat,Cmat,kmap,olist,hamk,eig,uni,mu,rfill,temp,scf_loo
   complex(real64),dimension(Nk,Nw,Norb,Norb):: Gk,sigmak0
   complex(real64),dimension(Nk,Nw,Nchi,Nchi):: chi
 
-  sigmak0(:,:,:,:)=0.0d0
-  mu_old=mu*1.2
-  Gk(:,:,:,:)=0.0d0 !gen_green0 need to initialization of Gk
-  call gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb)
-
+  if(sw_in)then
+     call io_sigma(.false.)
+     call gen_green_inv(Gk,sigmak,hamk,mu,temp,Nk,Nw,Norb)
+     call getinv(Gk,Nk,Nw,Norb)
+  else
+     sigmak0(:,:,:,:)=0.0d0
+     mu_old=mu*1.2
+     Gk(:,:,:,:)=0.0d0 !gen_green0 need to initialization of Gk
+     call gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb)
+  end if
   do scf_i=1,scf_loop
      print*,'iter=',scf_i
      call get_chi0_conv(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nk,Norb,Nchi)
@@ -472,6 +478,9 @@ subroutine mkself(sigmak,Smat,Cmat,kmap,olist,hamk,eig,uni,mu,rfill,temp,scf_loo
      call getinv(Gk,Nk,Nw,Norb)
      sigmak0(:,:,:,:)=sigmak(:,:,:,:)
   end do
+  if(sw_out)then
+     call io_sigma(.true.)
+  end if
   call renew_mu()
 contains
   subroutine compair_sigma()
@@ -621,22 +630,57 @@ contains
   end subroutine renew_mu
   
   subroutine get_rn(rn,rmu)
+    use constant
     real(real64),intent(in):: rmu
     real(real64),intent(out):: rn
 
-    integer(int32) l
+    integer(int32) l,i,j,n
     real(real64) tmp,deltagk
-    complex(real64),dimension(Nk,Nw,Norb,Norb):: Gk0
+    complex(real64):: Gk0,iw
 
     tmp=sum(0.5d0*(1.0d0-tanh(0.5d0*(eig(:,:)-rmu)/temp)))
-    Gk0(:,:,:,:)=0.0d0
-    call gen_green0(Gk0,eig,uni,mu,temp,Nk,Nw,Norb)
     call gen_green_inv(Gk,sigmak,hamk,rmu,temp,Nk,Nw,Norb)
     call getinv(Gk,Nk,Nw,Norb)
     deltagk=0.0d0
     do l=1,Norb
-       deltagk=deltagk+sum(dble(Gk(:,:,l,l)-Gk0(:,:,l,l)))
+       do j=1,Nw
+          iw=cmplx(mu,dble(2*(j-1)+1)*pi*temp)          
+          do i=1,Nk
+             Gk0=0.0d0
+             do n=1,Norb
+                Gk0=Gk0+uni(l,n,i)*conjg(uni(l,n,i))/(iw-eig(n,i))
+             end do
+             deltagk=deltagk+dble(Gk(i,j,l,l)-Gk0)
+          end do
+       end do
     end do
     rn=(tmp+2*temp*deltagk)/Nk
   end subroutine get_rn
+  
+  subroutine io_sigma(sw)
+    logical(int32),intent(in):: sw
+    integer(int32),i,j,l,m
+    open(55,file='sigma.bin',form='unformatted')
+    if(sw)then
+       write(55)mu
+       write(55)mu_old
+    else
+       read(55)mu
+       read(55)mu_old
+    end if
+    do l=1,Norb
+       do m=1,Norb
+          do j=1,Nw
+             do i=1,Nk
+                if(sw)then
+                   write(55)sigmak(i,j,m,l)
+                else
+                   read(55)sigmak(i,j,m,l)
+                end if
+             end do
+          end do
+       end do
+    end do
+    close(55)
+  end subroutine io_sigma
 end subroutine mkself

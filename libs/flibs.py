@@ -267,7 +267,8 @@ def get_Vsigma_nosoc_flex(chi,Smat,Cmat):
                                  byref(c_int64(Nw)),byref(c_int64(Nchi)))
     return chi.copy()
 
-def mkself(Smat,Cmat,kmap,olist,hamk,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,scf_loop=100,eps=1.0e-3,pp=0.4):
+def mkself(Smat,Cmat,kmap,olist,hamk,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out,sw_in,scf_loop=100,eps=1.0e-3,pp=0.4):
+    print('mixing rate: pp = %3.1f'%pp)
     Nk,Nchi=len(hamk),len(Smat)
     Norb=int(np.sqrt(hamk.size/Nk))
     sigmak=np.zeros((Norb,Norb,Nw,Nk),dtype=np.complex128)
@@ -283,12 +284,13 @@ def mkself(Smat,Cmat,kmap,olist,hamk,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,scf_loop=1
                            POINTER(c_double),POINTER(c_int64),                   #temp,scf_loop
                            POINTER(c_double),POINTER(c_double),POINTER(c_int64), #pp,eps,Nk
                            POINTER(c_int64),POINTER(c_int64),POINTER(c_int64),   #Nw,Norb,Nchi
-                           POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)]   #Nx,Ny,Nz
+                           POINTER(c_int64),POINTER(c_int64),POINTER(c_int64),   #Nx,Ny,Nz
+                           POINTER(c_bool),POINTER(c_bool)]                      #sw_out,sw_in
     flibs.mkself.restype=c_void_p
     flibs.mkself(sigmak,Smat,Cmat,kmap,olist,hamk,eig,uni,byref(c_double(mu)),byref(c_double(fill)),byref(c_double(temp)),
-                 byref(c_int64(scf_loop)),byref(c_double(pp)),byref(c_double(eps)),
-                 byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Norb)),
-                 byref(c_int64(Nchi)),byref(c_int64(Nx)),byref(c_int64(Ny)),byref(c_int64(Nz)))
+                 byref(c_int64(scf_loop)),byref(c_double(pp)),byref(c_double(eps)),byref(c_int64(Nk)),byref(c_int64(Nw)),
+                 byref(c_int64(Norb)),byref(c_int64(Nchi)),byref(c_int64(Nx)),byref(c_int64(Ny)),byref(c_int64(Nz)),
+                 byref(c_bool(sw_out)),,byref(c_bool(sw_in)))
     return sigmak
 
 def get_qshift(klist,qpoint):
