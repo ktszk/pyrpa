@@ -373,6 +373,77 @@ subroutine get_vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi) bind(C,name='get_vsig
   end do
 end subroutine get_vsigma_flex_nosoc
 
+subroutine get_vsigma_flex_soc(chi,Vmat,Nk,Nw,Nchi)
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  implicit none
+  integer(int64),intent(in):: Nk,Nw,Nchi
+  real(real64),intent(in),dimension(Nchi,Nchi):: Vmat
+  complex(real64),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
+
+  integer(int32) i,j,l,m,n,info
+  integer(int32),dimension(Nchi):: ipiv
+  complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3
+  complex(real64),dimension(2*Nchi):: work
+
+  do j=1,Nw
+     do i=1,Nk
+        !$omp parallel
+        !$omp workshare
+        cmat1(:,:)=0.0d0
+        !$omp end workshare
+        !$omp do private(m,n)
+        do l=1,Nchi
+           do m=1,Nchi
+              do n=1,Nchi
+                 cmat1(m,l)=cmat1(m,l)+chi(i,j,m,n)*Vmat(n,l) !-chi0V
+              end do
+           end do
+        end do
+        !$omp end do
+        !$omp workshare
+        cmat2(:,:)=cmat1(:,:)  !chi0V
+        !$omp end workshare
+        !$omp do 
+        do l=1,Nchi
+           cmat1(l,l)=cmat1(l,l)+1.0d0 !I-chi0S
+        end do
+        !$omp end do
+        !$omp end parallel
+        call zgetrf(Nchi,Nchi,cmat1,Nchi,ipiv,info)
+        call zgetri(Nchi,cmat1,Nchi,ipiv,work,2*Nchi,info)
+        !$omp parallel
+        !$omp workshare
+        cmat3(:,:)=0.0d0
+        !$omp end workshare
+        !$omp do private(m,n)
+        do l=1,Nchi
+           do m=1,Nchi
+              do n=1,Nchi
+                 cmat3(m,l)=cmat3(m,l)+cmat1(m,n)*cmat2(n,l) !(1-chi0S)^-1chi0S
+              end do
+           end do
+        end do
+        !$omp end do
+        !$omp workshare
+        cmat2(:,:)=-Vmat(:,:)
+        !$omp end workshare
+        !$omp do private(m,n)
+        do l=1,Nchi
+           do m=1,Nchi
+              do n=1,Nchi
+                 cmat2(m,l)=cmat2(m,l)+Vmat(m,n)*cmat3(n,l) !subtract double count 2nd order buble(ladder)
+              end do
+           end do
+        end do
+        !$omp end do
+        !$omp workshare
+        chi(i,j,:,:)=cmat2(:,:)
+        !$omp end workshare
+        !$omp end parallel
+     end do
+  end do
+end subroutine get_vsigma_flex_soc
+
 subroutine calc_sigma(sigmak,Gk,Vsigma,kmap,olist,temp,Nk,Nw,Nchi,Norb,Nx,Ny,Nz) bind(C,name='calc_sigma_')
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
@@ -424,7 +495,8 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,kmap,olist,temp,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
         !$omp parallel do private(i,j)
         do j=1,Nw
            do i=1,Nk
-              sigmak(i,j,olist(m,1),olist(l,1))=sigmak(i,j,olist(m,1),olist(l,1))+tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)
+              sigmak(i,j,olist(m,1),olist(l,1))=sigmak(i,j,olist(m,1),olist(l,1))&
+                   +tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)
            end do
         end do
         !$omp end parallel do
