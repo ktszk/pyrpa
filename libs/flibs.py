@@ -613,3 +613,29 @@ def pade_with_trace(A,iwlist,wlist):
     flibs.pade_with_trace(A,B,iwlist,wlist,byref(c_int64(Nk)),byref(c_int64(Niw)),
                           byref(c_int64(Nw)),byref(c_int64(Norb)))
     return B
+
+def linearized_eliashberg(Gk,uni,Smat,Cmat,olist,kmap,invk,Nx,Ny,Nz,temp,gap_sym,eps=1.0e-3,itemax=100):
+    Norb,Nchi=len(Gk),len(Smat)
+    Nk,Nw=len(kmap),len(Gk[0,0])
+    delta=np.zeros((Norb,Norb,Nw,Nk),dtype=np.complex128)
+    flibs.lin_eliash.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #delta
+                               np.ctypeslib.ndpointer(dtype=np.complex128), #Gk
+                               np.ctypeslib.ndpointer(dtype=np.complex128), #uni
+                               np.ctypeslib.ndpointer(dtype=np.float64),    #Smat
+                               np.ctypeslib.ndpointer(dtype=np.float64),    #Cmat
+                               np.ctypeslib.ndpointer(dtype=np.int64),      #olist
+                               np.ctypeslib.ndpointer(dtype=np.int64),      #kmap
+                               np.ctypeslib.ndpointer(dtype=np.int64),      #invk
+                               POINTER(c_double),POINTER(c_double),         #temp,eps
+                               POINTER(c_int64),POINTER(c_int64),           #Nk,Nw
+                               POINTER(c_int64),POINTER(c_int64),           #Nchi,Norb
+                               POINTER(c_int64),POINTER(c_int64),           #Nx,Ny
+                               POINTER(c_int64),POINTER(c_int64),           #Nz,itemax
+                               POINTER(c_int64)]                            #gapsym
+    flibs.lin_eliash.retype=c_void_p
+    flibs.lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,byref(c_double(temp)),
+                     byref(c_double(eps)),byref(c_int64(Nk)),byref(c_int64(Nw)),
+                     byref(c_int64(Nchi)),byref(c_int64(Norb)),byref(c_int64(Nx)),
+                     byref(c_int64(Ny)),byref(c_int64(Nz)),byref(c_int64(itemax)),
+                     byref(c_int64(gap_sym)))
+    return delta

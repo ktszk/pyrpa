@@ -42,15 +42,16 @@ option defines calculation modes
 11: calc phi on xy plane at Ecut
 12: calc carrier num.
 13: calc cycrotron mass (not implement)
-14: calc selfenergy using flex (not implement)
+14: calc selfenergy using
 15: mass calculation (not implement)
 16: spectrum with impurity (not implement)
+17: solve linearized eliashberg equation
 color_option defines the meaning of color on Fermi surfaces
  0: band or mono color
  1: orbital weight settled by olist
  2: velocity size
 """
-option=14
+option=17
 color_option=2
 
 Nx,Ny,Nz,Nw=16,16,1,64  #k and energy(or matsubara freq.) mesh size
@@ -72,6 +73,8 @@ tau_const=100
 olist=[[0,4],[1,2,5,6],[3,7]]
 U,J=0.8, 0.1
 #U,J=1.2,0.15
+gap_sym=1
+
 
 mu0=9.85114560061123
 k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
@@ -81,7 +84,7 @@ sw_calc_mu=True #calculate mu or not
 sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 sw_omega=False #True: real freq, False: Matsubara freq.
-sw_self=True  #True: use calculated self energy for spectrum band plot
+sw_self=False  #True: use calculated self energy for spectrum band plot
 sw_out_self=True
 sw_in_self=False
 #------------------------ initial parameters are above -------------------------------
@@ -422,6 +425,19 @@ def calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,olist):
     Smat,Cmat=flibs.gen_SCmatrix(olist,U,J)
     sigmak=flibs.mkself(Smat,Cmat,kmap,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
 
+def calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,olist,gap_sym,sw_self):
+    klist,kmap=plibs.gen_klist_with_kmap(Nx,Ny,Nz)
+    eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
+    Smat,Cmat=flibs.gen_SCmatrix(olist,U,J)
+    invk=flibs.get_iqshift(klist,klist[0])
+    if sw_self:
+        ham_k=flibs.gen_ham(klist,ham_r,rvec)
+        sigmak=flibs.mkself(Smat,Cmat,kmap,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
+        Gk=flibs.gen_green(sigmak,ham_k,mu,temp)
+    else:
+        Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
+    gap=flibs.linearized_eliashberg(Gk,uni,Smat,Cmat,olist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
+
 def get_carrier_num(kmesh,rvec,ham_r,S_r,mu,Arot):
     Nk,eig,kwieght=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,S_r,rvec,Arot)
     fill=0.0
@@ -480,7 +496,8 @@ def main():
            "calculate chis at q-point","calculate chis qmap at Ecut",
            "calc phi spectrum with symmetry line","calc phi on xy plane at Ecut",
            "calculate carrier number","calculate cycrtron mass","calc self energy",
-           "calculate electron mass","spectrum with impurity"]
+           "calculate electron mass","spectrum with impurity",
+           "solve linearized eliashberg equation"]
     cstr=["no color",'orbital weight','velocity size']
     if omp_check:
         print("OpenMP mode",flush=True)
@@ -490,7 +507,7 @@ def main():
         print("color mode: "+cstr[color_option],flush=True)
     print("Hamiltonian name is "+fname,flush=True)
     print("Number of orbital =",no,flush=True)
-    if option in {7,8,9,14}:
+    if option in {7,8,9,14,17}:
         print(f'U= {U:4.2f} and J= {J:4.2f}')
     if option in {0,4}:
         if sw_gen_sym:
@@ -601,11 +618,10 @@ def main():
     elif option==13: #calc cycrtron mass
         get_mass(Nx,rvec,ham_r,mu)
     elif option==14: #calc self-energy using flex
-        Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=True)
         try:
             chiolist
         except NameError:
-            Norb=int(eig.size/Nk)
+            Norb=len(ham_r[0])
             tmp=np.arange(Norb)+1
             o1,o2=np.meshgrid(tmp,tmp)
             chiolist=np.array([o1.flatten(),o2.flatten()]).T
@@ -631,6 +647,15 @@ def main():
         w,k=np.meshgrid(wlist,spa_length)
         plt.contourf(k,w,abs(spectrum.imag),100)
         plt.show()
+    elif option==17:
+        try:
+            chiolist
+        except NameError:
+            Norb=len(ham_r[0])
+            tmp=np.arange(Norb)+1
+            o1,o2=np.meshgrid(tmp,tmp)
+            chiolist=np.array([o1.flatten(),o2.flatten()]).T
+        calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,gap_sym,sw_self)
 if __name__=="__main__":
     main()
 __license__="MIT"

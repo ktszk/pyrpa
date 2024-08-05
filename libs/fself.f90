@@ -463,16 +463,30 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,kmap,olist,temp,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
   sigmak(:,:,:,:)=0.0d0
   do l=1,Nchi
      do m=1,Nchi
-        !$omp parallel do private(i)
-        do j=1,Nw
+        !$omp parallel
+        !$omp do
+        do i=1,Nk !j=1>iw=0, j=Nw>iw=inf
+           tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vsigma(i,1,m,l) !Vsigma(iw)
+           tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=conjg(Vsigma(i,Nw,l,m))
+        end do
+        !$omp end do
+        !$omp do private(i)
+        do j=2,Nw
            do i=1,Nk
               tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vsigma(i,j,m,l) !Vsigma(iw)
-              tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Vsigma(i,j,l,m)) !Vsigma(-iw)ml=Vsigma^*lm(iw)
+              tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vsigma(i,j,l,m)) !Vsigma(-iw)ml=Vsigma^*lm(iw)
+           end do
+        end do
+        !$omp end do
+        !$omp do private(i)
+        do j=1,Nw
+           do i=1,Nk
               tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(m,2),olist(l,2)) !G42(iw)
               tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(l,2),olist(m,2))) !G42(-iw)=G^*24(iw)
            end do
         end do
-        !$omp end parallel do
+        !$omp end do
+        !$omp end parallel
         call FFT(tmpVsigma,tmp,Nx,Ny,Nz,2*Nw,.true.)
         call FFT(tmpgk,tmp,Nx,Ny,Nz,2*Nw,.true.)
         !$omp parallel
