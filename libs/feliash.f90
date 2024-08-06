@@ -200,15 +200,21 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
   
   if(gap_sym>=0)then
      sw_pair=.true.
+     print'(A7)','singlet'
   else
      sw_pair=.false.
+     print'(A7)','triplet'
   end if
   weight=temp/dble(Nk)
   norm2=0.0d0
   normb=0.0d0
+  print*,maxval(aimag(Gk(:,1,:,:)))
+  print*,maxval(aimag(chi(:,1,:,:)))
   call get_chi0_conv(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nk,Norb,Nchi)
+  call ckchi()
   call get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
-  print*,'V_delta max is ',maxval(dble(chi))
+  print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
+  print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
   do i_eig=1,2 !solve eig_val using power method, 1st eig is usually large negative value
      call get_initial_delta(delta,uni,kmap,Nk,Nw,Norb,Nx,Ny,Nz,gap_sym)
      count=0 !count too small eigenvalue
@@ -220,7 +226,11 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
         norm=2.0d0*sum(abs(newdelta(:,:,:,:))**2)
         !$omp end parallel workshare
         inorm=1.0d0/norm
-        print*,i_iter,'lambda_elsh=',norm-norm2
+        if(abs(norm-norm2)>1.0d0 .or. abs(norm-norm2)<1.0d-6)then
+           print'(I3,A13,E16.8)',i_iter,' lambda_elsh=',norm-norm2
+        else
+           print'(I3,A13,F12.8)',i_iter,' lambda_elsh=',norm-norm2
+        end if
         if(abs((norm-normb)*inorm)<eps)then
            if((norm-norm2)>1.0d-1)then !do not finish until eig>0.1
               exit
@@ -272,6 +282,44 @@ contains
        end do
     end do
   end subroutine mkfk
+  
+  subroutine ckchi()
+    integer(int32) i,l,m,n,info,chisk,chick
+    real(real64) maxchi0s,maxchi0c,maxchi0s2,maxchi0c2
+    real(real64),dimension(2*Nchi):: rwork
+    complex(real64),dimension(Nchi*Nchi*4+1):: work
+    complex(real64),dimension(Nchi):: eigs,eigc
+    complex(real64),dimension(Nchi,Nchi):: chi0s,chi0c,tmp1,tmp2
+
+    maxchi0s2=-1.0d5
+    maxchi0c2=-1.0d5
+    do i=1,Nk
+       chi0s(:,:)=0.0d0
+       chi0c(:,:)=0.0d0
+       do l=1,Nchi
+          do m=1,Nchi
+             do n=1,Nchi
+                chi0s(m,l)=chi0s(m,l)+chi(i,1,m,n)*Smat(n,l)
+                chi0c(m,l)=chi0c(m,l)-chi(i,1,m,n)*Cmat(n,l)
+             end do
+          end do
+       end do
+       call zgeev('N','N',Nchi,chi0s,Nchi,eigs,tmp1,Nchi,tmp2,Nchi,work,Nchi*Nchi*4+1,rwork,info)
+       call zgeev('N','N',Nchi,chi0c,Nchi,eigc,tmp1,Nchi,tmp2,Nchi,work,Nchi*Nchi*4+1,rwork,info)
+       maxchi0s=maxval(dble(eigs))
+       maxchi0c=maxval(dble(eigc))
+       if(maxchi0s>maxchi0s2)then
+          chisk=i
+          maxchi0s2=maxchi0s
+       end if
+       if(maxchi0c>maxchi0c2)then
+          chick=i
+          maxchi0c2=maxchi0c
+       end if
+    end do
+    print'(A3,3I4,F12.8)','SDW',kmap(:,chisk),maxchi0s2
+    print'(A3,3I4,F12.8)','CDW',kmap(:,chick),maxchi0c2
+  end subroutine ckchi
 end subroutine lin_eliash
 
 subroutine mkdelta_nsoc(newdelta,delta,Vdelta,kmap,invk,olist,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)

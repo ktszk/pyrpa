@@ -46,7 +46,7 @@ subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb) bind(C,name="gen_green0_")
            wloop: do j=1,Nw !ien=pi(2l+1)/beta l=0,1,... beta=(kBT)^-1
               iw=cmplx(mu,dble(2*(j-1)+1)*pi*temp) !j=1=>l=0
               kloop: do i=1,Nk
-                 Gk(i,j,m,l)=Gk(i,j,m,l)+uni(l,n,i)*conjg(uni(m,n,i))/(iw-eig(n,i))
+                 Gk(i,j,m,l)=Gk(i,j,m,l)+uni(m,n,i)*conjg(uni(l,n,i))/(iw-eig(n,i))
               end do kloop
            end do wloop
            !$omp end do
@@ -528,9 +528,10 @@ subroutine mkself(sigmak,Smat,Cmat,kmap,olist,hamk,eig,uni,mu,rfill,temp,scf_loo
   integer(int64),intent(in),dimension(Nchi,2):: olist
   integer(int64),intent(in),dimension(3,Nk):: kmap
   logical(1),intent(in):: sw_in,sw_out
-  real(real64),intent(in):: mu,temp,eps,pp,rfill
+  real(real64),intent(in):: temp,eps,pp,rfill
   real(real64),intent(in),dimension(Norb,Nk):: eig
   real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  real(real64),intent(inout):: mu
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni,hamk
   complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: sigmak
 
@@ -745,7 +746,7 @@ contains
   
   subroutine io_sigma(sw)
     logical(int32),intent(in):: sw
-    integer(int32),i,j,l,m
+    integer(int32)i,j,l,m
     open(55,file='sigma.bin',form='unformatted')
     if(sw)then
        write(55)mu
