@@ -54,7 +54,7 @@ color_option defines the meaning of color on Fermi surfaces
 option=17
 color_option=2
 
-Nx,Ny,Nz,Nw=16,16,1,64  #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=32,32,1,256  #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
@@ -62,7 +62,7 @@ kz=0.0
 abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 #abc=[3.90,3.90,12.68]
 alpha_beta_gamma=[90.,90.,90]
-temp=6.0e-2 #2.59e-2
+temp=3.0e-2 #2.59e-2
 fill= 0.5 #2.9375
 
 Emin,Emax=-3,3

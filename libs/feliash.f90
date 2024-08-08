@@ -192,11 +192,11 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: delta
 
-  integer(int32) i_iter,i_eig,count
+  integer(int32) i_iter,i_eig,count,i
   logical(1) sw_pair
   real(real64) norm,normb,inorm,norm2,weight
   complex(real64),dimension(Nk,Nw,Nchi,Nchi):: chi
-  complex(real64),dimension(Nk,Nw,Norb,Norb):: newdelta
+  complex(real64),dimension(Nk,Nw,Norb,Norb):: newdelta,fk
   
   if(gap_sym>=0)then
      sw_pair=.true.
@@ -208,8 +208,6 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
   weight=temp/dble(Nk)
   norm2=0.0d0
   normb=0.0d0
-  print*,maxval(aimag(Gk(:,1,:,:)))
-  print*,maxval(aimag(chi(:,1,:,:)))
   call get_chi0_conv(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nk,Norb,Nchi)
   call ckchi()
   call get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
@@ -220,11 +218,11 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
      count=0 !count too small eigenvalue
      do i_iter=1,itemax !iteration
         call mkfk()
-        call mkdelta_nsoc(newdelta,delta,chi,kmap,invk,olist,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
+        call mkdelta_nsoc(newdelta,fk,chi,kmap,invk,olist,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
         !$omp parallel workshare
         newdelta(:,:,:,:)=newdelta(:,:,:,:)*weight+delta(:,:,:,:)*norm2
-        norm=2.0d0*sum(abs(newdelta(:,:,:,:))**2)
         !$omp end parallel workshare
+        call get_norm(norm,newdelta)
         inorm=1.0d0/norm
         if(abs(norm-norm2)>1.0d0 .or. abs(norm-norm2)<1.0d-6)then
            print'(I3,A13,E16.8)',i_iter,' lambda_elsh=',norm-norm2
@@ -252,35 +250,67 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
      norm2=norm
   end do
 contains
+  subroutine get_norm(norm,func)
+    complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: func
+    real(real64),intent(out):: norm
+
+    integer(int32) i,j,l,m
+    
+    norm=0
+    !$omp parallel
+    do l=1,Norb
+       do m=1,Norb
+          !$omp do private(i)
+          do j=1,Nw
+             do i=1,Nk
+                norm=norm+2.0d0*abs(func(i,j,m,l))*abs(func(i,j,m,l))
+             end do
+          end do
+          !$omp end do
+       end do
+    end do
+    !$omp end parallel
+    norm=sqrt(norm)
+  end subroutine get_norm
+  
   subroutine mkfk()
     integer(int32) i,j,l,m,n
     complex(real64),dimension(Nk,Nw,Norb,Norb):: cmat1
 
+    !$omp parallel
+    !$omp workshare
     cmat1(:,:,:,:)=0.0d0
+    !$omp end workshare
     do l=1,Norb
        do m=1,Norb
           do n=1,Norb
+             !$omp do private(i)
              do j=1,Nw
                 do i=1,Nk
                    cmat1(i,j,m,l)=cmat1(i,j,m,l)+Gk(i,j,m,n)*delta(i,j,n,l)
                 end do
              end do
+             !$omp end do
           end do
        end do
     end do
-
-    delta(:,:,:,:)=0.0d0
+    !$omp workshare
+    fk(:,:,:,:)=0.0d0
+    !$omp end workshare
     do l=1,Norb
        do m=1,Norb
           do n=1,Norb
+             !$omp do private(i)
              do j=1,Nw
                 do i=1,Nk
-                   delta(i,j,m,l)=-cmat1(i,j,m,n)*conjg(Gk(i,j,l,n))
+                   fk(i,j,m,l)=fk(i,j,m,l)-cmat1(i,j,m,n)*conjg(Gk(i,j,l,n))
                 end do
              end do
+             !$omp end do
           end do
        end do
     end do
+    !$omp end parallel
   end subroutine mkfk
   
   subroutine ckchi()
@@ -339,9 +369,9 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,kmap,invk,olist,Nk,Nw,Nchi,Norb,Nx
   complex(real64),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpVdelta,tmpdelta,tmp
 
   if(sw_pair)then
-     sgn=1.0d0
+     sgn=1.0d0 !singlet Fk=F-k
   else
-     sgn=-1.0d0
+     sgn=-1.0d0 !triplet Fk=-F-k
   end if
   newdelta(:,:,:,:)=0.0d0
   do l=1,Nchi
