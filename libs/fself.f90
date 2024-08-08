@@ -444,13 +444,14 @@ subroutine get_vsigma_flex_soc(chi,Vmat,Nk,Nw,Nchi)
   end do
 end subroutine get_vsigma_flex_soc
 
-subroutine calc_sigma(sigmak,Gk,Vsigma,kmap,olist,temp,Nk,Nw,Nchi,Norb,Nx,Ny,Nz) bind(C,name='calc_sigma_')
+subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,olist,temp,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nk,Nw,Nchi,Norb,Nx,Ny,Nz
   integer(int64),intent(in),dimension(3,Nk):: kmap
   integer(int64),intent(in),dimension(Nchi,2):: olist
   real(real64),intent(in):: temp
+  complex(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
   complex(real64),intent(in),dimension(Nk,Nw,Nchi,Nchi):: Vsigma
   complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
   complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: sigmak
@@ -467,7 +468,7 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,kmap,olist,temp,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
         !$omp do
         do i=1,Nk !j=1>iw=0, j=Nw>iw=inf
            tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vsigma(i,1,m,l) !Vsigma(iw)
-           tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=conjg(Vsigma(i,Nw,l,m))
+           tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=1.5d0*Smat(m,l)-0.5d0*Cmat(m,l)
         end do
         !$omp end do
         !$omp do private(i)
@@ -555,7 +556,7 @@ subroutine mkself(sigmak,Smat,Cmat,kmap,olist,hamk,eig,uni,mu,rfill,temp,scf_loo
      call get_chi0_conv(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nk,Norb,Nchi)
      call get_Vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi)
      print'(A16,E12.4,A5,E12.4)','Re V_sigma: max:',maxval(dble(chi)),' min:',minval(dble(chi))
-     call calc_sigma(sigmak,Gk,chi,kmap,olist,temp,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
+     call calc_sigma(sigmak,Gk,chi,Smat,Cmat,kmap,olist,temp,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
      call compair_sigma()
      if(esterr<eps)then
         exit

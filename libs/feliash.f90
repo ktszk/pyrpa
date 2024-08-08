@@ -192,7 +192,7 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: delta
 
-  integer(int32) i_iter,i_eig,count,i
+  integer(int32) i_iter,i_eig,count
   logical(1) sw_pair
   real(real64) norm,normb,inorm,norm2,weight
   complex(real64),dimension(Nk,Nw,Nchi,Nchi):: chi
@@ -218,7 +218,7 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
      count=0 !count too small eigenvalue
      do i_iter=1,itemax !iteration
         call mkfk()
-        call mkdelta_nsoc(newdelta,fk,chi,kmap,invk,olist,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
+        call mkdelta_nsoc(newdelta,fk,chi,Smat,Cmat,kmap,invk,olist,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
         !$omp parallel workshare
         newdelta(:,:,:,:)=newdelta(:,:,:,:)*weight+delta(:,:,:,:)*norm2
         !$omp end parallel workshare
@@ -352,7 +352,7 @@ contains
   end subroutine ckchi
 end subroutine lin_eliash
 
-subroutine mkdelta_nsoc(newdelta,delta,Vdelta,kmap,invk,olist,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
+subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,olist,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nk,Nw,Nchi,Norb,Nx,Ny,Nz
@@ -360,13 +360,14 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,kmap,invk,olist,Nk,Nw,Nchi,Norb,Nx
   integer(int64),intent(in),dimension(Nk):: invk
   integer(int64),intent(in),dimension(Nchi,2):: olist
   logical(1),intent(in):: sw_pair
+  complex(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
   complex(real64),intent(in),dimension(Nk,Nw,Nchi,Nchi):: Vdelta
   complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: delta
   complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: newdelta
   
   integer(int32) i,j,k,n,l,m
   real(real64) sgn
-  complex(real64),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpVdelta,tmpdelta,tmp
+  complex(real64),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpVdelta,tmpfk,tmp
 
   if(sw_pair)then
      sgn=1.0d0 !singlet Fk=F-k
@@ -379,8 +380,8 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,kmap,invk,olist,Nk,Nw,Nchi,Norb,Nx
         !$omp parallel
         !$omp do
         do i=1,Nk 
-           tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vdelta(i,1,m,l)
-           tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=conjg(Vdelta(i,Nw,l,m))
+           tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vdelta(i,1,m,l) !j=1 corresponds to w_n=0
+           tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=0.5d0*(Cmat(m,l)+sgn*Smat(m,l)) !Nw+1 consider w_n=>inf limit
         end do
         !$omp end do
         !$omp do private(i)
@@ -394,31 +395,31 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,kmap,invk,olist,Nk,Nw,Nchi,Norb,Nx
         !$omp do private(i)
         do j=1,Nw
            do i=1,Nk
-              tmpdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)=delta(i,j,olist(m,1),olist(l,2))
-              tmpdelta(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgn*delta(invk(i),j,olist(l,2),olist(m,1))
+              tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),j)=delta(i,j,olist(m,1),olist(l,2))
+              tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgn*delta(invk(i),j,olist(l,2),olist(m,1)) !F(k,-w)=-F^+(-k,w) (no soc only)
            end do
         end do
         !$omp end do
         !$omp end parallel
         call FFT(tmpVdelta,tmp,Nx,Ny,Nz,2*Nw,.true.)
-        call FFT(tmpdelta,tmp,Nx,Ny,Nz,2*Nw,.true.)
+        call FFT(tmpfk,tmp,Nx,Ny,Nz,2*Nw,.true.)
         !$omp parallel
         !$omp do private(i,j,k)
         do n=1,2*Nw
            do k=0,Nz-1
               do j=0,Ny-1
                  do i=0,Nx-1
-                    tmp(i,j,k,n)=tmpVdelta(i,j,k,n)*tmpdelta(i,j,k,n)
+                    tmp(i,j,k,n)=tmpVdelta(i,j,k,n)*tmpfk(i,j,k,n)
                  end do
               end do
            end do
         end do
         !$omp end do
         !$omp workshare
-        tmpdelta(:,:,:,:)=0.0d0
+        tmpfk(:,:,:,:)=0.0d0
         !$omp end workshare
         !$omp end parallel
-        call FFT(tmp,tmpdelta,Nx,Ny,Nz,2*Nw,.false.)
+        call FFT(tmp,tmpfk,Nx,Ny,Nz,2*Nw,.false.)
         !$omp parallel do private(i)
         do j=1,Nw
            do i=1,Nk
