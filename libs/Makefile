@@ -34,12 +34,19 @@ else
   endif
 endif
 
-objmain= fmod.o fcond.o fUJ.o fchi.o fphi.o fself.o fimp.o fpade.o feliash.o
+srcdir= src
+objdir= obj
+flibso=fmod.so
+
+objmain= $(addprefix $(objdir)/, fmod.o fcond.o fUJ.o fchi.o fphi.o fself.o fimp.o fpade.o feliash.o)
 .SUFFIXES:
-main: $(objmain)
-	$(FC) $(FFLAGS) $(FFLAGS2) $(LIBS) -o fmod.so ${objmain}
-%.o: %.f90
-	$(FC) $(FFLAGS) -c $<
+all: $(objdir) $(objmain) $(flibso)
+$(flibso): $(objmain)
+	$(FC) $(FFLAGS) $(FFLAGS2) $(LIBS) -o fmod.so $(objmain)
+$(objdir):
+	mkdir -p $(objdir)
+$(objdir)/%.o: $(srcdir)/%.f90
+	$(FC) $(FFLAGS) -o $@ -c $<
 .PHONY: clean
 clean:
-	rm -rf *.mod *.o *.so __pycache__
+	rm -rf *.mod $(objdir) *.so __pycache__
