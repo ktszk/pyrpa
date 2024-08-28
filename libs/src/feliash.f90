@@ -192,7 +192,7 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: delta
 
-  integer(int32) i_iter,i_eig,count
+  integer(int32) i_iter,i_eig,count,i
   logical(1) sw_pair
   real(real64) norm,normb,inorm,norm2,weight
   complex(real64),dimension(Nk,Nw,Nchi,Nchi):: chi
@@ -206,6 +206,7 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
      print'(A7)','triplet'
   end if
   weight=temp/dble(Nk)
+  print*,weight
   norm2=0.0d0
   normb=0.0d0
   call get_chi0_conv(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nk,Norb,Nchi)
@@ -213,12 +214,21 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
   call get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
+  print*,sum(abs(chi))
   do i_eig=1,2 !solve eig_val using power method, 1st eig is usually large negative value
      call get_initial_delta(delta,uni,kmap,Nk,Nw,Norb,Nx,Ny,Nz,gap_sym)
      count=0 !count too small eigenvalue
      do i_iter=1,itemax !iteration
         call mkfk()
         call mkdelta_nsoc(newdelta,fk,chi,Smat,Cmat,kmap,invk,olist,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
+        if(i_eig==1 .and. i_iter==1)then
+           do i=1,Nk
+              if(kmap(3,i)==0.0d0)then
+                 write(50,'(2I3,2F12.7)')kmap(1,i),kmap(2,i),dble(newdelta(i,1,4,4)),aimag(newdelta(i,1,4,4))
+              end if
+           end do
+           close(50)
+        end if
         !$omp parallel workshare
         newdelta(:,:,:,:)=newdelta(:,:,:,:)*weight+delta(:,:,:,:)*norm2
         !$omp end parallel workshare
@@ -255,22 +265,27 @@ contains
     real(real64),intent(out):: norm
 
     integer(int32) i,j,l,m
-    
-    norm=0
-    !$omp parallel
+    real(real64) tmp
+
+    tmp=0.0d0
+    !!$omp parallel
     do l=1,Norb
        do m=1,Norb
-          !$omp do private(i)
+          !!$omp do private(i) reduction(+:tmp)
           do j=1,Nw
              do i=1,Nk
-                norm=norm+2.0d0*abs(func(i,j,m,l))*abs(func(i,j,m,l))
+                tmp=tmp+2.0d0*abs(func(i,j,m,l))*abs(func(i,j,m,l))
+                if(tmp*0.0d0/=0.0d0)then
+                   print*,i,j,m,l
+                   stop
+                end if
              end do
           end do
-          !$omp end do
+          !!$omp end do
        end do
     end do
-    !$omp end parallel
-    norm=sqrt(norm)
+    !!$omp end parallel
+    norm=sqrt(tmp)
   end subroutine get_norm
   
   subroutine mkfk()
@@ -379,7 +394,7 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,olist,Nk,Nw,Nc
      do m=1,Nchi
         !$omp parallel
         !$omp do
-        do i=1,Nk 
+        do i=1,Nk
            tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vdelta(i,1,m,l) !j=1 corresponds to w_n=0
            tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=0.5d0*(Cmat(m,l)+sgn*Smat(m,l)) !Nw+1 consider w_n=>inf limit
         end do
@@ -396,14 +411,24 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,olist,Nk,Nw,Nc
         do j=1,Nw
            do i=1,Nk
               tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),j)=delta(i,j,olist(m,1),olist(l,2))
-              tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgn*delta(invk(i),j,olist(l,2),olist(m,1)) !F(k,-w)=-F^+(-k,w) (no soc only)
+              tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgn*delta(invk(i),j,olist(l,2),olist(m,1)) !F(k,-w)=sgn*F(-k,w) (no soc only)
            end do
         end do
         !$omp end do
         !$omp end parallel
+        do j=1,2*Nw
+           do i=1,Nk
+              if(tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)*0.0d0/=0.0d0)then
+                 print*,i,j,m,l
+              end if
+           end do
+        end do
         call FFT(tmpVdelta,tmp,Nx,Ny,Nz,2*Nw,.true.)
         call FFT(tmpfk,tmp,Nx,Ny,Nz,2*Nw,.true.)
         !$omp parallel
+        !$omp workshare
+        tmp(:,:,:,:)=0.0d0
+        !$omp end workshare
         !$omp do private(i,j,k)
         do n=1,2*Nw
            do k=0,Nz-1
@@ -420,7 +445,7 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,olist,Nk,Nw,Nc
         !$omp end workshare
         !$omp end parallel
         call FFT(tmp,tmpfk,Nx,Ny,Nz,2*Nw,.false.)
-        !$omp parallel do private(i)
+        !$omp parallel do private(i) reduction(+:newdelta)
         do j=1,Nw
            do i=1,Nk
               newdelta(i,j,olist(m,2),olist(l,1))=newdelta(i,j,olist(m,2),olist(l,1))&
@@ -428,6 +453,13 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,olist,Nk,Nw,Nc
            end do
         end do
         !$omp end parallel do
+        do j=1,Nw
+           do i=1,Nk
+              if(newdelta(i,j,olist(m,2),olist(l,1))*0.0d0/=0.0d0)then
+                 print*,i,j,m,l
+              end if
+           end do
+        end do
      end do
   end do
 end subroutine mkdelta_nsoc
@@ -451,9 +483,9 @@ subroutine get_initial_delta(delta,uni,kmap,Nk,Nw,Norb,Nx,Ny,Nz,gap_sym)
         do i=1,Nk
            select case(gap_sym)
            case(1)
-              deltab(i,l)=cos(2*pi*dble(kmap(1,i))/Nx)-cos(2*pi*dble(kmap(2,i))/Ny)
+              deltab(i,l)=cos(2*pi*dble(kmap(1,i))/Nx)-cos(2*pi*dble(kmap(2,i))/Ny) !dx2-y2
            case(2)
-              deltab(i,l)=2.0d0*cos(2*pi*dble(kmap(1,i))/Nx)*cos(2*pi*dble(kmap(2,i))/Ny)
+              deltab(i,l)=2.0d0*cos(2*pi*dble(kmap(1,i))/Nx)*cos(2*pi*dble(kmap(2,i))/Ny) !spm
            case default !same as 0
               deltab(i,l)=1.0d0
            end select
