@@ -19,8 +19,8 @@ brav: choose primitive translation vector S,FC,BC etc
 else: monoclinic
 """
 
-fname,ftype,brav='inputs/Sr2RuO4',2,2
-#fname,ftype,brav='inputs/000AsP.input',1,0
+#fname,ftype,brav='inputs/Sr2RuO4',2,2
+fname,ftype,brav='inputs/000AsP.input',1,0
 #fname,ftype,brav='inputs/square.hop',1,0
 #fname,ftype,brav='inputs/SiMLO.input',3,6
 
@@ -63,7 +63,7 @@ abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 #abc=[3.90,3.90,12.68]
 alpha_beta_gamma=[90.,90.,90]
 temp=6.0e-2 #2.59e-2
-fill= 2.0 #2.9375
+fill= 2.9375
 
 Emin,Emax=-3,3
 delta=3.0e-2
@@ -71,8 +71,8 @@ Ecut=1.0e-2
 tau_const=100
 #olist=[[0,3],[1,4],[2,5]]
 olist=[[0,4],[1,2,5,6],[3,7]]
-U,J=0.6, 0.075
-#U,J=1.2,0.15
+#U,J=0.6, 0.075
+U,J=1.2,0.15
 gap_sym=2
 
 mu0=9.85114560061123

@@ -219,14 +219,6 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
      do i_iter=1,itemax !iteration
         call mkfk()
         call mkdelta_nsoc(newdelta,fk,chi,Smat,Cmat,kmap,invk,olist,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
-        if(i_eig==1 .and. i_iter==20)then
-           do i=1,Nk
-              if(kmap(3,i)==0.0d0)then
-                 write(50,'(2I3,2F12.7)')kmap(1,i),kmap(2,i),dble(newdelta(i,1,4,4)),aimag(newdelta(i,1,4,4))
-              end if
-           end do
-           close(50)
-        end if
         !$omp parallel workshare
         newdelta(:,:,:,:)=newdelta(:,:,:,:)*weight+delta(:,:,:,:)*norm2
         !$omp end parallel workshare
@@ -257,6 +249,12 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
      end if
      norm2=norm
   end do
+  do i=1,Nk
+     if(kmap(3,i)==0.0d0)then
+        write(50,'(2I3,2F12.7)')kmap(1,i),kmap(2,i),dble(delta(i,1,4,4)),aimag(delta(i,1,4,4))
+     end if
+  end do
+  close(50)
 contains
   subroutine get_norm()
     integer(int32) i,j,l,m
@@ -270,10 +268,6 @@ contains
           do j=1,Nw
              do i=1,Nk
                 tmp=tmp+2.0d0*abs(newdelta(i,j,m,l))*abs(newdelta(i,j,m,l))
-                !if(tmp*0.0d0/=0.0d0)then
-                !   print*,i,j,m,l
-                !   stop
-                !end if
              end do
           end do
           !$omp end do
@@ -411,13 +405,6 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,olist,Nk,Nw,Nc
         end do
         !$omp end do
         !$omp end parallel
-        do j=1,2*Nw
-           do i=1,Nk
-              if(tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)*0.0d0/=0.0d0)then
-                 print*,i,j,m,l
-              end if
-           end do
-        end do
         call FFT(tmpVdelta,tmp,Nx,Ny,Nz,2*Nw,.true.)
         call FFT(tmpfk,tmp,Nx,Ny,Nz,2*Nw,.true.)
         !$omp parallel
@@ -448,13 +435,6 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,olist,Nk,Nw,Nc
            end do
         end do
         !$omp end parallel do
-        do j=1,Nw
-           do i=1,Nk
-              if(newdelta(i,j,olist(m,2),olist(l,1))*0.0d0/=0.0d0)then
-                 print*,i,j,m,l
-              end if
-           end do
-        end do
      end do
   end do
 end subroutine mkdelta_nsoc
