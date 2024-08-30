@@ -614,7 +614,7 @@ def pade_with_trace(A,iwlist,wlist):
                           byref(c_int64(Nw)),byref(c_int64(Norb)))
     return B
 
-def linearized_eliashberg(Gk,uni,Smat,Cmat,olist,kmap,invk,Nx,Ny,Nz,temp,gap_sym,eps=1.0e-3,itemax=1):
+def linearized_eliashberg(Gk,uni,Smat,Cmat,olist,kmap,invk,Nx,Ny,Nz,temp,gap_sym,eps=1.0e-3,itemax=200):
     Norb,Nchi=len(Gk),len(Smat)
     Nk,Nw=len(kmap),len(Gk[0,0])
     delta=np.zeros((Norb,Norb,Nw,Nk),dtype=np.complex128)

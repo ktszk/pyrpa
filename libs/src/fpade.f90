@@ -83,7 +83,8 @@ subroutine get_QP(P,Q,a,xn,wlist,Nw,Np) bind(C,name='get_qp_')
   return
 end subroutine get_QP
 
-subroutine pade_analytic_continuation_arrays(arrayin,arrayout,iwlist,wlist,Nk,Niw,Nw) bind(C,name="pade_analytic_continuation_arrays_")
+subroutine pade_analytic_continuation_arrays(arrayin,arrayout,iwlist,wlist,&
+     Nk,Niw,Nw) bind(C,name="pade_analytic_continuation_arrays_")
   use,intrinsic:: iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nk,Nw,Niw

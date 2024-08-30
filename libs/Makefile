@@ -1,9 +1,12 @@
 #Makefile
 #FC=ifort
-#FC=ifx
-FC=flang
+FC=ifx
+#FC=flang
 #FC=amdflang
 #FC=gfortran
+SL=MKL
+#SL=AOCL
+#SL=OpenBLAS
 ifeq ($(FC),ifort)
   LIBS=-lmkl_intel_lp64 -lmkl_sequential -lmkl_core #-lmkl_avx
   FFLAGS= -O2 -mavx2 -qopenmp -IPO -fPIC -heap-arrays
@@ -11,7 +14,7 @@ ifeq ($(FC),ifort)
 else
   ifeq ($(FC),ifx)
     LIBS= -qmkl
-    FFLAGS= -O2 -mavx2 -fopenmp -finline-functions -fPIC -heap-arrays
+    FFLAGS= -O2 -mavx2 -qopenmp -finline-functions -fPIC -heap-arrays -assume nan_compares
     FFLAGS2= -shared
   else
     ifeq ($(FC),flang)
@@ -24,9 +27,15 @@ else
         FFLAGS= -O2 -mavx2 -fopenmp -finline-functions -fPIC
         FFLAGS2= -shared
       else
-        LIBS= -lmkl_gf_lp64 -lmkl_sequential -lmkl_core -liomp5
-        #LIBS= -lblis -lflame -lfftw3 -lm -lpthread
-        #LIBS= -lopenblas -lfftw3
+        ifeq ($(SL),MKL)
+          LIBS= -lmkl_rt
+        else
+          ifeq ($(SL),AOCL)
+            LIBS= -lblis -lflame -lfftw3 -lm -lpthread
+          else
+            LIBS= -lopenblas -lfftw3
+          endif
+        endif
         FFLAGS= -O2 -mavx2 -fopenmp -finline-functions
         FFLAGS2= -shared -fPIC
       endif
@@ -49,4 +58,4 @@ $(objdir)/%.o: $(srcdir)/%.f90
 	$(FC) $(FFLAGS) -o $@ -c $<
 .PHONY: clean
 clean:
-	rm -rf *.mod $(objdir) *.so __pycache__
+	rm -rf *.mod *.f90 $(objdir) *.so __pycache__

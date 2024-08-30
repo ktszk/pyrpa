@@ -451,7 +451,7 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,olist,temp,Nk,Nw,Nchi,Norb
   integer(int64),intent(in),dimension(3,Nk):: kmap
   integer(int64),intent(in),dimension(Nchi,2):: olist
   real(real64),intent(in):: temp
-  complex(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
   complex(real64),intent(in),dimension(Nk,Nw,Nchi,Nchi):: Vsigma
   complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
   complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: sigmak
@@ -522,7 +522,8 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,olist,temp,Nk,Nw,Nchi,Norb
   !$omp end parallel workshare
 end subroutine calc_sigma
 
-subroutine mkself(sigmak,Smat,Cmat,kmap,olist,hamk,eig,uni,mu,rfill,temp,scf_loop,pp,eps,Nk,Nw,Norb,Nchi,Nx,Ny,Nz,sw_out,sw_in) bind(C)
+subroutine mkself(sigmak,Smat,Cmat,kmap,olist,hamk,eig,uni,mu,rfill,temp,&
+     scf_loop,pp,eps,Nk,Nw,Norb,Nchi,Nx,Ny,Nz,sw_out,sw_in) bind(C)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nw,Norb,Nchi,Nk,Nx,Ny,Nz,scf_loop

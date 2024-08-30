@@ -7,7 +7,7 @@ subroutine get_qshift(qpoint,klist,qshift,Nk) bind(C,name="get_qshift_")
   real(real64),intent(in),dimension(3):: qpoint
   integer(int64),intent(out),dimension(Nk):: qshift
 
-  integer(int32) i,j,k
+  integer(int32) i,j
   real(real64) tmp
   real(real64),dimension(3,Nk):: kqlist
 
