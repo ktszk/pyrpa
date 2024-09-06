@@ -193,11 +193,12 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
   complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: delta
 
   integer(int32) i_iter,i_eig,count,i
+  integer(int32),parameter:: eig_max=2
   logical(1) sw_pair
   real(real64) norm,normb,inorm,norm2,weight
   complex(real64),dimension(Nk,Nw,Nchi,Nchi):: chi
   complex(real64),dimension(Nk,Nw,Norb,Norb):: newdelta,fk
-  
+ 
   if(gap_sym>=0)then
      sw_pair=.true.
      print'(A7)','singlet'
@@ -213,7 +214,7 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
   call get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
-  do i_eig=1,2 !solve eig_val using power method, 1st eig is usually large negative value
+  do i_eig=1,eig_max !solve eig_val using power method, 1st eig is usually large negative value
      call get_initial_delta(delta,uni,kmap,Nk,Nw,Norb,Nx,Ny,Nz,gap_sym)
      count=0 !count too small eigenvalue
      do i_iter=1,itemax !iteration
@@ -224,7 +225,7 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
         !$omp end parallel workshare
         call get_norm()
         inorm=1.0d0/norm
-        if(abs(norm-norm2)>1.0d0 .or. abs(norm-norm2)<1.0d-6)then
+        if(abs(norm-norm2)>=1.0d2 .or. abs(norm-norm2)<1.0d-6)then
            print'(I3,A13,E16.8)',i_iter,' lambda_elsh=',norm-norm2
         else
            print'(I3,A13,F12.8)',i_iter,' lambda_elsh=',norm-norm2
