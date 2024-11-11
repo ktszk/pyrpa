@@ -306,7 +306,7 @@ contains
        do m=1,Norb
           do n=1,Norb
              !$omp do private(i)
-             do j=1,Nw
+              do j=1,Nw
                 do i=1,Nk
                    fk(i,j,m,l)=fk(i,j,m,l)-cmat1(i,j,m,n)*conjg(Gk(i,j,l,n))
                 end do

@@ -3,8 +3,8 @@
 import libs.flibs as flibs
 import numpy as np, scipy.optimize as scopt, scipy.linalg as sclin
 
-def import_hoppings(fname,ftype):
-    def import_hop(name):
+def import_hoppings(fname:str,ftype:int):
+    def import_hop(name: str):
         rvec=np.loadtxt(f'{name}/irvec.txt')
         nr=rvec[:,0].size
         ndegen=np.loadtxt(f'{name}/ndegen.txt')
@@ -14,7 +14,7 @@ def import_hoppings(fname,ftype):
         ham_r=(tmp.reshape(nr,no,no).T/ndegen).T
         return(rvec,ham_r,no,nr)
 
-    def import_out(name):
+    def import_out(name:str):
         data=np.loadtxt(name)
         con=(data[:,:3]==data[0,:3]).prod(axis=1).sum()
         no,nr =int(np.sqrt(con)),data[:,0].size//con
@@ -22,7 +22,7 @@ def import_hoppings(fname,ftype):
         ham_r=(data[:,3]+1j*data[:,4]).reshape(no*no,nr).T.reshape(nr,no,no).round(6).copy()
         return(rvec,ham_r,no,nr)
 
-    def import_hr(name):
+    def import_hr(name:str):
         tmp=[f.split() for f in open(f'{name}_hr.dat','r')]
         no, nr=int(tmp[1][0]), int(tmp[2][0])
         c2,tmp1=3,[]
@@ -36,7 +36,7 @@ def import_hoppings(fname,ftype):
         ham_r=(tmp.reshape((nr,no,no)).T/ndegen).T.round(6).copy()
         return(rvec,ham_r,no,nr)
 
-    def import_Hopping(name,sw_axis=False):
+    def import_Hopping(name:str,sw_axis=False):
         tmp=[f.split() for f in open(f'{name}/Hopping.dat','r')]
         axis=np.array([[float(tp) for tp in tpp] for tpp in tmp[1:4]])
         no,nr=int(tmp[4][0]),int(tmp[4][1])
@@ -58,7 +58,7 @@ def import_hoppings(fname,ftype):
         rvec,ham_r,no,nr=import_Hopping(fname)
     return(rvec,ham_r,no,nr)
 
-def import_MLO_hoppings(name):
+def import_MLO_hoppings(name:str):
     tmp=[f.split() for f in open(f'{name}','r')]
     tmp1=np.array([[float(t) for t in tp] for tp in tmp])
     no=int(tmp1[:,0].max())
@@ -97,7 +97,7 @@ def get_eigs(klist,ham_r,S_r,rvec,sw_uni=False,sw_std=False):
             else:
                 return eig,uni
 
-def calc_mu(eig,Nk,fill,temp):
+def calc_mu(eig,Nk,fill:float,temp:float)-> float:
     no=int(eig.size/len(eig))
     def func(mu):
         sum_fermi=flibs.get_ffermi(eig,mu,temp).sum()
@@ -107,7 +107,7 @@ def calc_mu(eig,Nk,fill,temp):
     mu=scopt.brentq(func,emin,emax)
     return mu
 
-def calc_mu_imp(eigs,Nsite,fill,temp):
+def calc_mu_imp(eigs,Nsite,fill:float,temp:float)-> float:
     itemp=1./temp
     def func(mu):
         return(fill*Nsite-0.5*(1.0-np.tanh(0.5*(eigs-mu)*itemp)).sum())
@@ -116,7 +116,7 @@ def calc_mu_imp(eigs,Nsite,fill,temp):
     mu=scopt.brentq(func,emin,emax)
     return mu
 
-def gen_rlist(Nx,Ny,Nz):
+def gen_rlist(Nx:int,Ny:int,Nz:int):
     x0=np.linspace(0,Nx,Nx,False)
     y0=np.linspace(0,Ny,Ny,False)
     z0=np.linspace(0,Nz,Nz,False)
@@ -125,7 +125,7 @@ def gen_rlist(Nx,Ny,Nz):
     
     return rlist
 
-def gen_klist_with_kmap(Nx,Ny,Nz):
+def gen_klist_with_kmap(Nx:int,Ny:int,Nz:int):
     x0=np.linspace(0,Nx,Nx,False,dtype=int)
     y0=np.linspace(0,Ny,Ny,False,dtype=int)
     z0=np.linspace(0,Nz,Nz,False,dtype=int)
@@ -134,7 +134,7 @@ def gen_klist_with_kmap(Nx,Ny,Nz):
     klist=np.array([x.ravel()/Nx,y.ravel()/Ny,z.ravel()/Nz]).T.copy()
     return klist,kmap
 
-def gen_klist(Nx,Ny,Nz=None,sw_pp=True,kz=0):
+def gen_klist(Nx:int,Ny:int,Nz=None,sw_pp=True,kz=0):
     if sw_pp:
         kx=np.linspace(-0.5,0.5,Nx,True)
         ky=np.linspace(-0.5,0.5,Ny,True)
@@ -169,7 +169,7 @@ def mk_klist(k_list,N,bvec):
     xticks+=[splen[-1]]
     return np.array(klist),np.array(splen),xticks
 
-def mk_qlist(k_set,Nx,Ny,Nz,bvec):
+def mk_qlist(k_set,Nx:int,Ny:int,Nz:int,bvec):
     qlist=[]
     splen=[]
     xticks=[]
@@ -191,7 +191,7 @@ def mk_qlist(k_set,Nx,Ny,Nz,bvec):
     xticks+=[splen[-1]]
     return np.array(qlist),np.array(splen),xticks
 
-def mk_kf(mesh,rvec,ham_r,S_r,mu,kz):
+def mk_kf(mesh,rvec,ham_r,S_r,mu:float,kz):
     import skimage.measure as sk
     Nk,klist=gen_klist(mesh+1,mesh+1,kz=kz)
     eig,uni=get_eigs(klist,ham_r,S_r,rvec)
@@ -254,7 +254,7 @@ def get_colors(klist,blist,mrot,rvec,ham_r,S_r,ol,color_option,sw_2d=False):
             clist=[np.sqrt((abs(vkk)*abs(vkk)).sum(axis=1)) for vkk in vk]
         return clist
 
-def get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=False,sw_veloc=False):
+def get_emesh(Nx:int,Ny:int,Nz:int,ham_r,S_r,rvec,avec,sw_uni=False,sw_veloc=False):
     Nk,klist=gen_klist(Nx,Ny,Nz,sw_pp=False)
     eig,uni=get_eigs(klist,ham_r,S_r,rvec)
     kweight=np.ones(len(eig),dtype=np.float64)
@@ -306,7 +306,7 @@ def get_ptv(alatt,deg,brav):
         avec=alatt[0]*Arot
     return avec,Arot
 
-def get_symm_line(brav):
+def get_symm_line(brav:int)->tuple[list,list]:
     if brav==0: #simple
         k_list=[[0.,0.,.5],[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.],[0.,0.,0.]]
         xlabel=['Z','$\Gamma$','X','M','$\Gamma$']
@@ -329,7 +329,7 @@ def get_symm_line(brav):
         pass
     return k_list,xlabel
 
-def BZedge(brav):
+def BZedge(brav:int):
     pass
 
 def get_conductivity(mu,temp,eig,vk,Nw,Emax,idelta=1.e-3):

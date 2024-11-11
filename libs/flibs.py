@@ -4,7 +4,7 @@ import numpy as np
 flibs=np.ctypeslib.load_library("libs/fmod.so",".")
 #interface for fmod subroutines
 
-def omp_params():
+def omp_params() ->tuple[int,bool]:
     omp_num=c_int64()
     omp_check=c_bool()
     flibs.openmp_params.argtypes=[POINTER(c_int64),POINTER(c_bool)]
@@ -55,7 +55,7 @@ def get_eig(hamk,Ovlk=[],sw=True):
     else:
         return eig
 
-def get_ffermi(eig,mu,temp):
+def get_ffermi(eig,mu:float,temp:float):
     Nk=len(eig)
     Norb=int(eig.size/Nk)
     ffermi=np.zeros((Nk,Norb),dtype=np.float64)
@@ -154,7 +154,7 @@ def get_mass(klist,ham_r,rvec,mrot,uni):
     mass=np.array([[sclin.inv(im) for im in imas] for imas in imass])
     return mass
 
-def gen_Green0(eig,uni,mu,temp,Nw):
+def gen_Green0(eig,uni,mu:float,temp:float,Nw:int):
     Nk=len(eig)
     Norb=int(eig.size/Nk)
     Gk=np.zeros((Norb,Norb,Nw,Nk),dtype=np.complex128)
@@ -168,7 +168,7 @@ def gen_Green0(eig,uni,mu,temp,Nw):
                      byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Norb)))
     return Gk
 
-def gen_green(selfen,hamk,mu,temp):
+def gen_green(selfen,hamk,mu:float,temp:float):
     Nk=len(hamk)
     Norb=int(np.sqrt(hamk.size/Nk))
     Nw=int(selfen.size/(Nk*Norb*Norb))
@@ -187,7 +187,7 @@ def gen_green(selfen,hamk,mu,temp):
     flibs.getinv_(Gk,byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Norb)))
     return Gk
 
-def gen_green_from_eig(selfen,eig,uni,mu,temp):
+def gen_green_from_eig(selfen,eig,uni,mu:float,temp:float):
     Nk=len(eig)
     Norb=int(eig.size/Nk)
     Nw=int(selfen.size/(Nk*Norb*Norb))
@@ -222,7 +222,7 @@ def gen_tr_Greenw_0(eig,mu,wlist,delta):
                           byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Norb)))
     return -trGk.imag
 
-def get_chi0_conv(Gk,kmap,olist,temp,Nx,Ny,Nz):
+def get_chi0_conv(Gk,kmap,olist,temp:float,Nx:int,Ny:int,Nz:int):
     Nk=len(Gk[0,0,0])
     Norb,Nchi=len(Gk),len(olist)
     Nw=int(Gk.size/(Norb*Norb*Nk))
@@ -240,7 +240,7 @@ def get_chi0_conv(Gk,kmap,olist,temp,Nx,Ny,Nz):
                         byref(c_int64(Nk)),byref(c_int64(Norb)),byref(c_int64(Nchi)))
     return chi
 
-def get_chi0_sum(Gk,klist,olist,temp):
+def get_chi0_sum(Gk,klist,olist,temp:float):
     Nk=len(klist)
     Norb,Nchi=len(Gk),len(olist)
     Nw=int(Gk.size/(Norb*Norb*Nk))
@@ -267,7 +267,7 @@ def get_Vsigma_nosoc_flex(chi,Smat,Cmat):
                                  byref(c_int64(Nw)),byref(c_int64(Nchi)))
     return chi.copy()
 
-def mkself(Smat,Cmat,kmap,olist,hamk,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out,sw_in,scf_loop=100,eps=1.0e-3,pp=0.4):
+def mkself(Smat,Cmat,kmap,olist,hamk,eig,uni,mu:float,fill:float,temp:float,Nw:int,Nx:int,Ny:int,Nz:int,sw_out:bool,sw_in:bool,scf_loop=100,eps=1.0e-3,pp=0.4):
     print('mixing rate: pp = %3.1f'%pp)
     Nk,Nchi=len(hamk),len(Smat)
     Norb=int(np.sqrt(hamk.size/Nk))
