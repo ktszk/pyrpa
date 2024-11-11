@@ -162,7 +162,7 @@ def plot_band(eig,spl,xlabel,xticks,uni,ol,color):
     plt.xticks(xticks,xlabel)
     plt.show()
 
-def plot_FS(fscolors,klist,color_option):
+def plot_FS(fscolors,klist,color_option:int):
     fig=plt.figure()
     ax=fig.add_subplot(111,aspect='equal')
     col=['r','g','b','c','m','y','k','w']
@@ -257,7 +257,7 @@ def set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist
         fscolors=np.array(fscolors)
         return fspolys,fscenters,fscolors
 
-def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw,sw_self=True):
+def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu:float,ham_r,S_r,rvec,Emin:float,Emax:float,delta:float,Nw:int,sw_self=True):
     klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     wlist=np.linspace(Emin,Emax,Nw)
@@ -279,7 +279,7 @@ def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw,
     plt.colorbar()
     plt.show()
     
-def calc_conductivity_Bolzmann(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,tau_const,Nw=300,with_spin=False):
+def calc_conductivity_Bolzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,temp:float,tau_const,Nw=300,with_spin=False):
     #no dep. T and mu or filling
     Nk,eig,vk,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec.T*ihbar,sw_veloc=True)
     Vuc=sclin.det(avec)*1e-30
@@ -337,7 +337,7 @@ def calc_conductivity_Bolzmann(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,tau_const,
     print('Power Factor (SA/m^2/K)',flush=True)
     print(PF.round(10),flush=True)
 
-def calc_conductivity_lr(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta,with_spin=False):
+def calc_conductivity_lr(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,temp:float,Nw:int,delta,with_spin=False):
     '''
     calculation of linear response theory
     electric conductivity of LRT correponds to Boltzmann then delta~O(10-1) (tau~1fs) at 300K
@@ -387,7 +387,7 @@ def calc_conductivity_lr(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta,with_sp
     #ax3.plot(wlist,(sigmaS[:,0,0]+sigmaS[:,1,1]+sigmaS[:,2,2]).imag)
     plt.show()
 
-def calc_chis_spectrum(mu,temp,Smat,klist,qlist,chiolist,eig,uni,spa_length,Nw,Emax,delta):
+def calc_chis_spectrum(mu:float,temp:float,Smat,klist,qlist,chiolist,eig,uni,spa_length,Nw:int,Emax:float,delta:float):
     print("calculate spn susceptibility",flush=True)
     chisw,chisw_orb,wlist=plibs.chis_spectrum(mu,temp,Smat,klist,qlist,chiolist,eig,uni,Nw,Emax,delta)
     w,sp=np.meshgrid(wlist,spa_length)
@@ -406,7 +406,7 @@ def calc_chis_spectrum(mu,temp,Smat,klist,qlist,chiolist,eig,uni,spa_length,Nw,E
         f.close()
     return(w,sp,chisw)
 
-def calc_phi_spectrum(mu,temp,klist,qlist,chiolist,eig,uni,spa_length,Nw,Emax,delta):
+def calc_phi_spectrum(mu:float,temp:float,klist,qlist,chiolist,eig,uni,spa_length,Nw:int,Emax:float,delta:float):
     print("calculate sc susceptibility",flush=True)
     phiw,phiw_orb,wlist=plibs.phi_spectrum(mu,temp,klist,qlist,chiolist,eig,uni,Nw,Emax,delta)
     w,sp=np.meshgrid(wlist,spa_length)
@@ -418,14 +418,14 @@ def calc_phi_spectrum(mu,temp,klist,qlist,chiolist,eig,uni,spa_length,Nw,Emax,de
     f.close()
     return(w,sp,phiw)
 
-def calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,olist):
+def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,olist):
     klist,kmap=plibs.gen_klist_with_kmap(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     ham_k=flibs.gen_ham(klist,ham_r,rvec)
     Smat,Cmat=flibs.gen_SCmatrix(olist,U,J)
     sigmak=flibs.mkself(Smat,Cmat,kmap,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
 
-def calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,olist,gap_sym,sw_self):
+def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw,ham_r,S_r,rvec,mu:float,temp:float,olist,gap_sym,sw_self:bool):
     klist,kmap=plibs.gen_klist_with_kmap(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     Smat,Cmat=flibs.gen_SCmatrix(olist,U,J)
@@ -438,7 +438,7 @@ def calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,olist,gap_sym,sw_s
         Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
     gap=flibs.linearized_eliashberg(Gk,uni,Smat,Cmat,olist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
 
-def get_carrier_num(kmesh,rvec,ham_r,S_r,mu,Arot):
+def get_carrier_num(kmesh,rvec,ham_r,S_r,mu:float,Arot):
     Nk,eig,kwieght=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,S_r,rvec,Arot)
     fill=0.0
     for i,en in enumerate(eig.T-mu):
@@ -448,14 +448,14 @@ def get_carrier_num(kmesh,rvec,ham_r,S_r,mu,Arot):
         fill+=num_particle
     print('sum of electrons is %5.3f'%fill,flush=True)
 
-def get_mu(ham_r,S_r,rvec,Arot,temp,kmesh=40):
+def get_mu(ham_r,S_r,rvec,Arot,temp:float,kmesh=40)->float:
     print("calc chem. pot.",flush=True)
     print("band filling = %f"%fill,flush=True)
     Nk,eig,kweight=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,S_r,rvec,Arot)
     mu=plibs.calc_mu(eig,Nk,fill,temp)
     return mu
 
-def get_mass(mesh,rvec,ham_r,mu,de=3.e-4,meshkz=20):
+def get_mass(mesh,rvec,ham_r,mu:float,de=3.e-4,meshkz=20):
     import skimage.measure as sk
     al=alatt[:2]
     eV2J=scconst.physical_constants['electron volt-joule relationship'][0]
