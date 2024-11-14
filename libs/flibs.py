@@ -464,7 +464,7 @@ def gen_SCmatrix(olist,U,J):
     flibs.get_scmat(Smat,Cmat,olist,byref(c_double(U)),byref(c_double(J)),byref(c_int64(Nchi)))
     return Smat,Cmat
 
-def calc_Lij(eig,vk,ffermi,mu,w,idelta,temp):
+def calc_Lij(eig,vk,ffermi,mu:float,w:float,idelta:float,temp:float):
     Nk=len(eig)
     Norb=int(eig.size/Nk)
     L11=np.zeros((3,3),dtype=np.complex128)
@@ -487,7 +487,7 @@ def calc_Lij(eig,vk,ffermi,mu,w,idelta,temp):
                    byref(c_double(eps)),byref(c_double(temp)))
     return L11,L12,L22
 
-def calc_Kn(eig,veloc,kweight,temp,mu,tau):
+def calc_Kn(eig,veloc,kweight,temp:float,mu:float,tau):
     Nk=len(eig)
     Norb=int(eig.size/Nk)
     K0=np.zeros((3,3),dtype=np.float64)
@@ -507,7 +507,7 @@ def calc_Kn(eig,veloc,kweight,temp,mu,tau):
                   byref(c_double(mu)),byref(c_int64(Nk)),byref(c_int64(Norb)))
     return K0,K1,K2
 
-def calc_tdf(eig,veloc,kweight,tau,Nw):
+def calc_tdf(eig,veloc,kweight,tau,Nw:int):
     Nk=len(eig)
     Norb=int(eig.size/Nk)
     tdf=np.zeros((Nw,3,3),dtype=np.float64)
@@ -556,7 +556,7 @@ def dft_imp_ham(ham_imp,klist,rlist):
                           byref(c_int64(Nsite)),byref(c_int64(Norb)))
     return ham_k
 
-def get_imp_spectrum(uni,eigs,mu,wlist,klist,rlist,eta=1.0e-3):
+def get_imp_spectrum(uni,eigs,mu:float,wlist,klist,rlist,eta=1.0e-3):
     Nw,Nk,Nsite=len(wlist),len(klist),len(rlist)
     Norb=int(len(eigs)/Nsite)
     spectrum=np.zeros((Nk,Nw),dtype=np.complex128)
@@ -614,7 +614,7 @@ def pade_with_trace(A,iwlist,wlist):
                           byref(c_int64(Nw)),byref(c_int64(Norb)))
     return B
 
-def linearized_eliashberg(Gk,uni,Smat,Cmat,olist,kmap,invk,Nx,Ny,Nz,temp,gap_sym,eps=1.0e-4,itemax=200):
+def linearized_eliashberg(Gk,uni,Smat,Cmat,olist,kmap,invk,Nx:int,Ny:int,Nz:int,temp:float,gap_sym:int,eps=1.0e-4,itemax=300):
     Norb,Nchi=len(Gk),len(Smat)
     Nk,Nw=len(kmap),len(Gk[0,0])
     delta=np.zeros((Norb,Norb,Nw,Nk),dtype=np.complex128)

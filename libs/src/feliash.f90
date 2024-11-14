@@ -11,8 +11,8 @@ subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
   complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,cmat5
   complex(real64),dimension(2*Nchi):: work
 
-  do j=1,Nw
-     do i=1,Nk
+  wloop:do j=1,Nw
+     qloop:do i=1,Nk
         !$omp parallel
         !$omp workshare
         cmat1(:,:)=0.0d0
@@ -103,8 +103,8 @@ subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
         chi(i,j,:,:)=cmat4(:,:)
         !$omp end workshare
         !$omp end parallel
-     end do
-  end do
+     end do qloop
+  end do wloop
 end subroutine get_V_delta_nsoc_flex
 
 subroutine get_V_delta_soc_flex(chi,Vmat,Nk,Nw,Nchi)
@@ -119,8 +119,8 @@ subroutine get_V_delta_soc_flex(chi,Vmat,Nk,Nw,Nchi)
   complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3
   complex(real64),dimension(2*Nchi):: work
 
-  do j=1,Nw
-     do i=1,Nk
+  wloop:do j=1,Nw
+     qloop:do i=1,Nk
         !$omp parallel
         !$omp workshare
         cmat1(:,:)=0.0d0
@@ -174,8 +174,8 @@ subroutine get_V_delta_soc_flex(chi,Vmat,Nk,Nw,Nchi)
         chi(i,j,:,:)=cmat2(:,:)
         !$omp end workshare
         !$omp end parallel
-     end do
-  end do
+     end do qloop
+  end do wloop
 end subroutine get_V_delta_soc_flex
 
 subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
@@ -214,10 +214,10 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
   call get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
-  do i_eig=1,eig_max !solve eig_val using power method, 1st eig is usually large negative value
+  eigenval_loop:do i_eig=1,eig_max !solve eig_val using power method, 1st eig is usually large negative value
      call get_initial_delta(delta,uni,kmap,Nk,Nw,Norb,Nx,Ny,Nz,gap_sym)
      count=0 !count too small eigenvalue
-     do i_iter=1,itemax !iteration
+     iter_loop:do i_iter=1,itemax !iteration
         call mkfk()
         call mkdelta_nsoc(newdelta,fk,chi,Smat,Cmat,kmap,invk,olist,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
         !$omp parallel workshare
@@ -244,18 +244,12 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
         !$omp parallel workshare
         delta(:,:,:,:)=newdelta(:,:,:,:)*inorm
         !$omp end parallel workshare
-     end do
+     end do iter_loop
      if(i_eig==2)then
         print*,'eliash=',norm-norm2
      end if
      norm2=norm
-  end do
-  do i=1,Nk
-     if(kmap(3,i)==0.0d0)then
-        write(50,'(2I3,2F12.7)')kmap(1,i),kmap(2,i),dble(delta(i,1,4,4)),aimag(delta(i,1,4,4))
-     end if
-  end do
-  close(50)
+  end do eigenval_loop
 contains
   subroutine get_norm()
     integer(int32) i,j,l,m
