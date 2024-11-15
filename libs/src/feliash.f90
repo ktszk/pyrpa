@@ -1,4 +1,7 @@
 subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
+  !
+  !> obtain pairing interaction V_delta without soc
+  !
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nk,Nw,Nchi
@@ -180,6 +183,9 @@ end subroutine get_V_delta_soc_flex
 
 subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
      Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym) bind(C)
+  !
+  !> calculate linearized eliashberg equations
+  !
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym
@@ -218,7 +224,7 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
      call get_initial_delta(delta,uni,kmap,Nk,Nw,Norb,Nx,Ny,Nz,gap_sym)
      count=0 !count too small eigenvalue
      iter_loop:do i_iter=1,itemax !iteration
-        call mkfk()
+        call mkfk_trs_nsoc(fk,Gk,delta,Nk,Nw,Norb)
         call mkdelta_nsoc(newdelta,fk,chi,Smat,Cmat,kmap,invk,olist,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
         !$omp parallel workshare
         newdelta(:,:,:,:)=newdelta(:,:,:,:)*weight+delta(:,:,:,:)*norm2
@@ -272,46 +278,6 @@ contains
     norm=sqrt(tmp)
   end subroutine get_norm
   
-  subroutine mkfk()
-    integer(int32) i,j,l,m,n
-    complex(real64),dimension(Nk,Nw,Norb,Norb):: cmat1
-
-    !$omp parallel
-    !$omp workshare
-    cmat1(:,:,:,:)=0.0d0
-    !$omp end workshare
-    do l=1,Norb
-       do m=1,Norb
-          do n=1,Norb
-             !$omp do private(i)
-             do j=1,Nw
-                do i=1,Nk
-                   cmat1(i,j,m,l)=cmat1(i,j,m,l)+Gk(i,j,m,n)*delta(i,j,n,l)
-                end do
-             end do
-             !$omp end do
-          end do
-       end do
-    end do
-    !$omp workshare
-    fk(:,:,:,:)=0.0d0
-    !$omp end workshare
-    do l=1,Norb
-       do m=1,Norb
-          do n=1,Norb
-             !$omp do private(i)
-              do j=1,Nw
-                do i=1,Nk
-                   fk(i,j,m,l)=fk(i,j,m,l)-cmat1(i,j,m,n)*conjg(Gk(i,j,l,n))
-                end do
-             end do
-             !$omp end do
-          end do
-       end do
-    end do
-    !$omp end parallel
-  end subroutine mkfk
-  
   subroutine ckchi()
     integer(int32) i,l,m,n,info,chisk,chick
     real(real64) maxchi0s,maxchi0c,maxchi0s2,maxchi0c2
@@ -350,6 +316,58 @@ contains
     print'(A3,3I4,F12.8)','CDW',kmap(:,chick),maxchi0c2
   end subroutine ckchi
 end subroutine lin_eliash
+
+subroutine mkfk_trs_nsoc(fk,Gk,delta,Nk,Nw,Norb)
+  !
+  !>calculate linearized anomalous green function Fk with TRS
+  !>if we considder TRS,F_ab(k)=G_ac(k)Delta_cd(k)Gbd(-k)
+  !> =G_ac(k)Delta_cd(k)G^*_dbss'(k)ss'
+  !
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  implicit none
+  integer(int64),intent(in):: Nk,Nw,Norb
+  complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
+  complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: delta
+  complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: fk
+ 
+  integer(int32) i,j,l,m,n
+  complex(real64),dimension(Nk,Nw,Norb,Norb):: cmat1
+
+  !$omp parallel
+  !$omp workshare
+  cmat1(:,:,:,:)=0.0d0
+  !$omp end workshare
+  do l=1,Norb
+     do m=1,Norb
+        do n=1,Norb
+           !$omp do private(i)
+           do j=1,Nw
+              do i=1,Nk
+                 cmat1(i,j,m,l)=cmat1(i,j,m,l)+Gk(i,j,m,n)*delta(i,j,n,l)
+              end do
+           end do
+           !$omp end do
+        end do
+     end do
+  end do
+  !$omp workshare
+  fk(:,:,:,:)=0.0d0
+  !$omp end workshare
+  do l=1,Norb
+     do m=1,Norb
+        do n=1,Norb
+           !$omp do private(i)
+           do j=1,Nw
+              do i=1,Nk
+                 fk(i,j,m,l)=fk(i,j,m,l)-cmat1(i,j,m,n)*conjg(Gk(i,j,l,n))
+              end do
+           end do
+           !$omp end do
+        end do
+     end do
+  end do
+  !$omp end parallel
+end subroutine mkfk_trs_nsoc
 
 subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,olist,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
@@ -477,3 +495,44 @@ subroutine get_initial_delta(delta,uni,kmap,Nk,Nw,Norb,Nx,Ny,Nz,gap_sym)
   norm=2.0d0*sum(abs(delta(:,:,:,:))**2)
   delta(:,:,:,:)=delta(:,:,:,:)/norm
 end subroutine get_initial_delta
+
+subroutine conv_delta_orb_to_band(deltab,delta,uni,Norb,Nk,Nw)
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  implicit none
+  integer(int64),intent(in):: Nw,Norb,Nk
+  complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
+  complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: delta
+  complex(real64),intent(out),dimension(Nk,Norb,Norb):: deltab
+
+  integer(int32) i,l,m,n
+  complex(real64),dimension(Nk,Norb,Norb):: tmp
+
+  !$omp parallel
+  !$omp workshare
+  deltab(:,:,:)=0.0d0
+  tmp(:,:,:)=0.0d0
+  !$omp end workshare
+  !$omp do private(m,n,i)
+  do l=1,Norb
+     do m=1,Norb
+        do n=1,Norb
+           do i=1,Nk
+              tmp(i,m,l)=tmp(i,m,l)+conjg(uni(m,n,i))*delta(i,1,n,l)
+           end do
+        end do
+     end do
+  end do
+  !$omp end do
+  !$omp do private(m,n,i)
+  do l=1,Norb
+     do m=1,Norb
+        do n=1,Norb
+           do i=1,Nk
+              deltab(i,m,l)=deltab(i,m,l)+tmp(i,m,n)*uni(n,l,i)
+           end do
+        end do
+     end do
+  end do
+  !$omp end do
+  !$omp end parallel
+end subroutine conv_delta_orb_to_band
