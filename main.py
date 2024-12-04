@@ -56,7 +56,7 @@ color_option defines the meaning of color on Fermi surfaces
 option=17
 color_option=2
 
-Nx,Ny,Nz,Nw=32,32,1,512 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=8,8,4,512 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
@@ -428,7 +428,12 @@ def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,oli
     sigmak=flibs.mkself(Smat,Cmat,kmap,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
 
 def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw,ham_r,S_r,rvec,mu:float,temp:float,olist,gap_sym,sw_self:bool):
-    klist,kmap=plibs.gen_klist_with_kmap(Nx,Ny,Nz)
+    klist,kmap=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
+    #klist,kmap=plibs.gen_klist_with_kmap(Nx,Ny,Nz) #klist=>2pi/N*i,kmap=>k footnote
+    print(klist)
+    #print(1-klist)
+    print(kmap)
+    exit()
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     Smat,Cmat=flibs.gen_SCmatrix(olist,U,J)
     invk=flibs.get_iqshift(klist,klist[0])

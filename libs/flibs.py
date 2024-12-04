@@ -639,3 +639,17 @@ def linearized_eliashberg(Gk,uni,Smat,Cmat,olist,kmap,invk,Nx:int,Ny:int,Nz:int,
                      byref(c_int64(Ny)),byref(c_int64(Nz)),byref(c_int64(itemax)),
                      byref(c_int64(gap_sym)))
     return delta
+
+def gen_irr_k_TRS(Nx,Ny,Nz):
+    Nkall=Nx*Ny*Nz
+    Nkinv=int(Nkall/2+4)
+    klist=np.zeros((Nkinv,3),dtype=np.float64)
+    invk_ft_list=np.zeros(Nkall,dtype=np.int64)
+    flibs.generate_irr_kpoint_inv.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64),
+                                            np.ctypeslib.ndpointer(dtype=np.int64),
+                                            POINTER(c_int64),POINTER(c_int64),
+                                            POINTER(c_int64)]
+    flibs.generate_irr_kpoint_inv.retype=c_void_p
+    flibs.generate_irr_kpoint_inv(klist,invk_ft_list,byref(c_int64(Nx)),
+                                  byref(c_int64(Ny)),byref(c_int64(Nz)))
+    return klist,invk_ft_list

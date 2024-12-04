@@ -47,7 +47,7 @@ srcdir= src
 objdir= obj
 flibso=fmod.so
 
-objmain= $(addprefix $(objdir)/, fmod.o fcond.o fUJ.o fchi.o fphi.o fself.o fimp.o fpade.o feliash.o)
+objmain= $(addprefix $(objdir)/, fmod.o fcond.o fUJ.o fchi.o fphi.o fself.o fimp.o fpade.o feliash.o finv.o)
 .SUFFIXES:
 all: $(objdir) $(objmain) $(flibso)
 $(flibso): $(objmain)
