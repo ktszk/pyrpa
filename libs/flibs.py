@@ -222,22 +222,23 @@ def gen_tr_Greenw_0(eig,mu,wlist,delta):
                           byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Norb)))
     return -trGk.imag
 
-def get_chi0_conv(Gk,kmap,olist,temp:float,Nx:int,Ny:int,Nz:int):
-    Nk=len(Gk[0,0,0])
+def get_chi0_conv(Gk,kmap,invk,olist,temp:float,Nx:int,Ny:int,Nz:int):
+    Nkall,Nk=len(kmap),len(Gk[0,0,0])
     Norb,Nchi=len(Gk),len(olist)
     Nw=int(Gk.size/(Norb*Norb*Nk))
     chi=np.zeros((Nchi,Nchi,Nw,Nk),dtype=np.complex128)
     flibs.get_chi0_conv_.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),         #chi
-                                  np.ctypeslib.ndpointer(dtype=np.complex128),         #Gk
-                                  np.ctypeslib.ndpointer(dtype=np.int64),              #kmap
-                                  np.ctypeslib.ndpointer(dtype=np.int64),              #olist
-                                  POINTER(c_double),POINTER(c_int64),POINTER(c_int64), #temp,Nx,Ny
-                                  POINTER(c_int64),POINTER(c_int64),POINTER(c_int64),  #Nz,Nw,Nk
-                                  POINTER(c_int64),POINTER(c_int64)]                   #Norb,Nchi
+                                   np.ctypeslib.ndpointer(dtype=np.complex128),         #Gk
+                                   np.ctypeslib.ndpointer(dtype=np.int64),              #kmap
+                                   np.ctypeslib.ndpointer(dtype=np.int64),              #invk
+                                   np.ctypeslib.ndpointer(dtype=np.int64),              #olist
+                                   POINTER(c_double),POINTER(c_int64),POINTER(c_int64), #temp,Nx,Ny
+                                   POINTER(c_int64),POINTER(c_int64),POINTER(c_int64),  #Nz,Nw,Nk
+                                   POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)]  #Nkall,Norb,Nchi
     flibs.get_chi0_conv_.restype=c_void_p
-    flibs.get_chi0_conv_(chi,Gk,kmap,olist,byref(c_double(temp)),byref(c_int64(Nx)),
-                        byref(c_int64(Ny)),byref(c_int64(Nz)),byref(c_int64(Nw)),
-                        byref(c_int64(Nk)),byref(c_int64(Norb)),byref(c_int64(Nchi)))
+    flibs.get_chi0_conv_(chi,Gk,kmap,invk,olist,byref(c_double(temp)),byref(c_int64(Nx)),
+                         byref(c_int64(Ny)),byref(c_int64(Nz)),byref(c_int64(Nw)),byref(c_int64(Nk)),
+                         byref(c_int64(Nkall)),byref(c_int64(Norb)),byref(c_int64(Nchi)))
     return chi
 
 def get_chi0_sum(Gk,klist,olist,temp:float):
@@ -245,15 +246,17 @@ def get_chi0_sum(Gk,klist,olist,temp:float):
     Norb,Nchi=len(Gk),len(olist)
     Nw=int(Gk.size/(Norb*Norb*Nk))
     chi=np.zeros((Nchi,Nchi,Nw,Nk),dtype=np.complex128)
-    flibs.get_chi0_sum.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),        #chi
-                                 np.ctypeslib.ndpointer(dtype=np.complex128),        #Gk
-                                 np.ctypeslib.ndpointer(dtype=np.float64),           #klist
-                                 np.ctypeslib.ndpointer(dtype=np.int64),             #olist
-                                 POINTER(c_double),POINTER(c_int64),                 #temp,Nw
-                                 POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)] #Nk,Norb,Nchi
+    flibs.get_chi0_sum.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),   #chi
+                                 np.ctypeslib.ndpointer(dtype=np.complex128),   #Gk
+                                 np.ctypeslib.ndpointer(dtype=np.float64),      #klist
+                                 np.ctypeslib.ndpointer(dtype=np.int64),        #olist
+                                 POINTER(c_double),POINTER(c_int64),            #temp,Nw
+                                 POINTER(c_int64),POINTER(c_int64),             #Nk,Nkall
+                                 POINTER(c_int64),POINTER(c_int64)]             #Norb,Nchi
     flibs.get_chi0_sum.restype=c_void_p
     flibs.get_chi0_sum(chi,Gk,klist,olist,byref(c_double(temp)),byref(c_int64(Nw)),
-                       byref(c_int64(Nk)),byref(c_int64(Norb)),byref(c_int64(Nchi)))
+                       byref(c_int64(Nk)),byref(c_int64(Nkall)),byref(c_int64(Norb)),
+                       byref(c_int64(Nchi)))
     return chi
 
 def get_Vsigma_nosoc_flex(chi,Smat,Cmat):
@@ -267,30 +270,32 @@ def get_Vsigma_nosoc_flex(chi,Smat,Cmat):
                                  byref(c_int64(Nw)),byref(c_int64(Nchi)))
     return chi.copy()
 
-def mkself(Smat,Cmat,kmap,olist,hamk,eig,uni,mu:float,fill:float,temp:float,Nw:int,Nx:int,Ny:int,Nz:int,sw_out:bool,sw_in:bool,scf_loop=100,eps=1.0e-3,pp=0.4):
+def mkself(Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu:float,fill:float,temp:float,Nw:int,Nx:int,Ny:int,Nz:int,sw_out:bool,sw_in:bool,scf_loop=100,eps=1.0e-3,pp=0.4):
     print('mixing rate: pp = %3.1f'%pp)
-    Nk,Nchi=len(hamk),len(Smat)
+    Nkall,Nk,Nchi=len(kmap),len(hamk),len(Smat)
     Norb=int(np.sqrt(hamk.size/Nk))
     sigmak=np.zeros((Norb,Norb,Nw,Nk),dtype=np.complex128)
     flibs.mkself.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),          #sigmak
                            np.ctypeslib.ndpointer(dtype=np.float64),             #Smat
                            np.ctypeslib.ndpointer(dtype=np.float64),             #Cmat
                            np.ctypeslib.ndpointer(dtype=np.int64),               #kmap
+                           np.ctypeslib.ndpointer(dtype=np.int64),               #invk
                            np.ctypeslib.ndpointer(dtype=np.int64),               #olist
                            np.ctypeslib.ndpointer(dtype=np.complex128),          #hamk
                            np.ctypeslib.ndpointer(dtype=np.float64),             #eig
                            np.ctypeslib.ndpointer(dtype=np.complex128),          #uni
                            POINTER(c_double),POINTER(c_double),                  #mu,fill
                            POINTER(c_double),POINTER(c_int64),                   #temp,scf_loop
-                           POINTER(c_double),POINTER(c_double),POINTER(c_int64), #pp,eps,Nk
-                           POINTER(c_int64),POINTER(c_int64),POINTER(c_int64),   #Nw,Norb,Nchi
+                           POINTER(c_double),POINTER(c_double),POINTER(c_int64), #pp,eps,Nkall
+                           POINTER(c_int64),POINTER(c_int64),                    #Nk,Nw
+                           POINTER(c_int64),POINTER(c_int64),                    #Nchi,Norb
                            POINTER(c_int64),POINTER(c_int64),POINTER(c_int64),   #Nx,Ny,Nz
                            POINTER(c_bool),POINTER(c_bool)]                      #sw_out,sw_in
     flibs.mkself.restype=c_void_p
-    flibs.mkself(sigmak,Smat,Cmat,kmap,olist,hamk,eig,uni,byref(c_double(mu)),byref(c_double(fill)),byref(c_double(temp)),
-                 byref(c_int64(scf_loop)),byref(c_double(pp)),byref(c_double(eps)),byref(c_int64(Nk)),byref(c_int64(Nw)),
-                 byref(c_int64(Norb)),byref(c_int64(Nchi)),byref(c_int64(Nx)),byref(c_int64(Ny)),byref(c_int64(Nz)),
-                 byref(c_bool(sw_out)),byref(c_bool(sw_in)))
+    flibs.mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,byref(c_double(mu)),byref(c_double(fill)),
+                 byref(c_double(temp)),byref(c_int64(scf_loop)),byref(c_double(pp)),byref(c_double(eps)),
+                 byref(c_int64(Nkall)),byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Norb)),byref(c_int64(Nchi)),
+                 byref(c_int64(Nx)),byref(c_int64(Ny)),byref(c_int64(Nz)),byref(c_bool(sw_out)),byref(c_bool(sw_in)))
     return sigmak
 
 def get_qshift(klist,qpoint):
@@ -616,7 +621,7 @@ def pade_with_trace(A,iwlist,wlist):
 
 def linearized_eliashberg(Gk,uni,Smat,Cmat,olist,kmap,invk,Nx:int,Ny:int,Nz:int,temp:float,gap_sym:int,eps=1.0e-4,itemax=300):
     Norb,Nchi=len(Gk),len(Smat)
-    Nk,Nw=len(kmap),len(Gk[0,0])
+    Nkall,Nk,Nw=len(kmap),len(Gk[0,0,0]),len(Gk[0,0])
     delta=np.zeros((Norb,Norb,Nw,Nk),dtype=np.complex128)
     flibs.lin_eliash.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #delta
                                np.ctypeslib.ndpointer(dtype=np.complex128), #Gk
@@ -627,29 +632,31 @@ def linearized_eliashberg(Gk,uni,Smat,Cmat,olist,kmap,invk,Nx:int,Ny:int,Nz:int,
                                np.ctypeslib.ndpointer(dtype=np.int64),      #kmap
                                np.ctypeslib.ndpointer(dtype=np.int64),      #invk
                                POINTER(c_double),POINTER(c_double),         #temp,eps
-                               POINTER(c_int64),POINTER(c_int64),           #Nk,Nw
-                               POINTER(c_int64),POINTER(c_int64),           #Nchi,Norb
-                               POINTER(c_int64),POINTER(c_int64),           #Nx,Ny
-                               POINTER(c_int64),POINTER(c_int64),           #Nz,itemax
-                               POINTER(c_int64)]                            #gapsym
+                               POINTER(c_int64),POINTER(c_int64),           #Nkall,Nk
+                               POINTER(c_int64),POINTER(c_int64),           #Nw,Nchi
+                               POINTER(c_int64),POINTER(c_int64),           #Norb,Nx
+                               POINTER(c_int64),POINTER(c_int64),           #Ny,Nz
+                               POINTER(c_int64),POINTER(c_int64)]           #itemax,gapsym
     flibs.lin_eliash.retype=c_void_p
     flibs.lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,byref(c_double(temp)),
-                     byref(c_double(eps)),byref(c_int64(Nk)),byref(c_int64(Nw)),
-                     byref(c_int64(Nchi)),byref(c_int64(Norb)),byref(c_int64(Nx)),
-                     byref(c_int64(Ny)),byref(c_int64(Nz)),byref(c_int64(itemax)),
-                     byref(c_int64(gap_sym)))
+                     byref(c_double(eps)),byref(c_int64(Nkall)),byref(c_int64(Nk)),
+                     byref(c_int64(Nw)),byref(c_int64(Nchi)),byref(c_int64(Norb)),
+                     byref(c_int64(Nx)),byref(c_int64(Ny)),byref(c_int64(Nz)),
+                     byref(c_int64(itemax)),byref(c_int64(gap_sym)))
     return delta
 
 def gen_irr_k_TRS(Nx,Ny,Nz):
     Nkall=Nx*Ny*Nz
-    Nkinv=int(Nkall/2+4)
-    klist=np.zeros((Nkinv,3),dtype=np.float64)
-    invk_ft_list=np.zeros(Nkall,dtype=np.int64)
-    flibs.generate_irr_kpoint_inv.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64),
-                                            np.ctypeslib.ndpointer(dtype=np.int64),
-                                            POINTER(c_int64),POINTER(c_int64),
-                                            POINTER(c_int64)]
+    Nk=int(Nkall/2+2) if(Nz==1) else int(Nkall/2+4)
+    klist=np.zeros((Nk,3),dtype=np.float64)
+    kmap=np.zeros((Nkall,3),dtype=np.int64)
+    invk_ft_list=np.zeros((Nkall,2),dtype=np.int64)
+    flibs.generate_irr_kpoint_inv.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64), #klist
+                                            np.ctypeslib.ndpointer(dtype=np.int64),   #kmap
+                                            np.ctypeslib.ndpointer(dtype=np.int64),   #invk_ft_list
+                                            POINTER(c_int64),POINTER(c_int64),        #Nk,Nx
+                                            POINTER(c_int64),POINTER(c_int64)]        #Ny,Nz
     flibs.generate_irr_kpoint_inv.retype=c_void_p
-    flibs.generate_irr_kpoint_inv(klist,invk_ft_list,byref(c_int64(Nx)),
-                                  byref(c_int64(Ny)),byref(c_int64(Nz)))
-    return klist,invk_ft_list
+    flibs.generate_irr_kpoint_inv(klist,kmap,invk_ft_list,byref(c_int64(Nk)),
+                                  byref(c_int64(Nx)),byref(c_int64(Ny)),byref(c_int64(Nz)))
+    return klist,kmap,invk_ft_list

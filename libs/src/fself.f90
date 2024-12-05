@@ -146,12 +146,13 @@ subroutine getinv(Gk,Nk,Nw,Norb) bind(C,name="getinv_")
   !$omp end parallel do
 end subroutine getinv
 
-subroutine get_chi0_conv(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C,name='get_chi0_conv_')
+subroutine get_chi0_conv(chi,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi) bind(C,name='get_chi0_conv_')
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
-  integer(int64),intent(in):: Nw,Norb,Nchi,Nk,Nx,Ny,Nz
+  integer(int64),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
   integer(int64),intent(in),dimension(Nchi,2):: olist
-  integer(int64),intent(in),dimension(3,Nk):: kmap
+  integer(int64),intent(in),dimension(3,Nkall):: kmap
+  integer(int64),intent(in),dimension(2,Nkall):: invk
   real(real64),intent(in):: temp
   complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
   complex(real64),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
@@ -187,11 +188,18 @@ subroutine get_chi0_conv(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C
         !use symmetry G^lm(k,iw)=G^ml(k,-iw) from Hermitian symmetry of Hamiltonian
         !$omp parallel do private(i)
         w_loop_Gk_to_tmp:do j=1,Nw
-           k_loop_Gk_to_tmp:do i=1,Nk
-              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(l,1),olist(m,1)) !G13(iw)
-              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(m,2),olist(l,2)) !G42(iw)
-              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(m,1),olist(l,1))) !G13(-iw)=G^*31(iw)
-              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(l,2),olist(m,2))) !G42(-iw)=G^*24(iw)
+           k_loop_Gk_to_tmp:do i=1,Nkall
+              if(invk(2,i)==0)then
+                 tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(l,1),olist(m,1)) !G13(k,iw)
+                 tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(m,2),olist(l,2)) !G42(k,iw)
+                 tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(m,1),olist(l,1))) !G13(k,-iw)=G^*31(k,iw)
+                 tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(l,2),olist(m,2))) !G42(k,-iw)=G^*24(k,iw)
+              else if(invk(2,i)==1)then
+                 tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(m,1),olist(l,1)) !G13(-k,iw)=G^31(k,iw)
+                 tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(l,2),olist(m,2)) !G42(-k,iw)=G^24(k,iw)
+                 tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(l,1),olist(m,1))) !G13(-k,-iw)=G^13(k,iw)
+                 tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(m,2),olist(l,2))) !G42(-k,-iw)=G^42(k,iw)
+              end if
            end do k_loop_Gk_to_tmp
         end do w_loop_Gk_to_tmp
         !$omp end parallel do
@@ -214,8 +222,10 @@ subroutine get_chi0_conv(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nk,Norb,Nchi) bind(C
         call FFT(tmp,tmpgk13,Nx,Ny,Nz,2*Nw,.false.)
         !$omp parallel do private(i,j)
         w_loop_tmp_to_chi:do j=1,Nw
-           k_loop_tmp_to_chi:do i=1,Nk
-              chi(i,j,m,l)=tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight
+           k_loop_tmp_to_chi:do i=1,Nkall
+              if(invk(2,i)==0)then
+                 chi(invk(1,i),j,m,l)=tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight
+              end if
            end do k_loop_tmp_to_chi
         end do w_loop_tmp_to_chi
         !$omp end parallel do
@@ -444,11 +454,12 @@ subroutine get_vsigma_flex_soc(chi,Vmat,Nk,Nw,Nchi)
   end do
 end subroutine get_vsigma_flex_soc
 
-subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,olist,temp,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
+subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
-  integer(int64),intent(in):: Nk,Nw,Nchi,Norb,Nx,Ny,Nz
-  integer(int64),intent(in),dimension(3,Nk):: kmap
+  integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
+  integer(int64),intent(in),dimension(3,Nkall):: kmap
+  integer(int64),intent(in),dimension(2,Nkall):: invk
   integer(int64),intent(in),dimension(Nchi,2):: olist
   real(real64),intent(in):: temp
   real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
@@ -466,24 +477,38 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,olist,temp,Nk,Nw,Nchi,Norb
      do m=1,Nchi
         !$omp parallel
         !$omp do
-        do i=1,Nk !j=1>iw=0, j=Nw>iw=inf
-           tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vsigma(i,1,m,l) !Vsigma(iw)
+        do i=1,Nkall !j=1>iw=0, j=Nw>iw=inf
+           if(invk(2,i)==0)then
+              tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vsigma(invk(1,i),1,m,l) !Vsigma(k,iw)
+           else if(invk(2,i)==1)then
+              tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vsigma(invk(1,i),1,l,m) !Vsigma(-k,iw)
+           end if
            tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=1.5d0*Smat(m,l)-0.5d0*Cmat(m,l)
         end do
         !$omp end do
         !$omp do private(i)
         do j=2,Nw
-           do i=1,Nk
-              tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vsigma(i,j,m,l) !Vsigma(iw)
-              tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vsigma(i,j,l,m)) !Vsigma(-iw)ml=Vsigma^*lm(iw)
+           do i=1,Nkall
+              if(invk(2,i)==0)then
+                 tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vsigma(invk(1,i),j,m,l) !Vsigma(k,iw)
+                 tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vsigma(invk(1,i),j,l,m)) !Vsigma(k,-iw)ml=Vsigma^*lm(k,iw)
+              else if(invk(2,i)==1)then
+                 tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vsigma(invk(1,i),j,l,m) !Vsigma(-k,iw)=Vsigma(-k,iw)^T
+                 tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vsigma(invk(1,i),j,m,l)) !Vsigma(-k,-iw)=Vsigma^*(k,iw)
+              end if
            end do
         end do
         !$omp end do
         !$omp do private(i)
         do j=1,Nw
-           do i=1,Nk
-              tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(m,2),olist(l,2)) !G42(iw)
-              tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(l,2),olist(m,2))) !G42(-iw)=G^*24(iw)
+           do i=1,Nkall
+              if(invk(2,i)==0)then
+                 tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(m,2),olist(l,2)) !G42(iw)
+                 tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(l,2),olist(m,2))) !G42(k,-iw)=G^*24(k,iw)
+              else if(invk(2,i)==1)then
+                 tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(l,2),olist(m,2)) !G42(-k,iw)=G24(k,iw)
+                 tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(m,2),olist(l,2))) !G42(-k,-iw)=G^*42(k,iw)
+              end if
            end do
         end do
         !$omp end do
@@ -509,9 +534,11 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,olist,temp,Nk,Nw,Nchi,Norb
         call FFT(tmp,tmpgk,Nx,Ny,Nz,2*Nw,.false.)
         !$omp parallel do private(i,j)
         do j=1,Nw
-           do i=1,Nk
-              sigmak(i,j,olist(m,1),olist(l,1))=sigmak(i,j,olist(m,1),olist(l,1))&
-                   +tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)
+           do i=1,Nkall
+              if(invk(2,i)==0)then
+                 sigmak(invk(1,i),j,olist(m,1),olist(l,1))=sigmak(invk(1,i),j,olist(m,1),olist(l,1))&
+                      +tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)
+              end if
            end do
         end do
         !$omp end parallel do
@@ -522,13 +549,14 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,olist,temp,Nk,Nw,Nchi,Norb
   !$omp end parallel workshare
 end subroutine calc_sigma
 
-subroutine mkself(sigmak,Smat,Cmat,kmap,olist,hamk,eig,uni,mu,rfill,temp,&
-     scf_loop,pp,eps,Nk,Nw,Norb,Nchi,Nx,Ny,Nz,sw_out,sw_in) bind(C)
+subroutine mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu,rfill,temp,&
+     scf_loop,pp,eps,Nkall,Nk,Nw,Norb,Nchi,Nx,Ny,Nz,sw_out,sw_in) bind(C)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
-  integer(int64),intent(in):: Nw,Norb,Nchi,Nk,Nx,Ny,Nz,scf_loop
+  integer(int64),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz,scf_loop
   integer(int64),intent(in),dimension(Nchi,2):: olist
-  integer(int64),intent(in),dimension(3,Nk):: kmap
+  integer(int64),intent(in),dimension(3,Nkall):: kmap
+  integer(int64),intent(in),dimension(2,Nkall):: invk
   logical(1),intent(in):: sw_in,sw_out
   real(real64),intent(in):: temp,eps,pp,rfill
   real(real64),intent(in),dimension(Norb,Nk):: eig
@@ -554,10 +582,10 @@ subroutine mkself(sigmak,Smat,Cmat,kmap,olist,hamk,eig,uni,mu,rfill,temp,&
   end if
   do scf_i=1,scf_loop
      print*,'iter=',scf_i
-     call get_chi0_conv(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nk,Norb,Nchi)
+     call get_chi0_conv(chi,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
      call get_Vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi)
      print'(A16,E12.4,A5,E12.4)','Re V_sigma: max:',maxval(dble(chi)),' min:',minval(dble(chi))
-     call calc_sigma(sigmak,Gk,chi,Smat,Cmat,kmap,olist,temp,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
+     call calc_sigma(sigmak,Gk,chi,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
      call compair_sigma()
      if(esterr<eps)then
         exit
