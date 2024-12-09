@@ -162,7 +162,7 @@ subroutine get_chi0_conv(chi,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,N
   real(real64) weight
   complex(real64),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmp,tmpgk13,tmpgk42
   
-  weight=temp/dble(Nk)
+  weight=temp/dble(Nkall)
   ii(0)=0
   ij(0)=0
   ik(0)=0
@@ -233,13 +233,13 @@ subroutine get_chi0_conv(chi,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,N
   end do l1_l2_loop1
 end subroutine get_chi0_conv
 
-subroutine get_chi0_sum(chi,Gk,klist,olist,temp,Nw,Nk,Norb,Nchi) bind(C)
+subroutine get_chi0_sum(chi,Gk,klist,olist,temp,Nw,Nk,Nkall,Norb,Nchi) bind(C)
   !
   !> It obtains chi_0 using summation. Its cost is O(Nk^2), so it is heavy. You should use get_chi0_conv.
   !
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
-  integer(int64),intent(in):: Nw,Norb,Nchi,Nk
+  integer(int64),intent(in):: Nw,Norb,Nchi,Nk,Nkall
   integer(int64),intent(in),dimension(Nchi,2):: olist
   real(real64),intent(in),dimension(3,Nk):: klist
   real(real64),intent(in):: temp
@@ -252,7 +252,7 @@ subroutine get_chi0_sum(chi,Gk,klist,olist,temp,Nw,Nk,Norb,Nchi) bind(C)
   real(real64) weight
   complex(real64),dimension(Nk,2*Nw):: tmpgk13,tmpgk42
 
-  weight=temp/dble(Nk)
+  weight=temp/dble(Nkall)
   do l=1,Nchi
      do m=1,Nchi
         !$omp parallel do private(i)
@@ -471,7 +471,7 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
   real(real64) weight
   complex(real64),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpVsigma,tmp,tmpgk
 
-  weight=temp/dble(Nk)
+  weight=temp/dble(Nkall)
   sigmak(:,:,:,:)=0.0d0
   do l=1,Nchi
      do m=1,Nchi

@@ -212,7 +212,7 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
      sw_pair=.false.
      print'(A7)','triplet'
   end if
-  weight=temp/dble(Nk)
+  weight=temp/dble(Nkall)
   norm2=0.0d0
   normb=0.0d0
   call get_chi0_conv(chi,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)

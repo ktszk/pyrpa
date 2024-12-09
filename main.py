@@ -64,7 +64,7 @@ kz=0.0
 abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 #abc=[3.90,3.90,12.68]
 alpha_beta_gamma=[90.,90.,90]
-temp=1.0e-2 #2.59e-2
+temp=3.0e-2 #2.59e-2
 fill= .5 #2.9375
 
 Emin,Emax=-3,3
@@ -73,8 +73,8 @@ Ecut=1.0e-2
 tau_const=100
 #olist=[[0,3],[1,4],[2,5]]
 olist=[[0,4],[1,2,5,6],[3,7]]
-#U,J=0.8, 0.06
-U,J=1.2,0.15
+U,J=0.8, 0.06
+#U,J=1.2,0.15
 #0:s, 1:dx2-y2,2:spm
 gap_sym=1
 
@@ -438,12 +438,11 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw,ham_r,S_r,rvec,mu:float,temp:
     else:
         Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
     gap=flibs.linearized_eliashberg(Gk,uni,Smat,Cmat,olist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
-    exit()
     print('output gap function')
     for iorb in range(len(gap)):
         f=open(f'gap_{iorb+1}.dat','w')
-        for i,km in enumerate(kmap):
-            if km[2]==0:
+        for i,km in enumerate(klist):
+            if km[2]<=0.:
                 f.write(f'{km[0]} {km[1]} {gap[iorb,iorb,0,i].real:9.4f} {gap[iorb,iorb,0,i].imag:9.4f}\n')
                 if km[0]==Nx-1:
                     f.write('\n')

@@ -78,51 +78,110 @@ contains
     integer(int32) i,j,k,iter_k
     klist(:,:)=0.0d0
     iter_k=1
-    do j=0,int(Ny/2) !kz=0 plane
-       do i=0,int(Nx/2)
-          klist(1,iter_k)=dble(i)/dble(Nx)
-          klist(2,iter_k)=dble(j)/dble(Ny)
-          iter_k=iter_k+1
-       end do
-    end do
-  
-    do j=int(Ny/2)+1,Ny-1
-       do i=1,int(Nx/2)-1
-          klist(1,iter_k)=dble(i)/dble(Nx)
-          klist(2,iter_k)=dble(j)/dble(Ny)
-          iter_k=iter_k+1
-       end do
-    end do
-
-    if(Nz>1)then
-       do k=1,int(Nz/2)-1 !kz\=0,pi plane
-          do j=0,Ny-1
-             do i=0,Nx-1
-                klist(1,iter_k)=dble(i)/dble(Nx)
-                klist(2,iter_k)=dble(j)/dble(Ny)
-                klist(3,iter_k)=dble(k)/dble(Nz)
-                iter_k=iter_k+1
-             end do
-          end do
-       end do
-
-       do j=0,int(Ny/2) !kz=pi/2 plane
+    if(mod(Nx,2)==0 .and. mod(Ny,2)==0)then !Nx,Ny are even
+       do j=0,int(Ny/2) !kz=0 plane
           do i=0,int(Nx/2)
              klist(1,iter_k)=dble(i)/dble(Nx)
              klist(2,iter_k)=dble(j)/dble(Ny)
-             klist(3,iter_k)=0.5d0
              iter_k=iter_k+1
           end do
        end do
-
+  
        do j=int(Ny/2)+1,Ny-1
           do i=1,int(Nx/2)-1
              klist(1,iter_k)=dble(i)/dble(Nx)
              klist(2,iter_k)=dble(j)/dble(Ny)
-             klist(3,iter_k)=0.5d0
              iter_k=iter_k+1
           end do
        end do
+    else
+       if(mod(Nx*Ny,2)==0)then
+          continue
+       else !Nx,Ny are odd
+          do j=0,int((Ny-1)/2) !kz=0 plane
+             do i=0,int((Nx-1)/2)
+                klist(1,iter_k)=dble(i)/dble(Nx)
+                klist(2,iter_k)=dble(j)/dble(Ny)
+                iter_k=iter_k+1
+             end do
+          end do
+       
+          do j=int((Ny+1)/2),Ny-1
+             do i=1,int((Nx-1)/2)
+                klist(1,iter_k)=dble(i)/dble(Nx)
+                klist(2,iter_k)=dble(j)/dble(Ny)
+                iter_k=iter_k+1
+             end do
+          end do
+       end if
+    end if
+
+    if(Nz>1)then
+       if(mod(Nz,2)==0)then !kz=pi plane (consider only Nz is even)
+          do k=1,int(Nz/2)-1 !kz\=0,pi plane
+             do j=0,Ny-1
+                do i=0,Nx-1
+                   klist(1,iter_k)=dble(i)/dble(Nx)
+                   klist(2,iter_k)=dble(j)/dble(Ny)
+                   klist(3,iter_k)=dble(k)/dble(Nz)
+                   iter_k=iter_k+1
+                end do
+             end do
+          end do
+          
+          if(mod(Nx,2)==0 .and. mod(Ny,2)==0)then !Nx,Ny are even
+             do j=0,int(Ny/2) !kz=pi/2 plane
+                do i=0,int(Nx/2)
+                   klist(1,iter_k)=dble(i)/dble(Nx)
+                   klist(2,iter_k)=dble(j)/dble(Ny)
+                   klist(3,iter_k)=0.5d0
+                   iter_k=iter_k+1
+                end do
+             end do
+             
+             do j=int(Ny/2)+1,Ny-1
+                do i=1,int(Nx/2)-1
+                   klist(1,iter_k)=dble(i)/dble(Nx)
+                   klist(2,iter_k)=dble(j)/dble(Ny)
+                   klist(3,iter_k)=0.5d0
+                   iter_k=iter_k+1
+                end do
+             end do
+          else
+             if(mod(Nx*Ny,2)==0)then
+                continue
+             else !Nx,Ny are odd
+                do j=0,int((Ny-1)/2) !kz=0 plane
+                   do i=0,int((Nx-1)/2)
+                      klist(1,iter_k)=dble(i)/dble(Nx)
+                      klist(2,iter_k)=dble(j)/dble(Ny)
+                      klist(3,iter_k)=0.5d0
+                      iter_k=iter_k+1
+                   end do
+                end do
+
+                do j=int((Ny+1)/2),Ny-1
+                   do i=1,int((Nx-1)/2)
+                      klist(1,iter_k)=dble(i)/dble(Nx)
+                      klist(2,iter_k)=dble(j)/dble(Ny)
+                      klist(3,iter_k)=0.5d0
+                      iter_k=iter_k+1
+                   end do
+                end do
+             end if
+          end if
+       else
+          do k=1,int((Nz-1)/2) !kz\=0,pi plane
+             do j=0,Ny-1
+                do i=0,Nx-1
+                   klist(1,iter_k)=dble(i)/dble(Nx)
+                   klist(2,iter_k)=dble(j)/dble(Ny)
+                   klist(3,iter_k)=dble(k)/dble(Nz)
+                   iter_k=iter_k+1
+                end do
+             end do
+          end do
+       end if
     end if
   end subroutine gen_invk
 end subroutine generate_irr_kpoint_inv
