@@ -241,8 +241,8 @@ def get_chi0_conv(Gk,kmap,invk,olist,temp:float,Nx:int,Ny:int,Nz:int):
                          byref(c_int64(Nkall)),byref(c_int64(Norb)),byref(c_int64(Nchi)))
     return chi
 
-def get_chi0_sum(Gk,klist,olist,Nkal:int,temp:float):
-    Nk=len(klist)
+def get_chi0_sum(Gk,invk,klist,olist,temp:float):
+    Nkall,Nk=len(invk),len(klist)
     Norb,Nchi=len(Gk),len(olist)
     Nw=int(Gk.size/(Norb*Norb*Nk))
     chi=np.zeros((Nchi,Nchi,Nw,Nk),dtype=np.complex128)
@@ -649,9 +649,9 @@ def gen_irr_k_TRS(Nx,Ny,Nz):
     Nkall=Nx*Ny*Nz
     if(Nkall%2==0):
         if(Nz%2==0): #all even Nk=Nkall/2+4 else Nz even Nk=Nkall+2
-            Nk=int(Nkall/2+4) if(Nx*Ny%2==0) else int(Nkall/2+2)
+            Nk=int(Nkall/2+4) if((Nx%2)==0 and (Ny%2)==0) else (int(Nkall/2+2) if((Nx%2)==0 or (Ny%2)==0) else int(Nkall/2+1))
         else: #NxNy plane even Nk=Nkall/2+2 else Nk=Nkall/2+1
-            Nk=int(Nkall/2+2) if(Nx*Ny%2==0) else int(Nkall/2+1)
+            Nk=int(Nkall/2+2) if((Nx%2)==0 and (Ny%2)==0) else int(Nkall/2+1)
     else: #all odd Nk=(Nkall+1)/2
         Nk=int((Nkall+1)/2)
     klist=np.zeros((Nk,3),dtype=np.float64)

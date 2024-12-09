@@ -279,7 +279,7 @@ contains
   end subroutine get_norm
   
   subroutine ckchi()
-    integer(int32) i,l,m,n,info,chisk,chick
+    integer(int32) i,l,m,n,info,chisk,chick,chiskall,chickall
     real(real64) maxchi0s,maxchi0c,maxchi0s2,maxchi0c2
     real(real64),dimension(2*Nchi):: rwork
     complex(real64),dimension(Nchi*Nchi*4+1):: work
@@ -314,13 +314,12 @@ contains
     end do
     do i=1,Nkall
        if(invk(2,i)==0)then
-          if(invk(1,i)==chisk)then
-             print'(A3,3I4,F12.8)','SDW',kmap(:,i),maxchi0s2
-          else if(invk(1,i)==chick)then
-             print'(A3,3I4,F12.8)','CDW',kmap(:,i),maxchi0c2
-          end if
+          if(invk(1,i)==chisk)chiskall=i
+          if(invk(1,i)==chick)chickall=i
        end if
     end do
+    print'(A3,3I4,F12.8)','SDW',kmap(:,chiskall),maxchi0s2
+    print'(A3,3I4,F12.8)','CDW',kmap(:,chickall),maxchi0c2
   end subroutine ckchi
 end subroutine lin_eliash
 

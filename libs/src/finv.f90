@@ -75,81 +75,151 @@ contains
   subroutine gen_invk(klist)
     real(real64),intent(out),dimension(3,Nk)::klist
 
-    integer(int32) i,j,k,iter_k
+    integer(int32) i,j,k,iter_k,iter_k_ini
     klist(:,:)=0.0d0
-    iter_k=1
     if(mod(Nx,2)==0 .and. mod(Ny,2)==0)then !Nx,Ny are even
+       !$omp parallel
+       !$omp do private(j,i,iter_k)
        do j=0,int(Ny/2) !kz=0 plane
           do i=0,int(Nx/2)
+             iter_k=i+1+int(Nx/2+1)*j
              klist(1,iter_k)=dble(i)/dble(Nx)
              klist(2,iter_k)=dble(j)/dble(Ny)
-             iter_k=iter_k+1
           end do
        end do
-  
+       !$omp end do
+       !$omp single
+       iter_k_ini=int((Nx/2+1)*(Ny/2+1))
+       !$omp end single
+       !$omp do private(i,j,iter_k)
        do j=int(Ny/2)+1,Ny-1
           do i=1,int(Nx/2)-1
+             iter_k=iter_k_ini+i+int(Nx/2-1)*(j-int(Ny/2)-1)
              klist(1,iter_k)=dble(i)/dble(Nx)
              klist(2,iter_k)=dble(j)/dble(Ny)
-             iter_k=iter_k+1
           end do
        end do
+       !$omp end do
+       !$omp end parallel
+       iter_k_ini=int(Nx*Ny/2)+3
     else
+       iter_k=1
        if(mod(Nx*Ny,2)==0)then
-          continue
+          if(mod(Nx,2)==0)then
+             do j=0,int((Ny-1)/2)
+                do i=0,int(Nx/2)
+                   klist(1,iter_k)=dble(i)/dble(Nx)
+                   klist(2,iter_k)=dble(j)/dble(Ny)
+                   iter_k=iter_k+1
+                end do
+             end do
+
+             do j=int((Ny+1)/2),Ny-1
+                do i=1,int(Nx/2)-1
+                   klist(1,iter_k)=dble(i)/dble(Nx)
+                   klist(2,iter_k)=dble(j)/dble(Ny)
+                   iter_k=iter_k+1
+                end do
+             end do
+             iter_k_ini=iter_k
+          else
+             continue
+          end if
        else !Nx,Ny are odd
+          !$omp parallel
+          !$omp do private(j,i,iter_k)
           do j=0,int((Ny-1)/2) !kz=0 plane
              do i=0,int((Nx-1)/2)
+                iter_k=i+1+int((Nx+1)/2)*j
                 klist(1,iter_k)=dble(i)/dble(Nx)
                 klist(2,iter_k)=dble(j)/dble(Ny)
-                iter_k=iter_k+1
              end do
           end do
-       
+          !$omp end do
+          !$omp single
+          iter_k_ini=int((Nx+1)*(Ny+1)/4)
+          !$omp end single
+          !$omp do private(i,j,iter_k)
           do j=int((Ny+1)/2),Ny-1
              do i=1,int((Nx-1)/2)
+                iter_k=iter_k_ini+i+int((Nx-1)/2)*(j-int((Ny+1)/2))
                 klist(1,iter_k)=dble(i)/dble(Nx)
                 klist(2,iter_k)=dble(j)/dble(Ny)
-                iter_k=iter_k+1
              end do
           end do
+          !$omp end do
+          !$omp end parallel
+          iter_k_ini=int((Nx*Ny+1)/2)+1
        end if
     end if
 
     if(Nz>1)then
        if(mod(Nz,2)==0)then !kz=pi plane (consider only Nz is even)
+          !$omp parallel private(k)
           do k=1,int(Nz/2)-1 !kz\=0,pi plane
+             !$omp do private(j,i,iter_k)
              do j=0,Ny-1
                 do i=0,Nx-1
+                   iter_k=iter_k_ini+i+Nx*j+Nx*Ny*(k-1)
                    klist(1,iter_k)=dble(i)/dble(Nx)
                    klist(2,iter_k)=dble(j)/dble(Ny)
                    klist(3,iter_k)=dble(k)/dble(Nz)
-                   iter_k=iter_k+1
                 end do
              end do
+             !$omp end do
           end do
-          
+          !$omp end parallel
+          iter_k_ini=iter_k_ini+Nx*Ny*int(Nz/2-1)
           if(mod(Nx,2)==0 .and. mod(Ny,2)==0)then !Nx,Ny are even
+             !$omp parallel
+             !$omp do private(i,j,iter_k)
              do j=0,int(Ny/2) !kz=pi/2 plane
                 do i=0,int(Nx/2)
+                   iter_k=iter_k_ini+i+int(Nx/2+1)*j
                    klist(1,iter_k)=dble(i)/dble(Nx)
                    klist(2,iter_k)=dble(j)/dble(Ny)
                    klist(3,iter_k)=0.5d0
-                   iter_k=iter_k+1
                 end do
              end do
-             
+             !$omp end do
+             !$omp single
+             iter_k_ini=iter_k_ini+int((Nx/2+1)*(Ny/2+1))-1
+             !$omp end single
+             !$omp do private(i,j,iter_k)
              do j=int(Ny/2)+1,Ny-1
                 do i=1,int(Nx/2)-1
+                   iter_k=iter_k_ini+i+int(Nx/2-1)*(j-int(Ny/2)-1)
                    klist(1,iter_k)=dble(i)/dble(Nx)
                    klist(2,iter_k)=dble(j)/dble(Ny)
                    klist(3,iter_k)=0.5d0
-                   iter_k=iter_k+1
                 end do
              end do
+             !$omp end do
+             !$omp end parallel
           else
+             iter_k=iter_k_ini
              if(mod(Nx*Ny,2)==0)then
-                continue
+                if(mod(Nx,2)==0)then
+                   do j=0,int((Ny-1)/2)
+                      do i=0,int(Nx/2)
+                         klist(1,iter_k)=dble(i)/dble(Nx)
+                         klist(2,iter_k)=dble(j)/dble(Ny)
+                         klist(3,iter_k)=0.5d0
+                         iter_k=iter_k+1
+                      end do
+                   end do
+
+                   do j=int((Ny+1)/2),Ny-1
+                      do i=1,int(Nx/2)-1
+                         klist(1,iter_k)=dble(i)/dble(Nx)
+                         klist(2,iter_k)=dble(j)/dble(Ny)
+                         klist(3,iter_k)=0.5d0
+                         iter_k=iter_k+1
+                      end do
+                   end do
+                else
+                   continue
+                end if
              else !Nx,Ny are odd
                 do j=0,int((Ny-1)/2) !kz=0 plane
                    do i=0,int((Nx-1)/2)
@@ -170,18 +240,22 @@ contains
                 end do
              end if
           end if
-       else
+       else !kz is odd
+          !$omp parallel private(k)
           do k=1,int((Nz-1)/2) !kz\=0,pi plane
+             !$omp do private(i,j,iter_k)
              do j=0,Ny-1
                 do i=0,Nx-1
+                   iter_k=iter_k_ini+i+Nx*j+Nx*Ny*(k-1)
                    klist(1,iter_k)=dble(i)/dble(Nx)
                    klist(2,iter_k)=dble(j)/dble(Ny)
                    klist(3,iter_k)=dble(k)/dble(Nz)
-                   iter_k=iter_k+1
                 end do
              end do
+             !$omp end do
           end do
-       end if
-    end if
+          !$omp end parallel
+       end if !kz even or not
+    end if !Nz>1
   end subroutine gen_invk
 end subroutine generate_irr_kpoint_inv
