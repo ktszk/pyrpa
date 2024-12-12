@@ -41,7 +41,11 @@ subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
               ham_k(m,l,i)=ham_k(m,l,i)+ham_r(m,l,j)*cmplx(cos(phase),-sin(phase))
            end do rloop
            !$omp end simd
-           ham_k(l,m,i)=conjg(ham_k(m,l,i)) !Hamiltonian is Hermite
+           if(l==m)then
+              ham_k(l,l,i)=dble(ham_k(l,l,i)) !diagonal is real
+           else
+              ham_k(l,m,i)=conjg(ham_k(m,l,i)) !Hamiltonian is Hermite
+           end if
         end do
      end do
   end do klop

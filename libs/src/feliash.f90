@@ -265,17 +265,17 @@ contains
     !$omp parallel
     do l=1,Norb
        do m=1,Norb
-          !$omp do private(i)
+          !$omp do private(i,j)
           do j=1,Nw
              do i=1,Nk
-                tmp=tmp+2.0d0*abs(newdelta(i,j,m,l))*abs(newdelta(i,j,m,l))
+                tmp=tmp+abs(newdelta(i,j,m,l))*abs(newdelta(i,j,m,l))
              end do
           end do
           !$omp end do
        end do
     end do
     !$omp end parallel
-    norm=sqrt(tmp)
+    norm=sqrt(2.0d0*tmp)
   end subroutine get_norm
   
   subroutine ckchi()
@@ -360,9 +360,9 @@ subroutine mkfk_trs_nsoc(fk,Gk,delta,Nk,Nw,Norb)
   fk(:,:,:,:)=0.0d0
   !$omp end workshare
   do l=1,Norb
-     do m=1,Norb
+     do m=l,Norb
         do n=1,Norb
-           !$omp do private(i)
+           !$omp do private(i,j)
            do j=1,Nw
               do i=1,Nk
                  fk(i,j,m,l)=fk(i,j,m,l)-cmat1(i,j,m,n)*conjg(Gk(i,j,l,n))
@@ -373,6 +373,24 @@ subroutine mkfk_trs_nsoc(fk,Gk,delta,Nk,Nw,Norb)
      end do
   end do
   !$omp end parallel
+  do l=1,Norb
+     do m=l,Norb
+        !$omp parallel do private(j,i)
+        do j=1,Nw
+           do i=1,Nk
+              fk(i,j,m,l)=conjg(fk(i,j,m,l))
+           end do
+        end do
+        !$omp end parallel do
+     end do
+     !$omp parallel do private(j,i)
+     do j=1,Nw
+        do i=1,Nk
+           fk(i,j,l,l)=dble(fk(i,j,l,l))
+        end do
+     end do
+     !$omp end parallel do
+  end do
 end subroutine mkfk_trs_nsoc
 
 subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,olist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
@@ -403,10 +421,10 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,olist,Nkall,Nk
         !$omp parallel
         !$omp do
         do i=1,Nkall
-           if(invk(2,i)==0)then
+           if(invk(2,i)==0)then !k,0
               tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vdelta(invk(1,i),1,m,l) !j=1 corresponds to w_n=0
-           else if(invk(2,i)==1)then
-              tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vdelta(invk(1,i),1,l,m)
+           else if(invk(2,i)==1)then !-k,0
+              tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vdelta(invk(1,i),1,l,m) !V^ml(-q,0)=V^lm(q,0)
            end if
            tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=0.5d0*(Cmat(m,l)+sgn*Smat(m,l)) !Nw+1 consider w_n=>inf limit
         end do
@@ -414,12 +432,12 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,olist,Nkall,Nk
         !$omp do private(i)
         do j=2,Nw
            do i=1,Nkall
-              if(invk(2,i)==0)then
+              if(invk(2,i)==0)then !k,iw,k,-iw
                  tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vdelta(invk(1,i),j,m,l)
-                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vdelta(invk(1,i),j,l,m))
-              else if(invk(2,i)==1)then
-                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vdelta(invk(1,i),1,l,m)
-                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vdelta(invk(1,i),j,m,l))
+                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vdelta(invk(1,i),j,l,m)) !V^ml(q,-iw)=V^*lm(q,iw)
+              else if(invk(2,i)==1)then !-k,iw, -k,-iw
+                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vdelta(invk(1,i),1,l,m) !V^ml(-q,iw)=V^lm(q,iw)
+                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vdelta(invk(1,i),j,m,l)) !V^ml(-q,-iw)=V^*ml(q,iw)
               end if
            end do
         end do
@@ -427,7 +445,7 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,olist,Nkall,Nk
         !$omp do private(i)
         do j=1,Nw
            do i=1,Nkall
-              if(invk(2,i)==0)then
+              if(invk(2,i)==0)then !k, iw, k,-iw
                  tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),j)=delta(invk(1,i),j,olist(m,1),olist(l,2))
                  tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgn*delta(invk(1,i),j,olist(l,2),olist(m,1)) !F(k,-w)=sgn*F(-k,w) (no soc only)
               else if(invk(2,i)==1)then !need to check symm. F(k,iw)<=>F(-k,iw)
@@ -489,7 +507,9 @@ subroutine get_initial_delta(delta,uni,kmap,Nk,Nw,Norb,Nx,Ny,Nz,gap_sym)
   if(gap_sym==0)then
      deltab(:,:)=1.0d0
   else
+     !$omp parallel
      do l=1,Norb
+        !$omp do private(i)
         do i=1,Nk
            select case(gap_sym)
            case(1)
@@ -500,22 +520,42 @@ subroutine get_initial_delta(delta,uni,kmap,Nk,Nw,Norb,Nx,Ny,Nz,gap_sym)
               deltab(i,l)=1.0d0
            end select
         end do
+        !$omp end do
      end do
+     !$omp end parallel
   end if
 
+  norm=0.0d0
+  !$omp parallel
   do l=1,Norb
      do m=1,Norb
         do n=1,Norb
+           !$omp do private(i,j)
            do j=1,Nw
               do i=1,Nk
                  delta(i,j,m,l)=delta(i,j,m,l)+conjg(uni(m,n,i))*uni(l,n,i)*deltab(i,n)
               end do
            end do
+           !$omp end do
         end do
      end do
   end do
-  norm=2.0d0*sum(abs(delta(:,:,:,:))**2)
-  delta(:,:,:,:)=delta(:,:,:,:)/norm
+  
+  !$omp do private(l,m,j,i) reduction(+:norm)
+  do l=1,Norb
+     do m=1,Norb
+        do j=1,Nw
+           do i=1,Nk
+              norm=norm+abs(delta(i,j,m,l))*abs(delta(i,j,m,l))
+           end do
+        end do
+     end do
+  end do
+  !$omp end do
+  !$omp workshare
+  delta(:,:,:,:)=delta(:,:,:,:)/sqrt(2.0d0*norm)
+  !$omp end workshare
+  !$omp end parallel
 end subroutine get_initial_delta
 
 subroutine conv_delta_orb_to_band(deltab,delta,uni,Norb,Nk,Nw)
