@@ -232,11 +232,11 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
         call get_norm()
         inorm=1.0d0/norm
         if(abs(norm-norm2)>=1.0d2 .or. abs(norm-norm2)<1.0d-6)then
-           print'(I3,A13,E16.8)',i_iter,' lambda_elsh=',norm-norm2
+           print'(I3,A13,2E16.8)',i_iter,' lambda_elsh=',norm-norm2,norm
         else
-           print'(I3,A13,F12.8)',i_iter,' lambda_elsh=',norm-norm2
+           print'(I3,A13,2F12.8)',i_iter,' lambda_elsh=',norm-norm2,norm
         end if
-        if(abs((norm-normb)*inorm)<eps)then
+        if(abs(norm-normb)*inorm<eps)then
            if((norm-norm2)>1.0d-1)then !do not finish until eig>0.1
               exit
            else if(.true.)then !consider small eig
@@ -256,6 +256,9 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
      end if
      norm2=norm
   end do eigenval_loop
+  !$omp parallel workshare
+  delta(:,:,:,:)=newdelta(:,:,:,:)*inorm
+  !$omp end parallel workshare
 contains
   subroutine get_norm()
     integer(int32) i,j,l,m
@@ -373,8 +376,10 @@ subroutine mkfk_trs_nsoc(fk,Gk,delta,Nk,Nw,Norb)
      end do
   end do
   !$omp end parallel
+
+  !apply Fk symm.
   do l=1,Norb
-     do m=l,Norb
+     do m=l+1,Norb
         !$omp parallel do private(j,i)
         do j=1,Nw
            do i=1,Nk
@@ -386,7 +391,7 @@ subroutine mkfk_trs_nsoc(fk,Gk,delta,Nk,Nw,Norb)
      !$omp parallel do private(j,i)
      do j=1,Nw
         do i=1,Nk
-           fk(i,j,l,l)=dble(fk(i,j,l,l))
+           fk(i,j,l,l)=dble(fk(i,j,l,l)) !diagonal is real
         end do
      end do
      !$omp end parallel do
@@ -503,41 +508,39 @@ subroutine get_initial_delta(delta,uni,kmap,Nk,Nw,Norb,Nx,Ny,Nz,gap_sym)
 
   integer(int32) i,j,l,m,n
   real(real64) norm
-  complex(real64),dimension(Nk,Norb):: deltab
+  complex(real64),dimension(Norb,Nk):: deltab
   if(gap_sym==0)then
      deltab(:,:)=1.0d0
   else
-     !$omp parallel
-     do l=1,Norb
-        !$omp do private(i)
-        do i=1,Nk
+     !$omp parallel do private(i,l)
+     do i=1,Nk
+        do l=1,Norb
            select case(gap_sym)
            case(1)
-              deltab(i,l)=cos(2*pi*dble(kmap(1,i))/Nx)-cos(2*pi*dble(kmap(2,i))/Ny) !dx2-y2
+              deltab(l,i)=cos(2*pi*dble(kmap(1,i))/Nx)-cos(2*pi*dble(kmap(2,i))/Ny) !dx2-y2
            case(2)
-              deltab(i,l)=2.0d0*cos(2*pi*dble(kmap(1,i))/Nx)*cos(2*pi*dble(kmap(2,i))/Ny) !spm
+              deltab(l,i)=2.0d0*cos(2*pi*dble(kmap(1,i))/Nx)*cos(2*pi*dble(kmap(2,i))/Ny) !spm
            case default !same as 0
-              deltab(i,l)=1.0d0
+              deltab(l,i)=1.0d0
            end select
         end do
-        !$omp end do
      end do
-     !$omp end parallel
+     !$omp end parallel do
   end if
 
   norm=0.0d0
   !$omp parallel
   do l=1,Norb
      do m=1,Norb
-        do n=1,Norb
-           !$omp do private(i,j)
-           do j=1,Nw
-              do i=1,Nk
-                 delta(i,j,m,l)=delta(i,j,m,l)+conjg(uni(m,n,i))*uni(l,n,i)*deltab(i,n)
+        !$omp do private(i,j,n)
+        do j=1,Nw
+           do i=1,Nk
+              do n=1,Norb
+                 delta(i,j,m,l)=delta(i,j,m,l)+conjg(uni(m,n,i))*uni(l,n,i)*deltab(n,i)
               end do
            end do
-           !$omp end do
         end do
+        !$omp end do
      end do
   end do
   

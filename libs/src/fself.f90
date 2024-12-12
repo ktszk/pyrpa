@@ -111,7 +111,7 @@ subroutine gen_green_inv_from_eig(Gk,self,uni,eig,mu,temp,Nk,Nw,Norb) bind(C)
      do m=1,norb
         !$omp do private(iw,i,n)
         wloop: do j=1,Nw
-           iw=cmplx(mu,dble(2*j-1)*pi*temp) !(2(j-1)+1)pi*beta
+           iw=cmplx(mu,dble(2*j-1)*pi*temp) !(2(j-1)+1)pi/beta
            kloop: do i=1,Nk
               band_loop: do n=1,norb
                  Gk(i,j,m,l)=Gk(i,j,m,l)+uni(m,n,i)*conjg(uni(l,n,i))*(iw-eig(n,i))
@@ -160,6 +160,7 @@ subroutine get_chi0_conv(chi,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,N
   integer(int32) i,j,k,l,m,n
   integer(int32) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(2*Nw)
   real(real64) weight
+  real(real64),parameter:: eps=1.0d-9
   complex(real64),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmp,tmpgk13,tmpgk42
   
   weight=temp/dble(Nkall)
@@ -235,8 +236,8 @@ subroutine get_chi0_conv(chi,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,N
            k_loop_tmp_to_chi:do i=1,Nkall
               if(invk(2,i)==0)then
                  chi(invk(1,i),j,m,l)=tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight
-                 if(dble(chi(invk(1,i),j,m,l))<1.0d-9) chi(invk(1,i),j,m,l)=cmplx(0.0d0,imag(chi(invk(1,i),j,m,l)))
-                 if(imag(chi(invk(1,i),j,m,l))<1.0d-9) chi(invk(1,i),j,m,l)=cmplx(dble(chi(invk(1,i),j,m,l)),0.0d0)
+                 if(dble(chi(invk(1,i),j,m,l))<eps) chi(invk(1,i),j,m,l)=cmplx(0.0d0,imag(chi(invk(1,i),j,m,l)))
+                 if(imag(chi(invk(1,i),j,m,l))<eps) chi(invk(1,i),j,m,l)=cmplx(dble(chi(invk(1,i),j,m,l)),0.0d0)
               end if
            end do k_loop_tmp_to_chi
         end do w_loop_tmp_to_chi
