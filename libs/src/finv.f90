@@ -2,20 +2,20 @@ subroutine generate_irr_kpoint_inv(klist,kmap,invk_ft_list,Nk,Nx,Ny,Nz) bind(C)
   use constant
   implicit none
   integer(int64),intent(in):: Nx,Ny,Nz,Nk
-  integer(int64),intent(out),dimension(2,Nx*Ny*Nz):: invk_ft_list
-  integer(int64),intent(out),dimension(3,Nx*Ny*Nz):: kmap
+  integer(int64),intent(out),dimension(3,Nx*Ny*Nz):: invk_ft_list,kmap
   real(real64),intent(out),dimension(3,Nk)::klist
 
   real(real64),dimension(3,Nx*Ny*Nz):: all_k
 
   call gen_allk(all_k,kmap)
   call gen_invk(klist)
+
   gen_inv_ft:block
     integer(int32) Nkall,i,j,k
     real(real64) tmp(3),iktmp(3),eps
     eps=1.0d0/max(Nx,Ny,Nz)
     Nkall=Nx*Ny*Nz
-    !$omp parallel do private(i,j,tmp,iktmp)
+    !$omp parallel do private(i,j,k,tmp,iktmp)
     do i=1,Nkall
        do j=1,Nk
           tmp(:)=all_k(:,i)-klist(:,j)
@@ -35,6 +35,21 @@ subroutine generate_irr_kpoint_inv(klist,kmap,invk_ft_list,Nk,Nx,Ny,Nz) bind(C)
           if(sum(abs(tmp))<eps)then
              invk_ft_list(1,i)=j
              invk_ft_list(2,i)=1
+             exit
+          end if
+       end do
+
+       do j=1,Nkall
+          do k=1,3
+             if(all_k(k,j)==0.0d0)then
+                iktmp(k)=0.0d0
+             else
+                iktmp(k)=1.0d0-all_k(k,j)
+             end if
+          end do
+          tmp(:)=all_k(:,i)-iktmp(:)
+          if(sum(abs(tmp))<eps)then
+             invk_ft_list(3,i)=j
              exit
           end if
        end do

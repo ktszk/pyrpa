@@ -622,7 +622,7 @@ def pade_with_trace(A,iwlist,wlist):
 def linearized_eliashberg(Gk,uni,Smat,Cmat,olist,kmap,invk,Nx:int,Ny:int,Nz:int,temp:float,gap_sym:int,eps=1.0e-4,itemax=300):
     Norb,Nchi=len(Gk),len(Smat)
     Nkall,Nk,Nw=len(kmap),len(Gk[0,0,0]),len(Gk[0,0])
-    delta=np.zeros((Norb,Norb,Nw,Nk),dtype=np.complex128)
+    delta=np.zeros((Norb,Norb,Nw,Nkall),dtype=np.complex128)
     flibs.lin_eliash.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #delta
                                np.ctypeslib.ndpointer(dtype=np.complex128), #Gk
                                np.ctypeslib.ndpointer(dtype=np.complex128), #uni
@@ -645,6 +645,20 @@ def linearized_eliashberg(Gk,uni,Smat,Cmat,olist,kmap,invk,Nx:int,Ny:int,Nz:int,
                      byref(c_int64(itemax)),byref(c_int64(gap_sym)))
     return delta
 
+def conv_delta_orb_to_band(delta,uni,invk):
+    Nkall,Nk,Nw,Norb=len(invk),len(uni),len(delta[0,0]),len(delta)
+    deltab=np.zeros((Norb,Norb,Nk),dtype=np.complex128)
+    flibs.conv_delta_orb_to_band.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #deltab
+                                           np.ctypeslib.ndpointer(dtype=np.complex128), #delta
+                                           np.ctypeslib.ndpointer(dtype=np.complex128), #uni
+                                           np.ctypeslib.ndpointer(dtype=np.int64),      #invk
+                                           POINTER(c_int64),POINTER(c_int64),           #Norb,Nkall
+                                           POINTER(c_int64),POINTER(c_int64)]           #Nk,Nw
+    flibs.conv_delta_orb_to_band.retype=c_void_p
+    flibs.conv_delta_orb_to_band(deltab,delta,uni,invk,byref(c_int64(Norb)),
+                                 byref(c_int64(Nkall)),byref(c_int64(Nk)),byref(c_int64(Nw)))
+    return deltab
+
 def gen_irr_k_TRS(Nx,Ny,Nz):
     Nkall=Nx*Ny*Nz
     if(Nkall%2==0):
@@ -656,7 +670,7 @@ def gen_irr_k_TRS(Nx,Ny,Nz):
         Nk=int((Nkall+1)/2)
     klist=np.zeros((Nk,3),dtype=np.float64)
     kmap=np.zeros((Nkall,3),dtype=np.int64)
-    invk_ft_list=np.zeros((Nkall,2),dtype=np.int64)
+    invk_ft_list=np.zeros((Nkall,3),dtype=np.int64)
     flibs.generate_irr_kpoint_inv.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64), #klist
                                             np.ctypeslib.ndpointer(dtype=np.int64),   #kmap
                                             np.ctypeslib.ndpointer(dtype=np.int64),   #invk_ft_list

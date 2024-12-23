@@ -151,8 +151,7 @@ subroutine get_chi0_conv(chi,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,N
   implicit none
   integer(int64),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
   integer(int64),intent(in),dimension(Nchi,2):: olist
-  integer(int64),intent(in),dimension(3,Nkall):: kmap
-  integer(int64),intent(in),dimension(2,Nkall):: invk
+  integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
   real(real64),intent(in):: temp
   complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
   complex(real64),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
@@ -254,7 +253,7 @@ subroutine get_chi0_sum(chi,Gk,klist,invk,olist,temp,Nw,Nk,Nkall,Norb,Nchi) bind
   implicit none
   integer(int64),intent(in):: Nw,Norb,Nchi,Nk,Nkall
   integer(int64),intent(in),dimension(Nchi,2):: olist
-  integer(int64),intent(in),dimension(2,Nkall):: invk
+  integer(int64),intent(in),dimension(3,Nkall):: invk
   real(real64),intent(in),dimension(3,Nkall):: klist
   real(real64),intent(in):: temp
   complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
@@ -481,8 +480,7 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
-  integer(int64),intent(in),dimension(3,Nkall):: kmap
-  integer(int64),intent(in),dimension(2,Nkall):: invk
+  integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
   integer(int64),intent(in),dimension(Nchi,2):: olist
   real(real64),intent(in):: temp
   real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
@@ -578,8 +576,7 @@ subroutine mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu,rfill,temp,&
   implicit none
   integer(int64),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz,scf_loop
   integer(int64),intent(in),dimension(Nchi,2):: olist
-  integer(int64),intent(in),dimension(3,Nkall):: kmap
-  integer(int64),intent(in),dimension(2,Nkall):: invk
+  integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
   logical(1),intent(in):: sw_in,sw_out
   real(real64),intent(in):: temp,eps,pp,rfill
   real(real64),intent(in),dimension(Norb,Nk):: eig
