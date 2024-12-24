@@ -48,9 +48,9 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
         call get_norm()
         inorm=1.0d0/norm
         if(abs(norm-norm2)>=1.0d2 .or. abs(norm-norm2)<1.0d-6)then
-           print'(I3,A13,2E16.8)',i_iter,' lambda_elsh=',norm-norm2,norm
+           print'(I3,A13,2E16.8)',i_iter,' lambda_elsh=',norm-norm2
         else
-           print'(I3,A13,2F12.8)',i_iter,' lambda_elsh=',norm-norm2,norm
+           print'(I3,A13,2F12.8)',i_iter,' lambda_elsh=',norm-norm2
         end if
         if(abs(norm-normb)*inorm<eps)then
            if((norm-norm2)>1.0d-1)then !do not finish until eig>0.1
@@ -72,6 +72,8 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
      end if
      norm2=norm
   end do eigenval_loop
+  call get_norm()
+  print*,norm
   !$omp parallel workshare
   delta(:,:,:,:)=newdelta(:,:,:,:)*inorm
   !$omp end parallel workshare
@@ -387,6 +389,14 @@ subroutine mkfk_trs_nsoc(fk,Gk,delta,invk,Nkall,Nk,Nw,Norb)
               end do
            end do
            !$omp end do
+        else
+           !$omp do private(i,j)
+           do j=1,Nw
+              do i=1,Nkall
+                 fk(i,j,l,l)=dble(fk(i,j,l,l))
+              end do
+           end do
+           !$omp end do
         end if
      end do
   end do
@@ -420,7 +430,7 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,olist,Nkall,Nk
   do l=1,Nchi
      do m=1,Nchi
         !$omp parallel
-        !$omp do
+        !$omp do private(i)
         do i=1,Nkall
            if(invk(2,i)==0)then !k,0
               tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vdelta(invk(1,i),1,m,l) !j=1 corresponds to w_n=0
@@ -430,20 +440,20 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,olist,Nkall,Nk
            tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=0.5d0*(Cmat(m,l)+sgn*Smat(m,l)) !Nw+1 consider w_n=>inf limit
         end do
         !$omp end do
-        !$omp do private(i)
+        !$omp do private(i,j)
         do j=2,Nw
            do i=1,Nkall
               if(invk(2,i)==0)then !k,iw,k,-iw
                  tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vdelta(invk(1,i),j,m,l)
                  tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vdelta(invk(1,i),j,l,m)) !V^ml(q,-iw)=V^*lm(q,iw)
               else if(invk(2,i)==1)then !-k,iw, -k,-iw
-                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vdelta(invk(1,i),1,l,m) !V^ml(-q,iw)=V^lm(q,iw)
+                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vdelta(invk(1,i),j,l,m) !V^ml(-q,iw)=V^lm(q,iw)
                  tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vdelta(invk(1,i),j,m,l)) !V^ml(-q,-iw)=V^*ml(q,iw)
               end if
            end do
         end do
         !$omp end do
-        !$omp do private(i)
+        !$omp do private(i,j)
         do j=1,Nw
            do i=1,Nkall
               tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),j)=delta(i,j,olist(l,2),olist(m,1))
@@ -603,14 +613,14 @@ subroutine conv_delta_orb_to_band(deltab,delta,uni,invk,Norb,Nkall,Nk,Nw) bind(C
               if(invk(2,i)==0)then
                  tmp(i,m,l)=tmp(i,m,l)+conjg(uni(m,n,i))*delta(i,1,n,l)
               else if(invk(2,i)==1)then
-                 tmp(i,m,l)=tmp(i,m,l)+conjg(uni(m,n,invk(1,i)))*delta(i,1,n,l)
+                 tmp(i,m,l)=tmp(i,m,l)+uni(m,n,invk(1,i))*delta(i,1,n,l)
               end if
            end do
         end do
      end do
   end do
   !$omp end do
-  !$omp do private(m,n,i)
+  !$omp do private(l,m,n,i)
   do l=1,Norb
      do m=1,Norb
         do n=1,Norb

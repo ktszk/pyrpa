@@ -445,7 +445,8 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw,ham_r,S_r,rvec,mu:float,temp:
             f=open(f'gap_{iorb+1}{jorb+1}.dat','w')
             for i,km in enumerate(kmap):
                 if km[2]==0:
-                    f.write(f'{km[0]} {km[1]} {gapb[iorb,jorb,i].real:9.5f} {gapb[iorb,jorb,i].imag:9.5f}\n')
+                    f.write(f'{km[0]:3} {km[1]:3} {gapb[iorb,jorb,i].real:9.5f} {gapb[iorb,jorb,i].imag:9.5f}\n')
+                    #f.write(f'{km[0]:3} {km[1]:3} {gap[iorb,jorb,1,i].real:9.5f} {gap[iorb,jorb,1,i].imag:9.5f}\n')
                     if km[0]==Nx-1:
                         f.write('\n')
         f.close()
