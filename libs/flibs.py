@@ -647,7 +647,7 @@ def linearized_eliashberg(Gk,uni,Smat,Cmat,olist,kmap,invk,Nx:int,Ny:int,Nz:int,
 
 def conv_delta_orb_to_band(delta,uni,invk):
     Nkall,Nk,Nw,Norb=len(invk),len(uni),len(delta[0,0]),len(delta)
-    deltab=np.zeros((Norb,Norb,Nk),dtype=np.complex128)
+    deltab=np.zeros((Norb,Norb,Nkall),dtype=np.complex128)
     flibs.conv_delta_orb_to_band.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #deltab
                                            np.ctypeslib.ndpointer(dtype=np.complex128), #delta
                                            np.ctypeslib.ndpointer(dtype=np.complex128), #uni

@@ -373,7 +373,7 @@ subroutine mkfk_trs_nsoc(fk,Gk,delta,invk,Nkall,Nk,Nw,Norb)
                  if(invk(2,i)==0)then
                     fk(i,j,m,l)=fk(i,j,m,l)-cmat1(i,j,m,n)*conjg(Gk(invk(1,invk(3,i)),j,l,n))
                  else if(invk(2,i)==1)then
-                    fk(i,j,m,l)=fk(i,j,m,l)-cmat1(i,j,m,n)*Gk(invk(1,invk(3,i)),j,n,l)
+                    fk(i,j,m,l)=fk(i,j,m,l)-cmat1(i,j,m,n)*conjg(Gk(invk(1,invk(3,i)),j,n,l))
                  end if
               end do
            end do
@@ -532,18 +532,25 @@ subroutine get_initial_delta(delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,Nx,Ny,Nz,gap_s
      !$omp end workshare
      do l=1,Norb
         do m=1,Norb
+           !$omp do private(i,n)
+           do i=1,Nkall
+              if(invk(2,i)==0)then
+                 do n=1,Norb
+                    delta(i,1,m,l)=delta(i,1,m,l)+uni(m,n,invk(1,i))*deltab(n,i)*conjg(uni(l,n,invk(1,i)))
+                 end do
+              else if(invk(2,i)==1)then
+                 do n=1,Norb
+                    delta(i,1,m,l)=delta(i,1,m,l)+uni(l,n,invk(1,i))*deltab(n,i)*conjg(uni(m,n,invk(1,i)))
+                 end do
+              end if
+           end do
+           !$omp end do
            !$omp do private(i,j,n)
-           do j=1,Nw
+           do j=2,Nw
               do i=1,Nkall
-                 if(invk(2,i)==0)then
-                    do n=1,Norb
-                       delta(i,j,m,l)=delta(i,j,m,l)+uni(m,n,invk(1,i))*deltab(n,i)*conjg(uni(l,n,invk(1,i)))
-                    end do
-                 else if(invk(2,i)==1)then
-                    do n=1,Norb
-                       delta(i,j,m,l)=delta(i,j,m,l)+uni(l,n,invk(1,i))*deltab(n,i)*conjg(uni(m,n,invk(1,i)))
-                    end do
-                 end if
+                 do n=1,Norb
+                    delta(i,j,m,l)=delta(i,1,m,l)
+                 end do
               end do
            end do
            !$omp end do
@@ -581,7 +588,7 @@ subroutine conv_delta_orb_to_band(deltab,delta,uni,invk,Norb,Nkall,Nk,Nw) bind(C
   complex(real64),intent(out),dimension(Nkall,Norb,Norb):: deltab
 
   integer(int32) i,l,m,n
-  complex(real64),dimension(Nk,Norb,Norb):: tmp
+  complex(real64),dimension(Nkall,Norb,Norb):: tmp
 
   !$omp parallel
   !$omp workshare
@@ -611,7 +618,7 @@ subroutine conv_delta_orb_to_band(deltab,delta,uni,invk,Norb,Nkall,Nk,Nw) bind(C
               if(invk(2,i)==0)then
                  deltab(i,m,l)=deltab(i,m,l)+tmp(i,m,n)*uni(n,l,i)
               else if(invk(2,i)==1)then
-                 tmp(i,m,l)=tmp(i,m,l)+conjg(uni(m,n,invk(1,i)))*delta(i,1,n,l)
+                 deltab(i,m,l)=deltab(i,m,l)+tmp(i,m,n)*conjg(uni(n,l,invk(1,i)))
               end if
            end do
         end do
