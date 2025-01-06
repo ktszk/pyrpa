@@ -385,7 +385,7 @@ subroutine mkfk_trs_nsoc(fk,Gk,delta,invk,Nkall,Nk,Nw,Norb)
            !$omp do private(i,j)
            do j=1,Nw
               do i=1,Nkall
-                 fk(i,j,l,m)=fk(i,j,m,l)
+                 fk(i,j,l,m)=conjg(fk(i,j,m,l))
               end do
            end do
            !$omp end do
@@ -611,7 +611,7 @@ subroutine conv_delta_orb_to_band(deltab,delta,uni,invk,Norb,Nkall,Nk,Nw) bind(C
         do n=1,Norb
            do i=1,Nkall
               if(invk(2,i)==0)then
-                 tmp(i,m,l)=tmp(i,m,l)+conjg(uni(m,n,i))*delta(i,1,n,l)
+                 tmp(i,m,l)=tmp(i,m,l)+conjg(uni(m,n,invk(1,i)))*delta(i,1,n,l)
               else if(invk(2,i)==1)then
                  tmp(i,m,l)=tmp(i,m,l)+uni(m,n,invk(1,i))*delta(i,1,n,l)
               end if
@@ -626,7 +626,7 @@ subroutine conv_delta_orb_to_band(deltab,delta,uni,invk,Norb,Nkall,Nk,Nw) bind(C
         do n=1,Norb
            do i=1,Nkall
               if(invk(2,i)==0)then
-                 deltab(i,m,l)=deltab(i,m,l)+tmp(i,m,n)*uni(n,l,i)
+                 deltab(i,m,l)=deltab(i,m,l)+tmp(i,m,n)*uni(n,l,invk(1,i))
               else if(invk(2,i)==1)then
                  deltab(i,m,l)=deltab(i,m,l)+tmp(i,m,n)*conjg(uni(n,l,invk(1,i)))
               end if

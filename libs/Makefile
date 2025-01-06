@@ -1,7 +1,7 @@
 #Makefile
 #FC=ifort
-#FC=ifx
-FC=flang
+FC=ifx
+#FC=flang
 #FC=amdflang
 #FC=gfortran
 SL=MKL
