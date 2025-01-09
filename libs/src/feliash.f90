@@ -431,71 +431,91 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,olist,Nkall,Nk
   !$omp end parallel workshare
   do l=1,Nchi
      do m=1,Nchi
-        !$omp parallel
-        !$omp do private(i)
-        do i=1,Nkall
-           if(invk(2,i)==0)then !k,0
-              tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vdelta(invk(1,i),1,m,l) !j=1 corresponds to w_n=0
-           else if(invk(2,i)==1)then !-k,0
-              tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vdelta(invk(1,i),1,l,m) !V^ml(-q,0)=V^lm(q,0)
-           end if
-           tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=0.5d0*(Cmat(m,l)+sgn*Smat(m,l)) !Nw+1 consider w_n=>inf limit
-        end do
-        !$omp end do
-        !$omp do private(i,j)
-        do j=2,Nw
+        if(olist(l,1)>=olist(m,2))then
+           !$omp parallel
+           !$omp do private(i)
            do i=1,Nkall
-              if(invk(2,i)==0)then !k,iw,k,-iw
-                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vdelta(invk(1,i),j,m,l)
-                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vdelta(invk(1,i),j,l,m)) !V^ml(q,-iw)=V^*lm(q,iw)
-              else if(invk(2,i)==1)then !-k,iw, -k,-iw
-                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vdelta(invk(1,i),j,l,m) !V^ml(-q,iw)=V^lm(q,iw)
-                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vdelta(invk(1,i),j,m,l)) !V^ml(-q,-iw)=V^*ml(q,iw)
+              if(invk(2,i)==0)then !k,0
+                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vdelta(invk(1,i),1,m,l) !j=1 corresponds to w_n=0
+              else if(invk(2,i)==1)then !-k,0
+                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vdelta(invk(1,i),1,l,m) !V^ml(-q,0)=V^lm(q,0)
+              end if
+              tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=0.5d0*(Cmat(m,l)+sgn*Smat(m,l)) !Nw+1 consider w_n=>inf limit
+           end do
+           !$omp end do
+           !$omp do private(i,j)
+           do j=2,Nw
+              do i=1,Nkall
+                 if(invk(2,i)==0)then !k,iw,k,-iw
+                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vdelta(invk(1,i),j,m,l)
+                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vdelta(invk(1,i),j,l,m)) !V^ml(q,-iw)=V^*lm(q,iw)
+                 else if(invk(2,i)==1)then !-k,iw, -k,-iw
+                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vdelta(invk(1,i),j,l,m) !V^ml(-q,iw)=V^lm(q,iw)
+                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vdelta(invk(1,i),j,m,l)) !V^ml(-q,-iw)=V^*ml(q,iw)
+                 end if
+              end do
+           end do
+           !$omp end do
+           !$omp do private(i,j)
+           do j=1,Nw
+              do i=1,Nkall
+                 tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),j)=delta(i,j,olist(l,2),olist(m,1))
+                 tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgn*delta(invk(3,i),j,olist(m,1),olist(l,2)) !F(k,-w)=sgn*F(-k,w) (no soc only)
+              end do
+           end do
+           !$omp end do
+           !$omp end parallel
+           call FFT(tmpVdelta,tmp,Nx,Ny,Nz,2*Nw,.true.)
+           call FFT(tmpfk,tmp,Nx,Ny,Nz,2*Nw,.true.)
+           !$omp parallel
+           !$omp workshare
+           tmp(:,:,:,:)=0.0d0
+           !$omp end workshare
+           !$omp do private(i,j,k)
+           do n=1,2*Nw
+              do k=0,Nz-1
+                 do j=0,Ny-1
+                    do i=0,Nx-1
+                       tmp(i,j,k,n)=tmpVdelta(i,j,k,n)*tmpfk(i,j,k,n)
+                    end do
+                 end do
+              end do
+           end do
+           !$omp end do
+           !$omp workshare
+           tmpfk(:,:,:,:)=0.0d0
+           !$omp end workshare
+           !$omp end parallel
+           call FFT(tmp,tmpfk,Nx,Ny,Nz,2*Nw,.false.)
+           !$omp parallel do private(i)
+           do j=1,Nw
+              do i=1,Nkall
+                 newdelta(i,j,olist(l,1),olist(m,2))=newdelta(i,j,olist(l,1),olist(m,2))&
+                      +tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)
+              end do
+           end do
+           !$omp end parallel do
+        end if
+     end do
+  end do
+
+  !$omp parallel
+  do l=1,Norb
+     do m=l,Norb
+        !$omp do private(i,j)
+        do j=1,Nw
+           do i=1,Nkall
+              if(l/=m)then
+                 newdelta(i,j,l,m)=conjg(newdelta(i,j,m,l))
+              else
+                 newdelta(i,j,l,l)=dble(newdelta(i,j,l,l))
               end if
            end do
         end do
         !$omp end do
-        !$omp do private(i,j)
-        do j=1,Nw
-           do i=1,Nkall
-              tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),j)=delta(i,j,olist(l,2),olist(m,1))
-              tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgn*delta(invk(3,i),j,olist(m,1),olist(l,2)) !F(k,-w)=sgn*F(-k,w) (no soc only)
-           end do
-        end do
-        !$omp end do
-        !$omp end parallel
-        call FFT(tmpVdelta,tmp,Nx,Ny,Nz,2*Nw,.true.)
-        call FFT(tmpfk,tmp,Nx,Ny,Nz,2*Nw,.true.)
-        !$omp parallel
-        !$omp workshare
-        tmp(:,:,:,:)=0.0d0
-        !$omp end workshare
-        !$omp do private(i,j,k)
-        do n=1,2*Nw
-           do k=0,Nz-1
-              do j=0,Ny-1
-                 do i=0,Nx-1
-                    tmp(i,j,k,n)=tmpVdelta(i,j,k,n)*tmpfk(i,j,k,n)
-                 end do
-              end do
-           end do
-        end do
-        !$omp end do
-        !$omp workshare
-        tmpfk(:,:,:,:)=0.0d0
-        !$omp end workshare
-        !$omp end parallel
-        call FFT(tmp,tmpfk,Nx,Ny,Nz,2*Nw,.false.)
-        !$omp parallel do private(i)
-        do j=1,Nw
-           do i=1,Nkall
-              newdelta(i,j,olist(l,1),olist(m,2))=newdelta(i,j,olist(l,1),olist(m,2))&
-                   +tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)
-           end do
-        end do
-        !$omp end parallel do
      end do
   end do
+  !$omp end parallel
 end subroutine mkdelta_nsoc
 
 subroutine get_initial_delta(delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,Nx,Ny,Nz,gap_sym)
@@ -557,12 +577,10 @@ subroutine get_initial_delta(delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,Nx,Ny,Nz,gap_s
               end if
            end do
            !$omp end do
-           !$omp do private(i,j,n)
+           !$omp do private(i,j)
            do j=2,Nw
               do i=1,Nkall
-                 do n=1,Norb
-                    delta(i,j,m,l)=delta(i,1,m,l)
-                 end do
+                 delta(i,j,m,l)=delta(i,1,m,l)
               end do
            end do
            !$omp end do
@@ -573,17 +591,17 @@ subroutine get_initial_delta(delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,Nx,Ny,Nz,gap_s
 
   norm=0.0d0
   !$omp parallel
-  !$omp do private(l,m,j,i) reduction(+:norm)
   do l=1,Norb
      do m=1,Norb
+        !$omp do private(j,i) reduction(+:norm)
         do j=1,Nw
            do i=1,Nkall
               norm=norm+abs(delta(i,j,m,l))*abs(delta(i,j,m,l))
            end do
         end do
+        !$omp end do
      end do
   end do
-  !$omp end do
   !$omp workshare
   delta(:,:,:,:)=delta(:,:,:,:)/sqrt(2.0d0*norm)
   !$omp end workshare

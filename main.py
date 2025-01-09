@@ -20,8 +20,8 @@ else: monoclinic
 """
 
 #fname,ftype,brav='inputs/Sr2RuO4',2,2
-#fname,ftype,brav='inputs/000AsP.input',1,0
-fname,ftype,brav='inputs/NdFeAsO.input',1,0
+fname,ftype,brav='inputs/000AsP.input',1,0
+#fname,ftype,brav='inputs/NdFeAsO.input',1,0
 #fname,ftype,brav='inputs/square.hop',1,0
 #fname,ftype,brav='inputs/hop2.input',1,0
 #fname,ftype,brav='inputs/SiMLO.input',3,6
@@ -56,7 +56,7 @@ color_option defines the meaning of color on Fermi surfaces
 option=17
 color_option=2
 
-Nx,Ny,Nz,Nw=32,32,2,512 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=16,16,1,256 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
@@ -71,8 +71,8 @@ Emin,Emax=-3,3
 delta=3.0e-2
 Ecut=1.0e-2
 tau_const=100
-#olist=[[0,3],[1,4],[2,5]]
-olist=[[0,4],[1,2,5,6],[3,7]]
+olist=[[0],[1,2],[3]]
+#olist=[[0,4],[1,2,5,6],[3,7]]
 #U,J= 0.8, 0.06
 U,J=1.2,0.15
 #0:s, 1:dx2-y2,2:spm
@@ -445,8 +445,8 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw,ham_r,S_r,rvec,mu:float,temp:
             f=open(f'gap_{iorb+1}{jorb+1}.dat','w')
             for i,km in enumerate(kmap):
                 if km[2]==0:
-                    f.write(f'{km[0]:3} {km[1]:3} {gapb[iorb,jorb,i].real:9.5f} {gapb[iorb,jorb,i].imag:9.5f}\n')
-                    #f.write(f'{km[0]:3} {km[1]:3} {gap[iorb,jorb,1,i].real:9.5f} {gap[iorb,jorb,1,i].imag:9.5f}\n')
+                    #f.write(f'{km[0]:3} {km[1]:3} {gapb[iorb,jorb,i].real:9.5f} {gapb[iorb,jorb,i].imag:9.5f}\n')
+                    f.write(f'{km[0]:3} {km[1]:3} {gap[iorb,jorb,1,i].real:9.5f} {gap[iorb,jorb,1,i].imag:9.5f}\n')
                     if km[0]==Nx-1:
                         f.write('\n')
         f.close()
