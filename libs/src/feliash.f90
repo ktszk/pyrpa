@@ -45,7 +45,7 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
         !$omp parallel workshare
         newdelta(:,:,:,:)=newdelta(:,:,:,:)*weight+delta(:,:,:,:)*norm2
         !$omp end parallel workshare
-        call get_norm()
+        call get_norm(norm,newdelta)
         inorm=1.0d0/norm
         if(abs(norm-norm2)>=1.0d2 .or. abs(norm-norm2)<1.0d-6)then
            print'(I3,A13,2E16.8)',i_iter,' lambda_elsh=',norm-norm2
@@ -72,13 +72,15 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
      end if
      norm2=norm
   end do eigenval_loop
-  call get_norm()
-  print*,norm
+  call get_norm(norm,newdelta)
   !$omp parallel workshare
   delta(:,:,:,:)=newdelta(:,:,:,:)*inorm
   !$omp end parallel workshare
 contains
-  subroutine get_norm()
+  subroutine get_norm(norm,func)
+    complex(real64),intent(in),dimension(Nkall,Nw,Norb,Norb):: func
+    real(real64),intent(out):: norm
+
     integer(int32) i,j,l,m
     real(real64) tmp
 
@@ -86,10 +88,10 @@ contains
     !$omp parallel
     do l=1,Norb
        do m=1,Norb
-          !$omp do private(i,j)
+          !$omp do private(i,j),reduction(+:tmp)
           do j=1,Nw
              do i=1,Nkall
-                tmp=tmp+abs(newdelta(i,j,m,l))*abs(newdelta(i,j,m,l))
+                tmp=tmp+abs(func(i,j,m,l))*abs(func(i,j,m,l))
              end do
           end do
           !$omp end do
@@ -605,25 +607,26 @@ subroutine conv_delta_orb_to_band(deltab,delta,uni,invk,Norb,Nkall,Nk,Nw) bind(C
   deltab(:,:,:)=0.0d0
   tmp(:,:,:)=0.0d0
   !$omp end workshare
-  !$omp do private(m,n,i)
   do l=1,Norb
      do m=1,Norb
         do n=1,Norb
+           !$omp do private(i)
            do i=1,Nkall
               if(invk(2,i)==0)then
-                 tmp(i,m,l)=tmp(i,m,l)+conjg(uni(m,n,invk(1,i)))*delta(i,1,n,l)
+                 tmp(i,m,l)=tmp(i,m,l)+conjg(uni(n,m,invk(1,i)))*delta(i,1,n,l)
               else if(invk(2,i)==1)then
-                 tmp(i,m,l)=tmp(i,m,l)+uni(m,n,invk(1,i))*delta(i,1,n,l)
+                 tmp(i,m,l)=tmp(i,m,l)+uni(n,m,invk(1,i))*delta(i,1,n,l)
               end if
            end do
+           !$omp end do
         end do
      end do
   end do
-  !$omp end do
-  !$omp do private(l,m,n,i)
+
   do l=1,Norb
      do m=1,Norb
         do n=1,Norb
+           !$omp do private(i)
            do i=1,Nkall
               if(invk(2,i)==0)then
                  deltab(i,m,l)=deltab(i,m,l)+tmp(i,m,n)*uni(n,l,invk(1,i))
@@ -631,9 +634,9 @@ subroutine conv_delta_orb_to_band(deltab,delta,uni,invk,Norb,Nkall,Nk,Nw) bind(C
                  deltab(i,m,l)=deltab(i,m,l)+tmp(i,m,n)*conjg(uni(n,l,invk(1,i)))
               end if
            end do
+           !$omp end do
         end do
      end do
   end do
-  !$omp end do
   !$omp end parallel
 end subroutine conv_delta_orb_to_band
