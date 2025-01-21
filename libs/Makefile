@@ -1,7 +1,7 @@
 #Makefile
 #FC=ifort
-#FC=ifx
-FC=flang
+FC=ifx
+#FC=flang
 #FC=amdflang
 #FC=gfortran
 SL=MKL
@@ -47,7 +47,7 @@ srcdir= src
 objdir= obj
 flibso=fmod.so
 
-objmain= $(addprefix $(objdir)/, fmod.o fcond.o fUJ.o fchi.o fphi.o fself.o fimp.o fpade.o feliash.o finv.o)
+objmain= $(addprefix $(objdir)/, fmod.o fcond.o fUJ.o fchi.o fphi.o fself.o fimp.o fpade.o feliash.o finv.o fwithsoc.o)
 .SUFFIXES:
 all: $(objdir) $(objmain) $(flibso)
 $(flibso): $(objmain)
