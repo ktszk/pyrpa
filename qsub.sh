@@ -16,7 +16,14 @@
 ##PBS -j oe
 ##PBS -o out.o
 #PBS -l nodes=1:ppn=16
+#Slurm settings
+#SBATCH -p salmon
+#SBATCH -n 1
+#SBATCH -c 16
+#SBATCH -J job_name
+#SBATCH -o out.o
+#SBATCH -e out.o
 
-export OMP_NUM_THREADS=32
+#export OMP_NUM_THREADS=32
 #cd $PBS_O_WORKDIR
 python main.py

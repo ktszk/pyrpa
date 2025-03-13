@@ -483,8 +483,8 @@ subroutine get_chi0_conv_soc(chi,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,No
             k_loop_tmp_to_chi:do i=1,Nkall
                if(invk(2,i)==0)then
                   chi(invk(1,i),j,m,l)=tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight
-                  if(dble(chi(invk(1,i),j,m,l))<eps) chi(invk(1,i),j,m,l)=cmplx(0.0d0,imag(chi(invk(1,i),j,m,l)))
-                  if(imag(chi(invk(1,i),j,m,l))<eps) chi(invk(1,i),j,m,l)=cmplx(dble(chi(invk(1,i),j,m,l)),0.0d0)
+                  if(abs(dble(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(0.0d0,imag(chi(invk(1,i),j,m,l)))
+                  if(abs(imag(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(dble(chi(invk(1,i),j,m,l)),0.0d0)
                end if
             end do k_loop_tmp_to_chi
          end do w_loop_tmp_to_chi
