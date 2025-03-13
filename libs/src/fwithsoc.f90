@@ -1,4 +1,4 @@
-subroutine lin_eliash_soc(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
+subroutine lin_eliash_soc(delta,Gk,uni,Vmat,olist,sgnsig,kmap,invk,temp,eps,&
      Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym) bind(C)
   !
   !> calculate linearized eliashberg equations
@@ -9,7 +9,8 @@ subroutine lin_eliash_soc(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
   integer(int64),intent(in),dimension(Nchi,2):: olist
   integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
   real(real64),intent(in):: temp,eps
-  real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  real(real64),intent(in),dimension(Norb,Norb):: sgnsig
+  real(real64),intent(in),dimension(Nchi,Nchi):: Vmat
   complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(real64),intent(out),dimension(Nkall,Nw,Norb,Norb):: delta
@@ -24,9 +25,9 @@ subroutine lin_eliash_soc(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
   weight=temp/dble(Nkall)
   norm2=0.0d0
   normb=0.0d0
-  call get_chi0_conv_soc(chi,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+  call get_chi0_conv_soc(chi,Gk,kmap,invk,olist,sgnsig,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
   call ckchi()
-  call get_V_delta_soc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
+  call get_V_delta_soc_flex(chi,Vmat,Nk,Nw,Nchi,sw_pair)
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
   eigenval_loop:do i_eig=1,eig_max !solve eig_val using power method, 1st eig is usually large negative value
@@ -95,47 +96,36 @@ contains
   end subroutine get_norm
  
   subroutine ckchi()
-    integer(int32) i,l,m,n,info,chisk,chick,chiskall,chickall
-    real(real64) maxchi0s,maxchi0c,maxchi0s2,maxchi0c2
+    integer(int32) i,l,m,n,info,chik,chikall
+    real(real64) maxchi0,maxchi02
     real(real64),dimension(2*Nchi):: rwork
     complex(real64),dimension(Nchi*Nchi*4+1):: work
-    complex(real64),dimension(Nchi):: eigs,eigc
-    complex(real64),dimension(Nchi,Nchi):: chi0s,chi0c,tmp1,tmp2
+    complex(real64),dimension(Nchi):: eigc
+    complex(real64),dimension(Nchi,Nchi):: chi0,tmp
 
-    maxchi0s2=-1.0d5
-    maxchi0c2=-1.0d5
+    maxchi02=-1.0d5
     do i=1,Nk
-       chi0s(:,:)=0.0d0
-       chi0c(:,:)=0.0d0
+       chi0(:,:)=0.0d0
        do l=1,Nchi
           do m=1,Nchi
              do n=1,Nchi
-                chi0s(m,l)=chi0s(m,l)+chi(i,1,m,n)*Smat(n,l)
-                chi0c(m,l)=chi0c(m,l)-chi(i,1,m,n)*Cmat(n,l)
+                chi0(m,l)=chi0(m,l)+chi(i,1,m,n)*Vmat(n,l)
              end do
           end do
        end do
-       call zgeev('N','N',Nchi,chi0s,Nchi,eigs,tmp1,Nchi,tmp2,Nchi,work,Nchi*Nchi*4+1,rwork,info)
-       call zgeev('N','N',Nchi,chi0c,Nchi,eigc,tmp1,Nchi,tmp2,Nchi,work,Nchi*Nchi*4+1,rwork,info)
-       maxchi0s=maxval(dble(eigs))
-       maxchi0c=maxval(dble(eigc))
-       if(maxchi0s>maxchi0s2)then
-          chisk=i
-          maxchi0s2=maxchi0s
-       end if
-       if(maxchi0c>maxchi0c2)then
-          chick=i
-          maxchi0c2=maxchi0c
+       call zgeev('N','N',Nchi,chi0,Nchi,eigc,tmp1,Nchi,tmp,Nchi,work,Nchi*Nchi*4+1,rwork,info)
+       maxchi0=maxval(dble(eigc))
+       if(maxchi0>maxchi02)then
+          chik=i
+          maxchi02=maxchi0
        end if
     end do
     do i=1,Nkall
        if(invk(2,i)==0)then
-          if(invk(1,i)==chisk)chiskall=i
-          if(invk(1,i)==chick)chickall=i
+          if(invk(1,i)==chik)chikall=i
        end if
     end do
-    print'(A3,3I4,F12.8)','SDW',kmap(:,chiskall),maxchi0s2
-    print'(A3,3I4,F12.8)','CDW',kmap(:,chickall),maxchi0c2
+    print'(A7,3I4,F12.8)','SDW/CDW',kmap(:,chikall),maxchi02
   end subroutine ckchi
 end subroutine lin_eliash_soc
 
@@ -286,14 +276,14 @@ subroutine mkfk_trs_soc(fk,Gk,delta,invk,Nkall,Nk,Nw,Norb)
   !$omp end parallel
 end subroutine mkfk_trs_soc
   
-subroutine mkdelta_soc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,olist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
+subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,kmap,invk,olist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
   integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
   integer(int64),intent(in),dimension(Nchi,2):: olist
   logical(1),intent(in):: sw_pair
-  real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  real(real64),intent(in),dimension(Nchi,Nchi):: Vmat
   complex(real64),intent(in),dimension(Nk,Nw,Nchi,Nchi):: Vdelta
   complex(real64),intent(in),dimension(Nkall,Nw,Norb,Norb):: delta
   complex(real64),intent(out),dimension(Nkall,Nw,Norb,Norb):: newdelta
@@ -316,7 +306,7 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,olist,Nkall,Nk,
               else if(invk(2,i)==1)then !-k,0
                  tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vdelta(invk(1,i),1,l,m) !V^ml(-q,0)=V^lm(q,0)
               end if
-              tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=0.5d0*(Cmat(m,l)+sgn*Smat(m,l)) !Nw+1 consider w_n=>inf limit
+              tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=Vmat(m,l) !Nw+1 consider w_n=>inf limit
            end do
            !$omp end do
            !$omp do private(i,j)
@@ -394,13 +384,14 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,olist,Nkall,Nk,
   !$omp end parallel
 end subroutine mkdelta_soc
 
-subroutine get_chi0_conv_soc(chi,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+subroutine get_chi0_conv_soc(chi,Gk,kmap,invk,olist,sgnsig,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
    use,intrinsic:: iso_fortran_env, only:int64,real64,int32
    implicit none
    integer(int64),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
    integer(int64),intent(in),dimension(Nchi,2):: olist
    integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
    real(real64),intent(in):: temp
+   real(real64),intent(in),dimension(Norb,Norb):: sgnsig
    complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
    complex(real64),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
  
@@ -452,11 +443,11 @@ subroutine get_chi0_conv_soc(chi,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,No
                   tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(l,2),olist(m,2))) !G42(k,-iw)=G^*24(k,iw)
                else if(invk(2,i)==1)then
                   !iw
-                  tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(m,1),olist(l,1)) !G13(-k,iw)=G^31(k,iw)
-                  tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(l,2),olist(m,2)) !G42(-k,iw)=G^24(k,iw)
+                  tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),j)=sgnsig(olist(m,1),olist(l,1))*Gk(invk(1,i),j,olist(m,1),olist(l,1)) !G13(-k,iw)=sgn*G^31(k,iw)
+                  tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),j)=sgnsig(olist(l,2),olist(m,2))*Gk(invk(1,i),j,olist(l,2),olist(m,2)) !G42(-k,iw)=sgn*G^24(k,iw)
                   !-iw
-                  tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(l,1),olist(m,1))) !G13(-k,-iw)=G^*13(k,iw)
-                  tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(m,2),olist(l,2))) !G42(-k,-iw)=G^*42(k,iw)
+                  tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgnsig(olist(l,1),olist(m,1))*conjg(Gk(invk(1,i),j,olist(l,1),olist(m,1))) !G13(-k,-iw)=sgn*G^*13(k,iw)
+                  tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgnsig(olist(m,2),olist(l,2))*conjg(Gk(invk(1,i),j,olist(m,2),olist(l,2))) !G42(-k,-iw)=sgn*G^*42(k,iw)
                end if
             end do k_loop_Gk_to_tmp
          end do w_loop_Gk_to_tmp
