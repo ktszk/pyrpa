@@ -27,7 +27,7 @@ subroutine lin_eliash_soc(delta,Gk,uni,Vmat,olist,sgnsig,kmap,invk,temp,eps,&
   normb=0.0d0
   call get_chi0_conv_soc(chi,Gk,kmap,invk,olist,sgnsig,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
   call ckchi()
-  call get_V_delta_soc_flex(chi,Vmat,Nk,Nw,Nchi,sw_pair)
+  call get_V_delta_soc_flex(chi,Vmat,Nk,Nw,Nchi)
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
   eigenval_loop:do i_eig=1,eig_max !solve eig_val using power method, 1st eig is usually large negative value
@@ -35,7 +35,7 @@ subroutine lin_eliash_soc(delta,Gk,uni,Vmat,olist,sgnsig,kmap,invk,temp,eps,&
      count=0 !count too small eigenvalue
      iter_loop:do i_iter=1,itemax !iteration
         call mkfk_trs_soc(fk,Gk,delta,invk,Nkall,Nk,Nw,Norb)
-        call mkdelta_soc(newdelta,fk,chi,Smat,Cmat,kmap,invk,olist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
+        call mkdelta_soc(newdelta,fk,chi,Vmat,kmap,invk,olist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
         !$omp parallel workshare
         newdelta(:,:,:,:)=newdelta(:,:,:,:)*weight+delta(:,:,:,:)*norm2
         !$omp end parallel workshare
@@ -101,7 +101,7 @@ contains
     real(real64),dimension(2*Nchi):: rwork
     complex(real64),dimension(Nchi*Nchi*4+1):: work
     complex(real64),dimension(Nchi):: eigc
-    complex(real64),dimension(Nchi,Nchi):: chi0,tmp
+    complex(real64),dimension(Nchi,Nchi):: chi0,tmp,tmp1
 
     maxchi02=-1.0d5
     do i=1,Nk

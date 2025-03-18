@@ -220,7 +220,8 @@ def gen_3d_surf_points(mesh,rvec,ham_r,S_r,mu,kscale=1.0):
     for i,e in enumerate(eig.T-mu):
         if(e.max()*e.min()<0.):
             verts,faces, _, _=ski.marching_cubes(e.reshape(mesh+1,mesh+1,mesh+1),0,
-                                                spacing=(ks[0]*2*np.pi/mesh,ks[1]*2*np.pi/mesh,ks[2]*2*np.pi/mesh))
+                                                 spacing=(ks[0]*2*np.pi/mesh,ks[1]*2*np.pi/mesh,
+                                                          ks[2]*2*np.pi/mesh))
             verts=verts-ks*np.pi
             fspolys.append(verts[faces])
             fscenters.append(verts[faces].mean(axis=1)*.5/np.pi)
@@ -237,7 +238,8 @@ def get_colors(klist,blist,mrot,rvec,ham_r,S_r,ol,color_option,sw_2d=False):
     elif color_option==1: #orbital weight color
         if sw_2d:
             uni=[[get_eigs(k,ham_r,S_r,rvec,True,True)[:,b] for k in kk] for kk,b in zip(klist,blist)]
-            clist=[[np.array([get_col(cl,ol[0]),get_col(cl,ol[1]),get_col(cl,ol[2])]).T for cl in clst] for clst in uni]
+            clist=[[np.array([get_col(cl,ol[0]),get_col(cl,ol[1]),get_col(cl,ol[2])]).T for cl in clst]
+                   for clst in uni]
         else:
             uni=[get_eigs(k,ham_r,S_r,rvec,True,True)[:,b] for k,b in zip(klist,blist)]
             clist=[np.array([get_col(clst,ol[0]),get_col(clst,ol[1]),get_col(clst,ol[2])]).T for clst in uni]
@@ -309,22 +311,22 @@ def get_ptv(alatt,deg,brav):
 def get_symm_line(brav:int)->tuple[list,list]:
     if brav==0: #simple
         k_list=[[0.,0.,.5],[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.],[0.,0.,0.]]
-        xlabel=['Z','$\Gamma$','X','M','$\Gamma$']
+        xlabel=['Z',r'$\Gamma$','X','M',r'$\Gamma$']
     elif brav==1: #face center
         k_list=[[0.,0.,0.],[.5, 0., .5],[1., 0., 0.],[.5, .5, .5],[.5,.25,.75],[0.,0.,0.]]
-        xlabel=['$\Gamma$','X','$\Gamma$','L','W','$\Gamma$']
+        xlabel=[r'$\Gamma$','X',r'$\Gamma$','L','W',r'$\Gamma$']
     elif brav==2: #body center
         k_list=[[.5,.5,.5],[0., 0., 0.],[.5, 0., 0.],[.5, .5,-.5],[0.,0.,0.]]
-        xlabel=['Z','$\Gamma$','X','M','$\Gamma$']
+        xlabel=['Z',r'$\Gamma$','X','M',r'$\Gamma$']
     elif brav==3: #hexagonal
         k_list=[[0.,0.,0.],[2./3.,-1./3., 0.],[.5, 0., 0.],[0., 0., 0.],[0.,0.,.5]]
-        xlabel=['$\Gamma$','K','M','$\Gamma$','Z']
+        xlabel=[r'$\Gamma$','K','M',r'$\Gamma$','Z']
     elif brav==4: #trigonal
         k_list=[[0.,0.,0.],[.5,0.,.5],[.5,0.,0.],[0.,0.,0.],[.5,.5,.5]]
-        xlabel=['$\Gamma$','K','M','$\Gamma$','Z']
+        xlabel=[r'$\Gamma$','K','M',r'$\Gamma$','Z']
     elif brav==6:
         k_list=[[0.,0.,0.],[0., .5, .5],[.5, .5, .5],[.25,.75,.5],[0.,0.,0.]]
-        xlabel=['$\Gamma$','X','L','W','$\Gamma$']
+        xlabel=[r'$\Gamma$','X','L','W',r'$\Gamma$']
     else:
         pass
     return k_list,xlabel
@@ -413,3 +415,23 @@ def phi_qmap(Nx,Ny,Ecut,mu,temp,klist,olist,eig,uni,idelta=1.e-3,sw_omega=True):
     y0=np.linspace(0,1,Ny,False)
     qx,qy=np.meshgrid(x0,y0)
     return phi,qx,qy
+
+def get_chi_orb_list(Norb,site_prof):
+    if(len(site_prof)==1):
+        tmp=np.arange(Norb)+1
+        o1,o2=np.meshgrid(tmp,tmp)
+        chiolist=np.array([o1.flatten(),o2.flatten()]).T
+    else:
+        if(Norb==sum(site_prof)):
+            chiolist=[]
+            N0=1
+            for i_site in site_prof:
+                tmp=np.arange(i_site)+N0
+                o1,o2=np.meshgrid(tmp,tmp)
+                chiolist+=list(np.array([o1.flatten(),o2.flatten()]).T)
+                N0+=i_site
+            chiolist=np.array(chiolist)
+        else:
+            print("site_prof doesn't correspond to Hamiltonian")
+            exit()
+    return chiolist

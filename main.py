@@ -67,6 +67,8 @@ alpha_beta_gamma=[90.,90.,90]
 temp=5.0e-2 #2.59e-2
 fill=2.9375
 
+#site_prof=[5]
+
 Emin,Emax=-3,3
 delta=3.0e-2
 Ecut=1.0e-2
@@ -81,7 +83,7 @@ gap_sym=1
 
 mu0=9.85114560061123
 k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
-xlabel=['$\Gamma$','X','M']
+xlabel=[r'$\Gamma$','X','M']
 at_point=[ 0., .5, 0.]
 sw_calc_mu=True #calculate mu or not
 sw_unit=True    #set unit values unity (False) or not (True)
@@ -198,8 +200,8 @@ def plot_FS(fscolors,klist,color_option:int):
         plt.colorbar()
     plt.xlim(-0.5,0.5)
     plt.ylim(-0.5,0.5)
-    plt.xticks([-0.5,0,0.5],['-$\pi$','0','$\pi$'])
-    plt.yticks([-0.5,0,0.5],['-$\pi$','0','$\pi$'])
+    plt.xticks([-0.5,0,0.5],[r'-$\pi$','0',r'$\pi$'])
+    plt.yticks([-0.5,0,0.5],[r'-$\pi$','0',r'$\pi$'])
     plt.show()
 
 def plot_3d_surf(fspolys,fscenters,fscolors,surface_opt,kscale):
@@ -260,7 +262,8 @@ def set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist
         fscolors=np.array(fscolors)
         return fspolys,fscenters,fscolors
 
-def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu:float,ham_r,S_r,rvec,Emin:float,Emax:float,delta:float,Nw:int,sw_self=True):
+def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu:float,ham_r,S_r,rvec,Emin:float,Emax:float,
+                  delta:float,Nw:int,sw_self=True,selfen=None):
     klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     wlist=np.linspace(Emin,Emax,Nw)
@@ -282,7 +285,11 @@ def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu:float,ham_r,S_r,rvec,Emin:float,Em
     plt.colorbar()
     plt.show()
     
-def calc_conductivity_Bolzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,temp:float,tau_const,Nw=300,with_spin=False):
+def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
+                               fill:float,temp:float,tau_const,Nw=300,with_spin=False):
+    '''
+    calculate conductivities using Boltzmann equations
+    '''
     #no dep. T and mu or filling
     Nk,eig,vk,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec.T*ihbar,sw_veloc=True)
     Vuc=sclin.det(avec)*1e-30
@@ -340,7 +347,8 @@ def calc_conductivity_Bolzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:flo
     print('Power Factor (SA/m^2/K)',flush=True)
     print(PF.round(10),flush=True)
 
-def calc_conductivity_lr(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,temp:float,Nw:int,delta,with_spin=False):
+def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
+                         temp:float,Nw:int,delta,with_spin=False):
     '''
     calculation of linear response theory
     electric conductivity of LRT correponds to Boltzmann then delta~O(10-1) (tau~1fs) at 300K
@@ -390,7 +398,8 @@ def calc_conductivity_lr(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,tem
     #ax3.plot(wlist,(sigmaS[:,0,0]+sigmaS[:,1,1]+sigmaS[:,2,2]).imag)
     plt.show()
 
-def calc_chis_spectrum(mu:float,temp:float,Smat,klist,qlist,chiolist,eig,uni,spa_length,Nw:int,Emax:float,delta:float):
+def calc_chis_spectrum(mu:float,temp:float,Smat,klist,qlist,chiolist,eig,uni,spa_length,
+                       Nw:int,Emax:float,delta:float):
     print("calculate spn susceptibility",flush=True)
     chisw,chisw_orb,wlist=plibs.chis_spectrum(mu,temp,Smat,klist,qlist,chiolist,eig,uni,Nw,Emax,delta)
     w,sp=np.meshgrid(wlist,spa_length)
@@ -428,7 +437,8 @@ def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,oli
     Smat,Cmat=flibs.gen_SCmatrix(olist,U,J)
     sigmak=flibs.mkself(Smat,Cmat,kmap,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
 
-def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw,ham_r,S_r,rvec,mu:float,temp:float,olist,gap_sym,sw_self:bool):
+def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,olist,
+                           mu:float,temp:float,gap_sym:int,sw_self:bool):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     Smat,Cmat=flibs.gen_SCmatrix(olist,U,J)
@@ -524,6 +534,15 @@ def main():
     if option in {7,8,9,14,17}:
         print(f'U= {U:4.2f} and J= {J:4.2f}')
         print(f'Temperature = ',temp,flush=True)
+    if option in {7,8,9,10,11,14,17}:
+        try:
+            chiolist
+        except NameError:
+            try:
+                site_prof
+            except NameError:
+                site_prof=[1]
+            chiolist=plibs.get_chi_orb_list(len(ham_r[0]),site_prof)        
     if option in {0,4}:
         if sw_gen_sym:
             print('generate symmetry line',flush=True)
@@ -575,19 +594,12 @@ def main():
     elif option==4: #plot spectrum
         plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw,sw_self)
     elif option==5: #calc conductivity
-        calc_conductivity_Bolzmann(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,tau_const)
+        calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,tau_const)
     elif option==6: #calc_optical conductivity
-        calc_conductivity_lr(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta)
+        calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta)
     elif option in {7,8,9,10,11}: #calc_chis_spectrum
         print("calculate electron energy",flush=True)
         Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=True)
-        try:
-            chiolist
-        except NameError:
-            Norb=int(eig.size/Nk)
-            tmp=np.arange(Norb)+1
-            o1,o2=np.meshgrid(tmp,tmp)
-            chiolist=np.array([o1.flatten(),o2.flatten()]).T
         if option in {7,8,9}:
             print("generate coulomb vertex matrix S")
             Smat,Cmat=flibs.gen_SCmatrix(chiolist,U,J)
@@ -635,20 +647,16 @@ def main():
     elif option==13: #calc cycrtron mass
         get_mass(Nx,rvec,ham_r,mu)
     elif option==14: #calc self-energy using flex
-        try:
-            chiolist
-        except NameError:
-            Norb=len(ham_r[0])
-            tmp=np.arange(Norb)+1
-            o1,o2=np.meshgrid(tmp,tmp)
-            chiolist=np.array([o1.flatten(),o2.flatten()]).T
-        calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist)
+        if sw_soc:
+            continue
+        else:
+            calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist)
     elif option==15: #mass calc
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
         mass=flibs.get_mass(klist,ham_r,rvec,avec.T*ihbar,uni)*eC/emass
         print(mass[:,3,:,:])
-    elif option==16:
+    elif option==16: #calc spectrum with impurity
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         rlist=plibs.gen_rlist(Nx,Ny,Nz)
         wlist=np.linspace(Emin,Emax,Nw,True)
@@ -664,15 +672,11 @@ def main():
         w,k=np.meshgrid(wlist,spa_length)
         plt.contourf(k,w,abs(spectrum.imag),100)
         plt.show()
-    elif option==17:
-        try:
-            chiolist
-        except NameError:
-            Norb=len(ham_r[0])
-            tmp=np.arange(Norb)+1
-            o1,o2=np.meshgrid(tmp,tmp)
-            chiolist=np.array([o1.flatten(),o2.flatten()]).T
-        calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,gap_sym,sw_self)
+    elif option==17: #calc gap function
+        if sw_soc:
+            continue
+        else:
+            calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,mu,temp,gap_sym,sw_self)
 if __name__=="__main__":
     main()
 __license__="MIT"
