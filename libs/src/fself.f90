@@ -146,6 +146,24 @@ subroutine getinv(Gk,Nk,Nw,Norb) bind(C,name="getinv_")
   !$omp end parallel do
 end subroutine getinv
 
+subroutine get_irr_chi_orb(oilist,olist,Nchi,Nci)
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  implicit none
+  integer(int64),intent(in):: Nchi,Nci
+  integer(int64),intent(in),dimension(Nchi,2):: olist
+  integer(int64),intent(out),dimension(Nci,4):: oilist
+
+  integer(int64) l,m,n
+
+  do n=1,Nci
+     do l=1,Nchi
+        do m=1,Nchi
+           continue
+        end do
+     end do
+  end do
+end subroutine get_irr_chi_orb
+
 subroutine get_chi0_conv(chi,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi) bind(C,name='get_chi0_conv_')
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none

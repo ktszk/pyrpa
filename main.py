@@ -92,6 +92,7 @@ sw_omega=False #True: real freq, False: Matsubara freq.
 sw_self=False  #True: use calculated self energy for spectrum band plot
 sw_out_self=True
 sw_in_self=False
+sw_soc=False #use with soc hamiltonian
 #------------------------ initial parameters are above -------------------------------
 #----------------------------------main functions-------------------------------------
 #-------------------------------- import packages ------------------------------------
