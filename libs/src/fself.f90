@@ -146,35 +146,72 @@ subroutine getinv(Gk,Nk,Nw,Norb) bind(C,name="getinv_")
   !$omp end parallel do
 end subroutine getinv
 
-subroutine get_irr_chi_orb(oilist,olist,Nchi,Nci)
+subroutine get_chi_map(chi_map,irr_chi,olist,Nchi)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
-  integer(int64),intent(in):: Nchi,Nci
+  integer(int64),intent(in):: Nchi
   integer(int64),intent(in),dimension(Nchi,2):: olist
-  integer(int64),intent(out),dimension(Nci,4):: oilist
+  integer(int32),intent(out),dimension(Nchi,Nchi,2):: chi_map
+  integer(int32),intent(out),dimension(Nchi*(Nchi+1)/2,2):: irr_chi
 
-  integer(int64) l,m,n
+  integer(int32) l1,m1,l2,m2,iter
+  integer(int32),dimension(Nchi,Nchi):: chi_irr
+  integer(int32),dimension(4):: tmp1,tmp2
 
-  do n=1,Nci
-     do l=1,Nchi
-        do m=1,Nchi
-           continue
+  chi_irr(:,:)=0
+  chi_map(:,:,:)=0
+  do l1=1,Nchi
+     tmp1(1)=olist(l1,1)
+     tmp1(2)=olist(l1,2)
+     do m1=1,Nchi
+        tmp1(3)=olist(m1,1)
+        tmp1(4)=olist(m1,2)
+        do l2=1,Nchi
+           tmp2(3)=olist(l2,2)
+           tmp2(4)=olist(l2,1)
+           do m2=1,Nchi
+              tmp2(1)=olist(m2,2)
+              tmp2(2)=olist(m2,1)
+              if(sum(abs(tmp1(:)-tmp2(:)))==0)then
+                 chi_map(m1,l1,1)=m2
+                 chi_map(m1,l1,2)=l2
+                 if(chi_irr(m2,l2)==0)then
+                    chi_irr(m1,l1)=1
+                 end if
+                 exit
+              end if
+           end do
         end do
      end do
   end do
-end subroutine get_irr_chi_orb
 
-subroutine get_chi0_conv(chi,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi) bind(C,name='get_chi0_conv_')
+  iter=1
+  do l1=1,Nchi
+     do m1=1,Nchi
+        if(chi_irr(m1,l1)==1)then
+           irr_chi(iter,1)=l1
+           irr_chi(iter,2)=m1
+           iter=iter+1
+        end if
+     end do
+  end do
+
+end subroutine get_chi_map
+
+subroutine get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,&
+     Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi) bind(C,name='get_chi0_conv_')
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
   integer(int64),intent(in),dimension(Nchi,2):: olist
   integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
+  integer(int32),intent(in),dimension(Nchi,Nchi,2):: chi_map
+  integer(int32),intent(in),dimension(Nchi*(Nchi+1)/2,2):: irr_chi
   real(real64),intent(in):: temp
   complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
   complex(real64),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
 
-  integer(int32) i,j,k,l,m,n
+  integer(int32) i,j,k,l,m,n,iorb
   integer(int32) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(2*Nw)
   real(real64) weight
   real(real64),parameter:: eps=1.0d-9
@@ -207,59 +244,60 @@ subroutine get_chi0_conv(chi,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,N
   end do
   !$omp end do
   !$omp end parallel
-  l1_l2_loop1:do l=1,Nchi !olist(l)=(l1,l2)
-     l3_l4_loo2:do m=1,Nchi !olist(m)=(l3,l4)
-        !use symmetry G^lm(k,iw)=G^ml(k,-iw) from Hermitian symmetry of Hamiltonian
-        !$omp parallel do private(i)
-        w_loop_Gk_to_tmp:do j=1,Nw
-           k_loop_Gk_to_tmp:do i=1,Nkall
-              if(invk(2,i)==0)then
-                 !iw
-                 tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(l,1),olist(m,1)) !G13(k,iw)
-                 tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(m,2),olist(l,2)) !G42(k,iw)
-                 !-iw
-                 tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(m,1),olist(l,1))) !G13(k,-iw)=G^*31(k,iw)
-                 tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(l,2),olist(m,2))) !G42(k,-iw)=G^*24(k,iw)
-              else if(invk(2,i)==1)then
-                 !iw
-                 tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(m,1),olist(l,1)) !G13(-k,iw)=G^31(k,iw)
-                 tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(l,2),olist(m,2)) !G42(-k,iw)=G^24(k,iw)
-                 !-iw
-                 tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(l,1),olist(m,1))) !G13(-k,-iw)=G^*13(k,iw)
-                 tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(m,2),olist(l,2))) !G42(-k,-iw)=G^*42(k,iw)
-              end if
-           end do k_loop_Gk_to_tmp
-        end do w_loop_Gk_to_tmp
-        !$omp end parallel do
-        call FFT(tmpgk13,tmp,Nx,Ny,Nz,2*Nw,.true.)
-        call FFT(tmpgk42,tmp,Nx,Ny,Nz,2*Nw,.true.)
-        !calculate G(r)G(-r)
-        !$omp parallel do private(i,j,k)
-        w_loop_conv:do n=1,2*Nw
-           z_loop:do k=0,Nz-1
-              y_loop:do j=0,Ny-1
-                 !$omp simd
-                 x_loop:do i=0,Nx-1
-                    tmp(i,j,k,n)=-tmpgk13(i,j,k,n)*tmpgk42(ii(i),ij(j),ik(k),iw(n))
-                 end do x_loop
-                 !$omp end simd
-              end do y_loop
-           end do z_loop
-        end do w_loop_conv
-        !$omp end parallel do
-        call FFT(tmp,tmpgk13,Nx,Ny,Nz,2*Nw,.false.)
-        !$omp parallel do private(i,j)
-        w_loop_tmp_to_chi:do j=1,Nw
-           k_loop_tmp_to_chi:do i=1,Nkall
-              if(invk(2,i)==0)then
-                 chi(invk(1,i),j,m,l)=tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight
-                 if(abs(dble(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(0.0d0,imag(chi(invk(1,i),j,m,l)))
-                 if(abs(imag(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(dble(chi(invk(1,i),j,m,l)),0.0d0)
-              end if
-           end do k_loop_tmp_to_chi
-        end do w_loop_tmp_to_chi
-        !$omp end parallel do
-     end do l3_l4_loo2
+  l1_l2_loop1:do iorb=1,Nchi*(Nchi+1)/2
+     l=irr_chi(iorb,1)
+     m=irr_chi(iorb,2)
+     !use symmetry G^lm(k,iw)=G^ml(k,-iw) from Hermitian symmetry of Hamiltonian
+     !$omp parallel do private(i)
+     w_loop_Gk_to_tmp:do j=1,Nw
+        k_loop_Gk_to_tmp:do i=1,Nkall
+           if(invk(2,i)==0)then
+              !iw
+              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(l,1),olist(m,1)) !G13(k,iw)
+              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(m,2),olist(l,2)) !G42(k,iw)
+              !-iw
+              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(m,1),olist(l,1))) !G13(k,-iw)=G^*31(k,iw)
+              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(l,2),olist(m,2))) !G42(k,-iw)=G^*24(k,iw)
+           else if(invk(2,i)==1)then
+              !iw
+              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(m,1),olist(l,1)) !G13(-k,iw)=G^31(k,iw)
+              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(l,2),olist(m,2)) !G42(-k,iw)=G^24(k,iw)
+              !-iw
+              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(l,1),olist(m,1))) !G13(-k,-iw)=G^*13(k,iw)
+              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(m,2),olist(l,2))) !G42(-k,-iw)=G^*42(k,iw)
+           end if
+        end do k_loop_Gk_to_tmp
+     end do w_loop_Gk_to_tmp
+     !$omp end parallel do
+     call FFT(tmpgk13,tmp,Nx,Ny,Nz,2*Nw,.true.)
+     call FFT(tmpgk42,tmp,Nx,Ny,Nz,2*Nw,.true.)
+     !calculate G(r)G(-r)
+     !$omp parallel do private(i,j,k)
+     w_loop_conv:do n=1,2*Nw
+        z_loop:do k=0,Nz-1
+           y_loop:do j=0,Ny-1
+              !$omp simd
+              x_loop:do i=0,Nx-1
+                 tmp(i,j,k,n)=-tmpgk13(i,j,k,n)*tmpgk42(ii(i),ij(j),ik(k),iw(n))
+              end do x_loop
+              !$omp end simd
+           end do y_loop
+        end do z_loop
+     end do w_loop_conv
+     !$omp end parallel do
+     call FFT(tmp,tmpgk13,Nx,Ny,Nz,2*Nw,.false.)
+     !$omp parallel do private(i,j)
+     w_loop_tmp_to_chi:do j=1,Nw
+        k_loop_tmp_to_chi:do i=1,Nkall
+           if(invk(2,i)==0)then
+              chi(invk(1,i),j,m,l)=tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight
+              if(abs(dble(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(0.0d0,imag(chi(invk(1,i),j,m,l)))
+              if(abs(imag(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(dble(chi(invk(1,i),j,m,l)),0.0d0)
+           end if
+        end do k_loop_tmp_to_chi
+     end do w_loop_tmp_to_chi
+     !$omp end parallel do
+     chi(:,:,chi_map(m,l,1),chi_map(m,l,2))=conjg(chi(:,:,m,l))
   end do l1_l2_loop1
 end subroutine get_chi0_conv
 

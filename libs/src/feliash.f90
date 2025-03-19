@@ -20,7 +20,9 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
   real(real64) norm,normb,inorm,norm2,weight
   complex(real64),dimension(Nk,Nw,Nchi,Nchi):: chi
   complex(real64),dimension(Nkall,Nw,Norb,Norb):: newdelta,fk
- 
+  integer(int32),dimension(Nchi,Nchi,2)::chi_map
+  integer(int32),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
+
   if(gap_sym>=0)then
      sw_pair=.true.
      print'(A7)','singlet'
@@ -28,10 +30,11 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
      sw_pair=.false.
      print'(A7)','triplet'
   end if
+  call get_chi_map(chi_map,irr_chi,olist,Nchi)
   weight=temp/dble(Nkall)
   norm2=0.0d0
   normb=0.0d0
-  call get_chi0_conv(chi,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+  call get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
   call ckchi()
   call get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
   print*,chi(9,1,2,14)

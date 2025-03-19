@@ -56,7 +56,7 @@ color_option defines the meaning of color on Fermi surfaces
 option=17
 color_option=2
 
-Nx,Ny,Nz,Nw=32,32,1,256 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=16,16,1,256 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
@@ -649,7 +649,7 @@ def main():
         get_mass(Nx,rvec,ham_r,mu)
     elif option==14: #calc self-energy using flex
         if sw_soc:
-            continue
+            pass
         else:
             calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist)
     elif option==15: #mass calc
@@ -675,7 +675,7 @@ def main():
         plt.show()
     elif option==17: #calc gap function
         if sw_soc:
-            continue
+            pass
         else:
             calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,mu,temp,gap_sym,sw_self)
 if __name__=="__main__":
