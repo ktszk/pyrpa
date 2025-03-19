@@ -16,12 +16,12 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
 
   integer(int32) i_iter,i_eig,count,i
   integer(int32),parameter:: eig_max=2
+  integer(int32),dimension(Nchi,Nchi,2)::chi_map
+  integer(int32),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
   logical(1) sw_pair
   real(real64) norm,normb,inorm,norm2,weight
   complex(real64),dimension(Nk,Nw,Nchi,Nchi):: chi
   complex(real64),dimension(Nkall,Nw,Norb,Norb):: newdelta,fk
-  integer(int32),dimension(Nchi,Nchi,2)::chi_map
-  integer(int32),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
 
   if(gap_sym>=0)then
      sw_pair=.true.
@@ -37,8 +37,6 @@ subroutine lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,temp,eps,&
   call get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
   call ckchi()
   call get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
-  print*,chi(9,1,2,14)
-  print*,chi(9,1,18,6)
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
   eigenval_loop:do i_eig=1,eig_max !solve eig_val using power method, 1st eig is usually large negative value

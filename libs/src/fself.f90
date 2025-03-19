@@ -244,7 +244,7 @@ subroutine get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,&
   end do
   !$omp end do
   !$omp end parallel
-  l1_l2_loop1:do iorb=1,Nchi*(Nchi+1)/2
+  orb_loop:do iorb=1,Nchi*(Nchi+1)/2
      l=irr_chi(iorb,1)
      m=irr_chi(iorb,2)
      !use symmetry G^lm(k,iw)=G^ml(k,-iw) from Hermitian symmetry of Hamiltonian
@@ -298,10 +298,10 @@ subroutine get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,&
      end do w_loop_tmp_to_chi
      !$omp end parallel do
      chi(:,:,chi_map(m,l,1),chi_map(m,l,2))=conjg(chi(:,:,m,l))
-  end do l1_l2_loop1
+  end do orb_loop
 end subroutine get_chi0_conv
 
-subroutine get_chi0_sum(chi,Gk,klist,invk,olist,temp,Nw,Nk,Nkall,Norb,Nchi) bind(C)
+subroutine get_chi0_sum(chi,Gk,klist,invk,irr_chi,chi_map,olist,temp,Nw,Nk,Nkall,Norb,Nchi) bind(C)
   !
   !> It obtains chi_0 using summation. Its cost is O(Nk^2), so it is heavy. You should use get_chi0_conv.
   !
@@ -310,61 +310,64 @@ subroutine get_chi0_sum(chi,Gk,klist,invk,olist,temp,Nw,Nk,Nkall,Norb,Nchi) bind
   integer(int64),intent(in):: Nw,Norb,Nchi,Nk,Nkall
   integer(int64),intent(in),dimension(Nchi,2):: olist
   integer(int64),intent(in),dimension(3,Nkall):: invk
+  integer(int32),intent(in),dimension(Nchi,Nchi,2):: chi_map
+  integer(int32),intent(in),dimension(Nchi*(Nchi+1)/2,2):: irr_chi
   real(real64),intent(in),dimension(3,Nkall):: klist
   real(real64),intent(in):: temp
   complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
   complex(real64),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
 
-  integer(int32) i,j,l,m,iq,iw
+  integer(int32) i,j,l,m,iq,iw,iorb
   integer(int32),dimension(2*Nw):: wshift
   integer(int64),dimension(Nkall):: qshift
   real(real64) weight
   complex(real64),dimension(Nkall,2*Nw):: tmpgk13,tmpgk42
 
   weight=temp/dble(Nkall)
-  do l=1,Nchi
-     do m=1,Nchi
-        !$omp parallel do private(i)
-        do j=1,Nw
-           do i=1,Nkall
-              if(invk(2,i)==0)then
-                 tmpgk13(i,j)=Gk(i,j,olist(m,1),olist(l,1))
-                 tmpgk42(i,j)=Gk(i,j,olist(l,2),olist(m,2))
-                 tmpgk13(i,2*Nw-j+1)=conjg(Gk(i,j,olist(l,1),olist(m,1)))
-                 tmpgk42(i,2*Nw-j+1)=conjg(Gk(i,j,olist(m,2),olist(l,2)))
-              else if(invk(2,i)==1)then
-                 tmpgk13(i,j)=Gk(i,j,olist(l,1),olist(m,1))
-                 tmpgk42(i,j)=Gk(i,j,olist(m,2),olist(l,2))
-                 tmpgk13(i,2*Nw-j+1)=conjg(Gk(i,j,olist(m,1),olist(l,1)))
-                 tmpgk42(i,2*Nw-j+1)=conjg(Gk(i,j,olist(l,2),olist(m,2)))
-              end if
-           end do
+  orb_loop:do iorb=1,Nchi*(Nchi+1)/2
+     l=irr_chi(iorb,1)
+     m=irr_chi(iorb,2)
+     !$omp parallel do private(i)
+     do j=1,Nw
+        do i=1,Nkall
+           if(invk(2,i)==0)then
+              tmpgk13(i,j)=Gk(i,j,olist(m,1),olist(l,1))
+              tmpgk42(i,j)=Gk(i,j,olist(l,2),olist(m,2))
+              tmpgk13(i,2*Nw-j+1)=conjg(Gk(i,j,olist(l,1),olist(m,1)))
+              tmpgk42(i,2*Nw-j+1)=conjg(Gk(i,j,olist(m,2),olist(l,2)))
+           else if(invk(2,i)==1)then
+              tmpgk13(i,j)=Gk(i,j,olist(l,1),olist(m,1))
+              tmpgk42(i,j)=Gk(i,j,olist(m,2),olist(l,2))
+              tmpgk13(i,2*Nw-j+1)=conjg(Gk(i,j,olist(m,1),olist(l,1)))
+              tmpgk42(i,2*Nw-j+1)=conjg(Gk(i,j,olist(l,2),olist(m,2)))
+           end if
         end do
-        !$omp end parallel do
-        wloop: do iw=1,Nw
-           wl_loop: do j=1,2*Nw
-              wshift(j)=mod(j+iw-1,2*Nw)
-              if(wshift(j)==0)then
-                 wshift(j)=2*Nw
-              end if
-           end do wl_loop
-           qloop: do iq=1,Nkall
-              if(invk(2,iq)==0)then
-                 call get_qshift(klist(:,iq),klist,qshift,Nk)
-                 !$omp parallel do private(i) reduction(+: chi)
-                 wloop2: do j=1,2*Nw
-                    !$omp simd
-                    kloop: do i=1,Nkall
-                       chi(invk(1,iq),iw,m,l)=chi(iq,iw,m,l)-tmpgk13(i,j)*tmpgk42(qshift(i),wshift(j))
-                    end do kloop
-                    !$omp end simd
-                 end do wloop2
-                 !$omp end parallel do
-              end if
-           end do qloop
-        end do wloop
      end do
-  end do
+     !$omp end parallel do
+     wloop: do iw=1,Nw
+        wl_loop: do j=1,2*Nw
+           wshift(j)=mod(j+iw-1,2*Nw)
+           if(wshift(j)==0)then
+              wshift(j)=2*Nw
+           end if
+        end do wl_loop
+        qloop: do iq=1,Nkall
+           if(invk(2,iq)==0)then
+              call get_qshift(klist(:,iq),klist,qshift,Nk)
+              !$omp parallel do private(i) reduction(+: chi)
+              wloop2: do j=1,2*Nw
+                 !$omp simd
+                 kloop: do i=1,Nkall
+                    chi(invk(1,iq),iw,m,l)=chi(iq,iw,m,l)-tmpgk13(i,j)*tmpgk42(qshift(i),wshift(j))
+                 end do kloop
+                 !$omp end simd
+              end do wloop2
+              !$omp end parallel do
+           end if
+        end do qloop
+     end do wloop
+     chi(:,:,chi_map(m,l,1),chi_map(m,l,2))=conjg(chi(:,:,m,l))
+  end do orb_loop
   chi(:,:,:,:)=chi(:,:,:,:)*weight
 end subroutine get_chi0_sum
 
@@ -571,6 +574,8 @@ subroutine mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu,rfill,temp,&
   complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: sigmak
 
   integer(int32) scf_i,i
+  integer(int32),dimension(Nchi,Nchi,2)::chi_map
+  integer(int32),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
   real(real64)esterr,mu_old
   complex(real64),dimension(Nk,Nw,Norb,Norb):: Gk,sigmak0
   complex(real64),dimension(Nk,Nw,Nchi,Nchi):: chi
@@ -585,9 +590,10 @@ subroutine mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu,rfill,temp,&
      Gk(:,:,:,:)=0.0d0 !gen_green0 need to initialization of Gk
      call gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb)
   end if
+  call get_chi_map(chi_map,irr_chi,olist,Nchi)
   do scf_i=1,scf_loop
      print*,'iter=',scf_i
-     call get_chi0_conv(chi,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+     call get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
      call get_Vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi)
      print'(A16,E12.4,A5,E12.4)','Re V_sigma: max:',maxval(dble(chi)),' min:',minval(dble(chi))
      call calc_sigma(sigmak,Gk,chi,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)

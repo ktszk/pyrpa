@@ -649,7 +649,12 @@ def main():
         get_mass(Nx,rvec,ham_r,mu)
     elif option==14: #calc self-energy using flex
         if sw_soc:
-            pass
+            try:
+                slist
+            except NameError:
+                Norb=len(ham_r[0])
+                slist=np.ones(Norb)
+                slist[int(Norb/2):]=-1
         else:
             calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist)
     elif option==15: #mass calc
@@ -675,7 +680,12 @@ def main():
         plt.show()
     elif option==17: #calc gap function
         if sw_soc:
-            pass
+            try:
+                slist
+            except NameError:
+                Norb=len(ham_r[0])
+                slist=np.ones(Norb)
+                slist[int(Norb/2):]=-1
         else:
             calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,mu,temp,gap_sym,sw_self)
 if __name__=="__main__":
