@@ -53,7 +53,7 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=17
+option=14
 color_option=2
 
 Nx,Ny,Nz,Nw=16,16,1,256 #k and energy(or matsubara freq.) mesh size
@@ -89,7 +89,7 @@ sw_calc_mu=True #calculate mu or not
 sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 sw_omega=False #True: real freq, False: Matsubara freq.
-sw_self=False  #True: use calculated self energy for spectrum band plot
+sw_self=True  #True: use calculated self energy for spectrum band plot
 sw_out_self=True
 sw_in_self=False
 sw_soc=False #use with soc hamiltonian
@@ -432,11 +432,11 @@ def calc_phi_spectrum(mu:float,temp:float,klist,qlist,chiolist,eig,uni,spa_lengt
     return(w,sp,phiw)
 
 def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,olist):
-    klist,kmap=plibs.gen_klist_with_kmap(Nx,Ny,Nz)
+    klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     ham_k=flibs.gen_ham(klist,ham_r,rvec)
     Smat,Cmat=flibs.gen_SCmatrix(olist,U,J)
-    sigmak=flibs.mkself(Smat,Cmat,kmap,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
+    sigmak=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
 
 def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,olist,
                            mu:float,temp:float,gap_sym:int,sw_self:bool):
@@ -445,7 +445,7 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,olist,
     Smat,Cmat=flibs.gen_SCmatrix(olist,U,J)
     if sw_self:
         ham_k=flibs.gen_ham(klist,ham_r,rvec)
-        sigmak=flibs.mkself(Smat,Cmat,kmap,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
+        sigmak=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
         Gk=flibs.gen_green(sigmak,ham_k,mu,temp)
     else:
         Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)

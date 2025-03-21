@@ -576,10 +576,11 @@ subroutine mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu,rfill,temp,&
   integer(int32) scf_i,i
   integer(int32),dimension(Nchi,Nchi,2)::chi_map
   integer(int32),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
-  real(real64)esterr,mu_old
+  real(real64)esterr,mu_old,eps_sgm
   complex(real64),dimension(Nk,Nw,Norb,Norb):: Gk,sigmak0
   complex(real64),dimension(Nk,Nw,Nchi,Nchi):: chi
 
+  eps_sgm=1.0d-10
   if(sw_in)then
      call io_sigma(.false.)
      call gen_green_inv(Gk,sigmak,hamk,mu,temp,Nk,Nw,Norb)
@@ -623,7 +624,7 @@ contains
           do j=1,Nw
              do i=1,Nk
                 cksigm=sigmak(i,j,m,l)
-                if(abs(cksigm)>1.0d-10)then
+                if(abs(cksigm)>eps_sgm)then
                    est=abs((sigmak0(i,j,m,l)-cksigm)/cksigm)
                    if(est>esterr)then
                       esterr=est
@@ -638,7 +639,7 @@ contains
           end do
        end do
     end do
-    print '(A7,E12.4,A14,2I5,2I3)','esterr=',esterr,' at ik,iw,m,l=',kerr,iwerr,merr,lerr
+    print '(A7,E12.4,A14,2I5,2I3)','esterr=',esterr,' at k,iw,m,l=',kerr,iwerr,merr,lerr
   end subroutine compair_sigma
 
   subroutine renew_mu()
