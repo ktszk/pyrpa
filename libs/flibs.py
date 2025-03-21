@@ -270,7 +270,7 @@ def get_Vsigma_nosoc_flex(chi,Smat,Cmat):
                                  byref(c_int64(Nw)),byref(c_int64(Nchi)))
     return chi.copy()
 
-def mkself(Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu:float,fill:float,temp:float,Nw:int,Nx:int,Ny:int,Nz:int,sw_out:bool,sw_in:bool,scf_loop=100,eps=1.0e-3,pp=0.4):
+def mkself(Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu:float,fill:float,temp:float,Nw:int,Nx:int,Ny:int,Nz:int,sw_out:bool,sw_in:bool,scf_loop=300,eps=1.0e-3,pp=0.4):
     print('mixing rate: pp = %3.1f'%pp)
     Nkall,Nk,Nchi=len(kmap),len(hamk),len(Smat)
     Norb=int(np.sqrt(hamk.size/Nk))

@@ -21,8 +21,8 @@ else: monoclinic
 
 #fname,ftype,brav='inputs/Sr2RuO4',2,2
 #fname,ftype,brav='inputs/000AsP.input',1,0
-fname,ftype,brav='inputs/NdFeAsO.input',1,0
-#fname,ftype,brav='inputs/square.hop',1,0
+#fname,ftype,brav='inputs/NdFeAsO.input',1,0
+fname,ftype,brav='inputs/square.hop',1,0
 #fname,ftype,brav='inputs/hop3.input',1,0
 #fname,ftype,brav='inputs/SiMLO.input',3,6
 
@@ -53,10 +53,10 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=14
+option=17
 color_option=2
 
-Nx,Ny,Nz,Nw=16,16,1,256 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=32,32,1,512 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
@@ -64,8 +64,8 @@ kz=0.0
 abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 #abc=[3.90,3.90,12.68]
 alpha_beta_gamma=[90.,90.,90]
-temp=5.0e-2 #2.59e-2
-fill=2.9375
+temp=3.0e-2 #2.59e-2
+fill=.45 #2.9375
 
 #site_prof=[5]
 
@@ -90,7 +90,7 @@ sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 sw_omega=False #True: real freq, False: Matsubara freq.
 sw_self=True  #True: use calculated self energy for spectrum band plot
-sw_out_self=True
+sw_out_self=False
 sw_in_self=False
 sw_soc=False #use with soc hamiltonian
 #------------------------ initial parameters are above -------------------------------

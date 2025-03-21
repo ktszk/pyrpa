@@ -478,6 +478,7 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
 
   integer(int32) i,j,k,n,l,m
   real(real64) weight
+  real(real64),parameter:: eps=1.0d-9
   complex(real64),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpVsigma,tmp,tmpgk
 
   weight=temp/dble(Nkall)
@@ -553,9 +554,20 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
         !$omp end parallel do
      end do
   end do
-  !$Omp parallel workshare
-  sigmak(:,:,:,:)=sigmak(:,:,:,:)*weight
-  !$omp end parallel workshare
+
+  do l=1,Norb
+     do m=1,Norb
+        !$Omp parallel do private(i,j)
+        do j=1,Nw
+           do i=1,Nk
+              sigmak(i,j,m,l)=sigmak(i,j,m,l)*weight
+              if(abs(dble(sigmak(i,j,m,l)))<eps) sigmak(i,j,m,l)=cmplx(0.0d0,imag(sigmak(i,j,m,l)))
+              if(abs(imag(sigmak(i,j,m,l)))<eps) sigmak(i,j,m,l)=cmplx(dble(sigmak(i,j,m,l)),0.0d0)
+           end do
+        end do
+        !$omp end parallel do
+     end do
+  end do
 end subroutine calc_sigma
 
 subroutine mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu,rfill,temp,&
@@ -580,7 +592,7 @@ subroutine mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu,rfill,temp,&
   complex(real64),dimension(Nk,Nw,Norb,Norb):: Gk,sigmak0
   complex(real64),dimension(Nk,Nw,Nchi,Nchi):: chi
 
-  eps_sgm=1.0d-10
+  eps_sgm=1.0d-9
   if(sw_in)then
      call io_sigma(.false.)
      call gen_green_inv(Gk,sigmak,hamk,mu,temp,Nk,Nw,Norb)
