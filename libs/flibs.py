@@ -645,6 +645,32 @@ def linearized_eliashberg(Gk,uni,Smat,Cmat,olist,kmap,invk,Nx:int,Ny:int,Nz:int,
                      byref(c_int64(itemax)),byref(c_int64(gap_sym)))
     return delta
 
+def linearized_eliashberg_soc(Gk,uni,Vmat,slist,olist,kmap,invk,Nx:int,Ny:int,Nz:int,temp:float,gap_sym:int,eps=1.0e-4,itemax=300):
+    Norb,Nchi=len(slist),len(Vmat)
+    Nkall,Nk,Nw=len(kmap),len(Gk[0,0,0]),len(Gk[0,0])
+    delta=np.zeros((Norb,Norb,Nw,Nkall),dtype=np.complex128)
+    flibs.lin_eliash_soc.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #delta
+                               np.ctypeslib.ndpointer(dtype=np.complex128), #Gk
+                               np.ctypeslib.ndpointer(dtype=np.complex128), #uni
+                               np.ctypeslib.ndpointer(dtype=np.float64),    #Vmat
+                               np.ctypeslib.ndpointer(dtype=np.int64),    #slist
+                               np.ctypeslib.ndpointer(dtype=np.int64),      #olist
+                               np.ctypeslib.ndpointer(dtype=np.int64),      #kmap
+                               np.ctypeslib.ndpointer(dtype=np.int64),      #invk
+                               POINTER(c_double),POINTER(c_double),         #temp,eps
+                               POINTER(c_int64),POINTER(c_int64),           #Nkall,Nk
+                               POINTER(c_int64),POINTER(c_int64),           #Nw,Nchi
+                               POINTER(c_int64),POINTER(c_int64),           #Norb,Nx
+                               POINTER(c_int64),POINTER(c_int64),           #Ny,Nz
+                               POINTER(c_int64),POINTER(c_int64)]           #itemax,gapsym
+    flibs.lin_eliash_soc.retype=c_void_p
+    flibs.lin_eliash_soc(delta,Gk,uni,Vmat,slist,olist,kmap,invk,byref(c_double(temp)),
+                     byref(c_double(eps)),byref(c_int64(Nkall)),byref(c_int64(Nk)),
+                     byref(c_int64(Nw)),byref(c_int64(Nchi)),byref(c_int64(Norb)),
+                     byref(c_int64(Nx)),byref(c_int64(Ny)),byref(c_int64(Nz)),
+                     byref(c_int64(itemax)),byref(c_int64(gap_sym)))
+    return delta
+
 def conv_delta_orb_to_band(delta,uni,invk):
     Nkall,Nk,Nw,Norb=len(invk),len(uni),len(delta[0,0]),len(delta)
     deltab=np.zeros((Norb,Norb,Nkall),dtype=np.complex128)

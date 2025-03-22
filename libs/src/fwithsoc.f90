@@ -1,4 +1,4 @@
-subroutine lin_eliash_soc(delta,Gk,uni,Vmat,olist,sgnsig,kmap,invk,temp,eps,&
+subroutine lin_eliash_soc(delta,Gk,uni,Vmat,slist,olist,kmap,invk,temp,eps,&
      Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym) bind(C)
   !
   !> calculate linearized eliashberg equations
@@ -6,10 +6,10 @@ subroutine lin_eliash_soc(delta,Gk,uni,Vmat,olist,sgnsig,kmap,invk,temp,eps,&
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym
+  integer(int64),intent(in),dimension(Norb):: slist
   integer(int64),intent(in),dimension(Nchi,2):: olist
   integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
   real(real64),intent(in):: temp,eps
-  real(real64),intent(in),dimension(Norb,Norb):: sgnsig
   real(real64),intent(in),dimension(Nchi,Nchi):: Vmat
   complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
@@ -17,17 +17,23 @@ subroutine lin_eliash_soc(delta,Gk,uni,Vmat,olist,sgnsig,kmap,invk,temp,eps,&
 
   integer(int32) i_iter,i_eig,count,i
   integer(int32),parameter:: eig_max=2
+  integer(int32),dimension(Nchi,Nchi,2)::chi_map
+  integer(int32),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
   logical(1) sw_pair
   real(real64) norm,normb,inorm,norm2,weight
-  complex(real64),dimension(Nk,Nw,Nchi,Nchi):: chi
+  real(real64),dimension(Norb,Norb):: sgnsig
+  real(real64),dimension(Nchi*(Nchi+1)/2):: sgnsig2
+  complex(real64),dimension(Nk,Nw,Nchi*(Nchi+1)/2):: chi
   complex(real64),dimension(Nkall,Nw,Norb,Norb):: newdelta,fk
 
+  call get_chi_map(chi_map,irr_chi,olist,Nchi)
+  call getsgnsig()
   weight=temp/dble(Nkall)
   norm2=0.0d0
   normb=0.0d0
-  call get_chi0_conv_soc(chi,Gk,kmap,invk,olist,sgnsig,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+  call get_chi0_conv_soc(chi,Gk,kmap,invk,irr_chi,olist,sgnsig,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
   call ckchi()
-  call get_V_delta_soc_flex(chi,Vmat,Nk,Nw,Nchi)
+  call get_V_delta_soc_flex(chi,Vmat,sgnsig2,irr_chi,chi_map,Nk,Nw,Nchi)
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
   eigenval_loop:do i_eig=1,eig_max !solve eig_val using power method, 1st eig is usually large negative value
@@ -96,7 +102,7 @@ contains
   end subroutine get_norm
  
   subroutine ckchi()
-    integer(int32) i,l,m,n,info,chik,chikall
+    integer(int32) i,l,m,n,info,chik,chikall,iorb
     real(real64) maxchi0,maxchi02
     real(real64),dimension(2*Nchi):: rwork
     complex(real64),dimension(Nchi*Nchi*4+1):: work
@@ -105,11 +111,17 @@ contains
 
     maxchi02=-1.0d5
     do i=1,Nk
+       do iorb=1,Nchi*(Nchi+1)/2
+          l=irr_chi(iorb,1)
+          m=irr_chi(iorb,2)
+          tmp(m,l)=chi(i,1,iorb)
+          tmp(chi_map(l,m,1),chi_map(l,m,2))=sgnsig2(n)*conjg(chi(i,1,iorb))
+       end do
        chi0(:,:)=0.0d0
        do l=1,Nchi
           do m=1,Nchi
              do n=1,Nchi
-                chi0(m,l)=chi0(m,l)+chi(i,1,m,n)*Vmat(n,l)
+                chi0(m,l)=chi0(m,l)+tmp(m,n)*Vmat(n,l)
              end do
           end do
        end do
@@ -127,31 +139,51 @@ contains
     end do
     print'(A7,3I4,F12.8)','SDW/CDW',kmap(:,chikall),maxchi02
   end subroutine ckchi
+
+  subroutine get_sgnsig()
+    integer(int32) i,j
+    do j=1,Norb
+       do i=j,Norb
+          sgnsig(i,j)=slist(i)*slist(j)
+          sgnsig(j,i)=sgnsig(i,j)
+       end do
+    end do
+  end subroutine get_sgnsig
 end subroutine lin_eliash_soc
 
-subroutine get_V_delta_soc_flex(chi,Vmat,Nk,Nw,Nchi)
+subroutine get_V_delta_soc_flex(chi,Vmat,sgnsig2,irr_chi,chi_map,Nk,Nw,Nchi)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nk,Nw,Nchi
+  integer(int32),intent(in),dimension(Nchi,Nchi,2)::chi_map
+  integer(int32),intent(in),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
+  real(real64),intent(in),dimension(Nchi*(Nchi+1)/2)::sgnsig2
   real(real64),intent(in),dimension(Nchi,Nchi):: Vmat
-  complex(real64),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
+  complex(real64),intent(inout),dimension(Nk,Nw,Nchi*(Nchi+1)/2):: chi
   
-  integer(int32) i,j,l,m,n,info
+  integer(int32) i,j,l,m,n,info,l2,m2,iorb
   integer(int32),dimension(Nchi):: ipiv
   complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3
   complex(real64),dimension(2*Nchi):: work
-  
+
   wloop:do j=1,Nw
      qloop:do i=1,Nk
         !$omp parallel
         !$omp workshare
         cmat1(:,:)=0.0d0
         !$omp end workshare
+        !$omp do private(l,m)
+        do iorb=1,Nchi*(Nchi+1)/2
+           l=irr_chi(iorb,1)
+           m=irr_chi(iorb,2)
+           cmat3(m,l)=chi(i,j,iorb)
+           cmat3(chi_map(l,m,1),chi_map(l,m,2))=sgnsig2(iorb)*conjg(chi(i,j,iorb))
+        end do
         !$omp do private(m,n)
         do l=1,Nchi
            do m=1,Nchi
               do n=1,Nchi
-                 cmat1(m,l)=cmat1(m,l)+chi(i,j,m,n)*Vmat(n,l) !-chi0V
+                 cmat1(m,l)=cmat1(m,l)+cmat3(m,n)*Vmat(n,l) !-chi0V
               end do
            end do
         end do
@@ -171,30 +203,32 @@ subroutine get_V_delta_soc_flex(chi,Vmat,Nk,Nw,Nchi)
         !$omp workshare
         cmat3(:,:)=0.0d0
         !$omp end workshare
-        !$omp do private(m,n)
-        do l=1,Nchi
-           do m=1,Nchi
-              do n=1,Nchi
-                 cmat3(m,l)=cmat3(m,l)+cmat1(m,n)*cmat2(n,l) !(1-chi0V)^-1chi0V
-              end do
+        !$omp do private(iorb,l,m,n)
+        do iorb=1,Nchi*(Nchi+1)/2
+           l=irr_chi(iorb,1)
+           m=irr_chi(iorb,2)
+           do n=1,Nchi
+              cmat3(m,l)=cmat3(m,l)+cmat1(m,n)*cmat2(n,l) !(1-chi0V)^-1chi0V
            end do
         end do
         !$omp end do
         !$omp workshare
         cmat2(:,:)=-Vmat(:,:)
         !$omp end workshare
-        !$omp do private(m,n)
-        do l=1,Nchi
-           do m=1,Nchi
-              do n=1,Nchi
-                 cmat2(m,l)=cmat2(m,l)+Vmat(m,n)*cmat3(n,l)
-              end do
+        !$omp do private(iorb,l,m,n)
+        do iorb=1,Nchi*(Nchi+1)/2
+           l=irr_chi(iorb,1)
+           m=irr_chi(iorb,2)
+           do n=1,Nchi
+              cmat2(m,l)=cmat2(m,l)+Vmat(m,n)*cmat3(n,l)
            end do
         end do
         !$omp end do
-        !$omp workshare
-        chi(i,j,:,:)=cmat2(:,:)
-        !$omp end workshare
+        !$omp do private(iorb)
+        do iorb=1,Nchi*(Nchi+1)/2
+           chi(i,j,iorb)=cmat2(irr_chi(iorb,2),irr_chi(iorb,1))
+        end do
+        !$omp end do
         !$omp end parallel
      end do qloop
   end do wloop
@@ -384,18 +418,19 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,kmap,invk,olist,Nkall,Nk,Nw,Nc
   !$omp end parallel
 end subroutine mkdelta_soc
 
-subroutine get_chi0_conv_soc(chi,Gk,kmap,invk,olist,sgnsig,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+subroutine get_chi0_conv_soc(chi,Gk,kmap,invk,irr_chi,olist,sgnsig,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
    use,intrinsic:: iso_fortran_env, only:int64,real64,int32
    implicit none
    integer(int64),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
    integer(int64),intent(in),dimension(Nchi,2):: olist
    integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
+   integer(int32),intent(in),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
    real(real64),intent(in):: temp
    real(real64),intent(in),dimension(Norb,Norb):: sgnsig
    complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
-   complex(real64),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
+   complex(real64),intent(out),dimension(Nk,Nw,Nchi*(Nchi+1)/2):: chi
  
-   integer(int32) i,j,k,l,m,n
+   integer(int32) i,j,k,l,m,n,iorb
    integer(int32) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(2*Nw)
    real(real64) weight
    real(real64),parameter:: eps=1.0d-9
@@ -428,60 +463,60 @@ subroutine get_chi0_conv_soc(chi,Gk,kmap,invk,olist,sgnsig,temp,Nx,Ny,Nz,Nw,Nk,N
    end do
    !$omp end do
    !$omp end parallel
-   l1_l2_loop1:do l=1,Nchi !olist(l)=(l1,l2)
-      l3_l4_loo2:do m=1,Nchi !olist(m)=(l3,l4)
-         !use symmetry G^lm(k,iw)=G^ml(k,-iw) from Hermitian symmetry of Hamiltonian
-         !$omp parallel do private(i)
-         w_loop_Gk_to_tmp:do j=1,Nw
-            k_loop_Gk_to_tmp:do i=1,Nkall
-               if(invk(2,i)==0)then
-                  !iw
-                  tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(l,1),olist(m,1)) !G13(k,iw)
-                  tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(m,2),olist(l,2)) !G42(k,iw)
-                  !-iw
-                  tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(m,1),olist(l,1))) !G13(k,-iw)=G^*31(k,iw)
-                  tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(l,2),olist(m,2))) !G42(k,-iw)=G^*24(k,iw)
-               else if(invk(2,i)==1)then
-                  !iw
-                  tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),j)=sgnsig(olist(m,1),olist(l,1))*Gk(invk(1,i),j,olist(m,1),olist(l,1)) !G13(-k,iw)=sgn*G^31(k,iw)
-                  tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),j)=sgnsig(olist(l,2),olist(m,2))*Gk(invk(1,i),j,olist(l,2),olist(m,2)) !G42(-k,iw)=sgn*G^24(k,iw)
-                  !-iw
-                  tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgnsig(olist(l,1),olist(m,1))*conjg(Gk(invk(1,i),j,olist(l,1),olist(m,1))) !G13(-k,-iw)=sgn*G^*13(k,iw)
-                  tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgnsig(olist(m,2),olist(l,2))*conjg(Gk(invk(1,i),j,olist(m,2),olist(l,2))) !G42(-k,-iw)=sgn*G^*42(k,iw)
-               end if
-            end do k_loop_Gk_to_tmp
-         end do w_loop_Gk_to_tmp
-         !$omp end parallel do
-         call FFT(tmpgk13,tmp,Nx,Ny,Nz,2*Nw,.true.)
-         call FFT(tmpgk42,tmp,Nx,Ny,Nz,2*Nw,.true.)
-         !calculate G(r)G(-r)
-         !$omp parallel do private(i,j,k)
-         w_loop_conv:do n=1,2*Nw
-            z_loop:do k=0,Nz-1
-               y_loop:do j=0,Ny-1
-                  !$omp simd
-                  x_loop:do i=0,Nx-1
-                     tmp(i,j,k,n)=-tmpgk13(i,j,k,n)*tmpgk42(ii(i),ij(j),ik(k),iw(n))
-                  end do x_loop
-                  !$omp end simd
-               end do y_loop
-            end do z_loop
-         end do w_loop_conv
-         !$omp end parallel do
-         call FFT(tmp,tmpgk13,Nx,Ny,Nz,2*Nw,.false.)
-         !$omp parallel do private(i,j)
-         w_loop_tmp_to_chi:do j=1,Nw
-            k_loop_tmp_to_chi:do i=1,Nkall
-               if(invk(2,i)==0)then
-                  chi(invk(1,i),j,m,l)=tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight
-                  if(abs(dble(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(0.0d0,imag(chi(invk(1,i),j,m,l)))
-                  if(abs(imag(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(dble(chi(invk(1,i),j,m,l)),0.0d0)
-               end if
-            end do k_loop_tmp_to_chi
-         end do w_loop_tmp_to_chi
-         !$omp end parallel do
-      end do l3_l4_loo2
-   end do l1_l2_loop1
+   orb_loop:do iorb=1,Nchi*(Nchi+1)/2 !olist(l)=(l1,l2)
+      l=irr_chi(iorb,1)
+      m=irr_chi(iorb,2)
+      !use symmetry G^lm(k,iw)=G^ml(k,-iw) from Hermitian symmetry of Hamiltonian
+      !$omp parallel do private(i)
+      w_loop_Gk_to_tmp:do j=1,Nw
+         k_loop_Gk_to_tmp:do i=1,Nkall
+            if(invk(2,i)==0)then
+               !iw
+               tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(l,1),olist(m,1)) !G13(k,iw)
+               tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(m,2),olist(l,2)) !G42(k,iw)
+               !-iw
+               tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(m,1),olist(l,1))) !G13(k,-iw)=G^*31(k,iw)
+               tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(l,2),olist(m,2))) !G42(k,-iw)=G^*24(k,iw)
+            else if(invk(2,i)==1)then
+               !iw
+               tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),j)=sgnsig(olist(m,1),olist(l,1))*Gk(invk(1,i),j,olist(m,1),olist(l,1)) !G13(-k,iw)=sgn*G^31(k,iw)
+               tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),j)=sgnsig(olist(l,2),olist(m,2))*Gk(invk(1,i),j,olist(l,2),olist(m,2)) !G42(-k,iw)=sgn*G^24(k,iw)
+               !-iw
+               tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgnsig(olist(l,1),olist(m,1))*conjg(Gk(invk(1,i),j,olist(l,1),olist(m,1))) !G13(-k,-iw)=sgn*G^*13(k,iw)
+               tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgnsig(olist(m,2),olist(l,2))*conjg(Gk(invk(1,i),j,olist(m,2),olist(l,2))) !G42(-k,-iw)=sgn*G^*42(k,iw)
+            end if
+         end do k_loop_Gk_to_tmp
+      end do w_loop_Gk_to_tmp
+      !$omp end parallel do
+      call FFT(tmpgk13,tmp,Nx,Ny,Nz,2*Nw,.true.)
+      call FFT(tmpgk42,tmp,Nx,Ny,Nz,2*Nw,.true.)
+      !calculate G(r)G(-r)
+      !$omp parallel do private(i,j,k)
+      w_loop_conv:do n=1,2*Nw
+         z_loop:do k=0,Nz-1
+            y_loop:do j=0,Ny-1
+               !$omp simd
+               x_loop:do i=0,Nx-1
+                  tmp(i,j,k,n)=-tmpgk13(i,j,k,n)*tmpgk42(ii(i),ij(j),ik(k),iw(n))
+               end do x_loop
+               !$omp end simd
+            end do y_loop
+         end do z_loop
+      end do w_loop_conv
+      !$omp end parallel do
+      call FFT(tmp,tmpgk13,Nx,Ny,Nz,2*Nw,.false.)
+      !$omp parallel do private(i,j)
+      w_loop_tmp_to_chi:do j=1,Nw
+         k_loop_tmp_to_chi:do i=1,Nkall
+            if(invk(2,i)==0)then
+               chi(invk(1,i),j,iorb)=tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight
+               if(abs(dble(chi(invk(1,i),j,iorb)))<eps) chi(invk(1,i),j,iorb)=cmplx(0.0d0,imag(chi(invk(1,i),j,iorb)))
+               if(abs(imag(chi(invk(1,i),j,iorb)))<eps) chi(invk(1,i),j,iorb)=cmplx(dble(chi(invk(1,i),j,iorb)),0.0d0)
+            end if
+         end do k_loop_tmp_to_chi
+      end do w_loop_tmp_to_chi
+      !$omp end parallel do
+   end do orb_loop
 end subroutine get_chi0_conv_soc
 
 subroutine get_vsigma_flex_soc(chi,Vmat,Nk,Nw,Nchi)
