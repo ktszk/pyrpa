@@ -27,7 +27,7 @@ subroutine lin_eliash_soc(delta,Gk,uni,Vmat,slist,olist,kmap,invk,temp,eps,&
   complex(real64),dimension(Nkall,Nw,Norb,Norb):: newdelta,fk
 
   call get_chi_map(chi_map,irr_chi,olist,Nchi)
-  call getsgnsig()
+  call get_sgnsig()
   weight=temp/dble(Nkall)
   norm2=0.0d0
   normb=0.0d0
