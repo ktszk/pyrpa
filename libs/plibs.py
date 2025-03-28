@@ -191,10 +191,11 @@ def mk_qlist(k_set,Nx:int,Ny:int,Nz:int,bvec):
     xticks+=[splen[-1]]
     return np.array(qlist),np.array(splen),xticks
 
-def mk_kf(mesh,rvec,ham_r,S_r,mu:float,kz):
+def mk_kf(mesh,rvec,ham_r,S_r,RotMat,mu:float,kz):
     import skimage.measure as sk
     Nk,klist=gen_klist(mesh+1,mesh+1,kz=kz)
-    eig,uni=get_eigs(klist,ham_r,S_r,rvec)
+    rvec1=RotMat.dot(rvec.T).T.copy()
+    eig,uni=get_eigs(klist,ham_r,S_r,rvec1)
     v2=[]
     fsband=[]
     for i,e in enumerate(eig.T-mu):

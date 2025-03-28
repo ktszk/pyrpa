@@ -20,9 +20,9 @@ else: monoclinic
 """
 
 #fname,ftype,brav='inputs/Sr2RuO4',2,2
-#fname,ftype,brav='inputs/000AsP.input',1,0
+fname,ftype,brav='inputs/000AsP.input',1,0
 #fname,ftype,brav='inputs/NdFeAsO.input',1,0
-fname,ftype,brav='inputs/square.hop',1,0
+#fname,ftype,brav='inputs/square.hop',1,0
 #fname,ftype,brav='inputs/hop3.input',1,0
 #fname,ftype,brav='inputs/SiMLO.input',3,6
 
@@ -53,19 +53,20 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=17
-color_option=2
+option=2
+color_option=0
 
-Nx,Ny,Nz,Nw=32,32,1,512 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=400,32,1,512 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
+RotMat=[[0,0,1],[0,1,0],[1,0,0]]
 
 abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 #abc=[3.90,3.90,12.68]
 alpha_beta_gamma=[90.,90.,90]
 temp=3.0e-2 #2.59e-2
-fill=.45 #2.9375
+fill=2.9375
 
 #site_prof=[5]
 
@@ -81,11 +82,11 @@ U,J=1.2,0.15
 #0:s, 1:dx2-y2,2:spm
 gap_sym=1
 
-mu0=9.85114560061123
+#mu0=9.85114560061123
 k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
 xlabel=[r'$\Gamma$','X','M']
 at_point=[ 0., .5, 0.]
-sw_calc_mu=True #calculate mu or not
+sw_calc_mu=False #calculate mu or not
 sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 sw_omega=False #True: real freq, False: Matsubara freq.
@@ -108,6 +109,10 @@ try:
     kz
 except NameError:
     kz=0.0
+try:
+    mu0
+except NameError:
+    sw_calc_mu=True
 try:
     kscale
 except NameError:
@@ -139,6 +144,13 @@ else:
     eC=1.
     tau_unit=1.
     emass=1.
+if option==2:
+    try:
+        RotMat
+        RotMat=np.array(RotMat)
+    except NameError:
+        print('No RotMat')
+        RotMat=np.eye(3)
 #------------------------ define functions -------------------------------------------
 def plot_band(eig,spl,xlabel,xticks,uni,ol,color):
     def get_col(cl,ol):
@@ -172,33 +184,34 @@ def plot_FS(fscolors,klist,color_option:int):
     fig=plt.figure()
     ax=fig.add_subplot(111,aspect='equal')
     col=['r','g','b','c','m','y','k','w']
-    if color_option==2:
-        v=[]
-        k=[]
-        for vl,kl in zip(fscolors,klist):
-            for vv,kk in zip(vl,kl):
-                v.extend(vv)
-                k.extend(kk)
-        v=np.array(v)
-        k=np.array(k)
-        vmax=v.max()
-        vmin=v.min()
-    for kl,fscol,cb in zip(klist,fscolors,col):
-        for kk,fcol,in zip(kl,fscol):
-            if color_option==0:
-                for k1,k2 in zip(kk,kk[1:]):
-                    plt.plot([k1[0],k2[0]],[k1[1],k2[1]],color='black')
-            else:
+    if color_option==0:
+        for kl in klist:
+            for kk in kl:
+                plt.plot(kk[:,0],kk[:,1],color='black',lw=2)
+    else:
+        if color_option==2:
+            v=[]
+            k=[]
+            for vl,kl in zip(fscolors,klist):
+                for vv,kk in zip(vl,kl):
+                    v.extend(vv)
+                    k.extend(kk)
+            v=np.array(v)
+            k=np.array(k)
+            vmax=v.max()
+            vmin=v.min()
+        for kl,fscol,cb in zip(klist,fscolors,col):
+            for kk,fcol,in zip(kl,fscol):
                 if color_option==2:
                     clist=cm.jet((fcol-vmin)/(vmax-vmin))
                 else:
                     clist=fcol
                 for k1,k2,clst in zip(kk,kk[1:],clist):
                     plt.plot([k1[0],k2[0]],[k1[1],k2[1]],c=clst,lw=2)
-    if color_option==2:
-        plt.scatter(k[:,0],k[:,1],s=0.1,c=v)
-        plt.jet()
-        plt.colorbar()
+        if color_option==2:
+            plt.scatter(k[:,0],k[:,1],s=0.1,c=v)
+            plt.jet()
+            plt.colorbar()
     plt.xlim(-0.5,0.5)
     plt.ylim(-0.5,0.5)
     plt.xticks([-0.5,0,0.5],[r'-$\pi$','0',r'$\pi$'])
@@ -566,11 +579,8 @@ def main():
         if sw_calc_mu:
             mu=get_mu(ham_r,S_r,rvec,Arot,temp)
         else:
-            try:
-                mu=mu0
-                print('chem. pot. is fixed')
-            except NameError:
-                mu=get_mu(ham_r,S_r,rvec,Arot,temp)
+            mu=mu0
+            print('use fixed mu')
         print('chem. pot. = %7.4f'%mu,flush=True)
 
     if option==0: #plot band
@@ -585,7 +595,7 @@ def main():
         plt.plot(wlist,Dos,color='black')
         plt.show()
     elif option==2: #2D Fermi surface plot
-        klist,blist=plibs.mk_kf(Nx,rvec,ham_r,S_r,mu,kz)
+        klist,blist=plibs.mk_kf(Nx,rvec,ham_r,S_r,RotMat,mu,kz)
         clist=plibs.get_colors(klist,blist,ihbar*avec.T,rvec,ham_r,S_r,olist,color_option,True)
         plot_FS(clist,klist,color_option)
     elif option==3: #3D Fermi surface plot
