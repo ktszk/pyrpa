@@ -12,6 +12,7 @@ __pycache__/
 chis*
 chi0.dat
 *.bin
+*.npy
 
 writeq.dat
 *.png

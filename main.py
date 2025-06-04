@@ -20,8 +20,8 @@ else: monoclinic
 """
 
 #fname,ftype,brav='inputs/Sr2RuO4',2,2
-fname,ftype,brav='inputs/000AsP.input',1,0
-#fname,ftype,brav='inputs/NdFeAsO.input',1,0
+#fname,ftype,brav='inputs/000AsP.input',1,0
+fname,ftype,brav='inputs/NdFeAsO.input',1,0
 #fname,ftype,brav='inputs/square.hop',1,0
 #fname,ftype,brav='inputs/hop3.input',1,0
 #fname,ftype,brav='inputs/SiMLO.input',3,6
@@ -53,10 +53,10 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=2
+option=18
 color_option=0
 
-Nx,Ny,Nz,Nw=400,32,1,512 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=32,32,4,512 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
@@ -65,7 +65,7 @@ RotMat=[[0,0,1],[0,1,0],[1,0,0]]
 abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 #abc=[3.90,3.90,12.68]
 alpha_beta_gamma=[90.,90.,90]
-temp=3.0e-2 #2.59e-2
+temp=5.0e-2 #2.59e-2
 fill=2.9375
 
 #site_prof=[5]
@@ -77,10 +77,10 @@ tau_const=100
 olist=[0,1,2]
 #olist=[[0],[1,2],[3]]
 #olist=[[0,4],[1,2,5,6],[3,7]]
-#U,J= 0.8, 0.06
+#U,J= 0.8, 0.1
 U,J=1.2,0.15
 #0:s, 1:dx2-y2,2:spm
-gap_sym=1
+gap_sym=2
 
 #mu0=9.85114560061123
 k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
@@ -90,8 +90,8 @@ sw_calc_mu=False #calculate mu or not
 sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 sw_omega=False #True: real freq, False: Matsubara freq.
-sw_self=True  #True: use calculated self energy for spectrum band plot
-sw_out_self=False
+sw_self=False  #True: use calculated self energy for spectrum band plot
+sw_out_self=True
 sw_in_self=False
 sw_soc=False #use with soc hamiltonian
 #------------------------ initial parameters are above -------------------------------
@@ -451,6 +451,20 @@ def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,oli
     Smat,Cmat=flibs.gen_SCmatrix(olist,U,J)
     sigmak=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
 
+def output_gap_function(invk,kmap,gap,uni):
+    gapb=flibs.conv_delta_orb_to_band(gap,uni,invk)
+    print('output gap function')
+    for iorb in range(len(gapb)):
+        for jorb in range(len(gapb)):
+            f=open(f'gap_{iorb+1}{jorb+1}.dat','w')
+            for i,km in enumerate(kmap):
+                if km[2]==0:
+                    f.write(f'{km[0]:3} {km[1]:3} {gapb[iorb,jorb,i].real:9.5f} {gapb[iorb,jorb,i].imag:9.5f}\n')
+                    if km[0]==Nx-1:
+                        f.write('\n')
+        f.close()
+    return(0)
+
 def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,olist,
                            mu:float,temp:float,gap_sym:int,sw_self:bool):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
@@ -463,18 +477,9 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,olist,
     else:
         Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
     gap=flibs.linearized_eliashberg(Gk,uni,Smat,Cmat,olist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
-    gapb=flibs.conv_delta_orb_to_band(gap,uni,invk)
-    print('output gap function')
-    for iorb in range(len(gapb)):
-        for jorb in range(len(gapb)):
-            f=open(f'gap_{iorb+1}{jorb+1}.dat','w')
-            for i,km in enumerate(kmap):
-                if km[2]==0:
-                    f.write(f'{km[0]:3} {km[1]:3} {gapb[iorb,jorb,i].real:9.5f} {gapb[iorb,jorb,i].imag:9.5f}\n')
-                    #f.write(f'{km[0]:3} {km[1]:3} {gap[iorb,jorb,1,i].real:9.5f} {gap[iorb,jorb,1,i].imag:9.5f}\n')
-                    if km[0]==Nx-1:
-                        f.write('\n')
-        f.close()
+    if sw_out_self:
+        np.save('gap',gap)
+    info=output_gap_function(invk,gap,uni)
 
 def get_carrier_num(kmesh,rvec,ham_r,S_r,mu:float,Arot):
     Nk,eig,kwieght=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,S_r,rvec,Arot)
@@ -535,7 +540,8 @@ def main():
            "calc phi spectrum with symmetry line","calc phi on xy plane at Ecut",
            "calculate carrier number","calculate cycrtron mass","calc self energy",
            "calculate electron mass","spectrum with impurity",
-           "solve linearized eliashberg equation"]
+           "solve linearized eliashberg equation",
+           "gap_function"]
     cstr=["no color",'orbital weight','velocity size']
     if omp_check:
         print("OpenMP mode",flush=True)
@@ -698,6 +704,11 @@ def main():
                 slist[int(Norb/2):]=-1
         else:
             calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,mu,temp,gap_sym,sw_self)
+    elif option==18:
+        klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
+        eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
+        gap=np.load('gap.npy')
+        info=output_gap_function(invk,kmap,gap,uni)
 if __name__=="__main__":
     main()
 __license__="MIT"
