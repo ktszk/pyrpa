@@ -450,16 +450,22 @@ def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,oli
     ham_k=flibs.gen_ham(klist,ham_r,rvec)
     Smat,Cmat=flibs.gen_SCmatrix(olist,U,J)
     sigmak=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
-
+    if sw_out_self:
+        np.save('self_en',sigmak)
 def output_gap_function(invk,kmap,gap,uni):
-    gapb=flibs.conv_delta_orb_to_band(gap,uni,invk)
+    f=open('gap_wdep.dat','w')
+    for i,gp in enumerate(gap[3,3,:,0]):
+        f.write(f'{i} {gp.real:12.8f} {gp.imag:12.8f}\n')
+    f.close()
+    #gapb=flibs.conv_delta_orb_to_band(gap,uni,invk)
+    gapb=gap[:,:,0,:]
     print('output gap function')
     for iorb in range(len(gapb)):
         for jorb in range(len(gapb)):
             f=open(f'gap_{iorb+1}{jorb+1}.dat','w')
             for i,km in enumerate(kmap):
                 if km[2]==0:
-                    f.write(f'{km[0]:3} {km[1]:3} {gapb[iorb,jorb,i].real:9.5f} {gapb[iorb,jorb,i].imag:9.5f}\n')
+                    f.write(f'{km[0]:3} {km[1]:3} {gapb[iorb,jorb,i].real:12.8f} {gapb[iorb,jorb,i].imag:12.8f}\n')
                     if km[0]==Nx-1:
                         f.write('\n')
         f.close()
@@ -705,9 +711,9 @@ def main():
         else:
             calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,mu,temp,gap_sym,sw_self)
     elif option==18:
+        gap=np.load('gap.npy')
         klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
         eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
-        gap=np.load('gap.npy')
         info=output_gap_function(invk,kmap,gap,uni)
 if __name__=="__main__":
     main()
