@@ -48,19 +48,20 @@ option defines calculation modes
 15: mass calculation (not implement)
 16: spectrum with impurity (not implement)
 17: solve linearized eliashberg equation
+18: post process of gap functions
 color_option defines the meaning of color on Fermi surfaces
  0: band or mono color
  1: orbital weight settled by olist
  2: velocity size
 """
 option=18
-color_option=0
+color_option=1
 
 Nx,Ny,Nz,Nw=32,32,4,512 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
-RotMat=[[0,0,1],[0,1,0],[1,0,0]]
+#RotMat=[[0,0,1],[0,1,0],[1,0,0]]
 
 abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 #abc=[3.90,3.90,12.68]
@@ -74,8 +75,8 @@ Emin,Emax=-3,3
 delta=3.0e-2
 Ecut=1.0e-2
 tau_const=100
-olist=[0,1,2]
-#olist=[[0],[1,2],[3]]
+#olist=[0,1,2]
+olist=[[0],[1,2],[3]]
 #olist=[[0,4],[1,2,5,6],[3,7]]
 #U,J= 0.8, 0.1
 U,J=1.2,0.15
@@ -354,7 +355,7 @@ def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
     print(Seebeck.round(10),flush=True)
     print('Pertier matrix (V)',flush=True)
     print(Pertier.round(13),flush=True)
-    print('Lorenz matrix (K22 only) (Wohm/K^2)',flush=True)
+    print('Lorenz matrix (K22 only) (Wohm/K^2) (fe 2.44e-8)',flush=True)
     print(Lorenz.round(10),flush=True)
     print('Lorenz matrix? (full) (Wohm/K^2)',flush=True)
     print(Lorenz2.round(10),flush=True)
@@ -390,7 +391,7 @@ def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
     print(kappa[0].real.round(10),flush=True)
     print('sigmaS matrix (A/m/K)',flush=True)
     print(sigmaS[0].real.round(10),flush=True)
-    print('Lorenz number (Wohm/K^2)',flush=True)
+    print('Lorenz number (Wohm/K^2) (fe 2.44e-8)',flush=True)
     print((kb*kappa[0]*sclin.inv(sigma[0]*temp)).real.round(10),flush=True)
     print('Seebeck coefficient matrix (V/K)',flush=True)
     print(Seebeck[0].real.round(10),flush=True)
