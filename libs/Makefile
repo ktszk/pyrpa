@@ -1,10 +1,10 @@
 #Makefile
 #FC=ifort
-#FC=ifx
-FC=flang
+FC=ifx
+#FC=flang
 #FC=amdflang
 #FC=gfortran
-#SL=MKL
+SL=MKL
 #SL=AOCL
 #SL=OpenBLAS
 ifeq ($(FC),ifort)
@@ -19,6 +19,7 @@ else
   else
     ifeq ($(FC),flang)
       LIBS= -lblis -lflame -lfftw3 -lm -lpthread
+      #LIBS= -lmkl_rt
       FFLAGS= -O2 -march=znver3 -fopenmp -finline-functions -fPIC
       FFLAGS2= -shared
     else
@@ -36,8 +37,8 @@ else
             LIBS= -lopenblas -lfftw3
           endif
         endif
-        FFLAGS= -O2 -mavx2 -fopenmp -finline-functions
-        FFLAGS2= -shared -fPIC
+        FFLAGS= -O2 -mavx2 -fopenmp -finline-functions -fPIC
+        FFLAGS2= -shared
       endif
     endif
   endif

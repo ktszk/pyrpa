@@ -482,8 +482,10 @@ subroutine get_chi0_conv_soc(chi,Gk,kmap,invk,irr_chi,olist,sgnsig,temp,Nx,Ny,Nz
                tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),j)=sgnsig(olist(m,1),olist(l,1))*Gk(invk(1,i),j,olist(m,1),olist(l,1)) !G13(-k,iw)=sgn*G^31(k,iw)
                tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),j)=sgnsig(olist(l,2),olist(m,2))*Gk(invk(1,i),j,olist(l,2),olist(m,2)) !G42(-k,iw)=sgn*G^24(k,iw)
                !-iw
-               tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgnsig(olist(l,1),olist(m,1))*conjg(Gk(invk(1,i),j,olist(l,1),olist(m,1))) !G13(-k,-iw)=sgn*G^*13(k,iw)
-               tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgnsig(olist(m,2),olist(l,2))*conjg(Gk(invk(1,i),j,olist(m,2),olist(l,2))) !G42(-k,-iw)=sgn*G^*42(k,iw)
+               tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgnsig(olist(l,1),olist(m,1))&
+                    *conjg(Gk(invk(1,i),j,olist(l,1),olist(m,1))) !G13(-k,-iw)=sgn*G^*13(k,iw)
+               tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgnsig(olist(m,2),olist(l,2))&
+                    *conjg(Gk(invk(1,i),j,olist(m,2),olist(l,2))) !G42(-k,-iw)=sgn*G^*42(k,iw)
             end if
          end do k_loop_Gk_to_tmp
       end do w_loop_Gk_to_tmp
