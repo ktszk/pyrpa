@@ -482,7 +482,9 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
   complex(real64),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpVsigma,tmp,tmpgk
 
   weight=temp/dble(Nkall)
+  !$omp parallel workshare
   sigmak(:,:,:,:)=0.0d0
+  !$omp end parallel workshare
   do l=1,Nchi
      do m=1,Nchi
         !$omp parallel
@@ -557,7 +559,7 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
 
   do l=1,Norb
      do m=1,Norb
-        !$Omp parallel do private(i,j)
+        !$omp parallel do private(i,j)
         do j=1,Nw
            do i=1,Nk
               sigmak(i,j,m,l)=sigmak(i,j,m,l)*weight
@@ -585,7 +587,7 @@ subroutine mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu,rfill,temp,&
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni,hamk
   complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: sigmak
 
-  integer(int32) scf_i,i
+  integer(int32) scf_i
   integer(int32),dimension(Nchi,Nchi,2)::chi_map
   integer(int32),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
   real(real64)esterr,mu_old,eps_sgm
@@ -597,14 +599,19 @@ subroutine mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu,rfill,temp,&
      call io_sigma(.false.)
      call gen_green_inv(Gk,sigmak,hamk,mu,temp,Nk,Nw,Norb)
      call getinv(Gk,Nk,Nw,Norb)
-  else
+     !$omp parallel workshare
      sigmak0(:,:,:,:)=0.0d0
+     !$omp end parallel workshare
+  else
      mu_old=mu*1.2
+     !$omp parallel workshare
+     sigmak0(:,:,:,:)=0.0d0
      Gk(:,:,:,:)=0.0d0 !gen_green0 need to initialization of Gk
+     !$omp end parallel workshare
      call gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb)
   end if
   call get_chi_map(chi_map,irr_chi,olist,Nchi)
-  do scf_i=1,scf_loop
+  iter_loop: do scf_i=1,scf_loop
      print*,'iter=',scf_i
      call get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
      call get_Vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi)
@@ -615,19 +622,26 @@ subroutine mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu,rfill,temp,&
         exit
      end if
      if(sw_sub_sigma)then
-        block
+        sub_self:block
+          integer(int32) iw
           complex(real64),dimension(Nk,Norb,Norb):: sub_sigmak
-          sub_sigmak(:,:,:)=sigmak(:,0,:,:)
-          do i=1,Nw
-             sigmak(:,i,:,:)=sigmak(:,i,:,:)-sub_sigmak(:,:,:)
+          !$omp parallel
+          !$omp workshare
+          sub_sigmak(:,:,:)=sigmak(:,1,:,:)
+          !$omp end workshare
+          !$omp do
+          do iw=1,Nw
+             sigmak(:,iw,:,:)=sigmak(:,iw,:,:)-sub_sigmak(:,:,:)
           end do
-        end block
+          !$omp end do
+          !$omp end parallel
+        end block sub_self
      end if
      call renew_mu()
      call gen_green_inv(Gk,sigmak,hamk,mu,temp,Nk,Nw,Norb)
      call getinv(Gk,Nk,Nw,Norb)
      sigmak0(:,:,:,:)=sigmak(:,:,:,:)
-  end do
+  end do iter_loop
   if(sw_out)then
      call io_sigma(.true.)
   end if
