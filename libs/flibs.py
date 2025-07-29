@@ -270,7 +270,8 @@ def get_Vsigma_nosoc_flex(chi,Smat,Cmat):
                                  byref(c_int64(Nw)),byref(c_int64(Nchi)))
     return chi.copy()
 
-def mkself(Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu:float,fill:float,temp:float,Nw:int,Nx:int,Ny:int,Nz:int,sw_out:bool,sw_in:bool,scf_loop=300,eps=1.0e-3,pp=0.4):
+def mkself(Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu:float,fill:float,temp:float,
+           Nw:int,Nx:int,Ny:int,Nz:int,sw_out:bool,sw_in:bool,sw_sub_sigma=True,scf_loop=300,eps=1.0e-3,pp=0.4):
     print('mixing rate: pp = %3.1f'%pp)
     Nkall,Nk,Nchi=len(kmap),len(hamk),len(Smat)
     Norb=int(np.sqrt(hamk.size/Nk))
@@ -290,12 +291,14 @@ def mkself(Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu:float,fill:float,temp:float
                            POINTER(c_int64),POINTER(c_int64),                    #Nk,Nw
                            POINTER(c_int64),POINTER(c_int64),                    #Nchi,Norb
                            POINTER(c_int64),POINTER(c_int64),POINTER(c_int64),   #Nx,Ny,Nz
-                           POINTER(c_bool),POINTER(c_bool)]                      #sw_out,sw_in
+                           POINTER(c_bool),POINTER(c_bool),POINTER(c_bool)]      #sw_sub_sigma,sw_out,sw_in
     flibs.mkself.restype=c_void_p
-    flibs.mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,byref(c_double(mu)),byref(c_double(fill)),
-                 byref(c_double(temp)),byref(c_int64(scf_loop)),byref(c_double(pp)),byref(c_double(eps)),
-                 byref(c_int64(Nkall)),byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Norb)),byref(c_int64(Nchi)),
-                 byref(c_int64(Nx)),byref(c_int64(Ny)),byref(c_int64(Nz)),byref(c_bool(sw_out)),byref(c_bool(sw_in)))
+    flibs.mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,byref(c_double(mu)),
+                 byref(c_double(fill)),byref(c_double(temp)),byref(c_int64(scf_loop)),
+                 byref(c_double(pp)),byref(c_double(eps)),byref(c_int64(Nkall)),
+                 byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Norb)),
+                 byref(c_int64(Nchi)),byref(c_int64(Nx)),byref(c_int64(Ny)),byref(c_int64(Nz)),
+                 byref(c_bool(sw_sub_sigma)),byref(c_bool(sw_out)),byref(c_bool(sw_in)))
     return sigmak
 
 def get_qshift(klist,qpoint):

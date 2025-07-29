@@ -253,9 +253,9 @@ subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
            end do
            !$omp end do
         end if
-        !$omp workshare
+        !!$omp workshare
         chi(i,j,:,:)=cmat4(:,:)
-        !$omp end workshare
+        !!$omp end workshare
         !$omp end parallel
      end do qloop
   end do wloop

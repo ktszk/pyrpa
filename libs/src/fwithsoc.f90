@@ -584,9 +584,9 @@ subroutine get_vsigma_flex_soc(chi,Vmat,Nk,Nw,Nchi)
             end do
          end do
          !$omp end do
-         !$omp workshare
+         !!$omp workshare
          chi(i,j,:,:)=cmat2(:,:)
-         !$omp end workshare
+         !!$omp end workshare
          !$omp end parallel
       end do
    end do

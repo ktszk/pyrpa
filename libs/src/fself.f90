@@ -456,9 +456,9 @@ subroutine get_vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi) bind(C,name='get_vsig
            end do
         end do
         !$omp end do
-        !$omp workshare
+        !!$omp workshare
         chi(i,j,:,:)=cmat4(:,:)
-        !$omp end workshare
+        !!$omp end workshare
         !$omp end parallel
      end do
   end do
@@ -571,13 +571,13 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
 end subroutine calc_sigma
 
 subroutine mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu,rfill,temp,&
-     scf_loop,pp,eps,Nkall,Nk,Nw,Norb,Nchi,Nx,Ny,Nz,sw_out,sw_in) bind(C)
+     scf_loop,pp,eps,Nkall,Nk,Nw,Norb,Nchi,Nx,Ny,Nz,sw_sub_sigma,sw_out,sw_in) bind(C)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz,scf_loop
   integer(int64),intent(in),dimension(Nchi,2):: olist
   integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
-  logical(1),intent(in):: sw_in,sw_out
+  logical(1),intent(in):: sw_in,sw_out,sw_sub_sigma
   real(real64),intent(in):: temp,eps,pp,rfill
   real(real64),intent(in),dimension(Norb,Nk):: eig
   real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
@@ -613,6 +613,15 @@ subroutine mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu,rfill,temp,&
      call compair_sigma()
      if(esterr<eps)then
         exit
+     end if
+     if(sw_sub_sigma)then
+        block
+          complex(real64),dimension(Nk,Norb,Norb):: sub_sigmak
+          sub_sigmak(:,:,:)=sigmak(:,0,:,:)
+          do i=1,Nw
+             sigmak(:,i,:,:)=sigmak(:,i,:,:)-sub_sigmak(:,:,:)
+          end do
+        end block
      end if
      call renew_mu()
      call gen_green_inv(Gk,sigmak,hamk,mu,temp,Nk,Nw,Norb)

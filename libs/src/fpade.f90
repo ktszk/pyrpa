@@ -12,8 +12,8 @@ subroutine get_a(a,xn,inp_data,Np) bind(C,name="get_a_")
   integer(int32) i,j
   complex(real64),dimension(Np):: g1,g0
 
-  !$omp parallel workshare
   g0(:)=inp_data(:) !g_1=inp_data
+  !$omp parallel workshare
   a(:)=0.0d0
   !$omp end parallel workshare
   a(1)=g0(1)  !a_1=g_1(z1)

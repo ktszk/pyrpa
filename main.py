@@ -44,7 +44,7 @@ option defines calculation modes
 11: calc phi on xy plane at Ecut
 12: calc carrier num.
 13: calc cycrotron mass (not implement)
-14: calc selfenergy using
+14: calc selfenergy using flex
 15: mass calculation (not implement)
 16: spectrum with impurity (not implement)
 17: solve linearized eliashberg equation
@@ -54,7 +54,7 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=18
+option=14
 color_option=1
 
 Nx,Ny,Nz,Nw=32,32,4,512 #k and energy(or matsubara freq.) mesh size
@@ -453,6 +453,7 @@ def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,oli
     sigmak=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
     if sw_out_self:
         np.save('self_en',sigmak)
+
 def output_gap_function(invk,kmap,gap,uni):
     f=open('gap_wdep.dat','w')
     for i,gp in enumerate(gap[3,3,:,0]):
