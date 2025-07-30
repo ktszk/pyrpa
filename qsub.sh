@@ -17,9 +17,9 @@
 ##PBS -o out.o
 ##PBS -l nodes=1:ppn=16
 #Slurm settings
-#SBATCH -p unagi
+#SBATCH -p salmon
 #SBATCH -J job_name
-#SBATCH -c 20
+#SBATCH -c 16
 #SBATCH -o out.o
 #SBATCH -e out.o
 

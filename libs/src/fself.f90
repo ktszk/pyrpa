@@ -617,10 +617,6 @@ subroutine mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu,rfill,temp,&
      call get_Vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi)
      print'(A16,E12.4,A5,E12.4)','Re V_sigma: max:',maxval(dble(chi)),' min:',minval(dble(chi))
      call calc_sigma(sigmak,Gk,chi,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
-     call compair_sigma()
-     if(esterr<eps)then
-        exit
-     end if
      if(sw_sub_sigma)then
         sub_self:block
           integer(int32) iw
@@ -636,6 +632,10 @@ subroutine mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu,rfill,temp,&
           !$omp end do
           !$omp end parallel
         end block sub_self
+     end if
+     call compair_sigma()
+     if(esterr<eps)then
+        exit
      end if
      call renew_mu()
      call gen_green_inv(Gk,sigmak,hamk,mu,temp,Nk,Nw,Norb)
@@ -690,6 +690,7 @@ contains
     end if
     dmu= abs(mu-mu_OLD)*2.0d0
     if (dmu<eps*4.0d0) dmu= eps*4.0d0
+    mu_OLD=mu
     muL= mu+dmu
     muS= mu-dmu
     upper_lim: do i_iter=1,itemax
@@ -758,6 +759,8 @@ contains
           flag=.false.
        end if
        if(abs(muL-muM)<eps)exit
+       mu=muM
+       rnM=0
        call get_rn(rnM,muM)
        !print '(1x,a,2f22.16,l2)','muM,rnM=   ',muM,rnM,flag
        mud=muc
@@ -789,7 +792,7 @@ contains
        mu= (muS*rnL-muL*rnS)/(rnL-rnS)
     end if
     call get_rn(rnM,mu)
-    mu_old=mu
+    mu_OLD=mu
     print'(A4,F8.4,A5,F8.4)','mu  =',mu,' rn =',rnM
   end subroutine renew_mu
   
