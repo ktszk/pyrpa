@@ -65,12 +65,12 @@ subroutine get_QP(P,Q,a,xn,wlist,Nw,Np) bind(C,name='get_qp_')
      Q(:)=0.0d0
      P(:)=0.0d0
      !$omp end workshare
-     !$omp do simd private(j) reduction(+: P,Q)
+     !$omp do private(j) reduction(+: P,Q)
      do j=1,Nw !calc Pi(w)=P_i-1(w)+a_i(w-z_i-1)P_i-2(w) (Q is same as P)
         P(j)=P1(j)+a(i)*(wlist(j)-xn(i-1))*P0(j)
         Q(j)=Q1(j)+a(i)*(wlist(j)-xn(i-1))*Q0(j)
      end do
-     !$omp end do simd
+     !$omp end do
      !$omp workshare
      P0(:)=P1(:)
      P1(:)=P(:)

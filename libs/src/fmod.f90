@@ -239,14 +239,14 @@ subroutine get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   kloop: do i=1,Nk
      do l=1,Norb
         do m=l,Norb
-           !$omp simd
            rloop: do j=1,Nr
               phase=2*pi*sum(klist(:,i)*rvec(:,j))
+              !$omp simd
               vaxis: do k=1,3
                  vk(k,m,l,i)=vk(k,m,l,i)-rvec(k,j)*ham_r(m,l,j)*cmplx(sin(phase),cos(phase))
               end do vaxis
+              !$omp end simd
            end do rloop
-           !$omp end simd
            vaxis2: do k=1,3
               vk(k,l,m,i)=conjg(vk(k,m,l,i))
            end do vaxis2

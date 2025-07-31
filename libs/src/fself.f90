@@ -572,7 +572,7 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
   end do
 end subroutine calc_sigma
 
-subroutine mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu,rfill,temp,&
+subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill,temp,&
      scf_loop,pp,eps,Nkall,Nk,Nw,Norb,Nchi,Nx,Ny,Nz,sw_sub_sigma,sw_out,sw_in) bind(C)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
@@ -580,28 +580,32 @@ subroutine mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu,rfill,temp,&
   integer(int64),intent(in),dimension(Nchi,2):: olist
   integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
   logical(1),intent(in):: sw_in,sw_out,sw_sub_sigma
-  real(real64),intent(in):: temp,eps,pp,rfill
+  real(real64),intent(in):: temp,eps,pp,rfill,mu_init
   real(real64),intent(in),dimension(Norb,Nk):: eig
   real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
-  real(real64),intent(inout):: mu
+  real(real64),intent(out):: mu
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni,hamk
   complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: sigmak
 
   integer(int32) scf_i
   integer(int32),dimension(Nchi,Nchi,2)::chi_map
   integer(int32),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
-  real(real64)esterr,mu_old,eps_sgm
+  real(real64)esterr,mu_OLD,eps_sgm
   complex(real64),dimension(Nk,Nw,Norb,Norb):: Gk,sigmak0
   complex(real64),dimension(Nk,Nw,Nchi,Nchi):: chi
 
   eps_sgm=1.0d-9
+  mu=mu_init
   if(sw_in)then
+     print*,"load self"
      call io_sigma(.false.)
+     !$omp parallel
+     !$omp workshare
+     sigmak0(:,:,:,:)=sigmak(:,:,:,:)
+     !$omp end workshare
+     !$omp end parallel
      call gen_green_inv(Gk,sigmak,hamk,mu,temp,Nk,Nw,Norb)
      call getinv(Gk,Nk,Nw,Norb)
-     !$omp parallel workshare
-     sigmak0(:,:,:,:)=0.0d0
-     !$omp end parallel workshare
   else
      mu_old=mu*1.2
      !$omp parallel workshare
@@ -619,12 +623,17 @@ subroutine mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu,rfill,temp,&
      call calc_sigma(sigmak,Gk,chi,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
      if(sw_sub_sigma)then
         sub_self:block
-          integer(int32) iw
+          integer(int32) iw,l,m
           complex(real64),dimension(Nk,Norb,Norb):: sub_sigmak
           !$omp parallel
-          !$omp workshare
-          sub_sigmak(:,:,:)=sigmak(:,1,:,:)
-          !$omp end workshare
+          do l=1,Norb
+             do m=l,Norb
+                !$omp workshare
+                sub_sigmak(:,l,m)=(sigmak(:,1,l,m)+conjg(sigmak(:,1,m,l)))*0.5d0
+                !$omp end workshare
+                if(l.ne.m)sub_sigmak(:,m,l)=conjg(sub_sigmak(:,l,m))
+             end do
+          end do
           !$omp do
           do iw=1,Nw
              sigmak(:,iw,:,:)=sigmak(:,iw,:,:)-sub_sigmak(:,:,:)
@@ -640,7 +649,11 @@ subroutine mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu,rfill,temp,&
      call renew_mu()
      call gen_green_inv(Gk,sigmak,hamk,mu,temp,Nk,Nw,Norb)
      call getinv(Gk,Nk,Nw,Norb)
+     !$omp parallel
+     !$omp workshare
      sigmak0(:,:,:,:)=sigmak(:,:,:,:)
+     !$omp end workshare
+     !$omp end parallel
   end do iter_loop
   if(sw_out)then
      call io_sigma(.true.)
@@ -825,15 +838,15 @@ contains
   end subroutine get_rn
   
   subroutine io_sigma(sw)
-    logical(int32),intent(in):: sw
+    logical(int32),intent(in):: sw !True: out, False: in
     integer(int32)i,j,l,m
     open(55,file='sigma.bin',form='unformatted')
     if(sw)then
        write(55)mu
-       write(55)mu_old
+       write(55)mu_OLD
     else
        read(55)mu
-       read(55)mu_old
+       read(55)mu_OLD
     end if
     do l=1,Norb
        do m=1,Norb

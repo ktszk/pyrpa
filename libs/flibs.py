@@ -275,8 +275,10 @@ def mkself(Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu:float,fill:float,temp:float
     print('mixing rate: pp = %3.1f'%pp)
     Nkall,Nk,Nchi=len(kmap),len(hamk),len(Smat)
     Norb=int(np.sqrt(hamk.size/Nk))
+    mu_self=c_double()
     sigmak=np.zeros((Norb,Norb,Nw,Nk),dtype=np.complex128)
     flibs.mkself.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),          #sigmak
+                           POINTER(c_double),                                    #muself
                            np.ctypeslib.ndpointer(dtype=np.float64),             #Smat
                            np.ctypeslib.ndpointer(dtype=np.float64),             #Cmat
                            np.ctypeslib.ndpointer(dtype=np.int64),               #kmap
@@ -293,13 +295,13 @@ def mkself(Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu:float,fill:float,temp:float
                            POINTER(c_int64),POINTER(c_int64),POINTER(c_int64),   #Nx,Ny,Nz
                            POINTER(c_bool),POINTER(c_bool),POINTER(c_bool)]      #sw_sub_sigma,sw_out,sw_in
     flibs.mkself.restype=c_void_p
-    flibs.mkself(sigmak,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,byref(c_double(mu)),
+    flibs.mkself(sigmak,byref(mu_self),Smat,Cmat,kmap,invk,olist,hamk,eig,uni,byref(c_double(mu)),
                  byref(c_double(fill)),byref(c_double(temp)),byref(c_int64(scf_loop)),
                  byref(c_double(pp)),byref(c_double(eps)),byref(c_int64(Nkall)),
                  byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Norb)),
                  byref(c_int64(Nchi)),byref(c_int64(Nx)),byref(c_int64(Ny)),byref(c_int64(Nz)),
                  byref(c_bool(sw_sub_sigma)),byref(c_bool(sw_out)),byref(c_bool(sw_in)))
-    return sigmak
+    return sigmak,mu_self.value
 
 def get_qshift(klist,qpoint):
     Nk=len(klist)

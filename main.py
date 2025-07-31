@@ -54,7 +54,7 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=14
+option=17
 color_option=1
 
 Nx,Ny,Nz,Nw=32,32,4,512 #k and energy(or matsubara freq.) mesh size
@@ -91,9 +91,9 @@ sw_calc_mu=False #calculate mu or not
 sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 sw_omega=False #True: real freq, False: Matsubara freq.
-sw_self=False  #True: use calculated self energy for spectrum band plot
+sw_self=True  #True: use calculated self energy for spectrum band plot
 sw_out_self=True
-sw_in_self=False
+sw_in_self=True
 sw_soc=False #use with soc hamiltonian
 #------------------------ initial parameters are above -------------------------------
 #----------------------------------main functions-------------------------------------
@@ -450,17 +450,17 @@ def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,oli
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     ham_k=flibs.gen_ham(klist,ham_r,rvec)
     Smat,Cmat=flibs.gen_SCmatrix(olist,U,J)
-    sigmak=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
+    sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
     if sw_out_self:
-        np.save('self_en',sigmak)
+        np.savez('self_en',sigmak,mu_self)
 
 def output_gap_function(invk,kmap,gap,uni):
     f=open('gap_wdep.dat','w')
     for i,gp in enumerate(gap[3,3,:,0]):
         f.write(f'{i} {gp.real:12.8f} {gp.imag:12.8f}\n')
     f.close()
-    #gapb=flibs.conv_delta_orb_to_band(gap,uni,invk)
-    gapb=gap[:,:,0,:]
+    gapb=flibs.conv_delta_orb_to_band(gap,uni,invk)
+    #gapb=gap[:,:,0,:]
     print('output gap function')
     for iorb in range(len(gapb)):
         for jorb in range(len(gapb)):
@@ -480,14 +480,15 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,olist,
     Smat,Cmat=flibs.gen_SCmatrix(olist,U,J)
     if sw_self:
         ham_k=flibs.gen_ham(klist,ham_r,rvec)
-        sigmak=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
-        Gk=flibs.gen_green(sigmak,ham_k,mu,temp)
+        sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
+        print('chem. pot. with self= %7.4f'%mu_self,flush=True)
+        Gk=flibs.gen_green(sigmak,ham_k,mu_self,temp)
     else:
         Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
     gap=flibs.linearized_eliashberg(Gk,uni,Smat,Cmat,olist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
     if sw_out_self:
         np.save('gap',gap)
-    info=output_gap_function(invk,gap,uni)
+    info=output_gap_function(invk,kmap,gap,uni)
 
 def get_carrier_num(kmesh,rvec,ham_r,S_r,mu:float,Arot):
     Nk,eig,kwieght=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,S_r,rvec,Arot)
