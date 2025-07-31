@@ -13,6 +13,7 @@ chis*
 chi0.dat
 *.bin
 *.npy
+*.npz
 
 writeq.dat
 *.png

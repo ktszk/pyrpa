@@ -3,9 +3,9 @@ pyrpa is python script and fortran library for model calculation.
 pyrpa can calculate band structure, Dos, Fermi surface, conductivity, and etc. using tight binding model Hamiltonian.
 
 # Requirements
-- fortran compiler (we check gcc 11.4 and newest aocc and ifx)
+- fortran compiler (we check gcc 13.3 and newest AMD Flang(ROCm and aocc) and ifx)
 - lapack, blas, and FFTW (we check OpenBLAS, MKL, and AOCL(BLIS and Flame))
-- python3 (we check 3.11.2)
+- python3 (we check 3.13.5)
 - python standard library
   - ctypes
 - python external packages
