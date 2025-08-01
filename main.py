@@ -54,7 +54,7 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=14
+option=17
 color_option=1
 
 Nx,Ny,Nz,Nw=32,32,4,512 #k and energy(or matsubara freq.) mesh size
@@ -94,6 +94,7 @@ sw_omega=False #True: real freq, False: Matsubara freq.
 sw_self=True  #True: use calculated self energy for spectrum band plot
 sw_out_self=True
 sw_in_self=True
+sw_from_file=True
 sw_soc=False #use with soc hamiltonian
 #------------------------ initial parameters are above -------------------------------
 #----------------------------------main functions-------------------------------------
@@ -480,7 +481,12 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,olist,
     Smat,Cmat=flibs.gen_SCmatrix(olist,U,J)
     if sw_self:
         ham_k=flibs.gen_ham(klist,ham_r,rvec)
-        sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
+        if sw_from_file:
+            npz=np.load('self_en.npz')
+            sigmak,mu_self=npz['arr_0'],npz['arr_1']
+        else:
+            sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,
+                                        mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
         print('chem. pot. with self= %7.4f'%mu_self,flush=True)
         Gk=flibs.gen_green(sigmak,ham_k,mu_self,temp)
     else:

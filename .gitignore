@@ -9,6 +9,7 @@ __pycache__/
 *.o
 
 # output files
+gap*
 chis*
 chi0.dat
 *.bin
