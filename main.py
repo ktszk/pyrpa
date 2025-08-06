@@ -55,7 +55,7 @@ color_option defines the meaning of color on Fermi surfaces
  2: velocity size
 """
 option=1
-color_option=1
+color_option=0
 
 Nx,Ny,Nz,Nw=32,32,4,512 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
@@ -619,6 +619,11 @@ def main():
                     pass
                 else:
                     plt.plot(wlist,Dos[ol,:].sum(axis=0),color=cl)
+        elif color_option==0:
+            plt.fill_between(wlist,Dos[olist[0]+olist[1]+olist[2]].sum(axis=0),Dos.sum(axis=0),color='k')
+            plt.fill_between(wlist,Dos[olist[1]+olist[2]].sum(axis=0),Dos[olist[0]+olist[1]+olist[2]].sum(axis=0),color='r')
+            plt.fill_between(wlist,Dos[olist[2]].sum(axis=0),Dos[olist[1]+olist[2]].sum(axis=0),color='g')
+            plt.fill_between(wlist,0,Dos[olist[2]].sum(axis=0),color='b')
         plt.plot(wlist,Dos.sum(axis=0),color='black')
         plt.xlim(Emin,Emax)
         plt.ylim(0,max(Dos.sum(axis=0))*1.2)
