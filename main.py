@@ -614,17 +614,28 @@ def main():
         wlist=np.linspace(Emin,Emax,Nw,True)
         Dos=flibs.gen_dos(eig,uni,mu,wlist,delta)
         if color_option==1:
-            for ol,cl in zip(olist,['red','green','blue']):
-                if ol==[]:
-                    pass
-                else:
-                    plt.plot(wlist,Dos[ol,:].sum(axis=0),color=cl)
+            if len(olist)!=0:
+                for ol,cl in zip(olist,['red','green','blue']):
+                    if ol==[]:
+                        pass
+                    else:
+                        plt.plot(wlist,Dos[ol,:].sum(axis=0),color=cl)
+            plt.plot(wlist,Dos.sum(axis=0),color='black')
         elif color_option==0:
-            plt.fill_between(wlist,Dos[olist[0]+olist[1]+olist[2]].sum(axis=0),Dos.sum(axis=0),color='k')
-            plt.fill_between(wlist,Dos[olist[1]+olist[2]].sum(axis=0),Dos[olist[0]+olist[1]+olist[2]].sum(axis=0),color='r')
-            plt.fill_between(wlist,Dos[olist[2]].sum(axis=0),Dos[olist[1]+olist[2]].sum(axis=0),color='g')
-            plt.fill_between(wlist,0,Dos[olist[2]].sum(axis=0),color='b')
-        plt.plot(wlist,Dos.sum(axis=0),color='black')
+            clist=['k','r','g','b','c','m','y']
+            tmp_ol_b=[]
+            for i in range(len(olist)):
+                tmp_ol_b+=olist[i]if type(olist[i])==list else [olist[i]]
+            plt.fill_between(wlist,Dos[tmp_ol_b].sum(axis=0),Dos.sum(axis=0),color=clist[0])
+            for i in range(len(olist)-1):
+                tmp_ol_u=[]
+                tmp_ol_b=[]
+                for j in range(i,len(olist)):
+                    tmp_ol_u+=olist[j] if type(olist[j])==list else [olist[j]]
+                for j in range(i+1,len(olist)):
+                    tmp_ol_b+=olist[j] if type(olist[j])==list else [olist[j]]
+                plt.fill_between(wlist,Dos[tmp_ol_b].sum(axis=0),Dos[tmp_ol_u].sum(axis=0),color=clist[i+1])
+            plt.fill_between(wlist,0,Dos[tmp_ol_b].sum(axis=0),color=clist[len(olist)])
         plt.xlim(Emin,Emax)
         plt.ylim(0,max(Dos.sum(axis=0))*1.2)
         plt.show()
