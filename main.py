@@ -54,7 +54,7 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=17
+option=1
 color_option=1
 
 Nx,Ny,Nz,Nw=32,32,4,512 #k and energy(or matsubara freq.) mesh size
@@ -610,10 +610,18 @@ def main():
         uni=np.array([u.T for u in uni0]) #rotate uni(k,band,orb) to uni(k,orb,band)
         plot_band(eig.T-mu,spa_length,xlabel,xticks,uni.T,olist,(False if color_option==0 else True))
     elif option==1: #plot dos
-        Nk,eig,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec)
+        Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=True)
         wlist=np.linspace(Emin,Emax,Nw,True)
-        Dos=flibs.gen_tr_Greenw_0(eig,mu,wlist,delta).sum(axis=0)/Nk
-        plt.plot(wlist,Dos,color='black')
+        Dos=flibs.gen_dos(eig,uni,mu,wlist,delta)
+        if color_option==1:
+            for ol,cl in zip(olist,['red','green','blue']):
+                if ol==[]:
+                    pass
+                else:
+                    plt.plot(wlist,Dos[ol,:].sum(axis=0),color=cl)
+        plt.plot(wlist,Dos.sum(axis=0),color='black')
+        plt.xlim(Emin,Emax)
+        plt.ylim(0,max(Dos.sum(axis=0))*1.2)
         plt.show()
     elif option==2: #2D Fermi surface plot
         klist,blist=plibs.mk_kf(Nx,rvec,ham_r,S_r,RotMat,mu,kz)

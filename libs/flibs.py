@@ -222,6 +222,21 @@ def gen_tr_Greenw_0(eig,mu,wlist,delta):
                           byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Norb)))
     return -trGk.imag
 
+def gen_dos(eig,uni,mu,wlist,delta):
+    Nk,Nw=len(eig),len(wlist)
+    Norb=int(eig.size/Nk)
+    pDos=np.zeros((Norb,Nw),dtype=np.complex128)
+    flibs.gen_dos.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #Dos
+                            np.ctypeslib.ndpointer(dtype=np.float64),    #wlist
+                            np.ctypeslib.ndpointer(dtype=np.float64),    #eig
+                            np.ctypeslib.ndpointer(dtype=np.complex128), #uni
+                            POINTER(c_double),POINTER(c_double),         #mu,delta
+                            POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)]
+    flibs.gen_dos.restype=c_void_p
+    flibs.gen_dos(pDos,wlist,eig,uni,byref(c_double(mu)),byref(c_double(delta)),
+                          byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Norb)))
+    return -pDos.imag
+
 def get_chi0_conv(Gk,kmap,invk,olist,temp:float,Nx:int,Ny:int,Nz:int):
     Nkall,Nk=len(kmap),len(Gk[0,0,0])
     Norb,Nchi=len(Gk),len(olist)

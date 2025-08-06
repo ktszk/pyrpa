@@ -362,3 +362,36 @@ subroutine gen_tr_greenw_0(trGk,wl,eig,mu,delta,Nk,Nw,Norb) bind(C)
   end do kloop
   !$omp end parallel do
 end subroutine gen_tr_greenw_0
+
+subroutine gen_dos(Dos,wl,eig,uni,mu,delta,Nk,Nw,Norb) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  implicit none
+  integer(int64),intent(in):: Nk,Nw,Norb
+  real(real64),intent(in):: mu,delta
+  real(real64),intent(in),dimension(Norb,Nk):: eig
+  real(real64),intent(in),dimension(Nw):: wl
+  complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
+  complex(real64),intent(out),dimension(Nw,Norb):: Dos
+
+  integer(int32) i,j,k,n
+
+  !$omp parallel
+  !$omp workshare
+  Dos(:,:)=0.0d0
+  !$omp end workshare
+  orb_loop: do j=1,Norb
+     !$omp do private(i,k,n)
+     wloop: do i=1,Nw
+        kloop: do k=1,Nk
+           bandloop: do n=1,Norb
+              Dos(i,j)=Dos(i,j)+uni(j,n,k)*conjg(uni(j,n,k))/cmplx(wl(i)-eig(n,k)+mu,delta)
+           end do bandloop
+        end do kloop
+     end do wloop
+     !$omp end do
+  end do orb_loop
+  !$omp workshare
+  Dos(:,:)=Dos(:,:)/Nk
+  !$omp end workshare
+  !$omp end parallel
+end subroutine gen_dos
