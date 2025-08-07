@@ -1,4 +1,7 @@
 subroutine get_scmat(Smat,Cmat,ol,Uval,Jval,Nchi) bind(C)
+  !
+  !> make S and C that is onsite interaction verteces without SOC
+  !
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nchi
@@ -40,6 +43,9 @@ subroutine get_scmat(Smat,Cmat,ol,Uval,Jval,Nchi) bind(C)
 end subroutine get_scmat
 
 subroutine get_Vmat_soc(Vmat,osl,Uval,Jval,Nchi,Norb)
+  !
+  !> make onsite interaction vertex V with SOC
+  !
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nchi,Norb

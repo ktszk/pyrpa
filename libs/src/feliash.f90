@@ -519,9 +519,9 @@ subroutine get_initial_delta(delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,Nx,Ny,Nz,gap_s
            !$omp do private(i,j)
            do j=1,Nw
               do i=1,Nkall
-                 if(l/=m)then
+                 if(l/=m)then !TRS gap function is Hermite
                     delta(i,j,l,m)=conjg(delta(i,j,m,l))
-                 else
+                 else !TRS diagonal gap is real
                     delta(i,j,l,l)=dble(delta(i,j,l,l))
                  end if
               end do

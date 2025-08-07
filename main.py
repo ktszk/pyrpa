@@ -54,8 +54,8 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=1
-color_option=0
+option=18
+color_option=1
 
 Nx,Ny,Nz,Nw=32,32,4,512 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
@@ -744,7 +744,24 @@ def main():
         else:
             calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,mu,temp,gap_sym,sw_self)
     elif option==18:
+        iwlist=(2*np.arange(Nw)+1)*np.pi*temp
         gap=np.load('gap.npy')
+        maxgap=abs(gap).max()
+        print((abs(gap)<maxgap*1.0e-6).sum())
+        print((abs(gap)<maxgap*1.0e-6).sum()/gap.size*100)
+        npz=np.load('self_en.npz')
+        sigmak,mu_self=npz['arr_0'],npz['arr_1']
+        maxsigma=abs(sigmak).max()
+        print((abs(sigmak)<maxsigma*1.0e-6).sum())
+        print((abs(sigmak)<maxsigma*1.0e-6).sum()/sigmak.size*100)
+        plt.plot(iwlist,sigmak[3,2,:,100].real,color='r')
+        plt.plot(-iwlist,sigmak[2,3,:,100].real,color='r')
+        plt.plot(iwlist,sigmak[3,2,:,100].imag,color='b')
+        plt.plot(-iwlist,-sigmak[2,3,:,100].imag,color='b')
+        plt.show()
+        plt.plot(iwlist,gap[3,2,:,100].real)
+        plt.plot(iwlist,gap[3,2,:,100].imag)
+        plt.show()
         klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
         eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
         info=output_gap_function(invk,kmap,gap,uni)

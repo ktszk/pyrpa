@@ -1,5 +1,11 @@
 subroutine get_qshift(qpoint,klist,qshift,Nk) bind(C,name="get_qshift_")
-  !shift k to k+q
+  !
+  !>shift k to k+q
+  !>  qpoint,in: q-vector
+  !>   klist,in: list of all k-point
+  !> qshift,out: list of footnote of klist that correspond to k+q shift
+  !>      Nk,in: number of k-points
+  !
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nk
@@ -49,6 +55,9 @@ module calc_irr_chi
   implicit none
 contains
   function calc_chi(Nk,Norb,Nchi,uni,eig,ffermi,ol,temp,qshift,w,idelta,eps)
+    !
+    !this function obtain irreducible susceptibility chi_0
+    !
     integer(int64),intent(in):: Nk,Norb,Nchi
     integer(int64),intent(in),dimension(Nk):: qshift
     integer(int64),intent(in),dimension(Nchi,2):: ol
@@ -84,6 +93,7 @@ contains
 end module calc_irr_chi
 
 subroutine get_tr_chi(trchis,trchi0,chis_orb,chis,chi0,olist,Nw,Nchi,Norb) bind(C)
+  !get trace of chi
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nchi,Nw,Norb
