@@ -4,6 +4,11 @@ import libs.flibs as flibs
 import numpy as np, scipy.optimize as scopt, scipy.linalg as sclin
 
 def import_hoppings(fname:str,ftype:int):
+    """
+    this function import hopping parameters from files
+    fname: Name of import files
+    ftype: File format of import files
+    """
     def import_hop(name: str):
         rvec=np.loadtxt(f'{name}/irvec.txt')
         nr=rvec[:,0].size
@@ -59,6 +64,10 @@ def import_hoppings(fname:str,ftype:int):
     return(rvec,ham_r,no,nr)
 
 def import_MLO_hoppings(name:str):
+    """
+    this function import MLO hopping parameters from files
+    name: File name
+    """
     tmp=[f.split() for f in open(f'{name}','r')]
     tmp1=np.array([[float(t) for t in tp] for tp in tmp])
     no=int(tmp1[:,0].max())
@@ -75,6 +84,19 @@ def get_bvec(avec):
     return bvec
 
 def get_eigs(klist,ham_r,S_r,rvec,sw_uni=False,sw_std=False):
+    """
+    This function generate eigenvalues of Hamiltonian
+    input argments
+        klist: list of k-points
+        ham_r: hopping parameters
+          S_r: overlap integrals
+         rvec: r vector of hoppings
+       sw_uni: switch of output only unitary matrix or not
+       sw_std: switch standardization of unitary matrix at MLO hoppings
+    output
+       eig: eigenvalues of Hamiltonian
+       uni: unitary matrix of eigenfunctions
+    """
     if len(S_r)==0:
         ham_k=flibs.gen_ham(klist,ham_r,rvec)
         eig,uni=flibs.get_eig(ham_k)
@@ -98,6 +120,16 @@ def get_eigs(klist,ham_r,S_r,rvec,sw_uni=False,sw_std=False):
                 return eig,uni
 
 def calc_mu(eig,Nk,fill:float,temp:float)-> float:
+    """
+    This function obtains chemical potential mu
+    input argments
+       eig: Eigenvales array
+        Nk: Number of k-point
+      fill: band filling
+      temp: Temperature
+    output
+        mu: chemical potential
+    """
     no=int(eig.size/len(eig))
     def func(mu):
         sum_fermi=flibs.get_ffermi(eig,mu,temp).sum()
@@ -135,6 +167,18 @@ def gen_klist_with_kmap(Nx:int,Ny:int,Nz:int):
     return klist,kmap
 
 def gen_klist(Nx:int,Ny:int,Nz=None,sw_pp=True,kz=0):
+    """
+    This function generate k-point list messhed Nx,Ny,Nz
+    input argments
+          Nx: Number of axis 1 mesh (usually kx mesh)
+          Ny: Number of axis 2 mesh (usually ky mesh)
+          Nx: Number of axis 3 mesh (usually kz mesh)
+       sw_pp: switch output 2D mesh or 3D mesh
+          kz: value of axis 3 at 2D mesh (use only if sw_pp is True)
+    output
+          Nk: number of k-points
+       klist: list of k-points
+    """
     if sw_pp:
         kx=np.linspace(-0.5,0.5,Nx,True)
         ky=np.linspace(-0.5,0.5,Ny,True)
@@ -151,6 +195,17 @@ def gen_klist(Nx:int,Ny:int,Nz=None,sw_pp=True,kz=0):
     return len(klist),klist
 
 def mk_klist(k_list,N,bvec):
+    """
+    This function generate k-point list for symmetry line
+    input argments
+       k_list: the list of symmetry points
+            N: Number of mesh between symmetry points
+         bvec: re
+    output
+        klist: list of k-points at band plot
+        splen: length of symmetry points
+       xticks: footnotes of klist at ticks of symmetry points
+    """
     klist=[]
     splen=[]
     xticks=[]

@@ -66,7 +66,8 @@ kz=0.0
 abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 #abc=[3.90,3.90,12.68]
 alpha_beta_gamma=[90.,90.,90]
-temp=5.0e-2 #2.59e-2
+#temp=5.0e-2 #2.59e-2
+tempK=300 #Kelvin
 fill=2.9375
 
 #site_prof=[5]
@@ -146,6 +147,15 @@ else:
     eC=1.
     tau_unit=1.
     emass=1.
+try:
+    tempK
+    try:
+        temp
+        print('temp & tempK find, use temp')
+    except NameError:
+        temp=tempK*kb
+except NameError:
+    pass
 if option==2:
     try:
         RotMat
@@ -568,7 +578,6 @@ def main():
     print("Number of orbital =",no,flush=True)
     if option in {7,8,9,14,17}:
         print(f'U= {U:4.2f} and J= {J:4.2f}')
-        print(f'Temperature = ',temp,flush=True)
     if option in {7,8,9,10,11,14,17}:
         try:
             chiolist
@@ -588,10 +597,10 @@ def main():
         print('k-mesh is %d %d %d'%(Nx,Ny,Nz),flush=True)
     if option in {14,17}:
         print(f'Number of Matsubara freq. = ',Nw,flush=True)
-    print("Lattice Vector",flush=True)
+    print("Lattice Vector (Angstrom)",flush=True)
     for i,a in enumerate(avec):
         print("a%d: "%i+"%8.4f %8.4f %8.4f"%tuple(a),flush=True)
-    print("Reciprocal Lattice Vector",flush=True)
+    print("Reciprocal Lattice Vector (Angstrom^-1)",flush=True)
     for i,b in enumerate(bvec):
         print("b%d: "%i+"%8.4f %8.4f %8.4f"%tuple(b),flush=True)
     if option in {5,6,16}:
@@ -602,7 +611,8 @@ def main():
         else:
             mu=mu0
             print('use fixed mu')
-        print('chem. pot. = %7.4f'%mu,flush=True)
+        print('Temperature = %10.4e eV'%temp,flush=True)
+        print('chem. pot. = %7.4f eV'%mu,flush=True)
 
     if option==0: #plot band
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
