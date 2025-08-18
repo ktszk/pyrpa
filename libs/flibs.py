@@ -705,6 +705,21 @@ def conv_delta_orb_to_band(delta,uni,invk):
                                  byref(c_int64(Nkall)),byref(c_int64(Nk)),byref(c_int64(Nw)))
     return deltab
 
+def gen_Fk(Gk,delta,invk):
+    Nkall,Nk,Nw,Norb=len(invk),len(Gk[0,0,0]),len(delta[0,0]),len(delta)
+    Fk=np.zeros((Norb,Norb,Nw,Nkall),dtype=np.complex128)
+    flibs.mkfk_trs_nsoc_.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #Fk
+                                   np.ctypeslib.ndpointer(dtype=np.complex128), #Gk
+                                   np.ctypeslib.ndpointer(dtype=np.complex128), #delta
+                                   np.ctypeslib.ndpointer(dtype=np.int64),      #invk
+                                   POINTER(c_int64),POINTER(c_int64),           #Nkall,Nk
+                                   POINTER(c_int64),POINTER(c_int64)]           #Nw,Norb
+    flibs.mkfk_trs_nsoc_.retype=c_void_p
+    flibs.mkfk_trs_nsoc_(Fk,Gk,delta,invk,byref(c_int64(Nkall)),byref(c_int64(Nk)),
+                         byref(c_int64(Nw)),byref(c_int64(Norb)))
+
+    return Fk
+
 def gen_irr_k_TRS(Nx,Ny,Nz):
     Nkall=Nx*Ny*Nz
     if(Nkall%2==0):

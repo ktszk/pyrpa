@@ -66,8 +66,8 @@ kz=0.0
 abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 #abc=[3.90,3.90,12.68]
 alpha_beta_gamma=[90.,90.,90]
-#temp=5.0e-2 #2.59e-2
-tempK=300 #Kelvin
+temp=5.0e-2 #2.59e-2
+#tempK=300 #Kelvin
 fill=2.9375
 
 #site_prof=[5]
@@ -484,6 +484,47 @@ def output_gap_function(invk,kmap,gap,uni):
         f.close()
     return(0)
 
+def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,sw_self:bool):
+    klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
+    eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
+    if sw_self:
+        ham_k=flibs.gen_ham(klist,ham_r,rvec)
+        npz=np.load('self_en.npz')
+        sigmak,mu_self=npz['arr_0'],npz['arr_1']
+        print('chem. pot. with self= %7.4f'%mu_self,flush=True)
+        Gk=flibs.gen_green(sigmak,ham_k,mu_self,temp)
+    else:
+        Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
+    gap=np.load('gap.npy')
+    Fk=flibs.gen_Fk(Gk,gap,invk)
+    print('output anomalous green function')
+    f=open(f'Fk_tr.dat','w')
+    Fktr=np.array([f.diagonal().sum() for f in Fk[:,:,0,:].T])
+    for i,km in enumerate(kmap):
+        if km[2]==0:
+            f.write(f'{km[0]:3} {km[1]:3} {Fktr[i].real:12.8f} {Fktr[i].imag:12.8f}\n')
+            if km[0]==Nx-1:
+                f.write('\n')
+    f.close()
+    iwlist=(2*np.arange(Nw)+1)*np.pi*temp
+    maxgap=abs(gap).max()
+    print((abs(gap)<maxgap*1.0e-6).sum())
+    print((abs(gap)<maxgap*1.0e-6).sum()/gap.size*100)
+    npz=np.load('self_en.npz')
+    sigmak,mu_self=npz['arr_0'],npz['arr_1']
+    maxsigma=abs(sigmak).max()
+    print((abs(sigmak)<maxsigma*1.0e-6).sum())
+    print((abs(sigmak)<maxsigma*1.0e-6).sum()/sigmak.size*100)
+    plt.plot(iwlist,sigmak[3,2,:,100].real,color='r')
+    plt.plot(-iwlist,sigmak[2,3,:,100].real,color='r')
+    plt.plot(iwlist,sigmak[3,2,:,100].imag,color='b')
+    plt.plot(-iwlist,-sigmak[2,3,:,100].imag,color='b')
+    plt.show()
+    plt.plot(iwlist,gap[3,2,:,100].real)
+    plt.plot(iwlist,gap[3,2,:,100].imag)
+    plt.show()
+    info=output_gap_function(invk,kmap,gap,uni)
+
 def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,olist,
                            mu:float,temp:float,gap_sym:int,sw_self:bool):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
@@ -502,9 +543,10 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,olist,
     else:
         Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
     gap=flibs.linearized_eliashberg(Gk,uni,Smat,Cmat,olist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
+    #Fk=flibs.gen_Fk(Gk,Delta,invk)
     if sw_out_self:
         np.save('gap',gap)
-    info=output_gap_function(invk,kmap,gap,uni)
+    info=output_gap_function(invk,kmap,delta,uni)
 
 def get_carrier_num(kmesh,rvec,ham_r,S_r,mu:float,Arot):
     Nk,eig,kwieght=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,S_r,rvec,Arot)
@@ -754,27 +796,7 @@ def main():
         else:
             calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,mu,temp,gap_sym,sw_self)
     elif option==18:
-        iwlist=(2*np.arange(Nw)+1)*np.pi*temp
-        gap=np.load('gap.npy')
-        maxgap=abs(gap).max()
-        print((abs(gap)<maxgap*1.0e-6).sum())
-        print((abs(gap)<maxgap*1.0e-6).sum()/gap.size*100)
-        npz=np.load('self_en.npz')
-        sigmak,mu_self=npz['arr_0'],npz['arr_1']
-        maxsigma=abs(sigmak).max()
-        print((abs(sigmak)<maxsigma*1.0e-6).sum())
-        print((abs(sigmak)<maxsigma*1.0e-6).sum()/sigmak.size*100)
-        plt.plot(iwlist,sigmak[3,2,:,100].real,color='r')
-        plt.plot(-iwlist,sigmak[2,3,:,100].real,color='r')
-        plt.plot(iwlist,sigmak[3,2,:,100].imag,color='b')
-        plt.plot(-iwlist,-sigmak[2,3,:,100].imag,color='b')
-        plt.show()
-        plt.plot(iwlist,gap[3,2,:,100].real)
-        plt.plot(iwlist,gap[3,2,:,100].imag)
-        plt.show()
-        klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
-        eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
-        info=output_gap_function(invk,kmap,gap,uni)
+        output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,sw_self)
 if __name__=="__main__":
     main()
 __license__="MIT"
