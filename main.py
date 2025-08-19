@@ -500,29 +500,39 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,sw_
     print('output anomalous green function')
     f=open(f'Fk_tr.dat','w')
     Fktr=np.array([f.diagonal().sum() for f in Fk[:,:,0,:].T])
+    fp=open(f'Gpade.dat','w')
+    iwlist=(2*np.arange(Nw)+1)*np.pi*temp
+    wlist=np.linspace(-3,3,100)
     for i,km in enumerate(kmap):
         if km[2]==0:
             f.write(f'{km[0]:3} {km[1]:3} {Fktr[i].real:12.8f} {Fktr[i].imag:12.8f}\n')
             if km[0]==Nx-1:
                 f.write('\n')
     f.close()
-    iwlist=(2*np.arange(Nw)+1)*np.pi*temp
+
+    Gkw=flibs.pade_with_trace(Gk[:,:,:256,:],iwlist[:256]*1j,wlist+3e-2*1j)
+    for i,km in enumerate(klist):
+        if km[1]==0.0 and km[2]==0.0:
+            for j,w in enumerate(wlist):
+                fp.write(f'{km[0]:3} {w.real:12.8f} {-Gkw[i,j].imag:12.8f}\n')
+            fp.write('\n')
+    fp.close()
     maxgap=abs(gap).max()
     print((abs(gap)<maxgap*1.0e-6).sum())
     print((abs(gap)<maxgap*1.0e-6).sum()/gap.size*100)
     npz=np.load('self_en.npz')
     sigmak,mu_self=npz['arr_0'],npz['arr_1']
     maxsigma=abs(sigmak).max()
-    print((abs(sigmak)<maxsigma*1.0e-6).sum())
-    print((abs(sigmak)<maxsigma*1.0e-6).sum()/sigmak.size*100)
-    plt.plot(iwlist,sigmak[3,2,:,100].real,color='r')
-    plt.plot(-iwlist,sigmak[2,3,:,100].real,color='r')
-    plt.plot(iwlist,sigmak[3,2,:,100].imag,color='b')
-    plt.plot(-iwlist,-sigmak[2,3,:,100].imag,color='b')
-    plt.show()
-    plt.plot(iwlist,gap[3,2,:,100].real)
-    plt.plot(iwlist,gap[3,2,:,100].imag)
-    plt.show()
+    #print((abs(sigmak)<maxsigma*1.0e-6).sum())
+    #print((abs(sigmak)<maxsigma*1.0e-6).sum()/sigmak.size*100)
+    #plt.plot(iwlist,Gk[2,2,:,100].real,color='r')
+    #plt.plot(-iwlist,Gk[2,2,:,100].real,color='r')
+    #plt.plot(iwlist,Gk[2,2,:,100].imag,color='b')
+    #plt.plot(-iwlist,-Gk[2,2,:,100].imag,color='b')
+    #plt.show()
+    #plt.plot(iwlist,Fk[2,2,:,100].real)
+    #plt.plot(iwlist,Fk[2,2,:,100].imag)
+    #plt.show()
     info=output_gap_function(invk,kmap,gap,uni)
 
 def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,olist,

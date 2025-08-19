@@ -1,8 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
-nk=32
-nw=32
-data=np.loadtxt('Fk_tr.dat')
+nk=17
+nw=100
+data=np.loadtxt('Gpade.dat')
 x=data[:,0].reshape(nk,nw)
 y=data[:,1].reshape(nk,nw)
 z=data[:,2].reshape(nk,nw)
