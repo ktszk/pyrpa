@@ -19,14 +19,15 @@ brav: choose primitive translation vector S,FC,BC etc
 else: monoclinic
 """
 
+fname,ftype,brav='inputs/Sr2RuO4nso',0,7
 #fname,ftype,brav='inputs/Sr2RuO4',2,2
-#fname,ftype,brav='inputs/000AsP.input',1,0
-fname,ftype,brav='inputs/NdFeAsO.input',1,0
+#fname,ftype,brav='inputs/SiMLO.input',3,6
+#fname,ftype,brav='inputs/NdFeAsO.input',1,0
+#fname,ftype,brav='inputs/010.input',1,0
 #fname,ftype,brav='inputs/square.hop',1,0
 #fname,ftype,brav='inputs/hop3.input',1,0
-#fname,ftype,brav='inputs/SiMLO.input',3,6
 
-sw_dec_axis=False
+sw_dec_axis=True
 
 """
 option defines calculation modes
@@ -54,7 +55,7 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=18
+option=17
 color_option=1
 
 Nx,Ny,Nz,Nw=32,32,4,512 #k and energy(or matsubara freq.) mesh size
@@ -68,7 +69,7 @@ abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 alpha_beta_gamma=[90.,90.,90]
 temp=5.0e-2 #2.59e-2
 #tempK=300 #Kelvin
-fill=2.9375
+fill=2.0 #3.05 #2.9375
 
 #site_prof=[5]
 
@@ -76,13 +77,14 @@ Emin,Emax=-3,3
 delta=3.0e-2
 Ecut=1.0e-2
 tau_const=100
-#olist=[0,1,2]
-olist=[[0],[1,2],[3]]
+olist=[0,1,2]
+#olist=[[0],[1,2],[3]]
 #olist=[[0,4],[1,2,5,6],[3,7]]
-#U,J= 0.8, 0.1
-U,J=1.2,0.15
+U,J= 0.8, 0.1
+#U,J=1.2,0.15
+#U,J=1.3,0.2167
 #0:s, 1:dx2-y2,2:spm
-gap_sym=2
+gap_sym=1
 
 #mu0=9.85114560061123
 k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
@@ -467,7 +469,7 @@ def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,oli
 
 def output_gap_function(invk,kmap,gap,uni):
     f=open('gap_wdep.dat','w')
-    for i,gp in enumerate(gap[3,3,:,0]):
+    for i,gp in enumerate(gap[2,2,:,0]):
         f.write(f'{i} {gp.real:12.8f} {gp.imag:12.8f}\n')
     f.close()
     gapb=flibs.conv_delta_orb_to_band(gap,uni,invk)
@@ -500,17 +502,20 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,sw_
     print('output anomalous green function')
     f=open(f'Fk_tr.dat','w')
     Fktr=np.array([f.diagonal().sum() for f in Fk[:,:,0,:].T])
-    fp=open(f'Gpade.dat','w')
     iwlist=(2*np.arange(Nw)+1)*np.pi*temp
-    wlist=np.linspace(-3,3,100)
+    #wlistg=np.linspace(0,10,10)
+    #Fkw=flibs.pade_with_trace(Fk[:,:,:30,:],iwlist[:30]*1j,wlistg+3e-2*1j)
     for i,km in enumerate(kmap):
         if km[2]==0:
+            #f.write(f'{km[0]:3} {km[1]:3} {Fkw[i,0].real:12.8f} {Fkw[i,0].imag:12.8f}\n')
             f.write(f'{km[0]:3} {km[1]:3} {Fktr[i].real:12.8f} {Fktr[i].imag:12.8f}\n')
             if km[0]==Nx-1:
                 f.write('\n')
     f.close()
-
-    Gkw=flibs.pade_with_trace(Gk[:,:,:256,:],iwlist[:256]*1j,wlist+3e-2*1j)
+    wlist=np.linspace(-3,3,100)
+    fp=open(f'Gpade.dat','w')
+    idelta=3e-2
+    Gkw=flibs.pade_with_trace(Gk[:,:,:40,:],iwlist[:40]*1j,wlist+idelta*1j)
     for i,km in enumerate(klist):
         if km[1]==0.0 and km[2]==0.0:
             for j,w in enumerate(wlist):
@@ -520,19 +525,18 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,sw_
     maxgap=abs(gap).max()
     print((abs(gap)<maxgap*1.0e-6).sum())
     print((abs(gap)<maxgap*1.0e-6).sum()/gap.size*100)
-    npz=np.load('self_en.npz')
-    sigmak,mu_self=npz['arr_0'],npz['arr_1']
-    maxsigma=abs(sigmak).max()
-    #print((abs(sigmak)<maxsigma*1.0e-6).sum())
-    #print((abs(sigmak)<maxsigma*1.0e-6).sum()/sigmak.size*100)
-    #plt.plot(iwlist,Gk[2,2,:,100].real,color='r')
-    #plt.plot(-iwlist,Gk[2,2,:,100].real,color='r')
-    #plt.plot(iwlist,Gk[2,2,:,100].imag,color='b')
-    #plt.plot(-iwlist,-Gk[2,2,:,100].imag,color='b')
-    #plt.show()
-    #plt.plot(iwlist,Fk[2,2,:,100].real)
-    #plt.plot(iwlist,Fk[2,2,:,100].imag)
-    #plt.show()
+    plt.plot(iwlist,gap[2,2,:,i].real)
+    #plt.plot(iwlist,gap[2,2,:,100].imag)
+    plt.show()
+    if sw_self:
+        maxsigma=abs(sigmak).max()
+        #print((abs(sigmak)<maxsigma*1.0e-6).sum())
+        #print((abs(sigmak)<maxsigma*1.0e-6).sum()/sigmak.size*100)
+        plt.plot(iwlist,sigmak[0,4,:,318].real,color='r')
+        #plt.plot(-iwlist,Gk[4,0,:,318].real,color='r')
+        plt.plot(iwlist,sigmak[0,4,:,318].imag,color='b')
+        #plt.plot(-iwlist,-Gk[4,0,:,318].imag,color='b')
+        plt.show()
     info=output_gap_function(invk,kmap,gap,uni)
 
 def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,olist,
@@ -552,11 +556,12 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,olist,
         Gk=flibs.gen_green(sigmak,ham_k,mu_self,temp)
     else:
         Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
-    gap=flibs.linearized_eliashberg(Gk,uni,Smat,Cmat,olist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
+    init_delta=plibs.get_initial_gap(kmap,klist,len(eig.T),gap_sym)
+    gap=flibs.linearized_eliashberg(Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
     #Fk=flibs.gen_Fk(Gk,Delta,invk)
     if sw_out_self:
         np.save('gap',gap)
-    info=output_gap_function(invk,kmap,delta,uni)
+    info=output_gap_function(invk,kmap,gap,uni)
 
 def get_carrier_num(kmesh,rvec,ham_r,S_r,mu:float,Arot):
     Nk,eig,kwieght=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,S_r,rvec,Arot)
@@ -663,7 +668,7 @@ def main():
         else:
             mu=mu0
             print('use fixed mu')
-        print('Temperature = %10.4e eV'%temp,flush=True)
+        print('Temperature = %10.4e eV (%8.2e K) '%(temp,temp/kb),flush=True)
         print('chem. pot. = %7.4f eV'%mu,flush=True)
 
     if option==0: #plot band

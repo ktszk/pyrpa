@@ -491,3 +491,29 @@ def get_chi_orb_list(Norb,site_prof):
             print("site_prof doesn't correspond to Hamiltonian")
             exit()
     return chiolist
+
+def get_initial_gap(kmap,klist,Norb,gap_sym):
+    if gap_sym>=0:
+        gapsym=['s','dx2-y2','spm','dxy']
+        print('gap symmetry is '+gapsym[gap_sym])
+    else:
+        gapsym=['s','px','py']
+        print('gap symmetry is '+gapsym[-gap_sym])
+    if gap_sym==0: #s
+        init_gap=np.ones((Norb,len(kmap)),dtype=np.float64)
+    else:
+        A=2*np.pi/(kmap[:,0].max()+1)
+        B=2*np.pi/(kmap[:,1].max()+1)
+        init_gap=np.zeros((Norb,len(kmap)),dtype=np.float64)
+        for i in range(Norb):
+            if gap_sym==1: #dx2-y2
+                init_gap[i,:]=np.cos(A*kmap[:,0])-np.cos(B*kmap[:,1])
+            elif gap_sym==2: #spm
+                init_gap[i,:]=2*np.cos(A*kmap[:,0])*np.cos(B*kmap[:,1])
+            elif gap_sym==3: #dxy
+                init_gap[i,:]=2*np.sin(A*kmap[:,0])*np.sin(B*kmap[:,1])
+            elif gap_sym==-1: #px
+                init_gap[i,:]=2*np.sin(A*kmap[:,0])
+            elif gap_sym==-2: #py
+                init_gap[i,:]=2*np.sin(B*kmap[:,1])
+    return init_gap

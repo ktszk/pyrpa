@@ -286,7 +286,7 @@ def get_Vsigma_nosoc_flex(chi,Smat,Cmat):
     return chi.copy()
 
 def mkself(Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu:float,fill:float,temp:float,
-           Nw:int,Nx:int,Ny:int,Nz:int,sw_out:bool,sw_in:bool,sw_sub_sigma=True,scf_loop=300,eps=1.0e-3,pp=0.4):
+           Nw:int,Nx:int,Ny:int,Nz:int,sw_out:bool,sw_in:bool,sw_sub_sigma=True,scf_loop=300,eps=1.0e-4,pp=0.3):
     print('mixing rate: pp = %3.1f'%pp)
     Nkall,Nk,Nchi=len(kmap),len(hamk),len(Smat)
     Norb=int(np.sqrt(hamk.size/Nk))
@@ -639,13 +639,14 @@ def pade_with_trace(A,iwlist,wlist):
                           byref(c_int64(Nw)),byref(c_int64(Norb)))
     return B
 
-def linearized_eliashberg(Gk,uni,Smat,Cmat,olist,kmap,invk,Nx:int,Ny:int,Nz:int,temp:float,gap_sym:int,eps=1.0e-4,itemax=300):
+def linearized_eliashberg(Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,Nx:int,Ny:int,Nz:int,temp:float,gap_sym:int,eps=1.0e-5,itemax=300):
     Norb,Nchi=len(Gk),len(Smat)
     Nkall,Nk,Nw=len(kmap),len(Gk[0,0,0]),len(Gk[0,0])
     delta=np.zeros((Norb,Norb,Nw,Nkall),dtype=np.complex128)
     flibs.lin_eliash.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #delta
                                np.ctypeslib.ndpointer(dtype=np.complex128), #Gk
                                np.ctypeslib.ndpointer(dtype=np.complex128), #uni
+                               np.ctypeslib.ndpointer(dtype=np.float64),    #init_delta
                                np.ctypeslib.ndpointer(dtype=np.float64),    #Smat
                                np.ctypeslib.ndpointer(dtype=np.float64),    #Cmat
                                np.ctypeslib.ndpointer(dtype=np.int64),      #olist
@@ -658,11 +659,11 @@ def linearized_eliashberg(Gk,uni,Smat,Cmat,olist,kmap,invk,Nx:int,Ny:int,Nz:int,
                                POINTER(c_int64),POINTER(c_int64),           #Ny,Nz
                                POINTER(c_int64),POINTER(c_int64)]           #itemax,gapsym
     flibs.lin_eliash.retype=c_void_p
-    flibs.lin_eliash(delta,Gk,uni,Smat,Cmat,olist,kmap,invk,byref(c_double(temp)),
-                     byref(c_double(eps)),byref(c_int64(Nkall)),byref(c_int64(Nk)),
-                     byref(c_int64(Nw)),byref(c_int64(Nchi)),byref(c_int64(Norb)),
-                     byref(c_int64(Nx)),byref(c_int64(Ny)),byref(c_int64(Nz)),
-                     byref(c_int64(itemax)),byref(c_int64(gap_sym)))
+    flibs.lin_eliash(delta,Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,
+                     byref(c_double(temp)),byref(c_double(eps)),byref(c_int64(Nkall)),
+                     byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Nchi)),
+                     byref(c_int64(Norb)),byref(c_int64(Nx)),byref(c_int64(Ny)),
+                     byref(c_int64(Nz)),byref(c_int64(itemax)),byref(c_int64(gap_sym)))
     return delta
 
 def linearized_eliashberg_soc(Gk,uni,Vmat,slist,olist,kmap,invk,Nx:int,Ny:int,Nz:int,temp:float,gap_sym:int,eps=1.0e-4,itemax=300):
@@ -670,19 +671,19 @@ def linearized_eliashberg_soc(Gk,uni,Vmat,slist,olist,kmap,invk,Nx:int,Ny:int,Nz
     Nkall,Nk,Nw=len(kmap),len(Gk[0,0,0]),len(Gk[0,0])
     delta=np.zeros((Norb,Norb,Nw,Nkall),dtype=np.complex128)
     flibs.lin_eliash_soc.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #delta
-                               np.ctypeslib.ndpointer(dtype=np.complex128), #Gk
-                               np.ctypeslib.ndpointer(dtype=np.complex128), #uni
-                               np.ctypeslib.ndpointer(dtype=np.float64),    #Vmat
-                               np.ctypeslib.ndpointer(dtype=np.int64),    #slist
-                               np.ctypeslib.ndpointer(dtype=np.int64),      #olist
-                               np.ctypeslib.ndpointer(dtype=np.int64),      #kmap
-                               np.ctypeslib.ndpointer(dtype=np.int64),      #invk
-                               POINTER(c_double),POINTER(c_double),         #temp,eps
-                               POINTER(c_int64),POINTER(c_int64),           #Nkall,Nk
-                               POINTER(c_int64),POINTER(c_int64),           #Nw,Nchi
-                               POINTER(c_int64),POINTER(c_int64),           #Norb,Nx
-                               POINTER(c_int64),POINTER(c_int64),           #Ny,Nz
-                               POINTER(c_int64),POINTER(c_int64)]           #itemax,gapsym
+                                   np.ctypeslib.ndpointer(dtype=np.complex128), #Gk
+                                   np.ctypeslib.ndpointer(dtype=np.complex128), #uni
+                                   np.ctypeslib.ndpointer(dtype=np.float64),    #Vmat
+                                   np.ctypeslib.ndpointer(dtype=np.int64),    #slist
+                                   np.ctypeslib.ndpointer(dtype=np.int64),      #olist
+                                   np.ctypeslib.ndpointer(dtype=np.int64),      #kmap
+                                   np.ctypeslib.ndpointer(dtype=np.int64),      #invk
+                                   POINTER(c_double),POINTER(c_double),         #temp,eps
+                                   POINTER(c_int64),POINTER(c_int64),           #Nkall,Nk
+                                   POINTER(c_int64),POINTER(c_int64),           #Nw,Nchi
+                                   POINTER(c_int64),POINTER(c_int64),           #Norb,Nx
+                                   POINTER(c_int64),POINTER(c_int64),           #Ny,Nz
+                                   POINTER(c_int64),POINTER(c_int64)]           #itemax,gapsym
     flibs.lin_eliash_soc.retype=c_void_p
     flibs.lin_eliash_soc(delta,Gk,uni,Vmat,slist,olist,kmap,invk,byref(c_double(temp)),
                      byref(c_double(eps)),byref(c_int64(Nkall)),byref(c_int64(Nk)),

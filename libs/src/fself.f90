@@ -688,6 +688,7 @@ contains
        end do
     end do
     print '(A7,E12.4,A14,2I5,2I3)','esterr=',esterr,' at k,iw,m,l=',kerr,iwerr,merr,lerr
+    print '(3(1X,I3))',kmap(1,kerr),kmap(2,kerr),kmap(3,kerr)
   end subroutine compair_sigma
 
   subroutine renew_mu()
