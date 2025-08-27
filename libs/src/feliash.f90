@@ -463,7 +463,6 @@ subroutine get_initial_delta(delta,init_delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,gap
 
   integer(int32) i,j,l,m,n
   real(real64) norm
-  real(real64),dimension(Norb,Nkall):: deltab
 
   if(gap_sym==0)then
      !$omp parallel
@@ -487,11 +486,11 @@ subroutine get_initial_delta(delta,init_delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,gap
            do i=1,Nkall
               if(invk(2,i)==0)then
                  do n=1,Norb
-                    delta(i,1,m,l)=delta(i,1,m,l)+uni(m,n,invk(1,i))*deltab(n,i)*conjg(uni(l,n,invk(1,i)))
+                    delta(i,1,m,l)=delta(i,1,m,l)+uni(m,n,invk(1,i))*init_delta(i,n)*conjg(uni(l,n,invk(1,i)))
                  end do
               else if(invk(2,i)==1)then
                  do n=1,Norb
-                    delta(i,1,m,l)=delta(i,1,m,l)+uni(l,n,invk(1,i))*deltab(n,i)*conjg(uni(m,n,invk(1,i)))
+                    delta(i,1,m,l)=delta(i,1,m,l)+uni(l,n,invk(1,i))*init_delta(i,n)*conjg(uni(m,n,invk(1,i)))
                  end do
               end if
            end do

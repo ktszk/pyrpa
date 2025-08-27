@@ -19,15 +19,15 @@ brav: choose primitive translation vector S,FC,BC etc
 else: monoclinic
 """
 
-fname,ftype,brav='inputs/Sr2RuO4nso',0,7
+#fname,ftype,brav='inputs/Sr2RuO4nso',0,7
 #fname,ftype,brav='inputs/Sr2RuO4',2,2
 #fname,ftype,brav='inputs/SiMLO.input',3,6
-#fname,ftype,brav='inputs/NdFeAsO.input',1,0
+fname,ftype,brav='inputs/NdFeAsO.input',1,0
 #fname,ftype,brav='inputs/010.input',1,0
 #fname,ftype,brav='inputs/square.hop',1,0
 #fname,ftype,brav='inputs/hop3.input',1,0
 
-sw_dec_axis=True
+sw_dec_axis=False
 
 """
 option defines calculation modes
@@ -55,7 +55,7 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=17
+option=18
 color_option=1
 
 Nx,Ny,Nz,Nw=32,32,4,512 #k and energy(or matsubara freq.) mesh size
@@ -69,7 +69,7 @@ abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 alpha_beta_gamma=[90.,90.,90]
 temp=5.0e-2 #2.59e-2
 #tempK=300 #Kelvin
-fill=2.0 #3.05 #2.9375
+fill=2.9375
 
 #site_prof=[5]
 
@@ -80,11 +80,11 @@ tau_const=100
 olist=[0,1,2]
 #olist=[[0],[1,2],[3]]
 #olist=[[0,4],[1,2,5,6],[3,7]]
-U,J= 0.8, 0.1
-#U,J=1.2,0.15
+#U,J= 0.8, 0.1
+U,J=1.2,0.15
 #U,J=1.3,0.2167
-#0:s, 1:dx2-y2,2:spm
-gap_sym=1
+#0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py
+gap_sym=2
 
 #mu0=9.85114560061123
 k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
@@ -94,7 +94,7 @@ sw_calc_mu=False #calculate mu or not
 sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 sw_omega=False #True: real freq, False: Matsubara freq.
-sw_self=True  #True: use calculated self energy for spectrum band plot
+sw_self=False  #True: use calculated self energy for spectrum band plot
 sw_out_self=True
 sw_in_self=True
 sw_from_file=True
