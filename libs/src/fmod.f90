@@ -422,7 +422,7 @@ subroutine gen_tr_greenw_0(trGk,wl,eig,mu,delta,Nk,Nw,Norb) bind(C)
   !$omp end parallel do
 end subroutine gen_tr_greenw_0
 
-subroutine gen_dos(Dos,wl,eig,uni,mu,delta,Nk,Nw,Norb) bind(C
+subroutine gen_dos(Dos,wl,eig,uni,mu,delta,Nk,Nw,Norb) bind(C)
   !> This function obtain partial Dos (and sum of them is total)
   !!@param  Dos,out: partial Density of states
   !!@param    wl,in: list of energies

@@ -34,6 +34,15 @@ subroutine FFT(cmat,tmp,Nx,Ny,Nz,Nw,SW)
 end subroutine FFT
 
 subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb) bind(C,name="gen_green0_")
+  !> This function obtains green function G0
+  !!@param  Gk,out: green function
+  !!@param  eig,in: energies at k-points
+  !!@param  uni,in: unitary matrix
+  !!@param   mu,in: chemical potential
+  !!@param temp,in: Temperature
+  !!@param   Nk,in: The number of k-points
+  !!@param   Nw,in: The number of energies mesh
+  !!@param Norb,in: The number of orbitals
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   use constant
   implicit none
@@ -208,6 +217,7 @@ end subroutine get_chi_map
 
 subroutine get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,&
      Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi) bind(C,name='get_chi0_conv_')
+  !> This function obtains chi_0 using convolution.
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
@@ -310,9 +320,7 @@ subroutine get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,&
 end subroutine get_chi0_conv
 
 subroutine get_chi0_sum(chi,Gk,klist,invk,irr_chi,chi_map,olist,temp,Nw,Nk,Nkall,Norb,Nchi) bind(C)
-  !
   !> It obtains chi_0 using summation. Its cost is O(Nk^2), so it is heavy. You should use get_chi0_conv.
-  !
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nw,Norb,Nchi,Nk,Nkall
@@ -380,7 +388,14 @@ subroutine get_chi0_sum(chi,Gk,klist,invk,irr_chi,chi_map,olist,temp,Nw,Nk,Nkall
 end subroutine get_chi0_sum
 
 subroutine get_vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi) bind(C,name='get_vsigma_flex_nosoc_')
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  !> This function obtains interaction V_sigma without soc
+  !!@param  chi,inout: irreducible susceptibility and pairing interaction
+  !!@param    Smat,in: S-matrix
+  !!@param    Cmat,in: C-matrix
+  !!@param      Nk,in: Number of k-points
+  !!@param      Nw,in: Number of Matsubara frequencies
+  !!@param    Nchi,in: Number of footnote of chi
+   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nk,Nw,Nchi
   real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
@@ -473,6 +488,24 @@ subroutine get_vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi) bind(C,name='get_vsig
 end subroutine get_vsigma_flex_nosoc
 
 subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
+  !> This function obtain new gap function Delta=sum VF
+  !!@param sigmak,out: self energy
+  !!@param      Gk,in: green function
+  !!@param  Vsigma,in: irreducible susceptibility and interaction
+  !!@param    Smat,in: S-matrix
+  !!@param    Cmat,in: C-matrix
+  !!@param    kmap,in: property of k-point
+  !!@param    invk,in: list of reverse k-points
+  !!@param   olist,in: property of chi footnote
+  !!@param    temp,in: Tempearature
+  !!@param   Nkall,in: Number of all k-points
+  !!@param      Nk,in: Number of k-points
+  !!@param      Nw,in: Number of Matsubara frequencies
+  !!@param    Nchi,in: Number of footnote of chi
+  !!@param    Norb,in: Number of orbitals
+  !!@param      Nx,in: Number of kx mesh
+  !!@param      Ny,in: Number of ky mesh
+  !!@param      Nz,in: Number of kz mesh
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz

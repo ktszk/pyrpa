@@ -1,4 +1,12 @@
 subroutine generate_irr_kpoint_inv(klist,kmap,invk_ft_list,Nk,Nx,Ny,Nz) bind(C)
+  !> This function obtain irreducible klist considering reverse symmetry of k-point
+  !!@param        klist,out: irreducible klist
+  !!@param         kmap,out: all k properties
+  !!@param invk_ft_list,out: footnote of reverse k
+  !!@param            Nk,in: The number of irreducible k-point
+  !!@param            Nx,in: kx mesh
+  !!@param            Ny,in: ky mesh
+  !!@param            Nz,in: kz mesh
   use constant
   implicit none
   integer(int64),intent(in):: Nx,Ny,Nz,Nk

@@ -149,9 +149,14 @@ contains
 end subroutine lin_eliash
 
 subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
-  !
-  !> obtain pairing interaction V_delta without soc
-  !
+  !> This function obtains pairing interaction V_delta without soc
+  !!@param  chi,inout: irreducible susceptibility and pairing interaction
+  !!@param    Smat,in: S-matrix
+  !!@param    Cmat,in: C-matrix
+  !!@param      Nk,in: Number of k-points
+  !!@param      Nw,in: Number of Matsubara frequencies
+  !!@param    Nchi,in: Number of footnote of chi
+  !!@param sw_pair,in: switch of singlet or triplet paring interacton
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nk,Nw,Nchi
@@ -261,11 +266,17 @@ subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
 end subroutine get_V_delta_nsoc_flex
 
 subroutine mkfk_trs_nsoc(fk,Gk,delta,invk,Nkall,Nk,Nw,Norb) bind(C,name="mkfk_trs_nsoc_")
-  !
   !>calculate linearized anomalous green function Fk with TRS
   !>if we considder TRS,F_ab(k)=G_ac(k)Delta_cd(k)Gbd(-k)
   !> =G_ac(k)Delta_cd(k)G^*_dbss'(k)ss'
-  !
+  !!@param   fk,out: anomalous green function
+  !!@param    Gk,in: normal green function
+  !!@param delta,in: gap function
+  !!@param  invk,in: list of reverse k-points
+  !!@param Nkall,in: Number of all k-points
+  !!@param    Nk,in: Number of irreducible k-points
+  !!@param    Nw,in: Number of Matsubara frequencies
+  !!@param  Norb,in: Number of orbitals
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nkall,Nk,Nw,Norb
@@ -337,6 +348,24 @@ subroutine mkfk_trs_nsoc(fk,Gk,delta,invk,Nkall,Nk,Nw,Norb) bind(C,name="mkfk_tr
 end subroutine mkfk_trs_nsoc
 
 subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,olist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
+  !> This function obtain new gap function Delta=sum VF
+  !!@param newdelta,out: new gap function
+  !!@param     delta,in: anomalous green function
+  !!@param    Vdelta,in: irreducible susceptibility and pairing interaction
+  !!@param      Smat,in: S-matrix
+  !!@param      Cmat,in: C-matrix
+  !!@param      kmap,in: property of k-point
+  !!@param      invk,in: list of reverse k-points
+  !!@param     olist,in: property of chi footnote
+  !!@param     Nkall,in: Number of all k-points
+  !!@param        Nk,in: Number of k-points
+  !!@param        Nw,in: Number of Matsubara frequencies
+  !!@param      Nchi,in: Number of footnote of chi
+  !!@param      Norb,in: Number of orbitals
+  !!@param        Nx,in: Number of kx mesh
+  !!@param        Ny,in: Number of ky mesh
+  !!@param        Nz,in: Number of kz mesh
+  !!@param sw_pair,in: switch of singlet or triplet paring interacton
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
