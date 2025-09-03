@@ -20,6 +20,14 @@ subroutine openmp_params(omp_num,omp_check) bind(C)
 end subroutine openmp_params
 
 subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
+  !> This function generate model hamiltonian from hoppings
+  !!@param ham_k,out: k-space Hamiltonian
+  !!@param  klist,in: k-points list
+  !!@param  ham_r,in: hopping integrals
+  !!@param   rvec,in: The list of lattice site
+  !!@param     Nk,in: The number of k-points
+  !!@param     Nr,in: The number of r-vector
+  !!@param   Norb,in: The number of orbitals
   use constant
   implicit none
   integer(int64),intent(in):: Nk,Nr,Norb
@@ -53,6 +61,12 @@ subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
 end subroutine gen_ham
 
 subroutine get_eig(eig,uni,ham_k,Nk,Norb) bind(C)
+  !> This function obtains energies
+  !!@param  eig,out: energies at k-points
+  !!@param  uni,out: unitary matrix at k-points
+  !!@param ham_k,in: k-space Hamiltonian
+  !!@param    Nk,in: The number of k-points
+  !!@param  Norb,in: The number of orbitals
   use,intrinsic:: iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nk,Norb
@@ -74,31 +88,38 @@ subroutine get_eig(eig,uni,ham_k,Nk,Norb) bind(C)
   !$omp end parallel do
 end subroutine get_eig
 
-subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,norb) bind(C)
+subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,Norb) bind(C)
+  !> This function obtains energies
+  !!@param  eig,out: energies at k-points
+  !!@param  uni,out: unitary matrix at k-points
+  !!@param ham_k,in: k-space Hamiltonian
+  !!@param  Ovlk,in: k-space Overlap integrals
+  !!@param    Nk,in: The number of k-points
+  !!@param  Norb,in: The number of orbitals
   use,intrinsic:: iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nk,norb
-  complex(real64),intent(in),dimension(norb,norb,Nk):: ham_k,Ovlk
-  real(real64),intent(out),dimension(norb,Nk):: eig
-  complex(real64),intent(out),dimension(norb,norb,Nk):: uni
+  complex(real64),intent(in),dimension(Norb,Norb,Nk):: ham_k,Ovlk
+  real(real64),intent(out),dimension(Norb,Nk):: eig
+  complex(real64),intent(out),dimension(Norb,Norb,Nk):: uni
 
   integer(int32) i,j,k,l,m,info
-  real(real64) rwork(3*norb-2),eq(norb),norm
-  complex(real64) work(2*norb-1)
-  complex(real64),dimension(norb,norb):: tmp,tmp2,tmp3
+  real(real64) rwork(3*Norb-2),eq(Norb),norm
+  complex(real64) work(2*Norb-1)
+  complex(real64),dimension(Norb,Norb):: tmp,tmp2,tmp3
 
   !$omp parallel do private(tmp,tmp2,tmp3,norm,eq,work,rwork,info)
   kloop: do i=1,Nk
      tmp(:,:)=Ovlk(:,:,i)
      call zheev('V','U',norb,tmp,norb,eq,work,2*norb-1,rwork,info)
-     do j=1,norb
+     do j=1,Norb
         tmp2(:,j)=tmp(:,j)/sqrt(cmplx(eq(j)))
      end do
      tmp(:,:)=0.0d0
-     do j=1,norb
-        do k=1,norb
-           do l=1,norb
-              do m=1,norb
+     do j=1,Norb
+        do k=1,Norb
+           do l=1,Norb
+              do m=1,Norb
                  tmp(k,j)=tmp(k,j)+conjg(tmp2(m,k))*ham_k(m,l,i)*tmp2(l,j)
               end do
            end do
@@ -107,9 +128,9 @@ subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,norb) bind(C)
      call zheev('V','U',norb,tmp,norb,eq,work,2*norb-1,rwork,info)
      eig(:,i)=eq(:)
      tmp3(:,:)=0.0d0
-     do j=1,norb
-        do k=1,norb
-           do l=1,norb
+     do j=1,Norb
+        do k=1,Norb
+           do l=1,Norb
               tmp3(k,j)=tmp3(k,j)+tmp2(k,l)*tmp(l,j)
            end do
         end do
@@ -120,6 +141,13 @@ subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,norb) bind(C)
 end subroutine get_eig_mlo
 
 subroutine get_ffermi(ffermi,eig,mu,temp,Nk,Norb) bind(C)
+  !> This function obtains fermi functions
+  !!@param ffermi,out: fermi distribute functions
+  !!@param     eig,in: energies at k-points
+  !!@param      mu,in: chemical potential
+  !!@param    temp,in: Temperature
+  !!@param      Nk,in: The number of k-points
+  !!@param    Norb,in: The number of orbitals
   use,intrinsic:: iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nk,Norb
@@ -224,6 +252,14 @@ subroutine get_imassk(imk,imk0,mrot,uni,Nk,Norb) bind(C)
 end subroutine get_imassk
 
 subroutine get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
+  !> This function obtain orbital basis velocity
+  !!@param   vk,out: orbital-basis group velocities
+  !!@param klist,in: k-points list
+  !!@param ham_r,in: hopping integrals
+  !!@param  rvec,in: The list of lattice site
+  !!@param    Nk,in: The number of k-points
+  !!@param    Nr,in: The number of r-vector
+  !!@param  Norb,in: The number of orbitals
   use constant
   implicit none
   integer(int64),intent(in):: Nk,Nr,Norb
@@ -257,6 +293,13 @@ subroutine get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
 end subroutine get_vlm0
 
 subroutine get_veloc(vk,vk0,mrot,uni,Nk,Norb) bind(C)
+  !> This function obtain group velocity at bands
+  !!@param  vk,out: band-basis group velocities
+  !!@param  vk0,in: orbital-basis group velocities
+  !!@param mrot,in: rotation matrix for real space
+  !!@param  uni,in: unitary matrix orbital to band
+  !!@param   Nk,in: The number of k-points
+  !!@param Norb,in: The number of orbitals
   use,intrinsic:: iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nk,Norb
@@ -294,6 +337,13 @@ subroutine get_veloc(vk,vk0,mrot,uni,Nk,Norb) bind(C)
 end subroutine get_veloc
 
 subroutine get_vnm(vk,vk0,mrot,uni,Nk,Norb) bind(C)
+  !> This function obtain band-basis group velocity with inter-band
+  !!@param  vk,out: band-basis group velocities
+  !!@param  vk0,in: orbital-basis group velocities
+  !!@param mrot,in: rotation matrix for real space
+  !!@param  uni,in: unitary matrix orbital to band
+  !!@param   Nk,in: The number of k-points
+  !!@param Norb,in: The number of orbitals
   use,intrinsic:: iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nk,Norb
@@ -340,6 +390,15 @@ subroutine get_vnm(vk,vk0,mrot,uni,Nk,Norb) bind(C)
 end subroutine get_vnm
 
 subroutine gen_tr_greenw_0(trGk,wl,eig,mu,delta,Nk,Nw,Norb) bind(C)
+  !> This function obtain orbital(band) trace of green function
+  !!@param trGk,out: trace of green function
+  !!@param    wl,in: list of energies
+  !!@param   eig,in: energies at k-points
+  !!@param    mu,in: chemical potential
+  !!@param delta,in: dumping factor
+  !!@param    Nk,in: The number of k-points
+  !!@param    Nw,in: The number of energies mesh
+  !!@param  Norb,in: The number of orbitals
   use,intrinsic:: iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nk,Nw,Norb
@@ -363,7 +422,17 @@ subroutine gen_tr_greenw_0(trGk,wl,eig,mu,delta,Nk,Nw,Norb) bind(C)
   !$omp end parallel do
 end subroutine gen_tr_greenw_0
 
-subroutine gen_dos(Dos,wl,eig,uni,mu,delta,Nk,Nw,Norb) bind(C)
+subroutine gen_dos(Dos,wl,eig,uni,mu,delta,Nk,Nw,Norb) bind(C
+  !> This function obtain partial Dos (and sum of them is total)
+  !!@param  Dos,out: partial Density of states
+  !!@param    wl,in: list of energies
+  !!@param   eig,in: energies at k-points
+  !!@param   uni,in: unitary matrix at k-points  
+  !!@param    mu,in: chemical potential
+  !!@param delta,in: dumping factor
+  !!@param    Nk,in: The number of k-points
+  !!@param    Nw,in: The number of energies mesh
+  !!@param  Norb,in: The number of orbitals
   use,intrinsic:: iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nk,Nw,Norb

@@ -1,13 +1,23 @@
 #!/usr/bin/env python
 #-*- coding:utf-8 -*-
+"""
+@file plibs.py
+@package plibs
+@brief python script for model calculations
+"""
 import libs.flibs as flibs
 import numpy as np, scipy.optimize as scopt, scipy.linalg as sclin
 
 def import_hoppings(fname:str,ftype:int):
     """
-    this function import hopping parameters from files
-    fname: Name of import files
-    ftype: File format of import files
+    @fn import_hoppings()
+    @brief this function import hopping parameters from files
+    @param fname: Name of import files
+    @param ftype: File format of import files
+    @retval  rvec: the array of r-vector, size:(nr,3)
+    @retval ham_r: the array of hopping integrals, size:(nr,no,no)
+    @retval    no: the number of orbitals
+    @retval    nr: the number of r-vectors
     """
     def import_hop(name: str):
         rvec=np.loadtxt(f'{name}/irvec.txt')
@@ -65,8 +75,14 @@ def import_hoppings(fname:str,ftype:int):
 
 def import_MLO_hoppings(name:str):
     """
-    this function import MLO hopping parameters from files
-    name: File name
+    @fn import_MLO_hoppings()
+    @brief this function import MLO hopping parameters from files
+    @param name: File name
+    @retval  rvec: the array of r-vector, size:(nr,3)
+    @retval ham_r: the array of hopping integrals, size:(nr,no,no)
+    @retval   S_r: the array of overlap integrals, size:(nr,no,no)
+    @retval    no: the number of orbitals
+    @retval    nr: the number of r-vectors
     """
     tmp=[f.split() for f in open(f'{name}','r')]
     tmp1=np.array([[float(t) for t in tp] for tp in tmp])
@@ -80,22 +96,27 @@ def import_MLO_hoppings(name:str):
     return rvec,ham_r,S_r,no,nr
 
 def get_bvec(avec):
+    """
+    @fn get_bvec()
+    @brief THis function generate reciprocal lattice vector from primitive translation vector
+    @param  avec: primitive translation vector
+    @return bvec: reciprocal lattice vector
+    """
     bvec=2*np.pi*sclin.inv(avec).T
     return bvec
 
 def get_eigs(klist,ham_r,S_r,rvec,sw_uni=False,sw_std=False):
     """
-    This function generate eigenvalues of Hamiltonian
-    input argments
-        klist: list of k-points
-        ham_r: hopping parameters
-          S_r: overlap integrals
-         rvec: r vector of hoppings
-       sw_uni: switch of output only unitary matrix or not
-       sw_std: switch standardization of unitary matrix at MLO hoppings
-    output
-       eig: eigenvalues of Hamiltonian
-       uni: unitary matrix of eigenfunctions
+    @fn get_eigs
+    @brief This function generate eigenvalues of Hamiltonian
+    @param  klist: list of k-points
+    @param  ham_r: hopping parameters
+    @param    S_r: overlap integrals
+    @param   rvec: r vector of hoppings
+    @param sw_uni: switch of output only unitary matrix or not
+    @param sw_std: switch standardization of unitary matrix at MLO hoppings
+    @retval   eig: eigenvalues of Hamiltonian
+    @retval   uni: unitary matrix of eigenfunctions
     """
     if len(S_r)==0:
         ham_k=flibs.gen_ham(klist,ham_r,rvec)
@@ -121,14 +142,13 @@ def get_eigs(klist,ham_r,S_r,rvec,sw_uni=False,sw_std=False):
 
 def calc_mu(eig,Nk,fill:float,temp:float)-> float:
     """
-    This function obtains chemical potential mu
-    input argments
-       eig: Eigenvales array
-        Nk: Number of k-point
-      fill: band filling
-      temp: Temperature
-    output
-        mu: chemical potential
+    @fn calc_mu()
+    @brief This function obtains chemical potential mu
+    @param   eig: Eigenvales array
+    @param    Nk: Number of k-point
+    @param  fill: band filling
+    @param  temp: Temperature
+    @return   mu: chemical potential
     """
     no=int(eig.size/len(eig))
     def func(mu):
@@ -149,6 +169,14 @@ def calc_mu_imp(eigs,Nsite,fill:float,temp:float)-> float:
     return mu
 
 def gen_rlist(Nx:int,Ny:int,Nz:int):
+    """
+    @fn gen_rlist
+    @brief This function generate the list of r-vector
+    @param     Nx: Number of site of x-axis
+    @param     Ny: Number of site of y-axis
+    @param     Nz: Number of site of z-axis
+    @return rlist: The array of r-vectors
+    """
     x0=np.linspace(0,Nx,Nx,False)
     y0=np.linspace(0,Ny,Ny,False)
     z0=np.linspace(0,Nz,Nz,False)
@@ -158,6 +186,15 @@ def gen_rlist(Nx:int,Ny:int,Nz:int):
     return rlist
 
 def gen_klist_with_kmap(Nx:int,Ny:int,Nz:int):
+    """
+    @fn gen_klist_with_kmap
+    @brief This function generate the list of r-vector
+    @param     Nx: Number of kx mesh
+    @param     Ny: Number of ky mesh
+    @param     Nz: Number of kz mesh
+    @retval klist: The array of k-vectors
+    @retval  kmap: The array of property of k-points
+    """
     x0=np.linspace(0,Nx,Nx,False,dtype=int)
     y0=np.linspace(0,Ny,Ny,False,dtype=int)
     z0=np.linspace(0,Nz,Nz,False,dtype=int)
@@ -168,16 +205,15 @@ def gen_klist_with_kmap(Nx:int,Ny:int,Nz:int):
 
 def gen_klist(Nx:int,Ny:int,Nz=None,sw_pp=True,kz=0):
     """
-    This function generate k-point list messhed Nx,Ny,Nz
-    input argments
-          Nx: Number of axis 1 mesh (usually kx mesh)
-          Ny: Number of axis 2 mesh (usually ky mesh)
-          Nx: Number of axis 3 mesh (usually kz mesh)
-       sw_pp: switch output 2D mesh or 3D mesh
-          kz: value of axis 3 at 2D mesh (use only if sw_pp is True)
-    output
-          Nk: number of k-points
-       klist: list of k-points
+    @fn gen_klist()
+    @brief This function generate k-point list messhed Nx,Ny,Nz
+    @param     Nx: Number of axis 1 mesh (usually kx mesh)
+    @param     Ny: Number of axis 2 mesh (usually ky mesh)
+    @param     Nx: Number of axis 3 mesh (usually kz mesh)
+    @param  sw_pp: switch output 2D mesh or 3D mesh
+    @param     kz: value of axis 3 at 2D mesh (use only if sw_pp is True)
+    @retval    Nk: number of k-points
+    @retval klist: list of k-points
     """
     if sw_pp:
         kx=np.linspace(-0.5,0.5,Nx,True)
@@ -194,17 +230,16 @@ def gen_klist(Nx:int,Ny:int,Nz=None,sw_pp=True,kz=0):
     klist=np.array([x.ravel(),y.ravel(),z.ravel()]).T.copy()
     return len(klist),klist
 
-def mk_klist(k_list,N,bvec):
+def mk_klist(k_list,N:int,bvec):
     """
-    This function generate k-point list for symmetry line
-    input argments
-       k_list: the list of symmetry points
-            N: Number of mesh between symmetry points
-         bvec: re
-    output
-        klist: list of k-points at band plot
-        splen: length of symmetry points
-       xticks: footnotes of klist at ticks of symmetry points
+    @fn mk_klist()
+    @brief This function generate k-point list for symmetry line
+    @param  k_list: the list of symmetry points
+    @param       N: Number of mesh between symmetry points
+    @param    bvec: reciprocal lattice vector
+    @retval  klist: list of k-points at band plot
+    @retval  splen: length of symmetry points
+    @retval xticks: footnotes of klist at ticks of symmetry points
     """
     klist=[]
     splen=[]
@@ -225,6 +260,18 @@ def mk_klist(k_list,N,bvec):
     return np.array(klist),np.array(splen),xticks
 
 def mk_qlist(k_set,Nx:int,Ny:int,Nz:int,bvec):
+    """
+    @fn mk_qlist()
+    @brief This function generate q-point list for symmetry line
+    @param   k_set: the list of symmetry points
+    @param      Nx: Number of x-mesh
+    @param      Ny: Number of y-mesh
+    @param      Nz: Number of z-mesh
+    @param    bvec: reciprocal lattice vector
+    @retval  qlist: list of q-points at band plot
+    @retval  splen: length of symmetry points
+    @retval xticks: footnotes of qlist at ticks of symmetry points
+    """
     qlist=[]
     splen=[]
     xticks=[]

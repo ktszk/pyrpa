@@ -1,4 +1,18 @@
 subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind(C)
+  !> calc_Lij
+  !!@param    L11,out: L11@linear response theory
+  !!@param    L22,out: L22@linear response theory
+  !!@param    L12,out: L12(L21^T)@linear response theory
+  !!@param      vk,in: group velocity:
+  !!@param     eig,in: energy of bands
+  !!@param  ffermi,in: fermi distribute function
+  !!@param    Norb,in: The numbrer of orbitals
+  !!@param      Nk,in: The number of k-points
+  !!@param      mu,in: chemical potential
+  !!@param       w,in: frequency (energy)
+  !!@param  idelta,in: dumping factor
+  !!@param     eps,in: threshold of energy
+  !!@param    temp,in: Temperature
   use,intrinsic:: iso_fortran_env, only:int64,real64
   implicit none
   integer(int64),intent(in):: Nk,Norb
@@ -52,10 +66,19 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
 end subroutine calc_lij
 
 subroutine calc_kn(K0,K1,K2,eig,veloc,kweight,tau,temp,mu,Nk,Norb) bind(C)
-  !
-  ! calc_Kn
-  ! Kn_ij=sum_k(v_ki*v_kj*(e_k-mu)^n*(-df(e_k)/de))
-  !
+  !> calc_Kn
+  !> Kn_ij=sum_k(v_ki*v_kj*(e_k-mu)^n*(-df(e_k)/de))
+  !!@param     K0,out: corresponds to sigma@Bolzmann theory
+  !!@param     K1,out: corresponds to sigmaS@Bolzmann theory
+  !!@param     K2,out: corresponds to kappa@Bolzmann theory
+  !!@param     eig,in: energy of bands
+  !!@param   veloc,in: group velocity:
+  !!@param kweight,in: weight of k-points
+  !!@param     tau,in: relaxation time
+  !!@param    temp,in: Temperature
+  !!@param      mu,in: chemical potential
+  !!@param      Nk,in: The number of k-points
+  !!@param    Norb,in: The numbrer of orbitals
   use,intrinsic:: iso_fortran_env, only:int64,real64
   implicit none
   integer(int64),intent(in):: Nk,Norb
@@ -103,10 +126,16 @@ subroutine calc_kn(K0,K1,K2,eig,veloc,kweight,tau,temp,mu,Nk,Norb) bind(C)
 end subroutine calc_kn
 
 subroutine calc_tdf(tdf,eig,veloc,kweight,tau,Nw,Nk,Norb) bind(C)
-  !
-  ! calc tdf function
-  ! sum_k(v_ki*v_kj*tau)
-  !
+  !> calc tdf function
+  !> sum_k(v_ki*v_kj*tau)
+  !!@param    tdf,out: transport distribution function
+  !!@param     eig,in: energy of bands
+  !!@param   veloc,in: group velocity:
+  !!@param kweight,in: weight of k-points
+  !!@param     tau,in: relaxation time
+  !!@param      Nw,in: The number of energy mesh
+  !!@param      Nk,in: The number of k-points
+  !!@param    Norb,in: The numbrer of orbitals
   use,intrinsic:: iso_fortran_env, only:int64,real64
   implicit none
   integer(int64),intent(in):: Nk,Norb,Nw

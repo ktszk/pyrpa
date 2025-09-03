@@ -1,5 +1,9 @@
 subroutine get_iqshift(qpoint,klist,qshift,Nk) bind(C,name="get_iqshift_")
-  !shift k to -k+q
+  !>shift k to -k+q
+  !!@param  qpoint,in: q-vector
+  !!@param   klist,in: list of all k-point
+  !!@param qshift,out: list of footnote of klist that correspond to k+q shift
+  !!@param      Nk,in: number of k-points
   use,intrinsic:: iso_fortran_env, only:int64,real64
   implicit none
   integer(int64),intent(in):: Nk
@@ -49,6 +53,21 @@ module calc_irr_phi
   implicit none
 contains
   function calc_phi(Nk,Norb,Nchi,uni,eig,ffermi,ol,mu,temp,qshift,w,idelta,eps)
+    !> This function obtain irreducible sc susceptibility phi_0
+    !!@param        Nk: The number of k-points
+    !!@param      Norb: The number of orbitals
+    !!@param      Nchi: The footnote of chi
+    !!@param       uni: unitary matrix
+    !!@param       eig: energies of bands
+    !!@param    ffermi: fermi distribute function
+    !!@param        ol: the list of the properties of orbitals at footnote of chi
+    !!@param        mu: chemical potential
+    !!@param      temp: temperature
+    !!@param    qshift: q-shifted klist
+    !!@param         w: frequency
+    !!@param    idelta: dumping factor
+    !!@param       eps: threshold of calculation value
+    !!@return calc_phi: irreducible sc susceptibility matrix
     integer(int64),intent(in):: Nk,Norb,Nchi
     integer(int64),intent(in),dimension(Nk):: qshift
     integer(int64),intent(in),dimension(Nchi,2):: ol
@@ -84,6 +103,22 @@ contains
 end module calc_irr_phi
 
 subroutine get_phi_irr(phi,uni,eig,ffermi,qshift,ol,wl,Nchi,Norb,Nk,Nw,idelta,eps,mu,temp) bind(C)
+  !> This function obtains irreducible sc susceptibility at q-point
+  !!@param   phi,out: irreducible sc susceptibility
+  !!@param    uni,in: unitary matrix
+  !!@param    eig,in: energies of bands
+  !!@param ffermi,in: fermi distribute function
+  !!@param qshift,in: q-shifted klist
+  !!@param     ol,in: the list of the properties of orbitals at footnote of chi
+  !!@param     wl,in: the list of frequency
+  !!@param   Nchi,in: The footnote of chi
+  !!@param   Norb,in: The number of orbitals
+  !!@param     Nk,in: The number of k-points
+  !!@param     Nw,in: The number of frequency mesh
+  !!@param idelta,in: dumping factor
+  !!@param    eps,in: threshold of calculation value
+  !!@param     mu,in: chemical potential
+  !!@param   temp,in: temperature
   use calc_irr_phi
   implicit none
   integer(int64),intent(in):: Nk,Norb,Nw,Nchi
@@ -105,6 +140,14 @@ subroutine get_phi_irr(phi,uni,eig,ffermi,qshift,ol,wl,Nchi,Norb,Nk,Nw,idelta,ep
 end subroutine get_phi_irr
 
 subroutine get_tr_phi(trphi,phi_orb,phi,olist,Nw,Nchi,Norb) bind(C)
+  !> This function take trace of phi
+  !!@param   trphi,out: trace value of phi
+  !!@param phi_orb,out: The array of phi values at orbital diagonal elements
+  !!@param      phi,in: sc susceptibility
+  !!@param    olist,in: the list of  properties of chis,chi0 footnote
+  !!@param       Nw,in: The number of freqency mesh
+  !!@param     Nchi,in: The number of footnote of chis,chi0
+  !!@param     Norb,in: The number of orbitals
   use,intrinsic:: iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nchi,Nw,Norb
@@ -136,6 +179,24 @@ subroutine get_tr_phi(trphi,phi_orb,phi,olist,Nw,Nchi,Norb) bind(C)
 end subroutine get_tr_phi
 
 subroutine phiq_map(trphi,uni,eig,ffermi,klist,ol,mu,temp,ecut,idelta,eps,Nx,Ny,Nk,Norb,Nchi,sw_omega) bind(C)
+  !> This function obtains irreducible susceptibility at w=ecut
+  !!@param   trphi,out: trace value of phi
+  !!@param      uni,in: unitary matrix
+  !!@param      eig,in: energies of bands
+  !!@param   ffermi,in: fermi distribute function
+  !!@param    klist,in: klist
+  !!@param       ol,in: the list of the properties of orbitals at footnote of chi
+  !!@param       mu,in: chemical potential
+  !!@param     temp,in: temperature
+  !!@param     ecut,in: energy value of cut energy plane
+  !!@param   idelta,in: dumping factor
+  !!@param      eps,in: threshold of calculation value
+  !!@param       Nx,in: The number of kx mesh
+  !!@param       Ny,in: The number of ky mesh
+  !!@param       Nk,in: The number of k-points
+  !!@param     Norb,in: The number of orbitals
+  !!@param     Nchi,in: The footnote of chi
+  !!@param sw_omega,in: switch matsubara or real freuency
   use calc_irr_phi
   implicit none
   integer(int64),intent(in):: Nx,Ny,Nk,Norb,Nchi

@@ -1,4 +1,12 @@
 subroutine FFT(cmat,tmp,Nx,Ny,Nz,Nw,SW)
+  !> 4D Fast Fourier transform function
+  !!@param cmat,inout: FFT source and results
+  !!@param  tmp,inout: temporary
+  !!@param      Nx,in: x mesh
+  !!@param      Ny,in: y mesh
+  !!@param      Nz,in: z mesh
+  !!@param      Nw,in: w mesh
+  !!@param      SW,in: FFT or IFFT switch (if true IFFT)
   use,intrinsic::iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nx,Ny,Nz,Nw

@@ -1,7 +1,9 @@
 subroutine get_a(a,xn,inp_data,Np) bind(C,name="get_a_")
-  !
   !> calculate pade's constants a
-  !
+  !!@param       a,out:
+  !!@param       xn,in: variables of origin data
+  !!@param inp_data,in: The origin data
+  !!@param       Np,in: The number of origin data
   use,intrinsic:: iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Np !length of data point
@@ -42,9 +44,14 @@ subroutine get_a(a,xn,inp_data,Np) bind(C,name="get_a_")
 end subroutine get_a
 
 subroutine get_QP(P,Q,a,xn,wlist,Nw,Np) bind(C,name='get_qp_')
-  !
   !>  calculate rational function P,Q for pade
-  !
+  !!@param    P,out:
+  !!@param    Q,out:
+  !!@param     a,in:
+  !!@param    xn,in: variables of origin data
+  !!@param wlist,in: new variables of pade data
+  !!@param    Nw,in: The number of pade data
+  !!@param    Np,in: The number of origin data
   use,intrinsic:: iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nw,Np
@@ -83,8 +90,8 @@ subroutine get_QP(P,Q,a,xn,wlist,Nw,Np) bind(C,name='get_qp_')
   return
 end subroutine get_QP
 
-subroutine pade_analytic_continuation_arrays(arrayin,arrayout,iwlist,wlist,&
-     Nk,Niw,Nw) bind(C,name="pade_analytic_continuation_arrays_")
+subroutine pade_analytic_continuation_arrays(arrayin,arrayout,&
+     iwlist,wlist,Nk,Niw,Nw) bind(C,name="pade_analytic_continuation_arrays_")
   use,intrinsic:: iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nk,Nw,Niw

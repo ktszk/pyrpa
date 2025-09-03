@@ -1,8 +1,6 @@
 subroutine lin_eliash(delta,Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,temp,eps,&
      Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym) bind(C)
-  !
   !> calculate linearized eliashberg equations
-  !
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym

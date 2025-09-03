@@ -1,11 +1,9 @@
 subroutine get_qshift(qpoint,klist,qshift,Nk) bind(C,name="get_qshift_")
-  !
-  !>shift k to k+q
-  !>  qpoint,in: q-vector
-  !>   klist,in: list of all k-point
-  !> qshift,out: list of footnote of klist that correspond to k+q shift
-  !>      Nk,in: number of k-points
-  !
+  !> shift k to k+q
+  !!@param  qpoint,in: q-vector
+  !!@param   klist,in: list of all k-point
+  !!@param qshift,out: list of footnote of klist that correspond to k+q shift
+  !!@param      Nk,in: number of k-points
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nk
@@ -55,9 +53,20 @@ module calc_irr_chi
   implicit none
 contains
   function calc_chi(Nk,Norb,Nchi,uni,eig,ffermi,ol,temp,qshift,w,idelta,eps)
-    !
-    !this function obtain irreducible susceptibility chi_0
-    !
+    !> This function obtain irreducible susceptibility chi_0
+    !!@param        Nk: The number of k-points
+    !!@param      Norb: The number of orbitals
+    !!@param      Nchi: The footnote of chi
+    !!@param       uni: unitary matrix
+    !!@param       eig: energies of bands
+    !!@param    ffermi: fermi distribute function
+    !!@param        ol: the list of the properties of orbitals at footnote of chi
+    !!@param      temp: temperature
+    !!@param    qshift: q-shifted klist
+    !!@param         w: frequency
+    !!@param    idelta: dumping factor
+    !!@param       eps: threshold of calculation value
+    !!@return calc_chi: irreducible susceptibility matrix
     integer(int64),intent(in):: Nk,Norb,Nchi
     integer(int64),intent(in),dimension(Nk):: qshift
     integer(int64),intent(in),dimension(Nchi,2):: ol
@@ -93,7 +102,16 @@ contains
 end module calc_irr_chi
 
 subroutine get_tr_chi(trchis,trchi0,chis_orb,chis,chi0,olist,Nw,Nchi,Norb) bind(C)
-  !get trace of chi
+  !> This function take trace of chi
+  !!@param   trchis,out: trace value of chi_s
+  !!@param   trchi0,out: trace value of chi_0
+  !!@param chis_orb,out: The array of chi_s values at orbital diagonal elements
+  !!@param      chis,in: spin susceptibility
+  !!@param      chi0,in: irreducible susceptibility
+  !!@param     olist,in: the list of  properties of chis,chi0 footnote
+  !!@param        Nw,in: The number of freqency mesh
+  !!@param      Nchi,in: The number of footnote of chis,chi0
+  !!@param      Norb,in: The number of orbitals
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nchi,Nw,Norb
@@ -126,6 +144,21 @@ subroutine get_tr_chi(trchis,trchi0,chis_orb,chis,chi0,olist,Nw,Nchi,Norb) bind(
 end subroutine get_tr_chi
 
 subroutine get_chi_irr(chi,uni,eig,ffermi,qshift,ol,wl,Nchi,Norb,Nk,Nw,idelta,eps,temp) bind(C)
+  !> This function obtains irreducible susceptibility at q-point
+  !!@param   chi,out: irreducible susceptibility
+  !!@param    uni,in: unitary matrix
+  !!@param    eig,in: energies of bands
+  !!@param ffermi,in: fermi distribute function
+  !!@param qshift,in: q-shifted klist
+  !!@param     ol,in: the list of the properties of orbitals at footnote of chi
+  !!@param     wl,in: the list of frequency
+  !!@param   Nchi,in: The footnote of chi
+  !!@param   Norb,in: The number of orbitals
+  !!@param     Nk,in: The number of k-points
+  !!@param     Nw,in: The number of frequency mesh
+  !!@param idelta,in: dumping factor
+  !!@param    eps,in: threshold of calculation value
+  !!@param   temp,in: temperature
   use calc_irr_chi
   implicit none
   integer(int64),intent(in):: Nk,Norb,Nw,Nchi
@@ -147,6 +180,24 @@ subroutine get_chi_irr(chi,uni,eig,ffermi,qshift,ol,wl,Nchi,Norb,Nk,Nw,idelta,ep
 end subroutine get_chi_irr
 
 subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,eps,Nx,Ny,Nk,Norb,Nchi) bind(C)
+  !> This function obtains irreducible susceptibility at w=ecut
+  !!@param trchis,out: trace value of chi_s
+  !!@param  trchi,out: trace value of chi_0
+  !!@param     uni,in: unitary matrix
+  !!@param     eig,in: energies of bands
+  !!@param  ffermi,in: fermi distribute function
+  !!@param   klist,in: klist
+  !!@param    Smat,in: S-matrix
+  !!@param      ol,in: the list of the properties of orbitals at footnote of chi
+  !!@param    temp,in: temperature
+  !!@param    ecut,in: energy value of cut energy plane
+  !!@param  idelta,in: dumping factor
+  !!@param     eps,in: threshold of calculation value
+  !!@param      Nx,in: The number of kx mesh
+  !!@param      Ny,in: The number of ky mesh
+  !!@param      Nk,in: The number of k-points
+  !!@param    Norb,in: The number of orbitals
+  !!@param    Nchi,in: The footnote of chi
   use calc_irr_chi
   implicit none
   integer(int64),intent(in):: Nx,Ny,Nk,Norb,Nchi
@@ -219,6 +270,12 @@ subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,e
 end subroutine chiq_map
 
 subroutine get_chis(chis,chi0,Smat,Nchi,Nw) bind(C)
+  !> This function obtain spin susceptibility
+  !!@param chis,out: spin susceptibility
+  !!@param  chi0,in: irreducible susceptibility
+  !!@param  Smat,in: S-matrix
+  !!@param  Nchi,in: The footnote of chi
+  !!@param    Nw,in: The numb er of w mesh
   use,intrinsic:: iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nchi,Nw

@@ -1,7 +1,11 @@
 subroutine get_scmat(Smat,Cmat,ol,Uval,Jval,Nchi) bind(C)
-  !
   !> make S and C that is onsite interaction verteces without SOC
-  !
+  !!@param Smat,out: S-matrix (vertex matrix for spin), size(Nchi,Nchi)
+  !!@param Cmat,out: C-matrix (vertex matrix for charge), size(Nchi,Nchi)
+  !!@param    ol,in: list of orbitals, size(Nchi,2)
+  !!@param  Uva,inl: U value
+  !!@param  Jval,in: J value
+  !!@param  Nchi,in: The number of orbitals for chi
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nchi
@@ -43,9 +47,13 @@ subroutine get_scmat(Smat,Cmat,ol,Uval,Jval,Nchi) bind(C)
 end subroutine get_scmat
 
 subroutine get_Vmat_soc(Vmat,osl,Uval,Jval,Nchi,Norb)
-  !
   !> make onsite interaction vertex V with SOC
-  !
+  !!@param Vmat,out: V-matrix (vertex matrix for soc calculation), size(Nchi,Nchi)
+  !!@param   osl,in: list of orbitals, size(Nchi,4)
+  !!@param  Uval,in: U value
+  !!@param  Jval,in: J value
+  !!@param  Nchi,in: The number of orbitals for chi
+  !!@param  Norb,in: The number of orbitals
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nchi,Norb
