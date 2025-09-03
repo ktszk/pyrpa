@@ -294,6 +294,17 @@ def mk_qlist(k_set,Nx:int,Ny:int,Nz:int,bvec):
     return np.array(qlist),np.array(splen),xticks
 
 def mk_kf(mesh,rvec,ham_r,S_r,RotMat,mu:float,kz):
+    """
+    @fn mk_kf()
+    @brief This function obtains 2d fermi wave-number
+    @param   mesh: k-mesh
+    @param   rvec: r vector of hoppings
+    @param  ham_r: hopping parameters
+    @param    S_r: overlap integrals
+    @param RotMat: rotation matrix
+    @param     mu: chemical potential
+    @param     kz: kz value
+    """
     import skimage.measure as sk
     Nk,klist=gen_klist(mesh+1,mesh+1,kz=kz)
     rvec1=RotMat.dot(rvec.T).T.copy()
@@ -309,6 +320,16 @@ def mk_kf(mesh,rvec,ham_r,S_r,RotMat,mu:float,kz):
     return v2,fsband
 
 def gen_3d_surf_points(mesh,rvec,ham_r,S_r,mu,kscale=1.0):
+    """
+    @fn gen_3d_surf_points()
+    @brief This function obtains 3d fermi wave-numbers
+    @param   mesh: k-mesh
+    @param   rvec: r vector of hoppings
+    @param  ham_r: hopping parameters
+    @param    S_r: overlap integrals
+    @param     mu: chemical potential
+    @param kscale: change considering k-space area 1.0 is only 1st BZ
+    """
     import skimage.measure as ski
     Nk,klist=gen_klist(mesh+1,mesh+1,mesh+1)
     klist=klist*kscale
