@@ -10,6 +10,7 @@ __pycache__/
 
 # output files
 Fk*
+Gpade.dat
 gap*
 chis*
 chi0.dat

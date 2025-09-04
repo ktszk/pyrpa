@@ -74,6 +74,15 @@ subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb) bind(C,name="gen_green0_")
 end subroutine gen_green0
 
 subroutine gen_green_inv(Gk,self,hamk,mu,temp,Nk,Nw,Norb) bind(C,name="gen_green_inv_")
+  !> This function obtains inverse of green function G^-1
+  !!@param  Gk,out: inverse of green function
+  !!@param self,in: self energies
+  !!@param hamk,in: hamiltonian at k-point
+  !!@param   mu,in: chemical potential
+  !!@param temp,in: Temperature
+  !!@param   Nk,in: The number of k-points
+  !!@param   Nw,in: The number of energies mesh
+  !!@param Norb,in: The number of orbitals
   use,intrinsic:: iso_fortran_env, only: int64,real64,int32
   use constant
   implicit none
@@ -107,6 +116,16 @@ subroutine gen_green_inv(Gk,self,hamk,mu,temp,Nk,Nw,Norb) bind(C,name="gen_green
 end subroutine gen_green_inv
 
 subroutine gen_green_inv_from_eig(Gk,self,uni,eig,mu,temp,Nk,Nw,Norb) bind(C)
+  !> This function obtains inverse of green function G^-1 form energy and unitary matrix
+  !!@param  Gk,out: inverse of green function
+  !!@param self,in: self energies
+  !!@param  uni,in: unitary matrix
+  !!@param  eig,in: energies at k-points
+  !!@param   mu,in: chemical potential
+  !!@param temp,in: Temperature
+  !!@param   Nk,in: The number of k-points
+  !!@param   Nw,in: The number of energies mesh
+  !!@param Norb,in: The number of orbitals
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   use constant
   implicit none
@@ -143,6 +162,11 @@ subroutine gen_green_inv_from_eig(Gk,self,uni,eig,mu,temp,Nk,Nw,Norb) bind(C)
 end subroutine gen_green_inv_from_eig
 
 subroutine getinv(Gk,Nk,Nw,Norb) bind(C,name="getinv_")
+  !> This function obtain green function form G^-1
+  !!@param Gk,inout: green function
+  !!@param    Nk,in: The number of k-points
+  !!@param    Nw,in: The number of energies mesh
+  !!@param  Norb,in: The number of orbitals
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nk,Nw,Norb
@@ -212,7 +236,6 @@ subroutine get_chi_map(chi_map,irr_chi,olist,Nchi)
         end if
      end do
   end do
-
 end subroutine get_chi_map
 
 subroutine get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,&

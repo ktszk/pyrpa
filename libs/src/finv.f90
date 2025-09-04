@@ -99,7 +99,9 @@ contains
     real(real64),intent(out),dimension(3,Nk)::klist
 
     integer(int32) i,j,k,iter_k,iter_k_ini
+    !$omp parallel workshare
     klist(:,:)=0.0d0
+    !$omp end parallel workshare
     if(mod(Nx,2)==0 .and. mod(Ny,2)==0)then !Nx,Ny are even
        !$omp parallel
        !$omp do private(j,i,iter_k)

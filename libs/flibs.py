@@ -489,6 +489,21 @@ def gen_SCmatrix(olist,U,J):
     flibs.get_scmat(Smat,Cmat,olist,byref(c_double(U)),byref(c_double(J)),byref(c_int64(Nchi)))
     return Smat,Cmat
 
+def gen_SCmatrix_orb(olist,Umat,Jmat):
+    Nchi=len(olist)
+    Norb=len(Umat)
+    Smat=np.zeros((Nchi,Nchi),dtype=np.float64)
+    Cmat=np.zeros((Nchi,Nchi),dtype=np.float64)
+    flibs.get_scmat_orb.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64), #Smat
+                                  np.ctypeslib.ndpointer(dtype=np.float64), #Cmat
+                                  np.ctypeslib.ndpointer(dtype=np.float64), #Umat
+                                  np.ctypeslib.ndpointer(dtype=np.float64), #Jmat
+                                  np.ctypeslib.ndpointer(dtype=np.int64),   #olist
+                                  POINTER(c_int64),POINTER(c_int64)]        #Nchi,Norb
+    flibs.get_scmat_orb.restype=c_void_p
+    flibs.get_scmat_orb(Smat,Cmat,olist,Umat,Jmat,byref(c_int64(Nchi)),byref(c_int64(Norb)))
+    return Smat,Cmat
+
 def calc_Lij(eig,vk,ffermi,mu:float,w:float,idelta:float,temp:float):
     Nk=len(eig)
     Norb=int(eig.size/Nk)
@@ -691,6 +706,30 @@ def linearized_eliashberg_soc(Gk,uni,Vmat,slist,olist,kmap,invk,Nx:int,Ny:int,Nz
                      byref(c_int64(Nx)),byref(c_int64(Ny)),byref(c_int64(Nz)),
                      byref(c_int64(itemax)),byref(c_int64(gap_sym)))
     return delta
+
+def gen_Vmatrix(oslist,U,J,Norb):
+    Nchi=len(oslist)
+    Vmat=np.zeros((Nchi,Nchi),dtype=np.float64)
+    flibs.get_vmat_soc.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64), #Vmat
+                                 np.ctypeslib.ndpointer(dtype=np.int64),   #oslist
+                                 POINTER(c_double),POINTER(c_double),      #U,J
+                                 POINTER(c_int64),POINTER(c_int64)]        #Nchi,Norb
+    flibs.get_vmat_soc.restype=c_void_p
+    flibs.get_vmat_soc(Vmat,oslist,byref(c_double(U)),byref(c_double(J)),
+                       byref(c_int64(Nchi)),byref(c_int64(Norb)))
+    return Vmat
+
+def gen_Vmatrix_orb(oslist,Umat,Jmat):
+    Nchi,Norb=len(oslist),len(Umat)
+    Vmat=np.zeros((Nchi,Nchi),dtype=np.float64)
+    flibs.get_vmat_soc_orb.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64), #Vmat
+                                     np.ctypeslib.ndpointer(dtype=np.float64), #Umat
+                                     np.ctypeslib.ndpointer(dtype=np.float64), #Jmat
+                                     np.ctypeslib.ndpointer(dtype=np.int64),   #oslist
+                                     POINTER(c_int64),POINTER(c_int64)]        #Nchi,Norb
+    flibs.get_vmat_soc_orb.restype=c_void_p
+    flibs.get_vmat_soc_orb(Vmat,oslist,Umat,Jmat,byref(c_int64(Nchi)),byref(c_int64(Norb)))
+    return Vmat
 
 def conv_delta_orb_to_band(delta,uni,invk):
     Nkall,Nk,Nw,Norb=len(invk),len(uni),len(delta[0,0]),len(delta)

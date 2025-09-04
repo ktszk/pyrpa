@@ -14,7 +14,7 @@ ifeq ($(FC),ifort)
 else
   ifeq ($(FC),ifx)
     LIBS= -qmkl
-    FFLAGS= -O2 -mavx2 -qopenmp -finline-functions -fPIC -heap-arrays -assume nan_compares
+    FFLAGS= -O2 -mavx2 -qopenmp -init:snan -finline-functions -fPIC -heap-arrays
     FFLAGS2= -shared
   else
     ifeq ($(FC),flang)
@@ -37,7 +37,7 @@ else
             LIBS= -lopenblas -lfftw3
           endif
         endif
-        FFLAGS= -O2 -mavx2 -fopenmp -finline-functions -fPIC
+        FFLAGS= -O2 -mavx2 -fopenmp -finline-functions -fimplicit-none -finit-integer=NaN -finit-real=NaN -fPIC
         FFLAGS2= -shared
       endif
     endif

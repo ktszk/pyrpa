@@ -34,7 +34,6 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
   !$omp do reduction(+: L11,L12,L22) private(i,l,m,j,k,tmp)
   k_loop: do i=1,Nk
      band_loop1: do l=1,Norb
-        !$omp simd
         band_loop2: do m=1,Norb
            do j=1,3
               do k=1,3
@@ -53,7 +52,6 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
               end do
            end do
         end do band_loop2
-        !$omp end simd
      end do band_loop1
   end do k_loop
   !$omp end do

@@ -1,6 +1,27 @@
 subroutine lin_eliash(delta,Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,temp,eps,&
      Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym) bind(C)
-  !> calculate linearized eliashberg equations
+  !> calculate linearized eliashberg equations with TRS without soc
+  !!@param     delta,out: gap function
+  !!@param         Gk,in: normal green function
+  !!@param        uni,in: unitary matrix
+  !!@param init_delta,in: band basis initial gap function
+  !!@param       Smat,in: S-matrix
+  !!@param       Cmat,in: C-matrix
+  !!@param      olist,in: property of chi footnote
+  !!@param       kmap,in: property of k-points
+  !!@param       invk,in: list of reverse k-points
+  !!@param       temp,in: Temperature
+  !!@param        eps,in: Threshold of calculation
+  !!@param      Nkall,in: Number of all k-points
+  !!@param         Nk,in: Number of k-points
+  !!@param         Nw,in: Number of Matsubara frequencies
+  !!@param       Nchi,in: Number of footnote of chi
+  !!@param       Norb,in: Number of orbitals
+  !!@param         Nx,in: Number of kx mesh
+  !!@param         Ny,in: Number of ky mesh
+  !!@param         Nz,in: Number of kz mesh
+  !!@param     itemax,in: maximum iteration of power method
+  !!@param    gap_sym,in: gap symmetry number
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym
@@ -114,8 +135,12 @@ contains
     maxchi0s2=-1.0d5
     maxchi0c2=-1.0d5
     do i=1,Nk
+       !$omp parallel
+       !$omp workshare
        chi0s(:,:)=0.0d0
        chi0c(:,:)=0.0d0
+       !$omp end workshare
+       !$omp do private(l,m,n)
        do l=1,Nchi
           do m=1,Nchi
              do n=1,Nchi
@@ -124,6 +149,8 @@ contains
              end do
           end do
        end do
+       !$omp end do
+       !$omp end parallel
        call zgeev('N','N',Nchi,chi0s,Nchi,eigs,tmp1,Nchi,tmp2,Nchi,work,Nchi*Nchi*4+1,rwork,info)
        call zgeev('N','N',Nchi,chi0c,Nchi,eigc,tmp1,Nchi,tmp2,Nchi,work,Nchi*Nchi*4+1,rwork,info)
        maxchi0s=maxval(dble(eigs))
@@ -137,7 +164,7 @@ contains
           maxchi0c2=maxchi0c
        end if
     end do
-    do i=1,Nkall
+    do i=1,Nkall !get kmap footnote
        if(invk(2,i)==0)then
           if(invk(1,i)==chisk)chiskall=i
           if(invk(1,i)==chick)chickall=i
@@ -328,17 +355,21 @@ subroutine mkfk_trs_nsoc(fk,Gk,delta,invk,Nkall,Nk,Nw,Norb) bind(C,name="mkfk_tr
         if(l/=m)then !if TRS and no SOC delta^+(k,iw)=delta(k,iw)
            !$omp do private(i,j)
            do j=1,Nw
+              !$omp simd
               do i=1,Nkall
                  fk(i,j,l,m)=conjg(fk(i,j,m,l))
               end do
+              !$omp end simd
            end do
            !$omp end do
         else
            !$omp do private(i,j)
            do j=1,Nw
+              !$omp simd
               do i=1,Nkall
                  fk(i,j,l,l)=dble(fk(i,j,l,l))
               end do
+              !$omp end simd
            end do
            !$omp end do
         end if
@@ -435,9 +466,11 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,olist,Nkall,Nk
            do n=1,2*Nw
               do k=0,Nz-1
                  do j=0,Ny-1
+                    !$omp simd
                     do i=0,Nx-1
                        tmp(i,j,k,n)=tmpVdelta(i,j,k,n)*tmpfk(i,j,k,n)
                     end do
+                    !$omp end simd
                  end do
               end do
            end do
@@ -479,6 +512,16 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,olist,Nkall,Nk
 end subroutine mkdelta_nsoc
 
 subroutine get_initial_delta(delta,init_delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,gap_sym)
+  !> make orbital basis initial gap function
+  !!@param     delta,out: gap function
+  !!@param init_delta,in: band basis initial gap function
+  !!@param        uni,in: unitary matrix
+  !!@param       kmap,in: property of k-points
+  !!@param       invk,in: footnote of reverse k
+  !!@param      Nkall,in: Number of all k-points
+  !!@param         Nk,in: Number of irreducible k-points
+  !!@param       Norb,in: Number of orbitals
+  !!@param    gap_sym,in: gap symmetry number
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   use constant
   implicit none
@@ -524,9 +567,11 @@ subroutine get_initial_delta(delta,init_delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,gap
            !$omp end do
            !$omp do private(i,j)
            do j=2,Nw
+              !$omp simd
               do i=1,Nkall
                  delta(i,j,m,l)=delta(i,1,m,l)
               end do
+              !$omp end simd
            end do
            !$omp end do
            !$omp do private(i,j)
@@ -565,6 +610,15 @@ subroutine get_initial_delta(delta,init_delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,gap
 end subroutine get_initial_delta
 
 subroutine conv_delta_orb_to_band(deltab,delta,uni,invk,Norb,Nkall,Nk,Nw) bind(C)
+  !> This function transform orbital basis gap function into band basis gap function
+  !!@param deltab,out: band basis gap function
+  !!@param   delta,in: orbital basis gap function
+  !!@param     uni,in: unitary matrix
+  !!@param    invk,in: footnote of reverse k
+  !!@param    Norb,in: Number of orbital
+  !!@param   Nkall,in: Number of all k-points
+  !!@param      Nk,in: Number of irreducible k-points
+  !!oparam      Nw,in: Number of Matsubara frequencies
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nw,Norb,Nk,Nkall

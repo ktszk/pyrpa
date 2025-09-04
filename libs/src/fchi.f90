@@ -232,11 +232,9 @@ subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,e
         tmp(:,:)=0.0d0
         do l=1,Nchi
            do m=1,Nchi
-              !$omp simd
               do n=1,Nchi
                  tmp(m,l)=tmp(m,l)-chi(m,n)*Smat(n,l)
               end do
-              !$omp end simd
            end do
            tmp(l,l)=tmp(l,l)+1.0d0
         end do
@@ -245,11 +243,9 @@ subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,e
         tmp2(:,:)=0.0d0
         do l=1,Nchi
            do m=1,Nchi
-              !$omp simd
               do n=1,Nchi
                  tmp2(m,l)=tmp2(m,l)+tmp(m,n)*chi(n,l)
               end do
-              !$omp end simd
            end do
         end do
         !take chis_llmm
@@ -307,7 +303,7 @@ subroutine get_chis(chis,chi0,Smat,Nchi,Nw) bind(C)
      do l=1,Nchi
         do n=1,Nchi
            !$omp simd
-           do m=1,Nchi
+           do m=1,Nchi !chis is initialized in flibs.py
               chis(m,l,i)=chis(m,l,i)+tmp(m,n)*chi0(n,l,i)
            end do
            !$omp end simd

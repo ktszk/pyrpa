@@ -43,12 +43,10 @@ subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   klop: do i=1,Nk
      do l=1,Norb
         do m=l,Norb
-           !$omp simd
            rloop: do j=1,Nr
               phase=2*pi*sum(klist(:,i)*rvec(:,j))
               ham_k(m,l,i)=ham_k(m,l,i)+ham_r(m,l,j)*cmplx(cos(phase),-sin(phase))
            end do rloop
-           !$omp end simd
            if(l==m)then
               ham_k(l,l,i)=dble(ham_k(l,l,i)) !diagonal is real
            else
@@ -112,10 +110,13 @@ subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,Norb) bind(C)
   kloop: do i=1,Nk
      tmp(:,:)=Ovlk(:,:,i)
      call zheev('V','U',norb,tmp,norb,eq,work,2*norb-1,rwork,info)
+     !$omp simd
      do j=1,Norb
         tmp2(:,j)=tmp(:,j)/sqrt(cmplx(eq(j)))
      end do
+     !$omp end simd
      tmp(:,:)=0.0d0
+     !$omp simd
      do j=1,Norb
         do k=1,Norb
            do l=1,Norb
@@ -125,6 +126,7 @@ subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,Norb) bind(C)
            end do
         end do
      end do
+     !$omp end simd
      call zheev('V','U',norb,tmp,norb,eq,work,2*norb-1,rwork,info)
      eig(:,i)=eq(:)
      tmp3(:,:)=0.0d0
@@ -184,17 +186,18 @@ subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   kloop: do i=1,Nk
      do l=1,Norb
         do m=l,Norb
-           !$omp simd
            rloop: do j=1,Nr
               phase=2*pi*sum(klist(:,i)*rvec(:,j))
+              !$omp simd
               axis1: do k=1,3
                  axis2: do n=k,3
                     imk(n,k,m,l,i)=imk(n,k,m,l,i)-rvec(n,j)*rvec(k,j)&
                          *ham_r(m,l,j)*cmplx(cos(phase),-sin(phase))
                  end do axis2
               end do axis1
+              !$omp end simd
            end do rloop
-           !$omp end simd
+           !$omp simd
            axis12: do k=1,3
               axis22: do n=k,3
                  imk(k,n,m,l,i)=imk(n,k,l,m,i)
@@ -202,6 +205,7 @@ subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
                  imk(k,n,m,l,i)=imk(n,k,l,m,i)
               end do axis22
            end do axis12
+           !$omp end simd
         end do
      end do
   end do kloop

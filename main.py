@@ -55,7 +55,7 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=18
+option=17
 color_option=1
 
 Nx,Ny,Nz,Nw=32,32,4,512 #k and energy(or matsubara freq.) mesh size
@@ -87,8 +87,8 @@ U,J=1.2,0.15
 gap_sym=2
 
 #mu0=9.85114560061123
-k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
-xlabel=[r'$\Gamma$','X','M']
+#k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
+#xlabel=[r'$\Gamma$','X','M']
 at_point=[ 0., .5, 0.]
 sw_calc_mu=False #calculate mu or not
 sw_unit=True    #set unit values unity (False) or not (True)
