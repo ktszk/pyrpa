@@ -328,12 +328,12 @@ def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
 
     itemp=1./temp
     mu=plibs.calc_mu(eig,Nk,fill,temp)
-    print("T = %6.3f K"%(temp/kb),flush=True)
-    print("mu = %6.3f eV"%mu,flush=True)
+    print(f"T = {temp/kb:.3f} K",flush=True)
+    print(f"mu = {mu:.4f} eV",flush=True)
     if tauconst:
-        print("tau = %d"%tau_const+('fs' if sw_unit else ''),flush=True)
+        print(f"tau = {tau_const} "+('fs' if sw_unit else ''),flush=True)
     else:
-        print("max tau = %d"%tau.max()+('fs' if sw_unit else ''),flush=True)
+        print(f"max tau = {tau.max()} "+('fs' if sw_unit else ''),flush=True)
     if sw_tdf:
         tdf=flibs.calc_tdf(eig,vk,kweight,tau,Nw)
         wlist=np.linspace(eig.min(),eig.max(),Nw)
@@ -357,23 +357,32 @@ def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
     sigmaS=gsp*tau_unit*kb*eC*K1*iNV*itemp
     PF=sigma*Seebeck**2
     print('sigma matrix (S/m)',flush=True)
-    print(sigma.round(10),flush=True)
-    print('kappa matrix (K22 only) (W/m/K',flush=True)
-    print(kappa.round(10),flush=True)
+    for sig in sigma.round(10):
+        print(f" {sig[0]:10.3e} {sig[1]:10.3e} {sig[2]:10.3e}",flush=True)
+    print('kappa matrix (K22 only) (W/m/K)',flush=True)
+    for kap in kappa.round(10):
+        print(f" {kap[0]:10.3e} {kap[1]:10.3e} {kap[2]:10.3e}",flush=True)
     print('kappa matrix (full) (W/m/K)',flush=True)
-    print(kappa2.round(10),flush=True)
+    for kap in kappa2.round(10):
+        print(f" {kap[0]:10.3e} {kap[1]:10.3e} {kap[2]:10.3e}",flush=True)
     print('sigmaS matrix (A/m/K)',flush=True)
-    print(sigmaS.round(10),flush=True)
+    for sig in sigmaS.round(10):
+        print(f" {sig[0]:10.3e} {sig[1]:10.3e} {sig[2]:10.3e}",flush=True)
     print('Seebeck matrix (V/K)',flush=True)
-    print(Seebeck.round(10),flush=True)
+    for seeb in Seebeck.round(10):
+        print(f" {seeb[0]:10.3e} {seeb[1]:10.3e} {seeb[2]:10.3e}",flush=True)
     print('Pertier matrix (V)',flush=True)
-    print(Pertier.round(13),flush=True)
+    for per in Pertier.round(10):
+        print(f" {per[0]:10.3e} {per[1]:10.3e} {per[2]:10.3e}",flush=True)
     print('Lorenz matrix (K22 only) (Wohm/K^2) (fe 2.44e-8)',flush=True)
-    print(Lorenz.round(10),flush=True)
+    for lor in Lorenz.round(10):
+        print(f" {lor[0]:9.2e} {lor[1]:9.2e} {lor[2]:9.2e}",flush=True)
     print('Lorenz matrix? (full) (Wohm/K^2)',flush=True)
-    print(Lorenz2.round(10),flush=True)
+    for lor in Lorenz2.round(10):
+        print(f" {lor[0]:9.2e} {lor[1]:9.2e} {lor[2]:9.2e}",flush=True)
     print('Power Factor (SA/m^2/K)',flush=True)
-    print(PF.round(10),flush=True)
+    for pofa in PF.round(8):
+        print(f" {pofa[0]:10.3e} {pofa[1]:10.3e} {pofa[2]:10.3e}",flush=True)
 
 def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
                          temp:float,Nw:int,delta,with_spin=False):
@@ -387,10 +396,10 @@ def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
     gsp=(1.0 if with_spin else 2.0) #spin weight
     mu=plibs.calc_mu(eig,Nk,fill,temp)
     delta=hbar*1.e15/100
-    print('chemical potential = %6.3f'%mu,flush=True)
-    print('tempreture = %6.3f'%(temp/kb),flush=True)
-    print('about tau = %6.3ffs'%(1.e15*hbar/delta),flush=True)
-    print('delta = %9.3e'%delta,flush=True)
+    print(f'chemical potential = {mu:.4f} eV',flush=True)
+    print(f'tempreture = {temp/kb:.3f} K',flush=True)
+    print(f'about tau = {1.e15*hbar/delta:.3f} fs',flush=True)
+    print(f'delta = {delta:9.3e}',flush=True)
     L11,L12,L22,wlist=plibs.get_conductivity(mu,temp,eig,vk,Nw,Emax,delta)
     sigmaconst=gsp*hbar*eC/Vuc*1.0e30
     kappaSconst=sigmaconst*kb/temp
@@ -399,16 +408,20 @@ def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
     sigmaS=kappaSconst*L12
     Seebeck=np.array([-sclin.inv(s).dot(sS) for s,sS in zip(sigma,sigmaS)])
     print('sigma matrix (S/m)',flush=True)
-    print(sigma[0].real.round(10),flush=True)
+    for sig in sigma[0].real.round(10):
+        print(f" {sig[0]:10.3e} {sig[1]:10.3e} {sig[2]:10.3e}",flush=True)
     print('kappa matrix (L22 only) (W/m/K)',flush=True)
-    print(kappa[0].real.round(10),flush=True)
+    for kap in kappa[0].real.round(10):
+        print(f" {kap[0]:10.3e} {kap[1]:10.3e} {kap[2]:10.3e}",flush=True)
     print('sigmaS matrix (A/m/K)',flush=True)
-    print(sigmaS[0].real.round(10),flush=True)
+    for sig in sigmaS[0].real.round(10):
+        print(f" {sig[0]:10.3e} {sig[1]:10.3e} {sig[2]:10.3e}",flush=True)
     print('Lorenz number (Wohm/K^2) (fe 2.44e-8)',flush=True)
-    print((kb*kappa[0]*sclin.inv(sigma[0]*temp)).real.round(10),flush=True)
+    for lor in (kb*kappa[0]*sclin.inv(sigma[0]*temp)).real.round(10):
+        print(f" {lor[0]:9.2e} {lor[1]:9.2e} {lor[2]:9.2e}",flush=True)
     print('Seebeck coefficient matrix (V/K)',flush=True)
-    print(Seebeck[0].real.round(10),flush=True)
-    print(hbar,flush=True)
+    for seeb in Seebeck[0].real.round(10):
+        print(f" {seeb[0]:10.3e} {seeb[1]:10.3e} {seeb[2]:10.3e}",flush=True)
     fig=plt.figure()
     ax=fig.add_subplot(211)
     ax.plot(wlist,sigma[:,0,0].real)
@@ -493,7 +506,7 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,sw_
         ham_k=flibs.gen_ham(klist,ham_r,rvec)
         npz=np.load('self_en.npz')
         sigmak,mu_self=npz['arr_0'],npz['arr_1']
-        print('chem. pot. with self= %7.4f'%mu_self,flush=True)
+        print(f'chem. pot. with self= {mu:.4f} eV',flush=True)
         Gk=flibs.gen_green(sigmak,ham_k,mu_self,temp)
     else:
         Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
@@ -552,7 +565,7 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,olist,
         else:
             sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,
                                         mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
-        print('chem. pot. with self= %7.4f'%mu_self,flush=True)
+        print(f'chem. pot. with self= {mu:.4f} eV',flush=True)
         Gk=flibs.gen_green(sigmak,ham_k,mu_self,temp)
     else:
         Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
@@ -571,11 +584,11 @@ def get_carrier_num(kmesh,rvec,ham_r,S_r,mu:float,Arot):
         num_particle=float(np.where(en<=0)[0].size)/Nk
         print(i+1,round(num_hole,4),round(num_particle,4),flush=True)
         fill+=num_particle
-    print('sum of electrons is %5.3f'%fill,flush=True)
+    print(f'sum of electrons is {fill:.4f}',flush=True)
 
 def get_mu(ham_r,S_r,rvec,Arot,temp:float,kmesh=40)->float:
     print("calc chem. pot.",flush=True)
-    print("band filling = %f"%fill,flush=True)
+    print(f"band filling = {fill:.4f}",flush=True)
     Nk,eig,kweight=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,S_r,rvec,Arot)
     mu=plibs.calc_mu(eig,Nk,fill,temp)
     return mu
@@ -627,14 +640,14 @@ def main():
     cstr=["no color",'orbital weight','velocity size']
     if omp_check:
         print("OpenMP mode",flush=True)
-        print("Number of OpenMP threads = %d"%omp_num,flush=True)
-    print("calc mode %d: "%option+opstr[option],flush=True)
+        print(f"Number of OpenMP threads = {omp_num}",flush=True)
+    print(f"calc mode {option}: "+opstr[option],flush=True)
     if option in {0,2,3}:
         print("color mode: "+cstr[color_option],flush=True)
     print("Hamiltonian name is "+fname,flush=True)
-    print("Number of orbital =",no,flush=True)
+    print(f"Number of orbital = {no}",flush=True)
     if option in {7,8,9,14,17}:
-        print(f'U= {U:4.2f} and J= {J:4.2f}')
+        print(f'U= {U:5.2f} and J= {J:5.3f}')
     if option in {7,8,9,10,11,14,17}:
         try:
             chiolist
@@ -647,19 +660,19 @@ def main():
     if option in {0,4}:
         if sw_gen_sym:
             print('generate symmetry line',flush=True)
-        print('kmesh = %d'%kmesh,flush=True)
+        print(f'kmesh = {kmesh}',flush=True)
     elif option in {2,3,9,11,12,13}:
-        print('Number of k-mesh = %d'%(Nx),flush=True)
+        print(f'Number of k-mesh = {Nx}',flush=True)
     else:
-        print('k-mesh is %d %d %d'%(Nx,Ny,Nz),flush=True)
+        print(f'k-mesh is {Nx} {Ny} {Nz}',flush=True)
     if option in {14,17}:
-        print(f'Number of Matsubara freq. = ',Nw,flush=True)
+        print(f'Number of Matsubara freq. = {Nw}',flush=True)
     print("Lattice Vector (Angstrom)",flush=True)
     for i,a in enumerate(avec):
-        print("a%d: "%i+"%8.4f %8.4f %8.4f"%tuple(a),flush=True)
+        print(f"a{i+1}: {a[0]:7.4f} {a[1]:7.4f} {a[2]:7.4f}",flush=True)
     print("Reciprocal Lattice Vector (Angstrom^-1)",flush=True)
     for i,b in enumerate(bvec):
-        print("b%d: "%i+"%8.4f %8.4f %8.4f"%tuple(b),flush=True)
+        print(f"b{i+1}: %7.4f %7.4f %7.4f"%tuple(b),flush=True)
     if option in {5,6,16}:
         pass
     else:
@@ -668,8 +681,8 @@ def main():
         else:
             mu=mu0
             print('use fixed mu')
-        print('Temperature = %10.4e eV (%8.2e K) '%(temp,temp/kb),flush=True)
-        print('chem. pot. = %7.4f eV'%mu,flush=True)
+        print(f'Temperature = {temp:10.3e} eV ({temp/kb:.2f} K)',flush=True)
+        print(f'chem. pot. = {mu:.4f} eV',flush=True)
 
     if option==0: #plot band
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
