@@ -23,9 +23,6 @@ else: monoclinic
 #fname,ftype,brav='inputs/Sr2RuO4',2,2
 #fname,ftype,brav='inputs/SiMLO.input',3,6
 fname,ftype,brav='inputs/NdFeAsO.input',1,0
-#fname,ftype,brav='inputs/010.input',1,0
-#fname,ftype,brav='inputs/square.hop',1,0
-#fname,ftype,brav='inputs/hop3.input',1,0
 
 sw_dec_axis=False
 
@@ -43,19 +40,19 @@ option defines calculation modes
  9: calc chis on xy plane at Ecut
 10: calc phi spectrum with symmetry line
 11: calc phi on xy plane at Ecut
-12: calc carrier num.
-13: calc cycrotron mass (not implement)
-14: calc selfenergy using flex
-15: mass calculation (not implement)
-16: spectrum with impurity (not implement)
-17: solve linearized eliashberg equation
-18: post process of gap functions
+12: calc selfenergy using flex
+13: solve linearized eliashberg equation
+14: post process of gap functions
+15: calc carrier num.
+16: calc cycrotron mass (not implement)
+17: mass calculation (not implement)
+18: spectrum with impurity (not implement)
 color_option defines the meaning of color on Fermi surfaces
  0: band or mono color
  1: orbital weight settled by olist
  2: velocity size
 """
-option=14
+option=13
 color_option=1
 
 Nx,Ny,Nz,Nw=32,32,4,512 #k and energy(or matsubara freq.) mesh size
@@ -90,7 +87,6 @@ gap_sym=2
 #k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
 #xlabel=[r'$\Gamma$','X','M']
 at_point=[ 0., .5, 0.]
-sw_calc_mu=False #calculate mu or not
 sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 sw_omega=False #True: real freq, False: Matsubara freq.
@@ -635,10 +631,9 @@ def main():
            "calculate conductivities with linear response","calculate chis spectrum",
            "calculate chis at q-point","calculate chis qmap at Ecut",
            "calc phi spectrum with symmetry line","calc phi on xy plane at Ecut",
-           "calculate carrier number","calculate cycrtron mass","calc self energy",
-           "calculate electron mass","spectrum with impurity",
-           "solve linearized eliashberg equation",
-           "gap_function"]
+           "calc self energy","solve linearized eliashberg equation",
+           "gap_function","calculate carrier number","calculate cycrtron mass",
+           "calculate electron mass","spectrum with impurity"]
     cstr=["no color",'orbital weight','velocity size']
     if omp_check:
         print("OpenMP mode",flush=True)
@@ -648,9 +643,9 @@ def main():
         print("color mode: "+cstr[color_option],flush=True)
     print("Hamiltonian name is "+fname,flush=True)
     print(f"Number of orbital = {no}",flush=True)
-    if option in {7,8,9,14,17}:
+    if option in {7,8,9,12,13}:
         print(f'U= {U:5.2f} and J= {J:5.3f}')
-    if option in {7,8,9,10,11,14,17}:
+    if option in {7,8,9,10,11,12,13}:
         try:
             chiolist
         except NameError:
@@ -663,11 +658,11 @@ def main():
         if sw_gen_sym:
             print('generate symmetry line',flush=True)
         print(f'kmesh = {kmesh}',flush=True)
-    elif option in {2,3,9,11,12,13}:
+    elif option in {2,3,9,11,15,16}:
         print(f'Number of k-mesh = {Nx}',flush=True)
     else:
         print(f'k-mesh is {Nx} {Ny} {Nz}',flush=True)
-    if option in {14,17}:
+    if option in {12,13}:
         print(f'Number of Matsubara freq. = {Nw}',flush=True)
     print("Lattice Vector (Angstrom)",flush=True)
     for i,a in enumerate(avec):
@@ -675,7 +670,7 @@ def main():
     print("Reciprocal Lattice Vector (Angstrom^-1)",flush=True)
     for i,b in enumerate(bvec):
         print(f"b{i+1}: %7.4f %7.4f %7.4f"%tuple(b),flush=True)
-    if option in {5,6,16}:
+    if option in {5,6,18}:
         pass
     else:
         if sw_calc_mu:
@@ -685,7 +680,6 @@ def main():
             print('use fixed mu')
         print(f'Temperature = {temp:10.3e} eV ({temp/kb:.2f} K)',flush=True)
         print(f'chem. pot. = {mu:.4f} eV',flush=True)
-
     if option==0: #plot band
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         eig,uni0=plibs.get_eigs(klist,ham_r,S_r,rvec)
@@ -780,26 +774,31 @@ def main():
             plt.jet()
             #plt.show()
             plt.savefig(fname=susfname,dpi=300)
-    elif option==12: #calc carrier number
-        get_carrier_num(Nx,rvec,ham_r,mu,Arot)
-    elif option==13: #calc cycrtron mass
-        get_mass(Nx,rvec,ham_r,mu)
-    elif option==14: #calc self-energy using flex
-        if sw_soc:
+    elif option in {12,13}:
+        if sw_soc: #with soc
             try:
                 slist
             except NameError: #default, up(~norb/2-1)>down(norb/2~)
                 Norb=len(ham_r[0])
                 slist=np.ones(Norb)
                 slist[int(Norb/2):]=-1
-        else:
-            calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist)
-    elif option==15: #mass calc
+        else: #without soc
+            if option==12: #calc self-energy using flex
+                calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist)
+            elif option==13: #calc gap function
+                calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,mu,temp,gap_sym,sw_self)
+    elif option==14:
+        output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,sw_self)
+    elif option==15: #calc carrier number
+        get_carrier_num(Nx,rvec,ham_r,mu,Arot)
+    elif option==16: #calc cycrtron mass
+        get_mass(Nx,rvec,ham_r,mu)
+    elif option==17: #mass calc
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
         mass=flibs.get_mass(klist,ham_r,rvec,avec.T*ihbar,uni)*eC/emass
         print(mass[:,3,:,:])
-    elif option==16: #calc spectrum with impurity
+    elif option==18: #calc spectrum with impurity
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         rlist=plibs.gen_rlist(Nx,Ny,Nz)
         wlist=np.linspace(Emin,Emax,Nw,True)
@@ -815,18 +814,6 @@ def main():
         w,k=np.meshgrid(wlist,spa_length)
         plt.contourf(k,w,abs(spectrum.imag),100)
         plt.show()
-    elif option==17: #calc gap function
-        if sw_soc:
-            try:
-                slist
-            except NameError:
-                Norb=len(ham_r[0])
-                slist=np.ones(Norb)
-                slist[int(Norb/2):]=-1
-        else:
-            calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,mu,temp,gap_sym,sw_self)
-    elif option==18:
-        output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,sw_self)
 if __name__=="__main__":
     main()
 __license__="MIT"

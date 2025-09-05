@@ -5,6 +5,7 @@ pyrpa can calculate band structure, Dos, Fermi surface, conductivity, and etc. u
 # Requirements
 - fortran compiler (we check gcc 13.3 and newest AMD Flang(ROCm and aocc) and ifx)
 - lapack, blas, and FFTW (we check OpenBLAS, MKL, and AOCL(BLIS and Flame))
+- Make
 - python3 (we check 3.13.5)
 - python standard library
   - ctypes
@@ -27,3 +28,4 @@ fmod.so, plibs.py and flibs.py are placed with the fortran codes in the libs dir
 - enter the libs directory
 - edit Makefile, select compiler and math library.
 - do Make command then fmod.so is generated.
+- after that run main.py with your hopping model hamiltonian.
