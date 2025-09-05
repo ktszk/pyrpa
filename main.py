@@ -55,7 +55,7 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=17
+option=14
 color_option=1
 
 Nx,Ny,Nz,Nw=32,32,4,512 #k and energy(or matsubara freq.) mesh size
@@ -96,7 +96,7 @@ sw_tdf=False
 sw_omega=False #True: real freq, False: Matsubara freq.
 sw_self=False  #True: use calculated self energy for spectrum band plot
 sw_out_self=True
-sw_in_self=True
+sw_in_self=False
 sw_from_file=True
 sw_soc=False #use with soc hamiltonian
 #------------------------ initial parameters are above -------------------------------
@@ -476,7 +476,9 @@ def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,oli
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     ham_k=flibs.gen_ham(klist,ham_r,rvec)
     Smat,Cmat=flibs.gen_SCmatrix(olist,U,J)
-    sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
+    pp=0.5
+    eps=1.0e-4
+    sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,pp=pp)
     if sw_out_self:
         np.savez('self_en',sigmak,mu_self)
 
@@ -786,7 +788,7 @@ def main():
         if sw_soc:
             try:
                 slist
-            except NameError:
+            except NameError: #default, up(~norb/2-1)>down(norb/2~)
                 Norb=len(ham_r[0])
                 slist=np.ones(Norb)
                 slist[int(Norb/2):]=-1

@@ -658,7 +658,7 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   complex(real64),dimension(Nk,Nw,Norb,Norb):: Gk,sigmak0
   complex(real64),dimension(Nk,Nw,Nchi,Nchi):: chi
 
-  eps_sgm=1.0d-9
+  eps_sgm=1.0d-10
   mu=mu_init
   if(sw_in)then
      print*,"load self"
@@ -680,7 +680,7 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   end if
   call get_chi_map(chi_map,irr_chi,olist,Nchi)
   iter_loop: do scf_i=1,scf_loop
-     print*,'iter=',scf_i
+     print'(A5,I5)','iter=',scf_i
      call get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
      call get_Vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi)
      print'(A16,E12.4,A5,E12.4)','Re V_sigma: max:',maxval(dble(chi)),' min:',minval(dble(chi))
@@ -746,13 +746,17 @@ contains
                       merr=m
                    end if
                 end if
-                sigmak(i,j,m,l)=pp*cksigm+(1-pp)*sigmak0(i,j,m,l)
+                sigmak(i,j,m,l)=pp*cksigm+(1.0d0-pp)*sigmak0(i,j,m,l)
              end do
           end do
        end do
     end do
-    print '(A7,E12.4,A14,2I5,2I3)','esterr=',esterr,' at k,iw,m,l=',kerr,iwerr,merr,lerr
-    print '(3(1X,I3))',kmap(1,kerr),kmap(2,kerr),kmap(3,kerr)
+    do i=1,Nkall
+       if(invk(1,i)==kerr)then
+          print '(A7,E9.2,A14,3(1X,I3),I5,2I3,I5)','esterr=',esterr,' at k,iw,m,l=',kmap(1,i),kmap(2,i),kmap(3,i),iwerr,merr,lerr,kerr
+          exit
+       end if
+    end do
   end subroutine compair_sigma
 
   subroutine renew_mu()
@@ -871,7 +875,7 @@ contains
     end if
     call get_rn(rnM,mu)
     mu_OLD=mu
-    print'(A4,F8.4,A5,F8.4)','mu  =',mu,' rn =',rnM
+    print'(A4,F8.4,A10,F8.4)','mu  =',mu,' filling =',rnM
   end subroutine renew_mu
   
   subroutine get_rn(rn,rmu)

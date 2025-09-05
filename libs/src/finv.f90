@@ -2,7 +2,7 @@ subroutine generate_irr_kpoint_inv(klist,kmap,invk_ft_list,Nk,Nx,Ny,Nz) bind(C)
   !> This function obtain irreducible klist considering reverse symmetry of k-point
   !!@param        klist,out: irreducible klist
   !!@param         kmap,out: all k properties
-  !!@param invk_ft_list,out: footnote of reverse k
+  !!@param invk_ft_list,out: footnote of reverse k. 1:index of irreducible k-points, 2: normal or reverse, 3: index of -k at all-ipoints
   !!@param            Nk,in: The number of irreducible k-point
   !!@param            Nx,in: kx mesh
   !!@param            Ny,in: ky mesh
@@ -25,11 +25,11 @@ subroutine generate_irr_kpoint_inv(klist,kmap,invk_ft_list,Nk,Nx,Ny,Nz) bind(C)
     Nkall=Nx*Ny*Nz
     !$omp parallel do private(i,j,k,tmp,iktmp)
     do i=1,Nkall
-       do j=1,Nk
+       do j=1,Nk !set invk(1,:) and invk(2,:)
           tmp(:)=all_k(:,i)-klist(:,j)
           if(sum(abs(tmp))<eps)then
-             invk_ft_list(1,i)=j
-             invk_ft_list(2,i)=0
+             invk_ft_list(1,i)=j !irreducible k index
+             invk_ft_list(2,i)=0 !0 is normal (k)
              exit
           end if
           do k=1,3
@@ -41,8 +41,8 @@ subroutine generate_irr_kpoint_inv(klist,kmap,invk_ft_list,Nk,Nx,Ny,Nz) bind(C)
           end do
           tmp(:)=all_k(:,i)-iktmp(:)
           if(sum(abs(tmp))<eps)then
-             invk_ft_list(1,i)=j
-             invk_ft_list(2,i)=1
+             invk_ft_list(1,i)=j !irreducible k index
+             invk_ft_list(2,i)=1 !1 is reverse (-k)
              exit
           end if
        end do
@@ -57,7 +57,7 @@ subroutine generate_irr_kpoint_inv(klist,kmap,invk_ft_list,Nk,Nx,Ny,Nz) bind(C)
           end do
           tmp(:)=all_k(:,i)-iktmp(:)
           if(sum(abs(tmp))<eps)then
-             invk_ft_list(3,i)=j
+             invk_ft_list(3,i)=j !index of -k in all k-point
              exit
           end if
        end do
