@@ -477,19 +477,20 @@ def get_chis(chi0,Smat):
     flibs.get_chis(chis,chi0,Smat,byref(c_int64(Nchi)),byref(c_int64(Nw)))
     return(chis)
 
-def gen_SCmatrix(olist,U,J):
+def gen_SCmatrix(olist,site,U,J):
     Nchi=len(olist)
     Smat=np.zeros((Nchi,Nchi),dtype=np.float64)
     Cmat=np.zeros((Nchi,Nchi),dtype=np.float64)
     flibs.get_scmat.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64),             #Smat
-                             np.ctypeslib.ndpointer(dtype=np.float64),             #Cmat
-                             np.ctypeslib.ndpointer(dtype=np.int64),               #olist
-                             POINTER(c_double),POINTER(c_double),POINTER(c_int64)] #U,J,Nchi
+                              np.ctypeslib.ndpointer(dtype=np.float64),             #Cmat
+                              np.ctypeslib.ndpointer(dtype=np.int64),               #olist
+                              np.ctypeslib.ndpointer(dtype=np.int64),               #site
+                              POINTER(c_double),POINTER(c_double),POINTER(c_int64)] #U,J,Nchi
     flibs.get_scmat.restype=c_void_p
-    flibs.get_scmat(Smat,Cmat,olist,byref(c_double(U)),byref(c_double(J)),byref(c_int64(Nchi)))
+    flibs.get_scmat(Smat,Cmat,olist,site,byref(c_double(U)),byref(c_double(J)),byref(c_int64(Nchi)))
     return Smat,Cmat
 
-def gen_SCmatrix_orb(olist,Umat,Jmat):
+def gen_SCmatrix_orb(olist,site,Umat,Jmat):
     Nchi=len(olist)
     Norb=len(Umat)
     Smat=np.zeros((Nchi,Nchi),dtype=np.float64)
@@ -499,9 +500,10 @@ def gen_SCmatrix_orb(olist,Umat,Jmat):
                                   np.ctypeslib.ndpointer(dtype=np.float64), #Umat
                                   np.ctypeslib.ndpointer(dtype=np.float64), #Jmat
                                   np.ctypeslib.ndpointer(dtype=np.int64),   #olist
+                                  np.ctypeslib.ndpointer(dtype=np.int64),   #site
                                   POINTER(c_int64),POINTER(c_int64)]        #Nchi,Norb
     flibs.get_scmat_orb.restype=c_void_p
-    flibs.get_scmat_orb(Smat,Cmat,olist,Umat,Jmat,byref(c_int64(Nchi)),byref(c_int64(Norb)))
+    flibs.get_scmat_orb(Smat,Cmat,olist,site,Umat,Jmat,byref(c_int64(Nchi)),byref(c_int64(Norb)))
     return Smat,Cmat
 
 def calc_Lij(eig,vk,ffermi,mu:float,w:float,idelta:float,temp:float):
@@ -681,16 +683,18 @@ def linearized_eliashberg(Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,Nx:int,Ny:
                      byref(c_int64(Nz)),byref(c_int64(itemax)),byref(c_int64(gap_sym)))
     return delta
 
-def linearized_eliashberg_soc(Gk,uni,Vmat,slist,olist,kmap,invk,Nx:int,Ny:int,Nz:int,temp:float,gap_sym:int,eps=1.0e-4,itemax=300):
+def linearized_eliashberg_soc(Gk,uni,init_delta,Vmat,slist,olist,kmap,invk,
+                              Nx:int,Ny:int,Nz:int,temp:float,gap_sym:int,eps=1.0e-4,itemax=300):
     Norb,Nchi=len(slist),len(Vmat)
     Nkall,Nk,Nw=len(kmap),len(Gk[0,0,0]),len(Gk[0,0])
     delta=np.zeros((Norb,Norb,Nw,Nkall),dtype=np.complex128)
     flibs.lin_eliash_soc.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #delta
                                    np.ctypeslib.ndpointer(dtype=np.complex128), #Gk
                                    np.ctypeslib.ndpointer(dtype=np.complex128), #uni
+                                   np.ctypeslib.ndpointer(dtype=np.float64),    #init_delta
                                    np.ctypeslib.ndpointer(dtype=np.float64),    #Vmat
-                                   np.ctypeslib.ndpointer(dtype=np.int64),    #slist
                                    np.ctypeslib.ndpointer(dtype=np.int64),      #olist
+                                   np.ctypeslib.ndpointer(dtype=np.int64),      #slist
                                    np.ctypeslib.ndpointer(dtype=np.int64),      #kmap
                                    np.ctypeslib.ndpointer(dtype=np.int64),      #invk
                                    POINTER(c_double),POINTER(c_double),         #temp,eps
@@ -700,35 +704,40 @@ def linearized_eliashberg_soc(Gk,uni,Vmat,slist,olist,kmap,invk,Nx:int,Ny:int,Nz
                                    POINTER(c_int64),POINTER(c_int64),           #Ny,Nz
                                    POINTER(c_int64),POINTER(c_int64)]           #itemax,gapsym
     flibs.lin_eliash_soc.retype=c_void_p
-    flibs.lin_eliash_soc(delta,Gk,uni,Vmat,slist,olist,kmap,invk,byref(c_double(temp)),
+    flibs.lin_eliash_soc(delta,Gk,uni,init_delta,Vmat,olist,slist,kmap,invk,byref(c_double(temp)),
                      byref(c_double(eps)),byref(c_int64(Nkall)),byref(c_int64(Nk)),
                      byref(c_int64(Nw)),byref(c_int64(Nchi)),byref(c_int64(Norb)),
                      byref(c_int64(Nx)),byref(c_int64(Ny)),byref(c_int64(Nz)),
                      byref(c_int64(itemax)),byref(c_int64(gap_sym)))
     return delta
 
-def gen_Vmatrix(oslist,U,J,Norb):
-    Nchi=len(oslist)
+def gen_Vmatrix(olist,slist,site,U,J):
+    Nchi,Norb=len(olist),len(slist)
     Vmat=np.zeros((Nchi,Nchi),dtype=np.float64)
     flibs.get_vmat_soc.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64), #Vmat
-                                 np.ctypeslib.ndpointer(dtype=np.int64),   #oslist
+                                 np.ctypeslib.ndpointer(dtype=np.int64),   #olist
+                                 np.ctypeslib.ndpointer(dtype=np.int64),   #slist
+                                 np.ctypeslib.ndpointer(dtype=np.int64),   #site
                                  POINTER(c_double),POINTER(c_double),      #U,J
                                  POINTER(c_int64),POINTER(c_int64)]        #Nchi,Norb
     flibs.get_vmat_soc.restype=c_void_p
-    flibs.get_vmat_soc(Vmat,oslist,byref(c_double(U)),byref(c_double(J)),
-                       byref(c_int64(Nchi)),byref(c_int64(Norb)))
+    flibs.get_vmat_soc(Vmat,olist,slist,site,byref(c_double(U)),
+                       byref(c_double(J)),byref(c_int64(Nchi)),byref(c_int64(Norb)))
     return Vmat
 
-def gen_Vmatrix_orb(oslist,Umat,Jmat):
-    Nchi,Norb=len(oslist),len(Umat)
+def gen_Vmatrix_orb(olist,slist,site,Umat,Jmat):
+    Nchi,Norb=len(olist),len(Umat)
     Vmat=np.zeros((Nchi,Nchi),dtype=np.float64)
     flibs.get_vmat_soc_orb.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64), #Vmat
+                                     np.ctypeslib.ndpointer(dtype=np.int64),   #olist
+                                     np.ctypeslib.ndpointer(dtype=np.int64),   #slist
+                                     np.ctypeslib.ndpointer(dtype=np.int64),   #site
                                      np.ctypeslib.ndpointer(dtype=np.float64), #Umat
                                      np.ctypeslib.ndpointer(dtype=np.float64), #Jmat
-                                     np.ctypeslib.ndpointer(dtype=np.int64),   #oslist
                                      POINTER(c_int64),POINTER(c_int64)]        #Nchi,Norb
     flibs.get_vmat_soc_orb.restype=c_void_p
-    flibs.get_vmat_soc_orb(Vmat,oslist,Umat,Jmat,byref(c_int64(Nchi)),byref(c_int64(Norb)))
+    flibs.get_vmat_soc_orb(Vmat,olist,slist,site,Umat,Jmat,
+                           byref(c_int64(Nchi)),byref(c_int64(Norb)))
     return Vmat
 
 def conv_delta_orb_to_band(delta,uni,invk):

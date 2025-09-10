@@ -545,6 +545,7 @@ def get_chi_orb_list(Norb,site_prof):
         tmp=np.arange(Norb)+1
         o1,o2=np.meshgrid(tmp,tmp)
         chiolist=np.array([o1.flatten(),o2.flatten()]).T
+        site=np.ones(len(chiolist),dtype=np.int64)
     else:
         if(Norb==sum(site_prof)):
             chiolist=[]
@@ -553,12 +554,14 @@ def get_chi_orb_list(Norb,site_prof):
                 tmp=np.arange(i_site)+N0
                 o1,o2=np.meshgrid(tmp,tmp)
                 chiolist+=list(np.array([o1.flatten(),o2.flatten()]).T)
+                site+=[N0]*len(o1)
                 N0+=i_site
             chiolist=np.array(chiolist)
+            site=np.array(site,dtype=np.int64)
         else:
             print("site_prof doesn't correspond to Hamiltonian")
             exit()
-    return chiolist
+    return chiolist,site
 
 def get_initial_gap(kmap,klist,Norb,gap_sym):
     if gap_sym>=0:

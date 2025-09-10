@@ -20,11 +20,11 @@ else: monoclinic
 """
 
 #fname,ftype,brav='inputs/Sr2RuO4nso',0,7
-#fname,ftype,brav='inputs/Sr2RuO4',2,2
+fname,ftype,brav='inputs/Sr2RuO4',2,2
 #fname,ftype,brav='inputs/SiMLO.input',3,6
-fname,ftype,brav='inputs/NdFeAsO.input',1,0
+#fname,ftype,brav='inputs/NdFeAsO.input',1,0
 
-sw_dec_axis=False
+sw_dec_axis=True
 
 """
 option defines calculation modes
@@ -53,7 +53,7 @@ color_option defines the meaning of color on Fermi surfaces
  2: velocity size
 """
 option=13
-color_option=1
+color_option=2
 
 Nx,Ny,Nz,Nw=32,32,4,512 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
@@ -66,7 +66,7 @@ abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 alpha_beta_gamma=[90.,90.,90]
 temp=5.0e-2 #2.59e-2
 #tempK=300 #Kelvin
-fill=2.9375
+fill=4.0 #2.9375
 
 #site_prof=[5]
 
@@ -74,8 +74,8 @@ Emin,Emax=-3,3
 delta=3.0e-2
 Ecut=1.0e-2
 tau_const=100
-olist=[0,1,2]
-#olist=[[0],[1,2],[3]]
+#olist=[0,1,2]
+olist=[[0,3],[1,4],[2,5]]
 #olist=[[0,4],[1,2,5,6],[3,7]]
 #U,J= 0.8, 0.1
 U,J=1.2,0.15
@@ -87,6 +87,7 @@ gap_sym=2
 #k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
 #xlabel=[r'$\Gamma$','X','M']
 at_point=[ 0., .5, 0.]
+orb_dep=False  #use orbital dependence U,J
 sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 sw_omega=False #True: real freq, False: Matsubara freq.
@@ -94,7 +95,7 @@ sw_self=False  #True: use calculated self energy for spectrum band plot
 sw_out_self=True
 sw_in_self=False
 sw_from_file=True
-sw_soc=False #use with soc hamiltonian
+sw_soc=True #use with soc hamiltonian
 #------------------------ initial parameters are above -------------------------------
 #----------------------------------main functions-------------------------------------
 #-------------------------------- import packages ------------------------------------
@@ -467,11 +468,14 @@ def calc_phi_spectrum(mu:float,temp:float,klist,qlist,chiolist,eig,uni,spa_lengt
     f.close()
     return(w,sp,phiw)
 
-def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,olist):
+def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,olist,site):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     ham_k=flibs.gen_ham(klist,ham_r,rvec)
-    Smat,Cmat=flibs.gen_SCmatrix(olist,U,J)
+    if orb_dep:
+        Smat,Cmat=flibs.gen_SCmatrix_orb(olist,site,Umat,Jmat)
+    else:
+        Smat,Cmat=flibs.gen_SCmatrix(olist,site,U,J)
     pp=0.5
     eps=1.0e-4
     sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,pp=pp)
@@ -550,11 +554,14 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,sw_
         plt.show()
     info=output_gap_function(invk,kmap,gap,uni)
 
-def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,olist,
+def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,olist,site,
                            mu:float,temp:float,gap_sym:int,sw_self:bool):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
-    Smat,Cmat=flibs.gen_SCmatrix(olist,U,J)
+    if orb_dep:
+        Smat,Cmat=flibs.gen_SCmatrix_orb(olist,site,Umat,Jmat)
+    else:
+        Smat,Cmat=flibs.gen_SCmatrix(olist,site,U,J)
     if sw_self:
         ham_k=flibs.gen_ham(klist,ham_r,rvec)
         if sw_from_file:
@@ -570,6 +577,31 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,olist,
     init_delta=plibs.get_initial_gap(kmap,klist,len(eig.T),gap_sym)
     gap=flibs.linearized_eliashberg(Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
     #Fk=flibs.gen_Fk(Gk,Delta,invk)
+    if sw_out_self:
+        np.save('gap',gap)
+    info=output_gap_function(invk,kmap,gap,uni)
+
+def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
+                        mu:float,temp:float,chiolist,slist,site):
+    klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
+    eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
+    if orb_dep:
+        Vmat=flibs.gen_Vmatrix_orb(chiolist,slist,site,Umat,Jmat)
+    else:
+        Vmat=flibs.gen_Vmatrix(chiolist,slist,site,U,J)
+    if sw_self:
+        ham_k=flibs.gen_ham(klist,ham_r,rvec)
+        if sw_from_file:
+            npz=np.load('self_en.npz')
+            sigmak,mu_self=npz['arr_0'],npz['arr_1']
+        else:
+            pass
+        print(f'chem. pot. with self= {mu:.4f} eV',flush=True)
+        Gk=flibs.gen_green(sigmak,ham_k,mu_self,temp)
+    else:
+        Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
+    init_delta=plibs.get_initial_gap(kmap,klist,len(slist),gap_sym)
+    gap=flibs.linearized_eliashberg_soc(Gk,uni,init_delta,Vmat,slist,chiolist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
     if sw_out_self:
         np.save('gap',gap)
     info=output_gap_function(invk,kmap,gap,uni)
@@ -606,12 +638,15 @@ def get_mass(mesh,rvec,ham_r,mu:float,de=3.e-4,meshkz=20):
 
 def main():
     omp_num,omp_check=flibs.omp_params()
+    #import hamiltonian
     if ftype==3:
         rvec,ham_r,S_r,no,Nr=plibs.import_MLO_hoppings(fname)
     else:
         rvec,ham_r,no,Nr=plibs.import_hoppings(fname,ftype)
         S_r=[]
+    #set lattice vector
     avec,Arot=plibs.get_ptv(alatt,deg,brav)
+    #rotation axis
     if sw_dec_axis:
         rvec1=Arot.T.dot(rvec.T).T
         rvec=rvec1.copy()
@@ -624,7 +659,7 @@ def main():
             avec=(alatt*np.eye(3))*.5
         else:
             avec=alatt*np.eye(3)
-    bvec=plibs.get_bvec(avec)
+    bvec=plibs.get_bvec(avec) #set recp. lattice
     opstr=["calculate band structure","calculate Dos","plot 2D Fermi surface",
            "plot 3D Fermi surface","calculate spectrum",
            "calculate conductivities using Boltzmann theory",
@@ -635,7 +670,7 @@ def main():
            "gap_function","calculate carrier number","calculate cycrtron mass",
            "calculate electron mass","spectrum with impurity"]
     cstr=["no color",'orbital weight','velocity size']
-    if omp_check:
+    if omp_check: #OMP properties
         print("OpenMP mode",flush=True)
         print(f"Number of OpenMP threads = {omp_num}",flush=True)
     print(f"calc mode {option}: "+opstr[option],flush=True)
@@ -643,17 +678,18 @@ def main():
         print("color mode: "+cstr[color_option],flush=True)
     print("Hamiltonian name is "+fname,flush=True)
     print(f"Number of orbital = {no}",flush=True)
-    if option in {7,8,9,12,13}:
+    if (orb_dep==False) and option in {7,8,9,12,13}: #write constant U,J
         print(f'U= {U:5.2f} and J= {J:5.3f}')
     if option in {7,8,9,10,11,12,13}:
+        """ chiolist is the list of orbital properties of index on chi """
         try:
             chiolist
         except NameError:
             try:
                 site_prof
             except NameError:
-                site_prof=[1]
-            chiolist=plibs.get_chi_orb_list(len(ham_r[0]),site_prof)        
+                site_prof=[1] #one site (len(site_prof)=1)
+            chiolist,site=plibs.get_chi_orb_list(len(ham_r[0]),site_prof)        
     if option in {0,4}:
         if sw_gen_sym:
             print('generate symmetry line',flush=True)
@@ -670,7 +706,7 @@ def main():
     print("Reciprocal Lattice Vector (Angstrom^-1)",flush=True)
     for i,b in enumerate(bvec):
         print(f"b{i+1}: %7.4f %7.4f %7.4f"%tuple(b),flush=True)
-    if option in {5,6,18}:
+    if option in {5,6,18}: #conductivity (5,6) and impurity (18) functions calc or set mu themself
         pass
     else:
         if sw_calc_mu:
@@ -734,7 +770,10 @@ def main():
         Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=True)
         if option in {7,8,9}:
             print("generate coulomb vertex matrix S")
-            Smat,Cmat=flibs.gen_SCmatrix(chiolist,U,J)
+            if orb_dep:
+                Smat,Cmat=flibs.gen_SCmatrix_soc(chiolist,site,Umat,Jmat)
+            else:
+                Smat,Cmat=flibs.gen_SCmatrix(chiolist,site,U,J)
         if option in {7,10}: #chis/phi spectrum with symmetry line
             print("generate qlist",flush=True)
             qlist,spa_length,xticks=plibs.mk_qlist(k_sets,Nx,Ny,Nz,bvec)
@@ -780,13 +819,17 @@ def main():
                 slist
             except NameError: #default, up(~norb/2-1)>down(norb/2~)
                 Norb=len(ham_r[0])
-                slist=np.ones(Norb)
+                slist=np.ones(Norb,dtype=np.int64)
                 slist[int(Norb/2):]=-1
+            if option==12:
+                pass
+            elif option==13:
+                calc_lin_eliash_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,site)
         else: #without soc
             if option==12: #calc self-energy using flex
-                calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist)
+                calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,site)
             elif option==13: #calc gap function
-                calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,mu,temp,gap_sym,sw_self)
+                calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,site,mu,temp,gap_sym,sw_self)
     elif option==14:
         output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,sw_self)
     elif option==15: #calc carrier number
