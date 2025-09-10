@@ -46,13 +46,13 @@ endif
 
 srcdir= src
 objdir= obj
-flibso=fmod.so
+flibso=libfmod.so
 
 objmain= $(addprefix $(objdir)/, fmod.o fcond.o fUJ.o fchi.o fphi.o fself.o fimp.o fpade.o feliash.o finv.o fwithsoc.o)
 .SUFFIXES:
 all: $(objdir) $(objmain) $(flibso)
 $(flibso): $(objmain)
-	$(FC) $(FFLAGS) $(FFLAGS2) $(LIBS) -o fmod.so $(objmain)
+	$(FC) $(FFLAGS) $(FFLAGS2) $(LIBS) -o $(flibso) $(objmain)
 $(objdir):
 	mkdir -p $(objdir)
 $(objdir)/%.o: $(srcdir)/%.f90

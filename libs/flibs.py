@@ -1,7 +1,7 @@
 from ctypes import *
 import numpy as np
 #import fortran library
-flibs=np.ctypeslib.load_library("libs/fmod.so",".")
+flibs=np.ctypeslib.load_library("libs/libfmod.so",".")
 #interface for fmod subroutines
 
 def omp_params() ->tuple[int,bool]:

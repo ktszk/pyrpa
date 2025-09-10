@@ -753,7 +753,8 @@ contains
     end do
     do i=1,Nkall
        if(invk(1,i)==kerr)then
-          print '(A7,E9.2,A14,3(1X,I3),I5,2I3,I5)','esterr=',esterr,' at k,iw,m,l=',kmap(1,i),kmap(2,i),kmap(3,i),iwerr,merr,lerr,kerr
+          print '(A7,E9.2,A14,3(1X,I3),I5,2I3,I5)','esterr=',esterr,' at k,iw,m,l=', &
+               & kmap(1,i),kmap(2,i),kmap(3,i),iwerr,merr,lerr,kerr
           exit
        end if
     end do
