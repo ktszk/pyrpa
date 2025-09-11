@@ -19,10 +19,10 @@ brav: choose primitive translation vector S,FC,BC etc
 else: monoclinic
 """
 
-#fname,ftype,brav='inputs/Sr2RuO4nso',0,7
-fname,ftype,brav='inputs/Sr2RuO4',2,2
-#fname,ftype,brav='inputs/SiMLO.input',3,6
-#fname,ftype,brav='inputs/NdFeAsO.input',1,0
+#fname,ftype,brav,sw_soc='inputs/Sr2RuO4nso',0,7,False
+fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
+#fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
+#fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
 
 sw_dec_axis=False
 
@@ -95,7 +95,6 @@ sw_self=False  #True: use calculated self energy for spectrum band plot
 sw_out_self=True
 sw_in_self=False
 sw_from_file=True
-sw_soc=True #use with soc hamiltonian
 #------------------------ initial parameters are above -------------------------------
 #----------------------------------main functions-------------------------------------
 #-------------------------------- import packages ------------------------------------
