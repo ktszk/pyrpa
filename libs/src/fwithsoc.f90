@@ -1,4 +1,4 @@
-subroutine lin_eliash_soc(delta,Gk,uni,init_delta,Vmat,olist,slist,kmap,invk,temp,eps,&
+subroutine lin_eliash_soc(delta,Gk,uni,init_delta,Vmat,olist,slist,kmap,invk,invs,temp,eps,&
      Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym) bind(C)
   !
   !> calculate linearized eliashberg equations with soc and TRS
@@ -7,7 +7,7 @@ subroutine lin_eliash_soc(delta,Gk,uni,init_delta,Vmat,olist,slist,kmap,invk,tem
   implicit none
   integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym
   integer(int64),intent(in),dimension(Nchi,2):: olist
-  integer(int64),intent(in),dimension(Norb):: slist
+  integer(int64),intent(in),dimension(Norb):: slist,invs
   integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
   real(real64),intent(in):: temp,eps
   real(real64),intent(in),dimension(Nchi,Nchi):: Vmat
@@ -20,7 +20,7 @@ subroutine lin_eliash_soc(delta,Gk,uni,init_delta,Vmat,olist,slist,kmap,invk,tem
   integer(int32),parameter:: eig_max=2
   integer(int32),dimension(Nchi,Nchi,2)::chi_map
   integer(int32),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
-  logical(1) sw_pair
+
   real(real64) norm,normb,inorm,norm2,weight
   real(real64),dimension(Norb,Norb):: sgnsig
   real(real64),dimension(Nchi*(Nchi+1)/2):: sgnsig2
@@ -32,17 +32,19 @@ subroutine lin_eliash_soc(delta,Gk,uni,init_delta,Vmat,olist,slist,kmap,invk,tem
   weight=temp/dble(Nkall)
   norm2=0.0d0
   normb=0.0d0
-  call get_chi0_conv_soc(chi,Gk,kmap,invk,irr_chi,olist,sgnsig,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+  call get_chi0_conv_soc(chi,Gk,kmap,invk,invs,irr_chi,olist,sgnsig,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
   call ckchi()
   call get_V_delta_soc_flex(chi,Vmat,sgnsig2,irr_chi,chi_map,Nk,Nw,Nchi)
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
   eigenval_loop:do i_eig=1,eig_max !solve eig_val using power method, 1st eig is usually large negative value
-     call get_initial_delta_soc(delta,init_delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,Nx,Ny,Nz,gap_sym)
+     call get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym)
      count=0 !count too small eigenvalue
      iter_loop:do i_iter=1,itemax !iteration
-        call mkfk_trs_soc(fk,Gk,delta,invk,Nkall,Nk,Nw,Norb)
-        call mkdelta_soc(newdelta,fk,chi,Vmat,kmap,invk,olist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
+        call mkfk_trs_soc(fk,Gk,delta,sgnsig,invk,invs,Nkall,Nk,Nw,Norb)
+        !something worng mkdelta_soc
+        call mkdelta_soc(newdelta,fk,chi,Vmat,kmap,invk,olist,slist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,gap_sym)
+        print*,'normalize'
         !$omp parallel workshare
         newdelta(:,:,:,:)=newdelta(:,:,:,:)*weight+delta(:,:,:,:)*norm2
         !$omp end parallel workshare
@@ -127,7 +129,7 @@ contains
           end do
        end do
        call zgeev('N','N',Nchi,chi0,Nchi,eigc,tmp1,Nchi,tmp,Nchi,work,Nchi*Nchi*4+1,rwork,info)
-       maxchi0=maxval(dble(eigc))
+       maxchi0=maxval(abs(dble(eigc)))
        if(maxchi0>maxchi02)then
           chik=i
           maxchi02=maxchi0
@@ -235,7 +237,7 @@ subroutine get_V_delta_soc_flex(chi,Vmat,sgnsig2,irr_chi,chi_map,Nk,Nw,Nchi)
   end do wloop
 end subroutine get_V_delta_soc_flex
 
-subroutine mkfk_trs_soc(fk,Gk,delta,invk,Nkall,Nk,Nw,Norb)
+subroutine mkfk_trs_soc(fk,Gk,delta,sgnsig,invk,invs,Nkall,Nk,Nw,Norb)
   !
   !>calculate linearized anomalous green function Fk with TRS
   !>if we considder TRS,F_ab(k)=G_ac(k)Delta_cd(k)Gbd(-k)
@@ -245,6 +247,8 @@ subroutine mkfk_trs_soc(fk,Gk,delta,invk,Nkall,Nk,Nw,Norb)
   implicit none
   integer(int64),intent(in):: Nkall,Nk,Nw,Norb
   integer(int64),intent(in),dimension(3,Nkall):: invk
+  integer(int64),intent(in),dimension(Norb):: invs
+  real(real64),intent(in),dimension(Norb,Norb):: sgnsig
   complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
   complex(real64),intent(in),dimension(Nkall,Nw,Norb,Norb):: delta
   complex(real64),intent(out),dimension(Nkall,Nw,Norb,Norb):: fk
@@ -265,7 +269,7 @@ subroutine mkfk_trs_soc(fk,Gk,delta,invk,Nkall,Nk,Nw,Norb)
                  if(invk(2,i)==0)then !cmat1(k,iw)=G(k,iw)Delta(k,iw)
                     cmat1(i,j,m,l)=cmat1(i,j,m,l)+Gk(invk(1,i),j,m,n)*delta(i,j,n,l)
                  else if(invk(2,i)==1)then !G(k,iw)=G^T(-k,iw)
-                    cmat1(i,j,m,l)=cmat1(i,j,m,l)+Gk(invk(1,i),j,n,m)*delta(i,j,n,l)
+                    cmat1(i,j,m,l)=cmat1(i,j,m,l)+sgnsig(n,m)*Gk(invk(1,i),j,invs(n),invs(m))*delta(i,j,n,l)
                  end if
               end do
            end do
@@ -283,7 +287,7 @@ subroutine mkfk_trs_soc(fk,Gk,delta,invk,Nkall,Nk,Nw,Norb)
                  if(invk(2,i)==0)then
                     fk(i,j,m,l)=fk(i,j,m,l)-cmat1(i,j,m,n)*conjg(Gk(invk(1,invk(3,i)),j,l,n))
                  else if(invk(2,i)==1)then
-                    fk(i,j,m,l)=fk(i,j,m,l)-cmat1(i,j,m,n)*conjg(Gk(invk(1,invk(3,i)),j,n,l))
+                    fk(i,j,m,l)=fk(i,j,m,l)-cmat1(i,j,m,n)*sgnsig(n,l)*conjg(Gk(invk(1,invk(3,i)),j,invs(n),invs(l)))
                  end if
               end do
            end do
@@ -311,20 +315,19 @@ subroutine mkfk_trs_soc(fk,Gk,delta,invk,Nkall,Nk,Nw,Norb)
   !$omp end parallel
 end subroutine mkfk_trs_soc
   
-subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,kmap,invk,olist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
+subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,kmap,invk,olist,slist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,gap_sym)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
-  integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
+  integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,gap_sym
   integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
   integer(int64),intent(in),dimension(Nchi,2):: olist
-  logical(1),intent(in):: sw_pair
+  integer(int64),intent(in),dimension(Norb):: slist
   real(real64),intent(in),dimension(Nchi,Nchi):: Vmat
   complex(real64),intent(in),dimension(Nk,Nw,Nchi,Nchi):: Vdelta
   complex(real64),intent(in),dimension(Nkall,Nw,Norb,Norb):: delta
   complex(real64),intent(out),dimension(Nkall,Nw,Norb,Norb):: newdelta
-    
+
   integer(int32) i,j,k,n,l,m
-  real(real64) sgn
   complex(real64),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpVdelta,tmpfk,tmp
   
   !$omp parallel workshare
@@ -332,7 +335,7 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,kmap,invk,olist,Nkall,Nk,Nw,Nc
   !$omp end parallel workshare
   do l=1,Nchi
      do m=1,Nchi
-        if(olist(l,1)>=olist(m,2))then
+        if((gap_sym<0) .or. (gap_sym>0 .and. slist(olist(l,1))*slist(olist(m,2))<0))then
            !$omp parallel
            !$omp do private(i)
            do i=1,Nkall
@@ -344,6 +347,9 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,kmap,invk,olist,Nkall,Nk,Nw,Nc
               tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=Vmat(m,l) !Nw+1 consider w_n=>inf limit
            end do
            !$omp end do
+           !$omp single
+           print*,'iw Vcalc'
+           !$omp end single
            !$omp do private(i,j)
            do j=2,Nw
               do i=1,Nkall
@@ -357,15 +363,19 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,kmap,invk,olist,Nkall,Nk,Nw,Nc
               end do
            end do
            !$omp end do
+           !$omp single
+           print*,'gen fk all'
+           !$omp end single
            !$omp do private(i,j)
            do j=1,Nw
               do i=1,Nkall
                  tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),j)=delta(i,j,olist(l,2),olist(m,1))
-                 tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=-delta(invk(3,i),j,olist(m,1),olist(l,2)) !F(k,-w)=sgn*F(-k,w) (no soc only)
+                 tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=-delta(invk(3,i),j,olist(m,1),olist(l,2)) !F(k,-w)=F(-k,w)
               end do
            end do
            !$omp end do
            !$omp end parallel
+           print*,'FFT',l,m
            call FFT(tmpVdelta,tmp,Nx,Ny,Nz,2*Nw,.true.)
            call FFT(tmpfk,tmp,Nx,Ny,Nz,2*Nw,.true.)
            !$omp parallel
@@ -387,6 +397,7 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,kmap,invk,olist,Nkall,Nk,Nw,Nc
            tmpfk(:,:,:,:)=0.0d0
            !$omp end workshare
            !$omp end parallel
+           print*,'IFFT'
            call FFT(tmp,tmpfk,Nx,Ny,Nz,2*Nw,.false.)
            !$omp parallel do private(i)
            do j=1,Nw
@@ -399,31 +410,14 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,kmap,invk,olist,Nkall,Nk,Nw,Nc
         end if
      end do
   end do
-  
-  !$omp parallel
-  do l=1,Norb
-     do m=l,Norb
-        !$omp do private(i,j)
-        do j=1,Nw
-           do i=1,Nkall
-              if(l/=m)then
-                 newdelta(i,j,l,m)=conjg(newdelta(i,j,m,l))
-              else
-                 newdelta(i,j,l,l)=dble(newdelta(i,j,l,l))
-              end if
-           end do
-        end do
-        !$omp end do
-     end do
-  end do
-  !$omp end parallel
 end subroutine mkdelta_soc
 
-subroutine get_chi0_conv_soc(chi,Gk,kmap,invk,irr_chi,olist,sgnsig,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+subroutine get_chi0_conv_soc(chi,Gk,kmap,invk,invs,irr_chi,olist,sgnsig,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
    use,intrinsic:: iso_fortran_env, only:int64,real64,int32
    implicit none
    integer(int64),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
    integer(int64),intent(in),dimension(Nchi,2):: olist
+   integer(int64),intent(in),dimension(Norb):: invs
    integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
    integer(int32),intent(in),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
    real(real64),intent(in):: temp
@@ -480,13 +474,15 @@ subroutine get_chi0_conv_soc(chi,Gk,kmap,invk,irr_chi,olist,sgnsig,temp,Nx,Ny,Nz
                tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(l,2),olist(m,2))) !G42(k,-iw)=G^*24(k,iw)
             else if(invk(2,i)==1)then
                !iw
-               tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),j)=sgnsig(olist(m,1),olist(l,1))*Gk(invk(1,i),j,olist(m,1),olist(l,1)) !G13(-k,iw)=sgn*G^31(k,iw)
-               tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),j)=sgnsig(olist(l,2),olist(m,2))*Gk(invk(1,i),j,olist(l,2),olist(m,2)) !G42(-k,iw)=sgn*G^24(k,iw)
+               tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),j)=sgnsig(olist(m,1),olist(l,1))&
+                    *Gk(invk(1,i),j,invs(olist(m,1)),invs(olist(l,1))) !G13ss'(-k,iw)=sgn*G^31-s'-s(k,iw)
+               tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),j)=sgnsig(olist(l,2),olist(m,2))&
+                    *Gk(invk(1,i),j,invs(olist(l,2)),invs(olist(m,2))) !G42ss'(-k,iw)=sgn*G^24-s's(k,iw)
                !-iw
                tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgnsig(olist(l,1),olist(m,1))&
-                    *conjg(Gk(invk(1,i),j,olist(l,1),olist(m,1))) !G13(-k,-iw)=sgn*G^*13(k,iw)
+                    *conjg(Gk(invk(1,i),j,invs(olist(l,1)),invs(olist(m,1)))) !G13(-k,-iw)=sgn*G^*13(k,iw)
                tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgnsig(olist(m,2),olist(l,2))&
-                    *conjg(Gk(invk(1,i),j,olist(m,2),olist(l,2))) !G42(-k,-iw)=sgn*G^*42(k,iw)
+                    *conjg(Gk(invk(1,i),j,invs(olist(m,2)),invs(olist(l,2)))) !G42(-k,-iw)=sgn*G^*42(k,iw)
             end if
          end do k_loop_Gk_to_tmp
       end do w_loop_Gk_to_tmp
@@ -593,7 +589,7 @@ subroutine get_vsigma_flex_soc(chi,Vmat,Nk,Nw,Nchi)
   end do
 end subroutine get_vsigma_flex_soc
 
-subroutine get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,Nkall,Nk,Nw,Norb,gap_sym)
+subroutine get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym)
   !> make orbital basis initial gap function
   !!@param     delta,out: gap function
   !!@param init_delta,in: band basis initial gap function
@@ -609,7 +605,7 @@ subroutine get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,Nkall,Nk,N
   implicit none
   integer(int64),intent(in):: Nw,Norb,Nkall,Nk,gap_sym
   integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
-  integer(int64),intent(in),dimension(Norb):: slist
+  integer(int64),intent(in),dimension(Norb):: slist,invs
   real(real64),intent(in),dimension(Nkall,Norb):: init_delta
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(real64),intent(out),dimension(Nkall,Nw,Norb,Norb):: delta
@@ -617,24 +613,13 @@ subroutine get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,Nkall,Nk,N
   integer(int32) i,j,l,m,n
   real(real64) norm
 
-  if(gap_sym==0)then
-     !$omp parallel
-     !$omp workshare
-     delta(:,:,:,:)=0.0d0
-     !$omp end workshare
-     do l=1,Norb
-        !$omp workshare
-        delta(:,:,l,l)=1.0d0
-        !$omp end workshare
-     end do
-     !$omp end parallel
-  else
-     !$omp parallel
-     !$omp workshare
-     delta(:,:,:,:)=0.0d0
-     !$omp end workshare
-     do l=1,Norb
-        do m=l,Norb
+  !$omp parallel
+  !$omp workshare
+  delta(:,:,:,:)=0.0d0
+  !$omp end workshare
+  do l=1,Norb
+     do m=1,Norb
+        if(gap_sym<0 .or. (gap_sym>0 .and. slist(m)*slist(l)<0))then !singlet gap only ud,du spin
            !$omp do private(i,n)
            do i=1,Nkall
               if(invk(2,i)==0)then
@@ -643,7 +628,7 @@ subroutine get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,Nkall,Nk,N
                  end do
               else if(invk(2,i)==1)then
                  do n=1,Norb
-                    delta(i,1,m,l)=delta(i,1,m,l)+uni(l,n,invk(1,i))*init_delta(i,n)*conjg(uni(m,n,invk(1,i)))
+                    delta(i,1,m,l)=delta(i,1,m,l)+uni(l,n,invk(1,i))*init_delta(i,n)*slist(m)*conjg(uni(invs(m),n,invk(1,i)))
                  end do
               end if
            end do
@@ -657,23 +642,12 @@ subroutine get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,Nkall,Nk,N
               !$omp end simd
            end do
            !$omp end do
-           !$omp do private(i,j)
-           do j=1,Nw
-              do i=1,Nkall
-                 if(l/=m)then !TRS gap function is Hermite
-                    delta(i,j,l,m)=conjg(delta(i,j,m,l))
-                 else !TRS diagonal gap is real
-                    delta(i,j,l,l)=dble(delta(i,j,l,l))
-                 end if
-              end do
-           end do
-           !$omp end do
-        end do
+        end if
      end do
-     !$omp end parallel
-  end if
+  end do
+  !$omp end parallel
 
-    norm=0.0d0
+  norm=0.0d0
   !$omp parallel
   do l=1,Norb
      do m=1,Norb

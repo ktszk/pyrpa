@@ -24,7 +24,7 @@ fname,ftype,brav='inputs/Sr2RuO4',2,2
 #fname,ftype,brav='inputs/SiMLO.input',3,6
 #fname,ftype,brav='inputs/NdFeAsO.input',1,0
 
-sw_dec_axis=True
+sw_dec_axis=False
 
 """
 option defines calculation modes
@@ -582,7 +582,7 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,olist,site
     info=output_gap_function(invk,kmap,gap,uni)
 
 def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
-                        mu:float,temp:float,chiolist,slist,site):
+                        mu:float,temp:float,chiolist,slist,invs,site):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     if orb_dep:
@@ -601,7 +601,7 @@ def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
     else:
         Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
     init_delta=plibs.get_initial_gap(kmap,klist,len(slist),gap_sym)
-    gap=flibs.linearized_eliashberg_soc(Gk,uni,init_delta,Vmat,slist,chiolist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
+    gap=flibs.linearized_eliashberg_soc(Gk,uni,init_delta,Vmat,slist,chiolist,kmap,invk,invs,Nx,Ny,Nz,temp,gap_sym)
     if sw_out_self:
         np.save('gap',gap)
     info=output_gap_function(invk,kmap,gap,uni)
@@ -821,10 +821,14 @@ def main():
                 Norb=len(ham_r[0])
                 slist=np.ones(Norb,dtype=np.int64)
                 slist[int(Norb/2):]=-1
+            try:
+                invs
+            except NameError:
+                invs=np.concatenate([np.arange(int(Norb/2),Norb),np.arange(int(Norb/2))])+1
             if option==12:
                 pass
             elif option==13:
-                calc_lin_eliash_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,site)
+                calc_lin_eliash_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,invs,site)
         else: #without soc
             if option==12: #calc self-energy using flex
                 calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,site)

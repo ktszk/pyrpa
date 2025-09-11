@@ -683,7 +683,7 @@ def linearized_eliashberg(Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,Nx:int,Ny:
                      byref(c_int64(Nz)),byref(c_int64(itemax)),byref(c_int64(gap_sym)))
     return delta
 
-def linearized_eliashberg_soc(Gk,uni,init_delta,Vmat,slist,olist,kmap,invk,
+def linearized_eliashberg_soc(Gk,uni,init_delta,Vmat,slist,olist,kmap,invk,invs,
                               Nx:int,Ny:int,Nz:int,temp:float,gap_sym:int,eps=1.0e-4,itemax=300):
     Norb,Nchi=len(slist),len(Vmat)
     Nkall,Nk,Nw=len(kmap),len(Gk[0,0,0]),len(Gk[0,0])
@@ -697,6 +697,7 @@ def linearized_eliashberg_soc(Gk,uni,init_delta,Vmat,slist,olist,kmap,invk,
                                    np.ctypeslib.ndpointer(dtype=np.int64),      #slist
                                    np.ctypeslib.ndpointer(dtype=np.int64),      #kmap
                                    np.ctypeslib.ndpointer(dtype=np.int64),      #invk
+                                   np.ctypeslib.ndpointer(dtype=np.int64),      #invs
                                    POINTER(c_double),POINTER(c_double),         #temp,eps
                                    POINTER(c_int64),POINTER(c_int64),           #Nkall,Nk
                                    POINTER(c_int64),POINTER(c_int64),           #Nw,Nchi
@@ -704,11 +705,11 @@ def linearized_eliashberg_soc(Gk,uni,init_delta,Vmat,slist,olist,kmap,invk,
                                    POINTER(c_int64),POINTER(c_int64),           #Ny,Nz
                                    POINTER(c_int64),POINTER(c_int64)]           #itemax,gapsym
     flibs.lin_eliash_soc.retype=c_void_p
-    flibs.lin_eliash_soc(delta,Gk,uni,init_delta,Vmat,olist,slist,kmap,invk,byref(c_double(temp)),
-                     byref(c_double(eps)),byref(c_int64(Nkall)),byref(c_int64(Nk)),
-                     byref(c_int64(Nw)),byref(c_int64(Nchi)),byref(c_int64(Norb)),
-                     byref(c_int64(Nx)),byref(c_int64(Ny)),byref(c_int64(Nz)),
-                     byref(c_int64(itemax)),byref(c_int64(gap_sym)))
+    flibs.lin_eliash_soc(delta,Gk,uni,init_delta,Vmat,olist,slist,kmap,invk,invs,
+                         byref(c_double(temp)),byref(c_double(eps)),byref(c_int64(Nkall)),
+                         byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Nchi)),
+                         byref(c_int64(Norb)),byref(c_int64(Nx)),byref(c_int64(Ny)),
+                         byref(c_int64(Nz)),byref(c_int64(itemax)),byref(c_int64(gap_sym)))
     return delta
 
 def gen_Vmatrix(olist,slist,site,U,J):

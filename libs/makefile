@@ -4,7 +4,7 @@ FC=ifx
 #FC=flang
 #FC=amdflang
 #FC=gfortran
-SL=MKL
+#SL=MKL
 #SL=AOCL
 #SL=OpenBLAS
 ifeq ($(FC),ifort)
