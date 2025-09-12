@@ -188,6 +188,12 @@ subroutine getinv(Gk,Nk,Nw,Norb) bind(C,name="getinv_")
 end subroutine getinv
 
 subroutine get_chi_map(chi_map,irr_chi,olist,Nchi)
+  !> This function generate index of exchange symmetry chi1234(q,iw)=chi*4321(q,iw).
+  !> This symmetry can use system has no spin dependence and TRS.
+  !!@param chi_map,out: mapping list of chi index
+  !!@param irr_chi,out: irreducible index of chii
+  !!@param    olist,in: orbital index list of chi index
+  !!@param     Nchi,in: Number of chi index
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nchi
@@ -202,22 +208,22 @@ subroutine get_chi_map(chi_map,irr_chi,olist,Nchi)
   chi_irr(:,:)=0
   chi_map(:,:,:)=0
   do l1=1,Nchi
-     tmp1(1)=olist(l1,1)
-     tmp1(2)=olist(l1,2)
+     tmp1(1)=olist(l1,1) !1 of 1234
+     tmp1(2)=olist(l1,2) !2 of 1234
      do m1=1,Nchi
-        tmp1(3)=olist(m1,1)
-        tmp1(4)=olist(m1,2)
+        tmp1(3)=olist(m1,1) !3 of 1234
+        tmp1(4)=olist(m1,2) !4 of 1234
         do l2=1,Nchi
-           tmp2(3)=olist(l2,2)
-           tmp2(4)=olist(l2,1)
+           tmp2(3)=olist(l2,2) !2 of 4321
+           tmp2(4)=olist(l2,1) !1 of 4321
            do m2=1,Nchi
-              tmp2(1)=olist(m2,2)
-              tmp2(2)=olist(m2,1)
-              if(sum(abs(tmp1(:)-tmp2(:)))==0)then
+              tmp2(1)=olist(m2,2) !4 of 4321
+              tmp2(2)=olist(m2,1) !3 of 4321
+              if(sum(abs(tmp1(:)-tmp2(:)))==0)then !4321 correspond to 1234
                  chi_map(m1,l1,1)=m2
                  chi_map(m1,l1,2)=l2
-                 if(chi_irr(m2,l2)==0)then
-                    chi_irr(m1,l1)=1
+                 if(chi_irr(m2,l2)==0)then !4321 is not irreducible
+                    chi_irr(m1,l1)=1 !1 is irreducible index
                  end if
                  exit
               end if
@@ -226,6 +232,7 @@ subroutine get_chi_map(chi_map,irr_chi,olist,Nchi)
      end do
   end do
 
+  !get list of irreducible chi index
   iter=1
   do l1=1,Nchi
      do m1=1,Nchi
