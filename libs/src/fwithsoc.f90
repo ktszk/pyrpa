@@ -39,22 +39,18 @@ subroutine lin_eliash_soc(delta,Gk,uni,init_delta,Vmat,olist,slist,kmap,invk,inv
   integer(int32) i_iter,i_eig,count,i
   integer(int32),parameter:: eig_max=2
   integer(int32),dimension(Nchi):: invschi
-  integer(int32),dimension(Nchi,Nchi,2)::chi_map
-  integer(int32),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
   real(real64) norm,normb,inorm,norm2,weight
   real(real64),dimension(Norb,Norb):: sgnsig
   real(real64),dimension(Nchi,Nchi):: sgnsig2
   complex(real64),dimension(Nk,Nw,Nchi,Nchi):: chi
   complex(real64),dimension(Nkall,Nw,Norb,Norb):: newdelta,fk
 
-  call get_invschi()
-  call get_sgnsig()
-  call get_chi_map_soc(chi_map,irr_chi,olist,invs,Nchi,Norb)
   weight=temp/dble(Nkall)
   norm2=0.0d0
   normb=0.0d0
-  call get_chi0_conv_soc(chi,Gk,kmap,invk,invs,irr_chi,chi_map,olist,sgnsig,sgnsig2,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
-  call ckchi()
+  call get_invschi()
+  call get_sgnsig()
+  call get_chi0_soc(chi,Vmat,Gk,kmap,invk,invs,olist,sgnsig,sgnsig2,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Nchi,Norb)
   call get_V_delta_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
@@ -123,39 +119,6 @@ contains
     !$omp end parallel
     norm=sqrt(2.0d0*tmp)
   end subroutine get_norm
- 
-  subroutine ckchi()
-    integer(int32) i,l,m,n,info,chik,chikall,iorb
-    real(real64) maxchi0,maxchi02
-    real(real64),dimension(2*Nchi):: rwork
-    complex(real64),dimension(Nchi*Nchi*4+1):: work
-    complex(real64),dimension(Nchi):: eigc
-    complex(real64),dimension(Nchi,Nchi):: chi0,tmp,tmp1
-
-    maxchi02=-1.0d5
-    do i=1,Nk
-       chi0(:,:)=0.0d0
-       do l=1,Nchi
-          do m=1,Nchi
-             do n=1,Nchi
-                chi0(m,l)=chi0(m,l)+chi(i,1,m,n)*Vmat(n,l)
-             end do
-          end do
-       end do
-       call zgeev('N','N',Nchi,chi0,Nchi,eigc,tmp1,Nchi,tmp,Nchi,work,Nchi*Nchi*4+1,rwork,info)
-       maxchi0=maxval(abs(dble(eigc)))
-       if(maxchi0>maxchi02)then
-          chik=i
-          maxchi02=maxchi0
-       end if
-    end do
-    do i=1,Nkall
-       if(invk(2,i)==0)then
-          if(invk(1,i)==chik)chikall=i
-       end if
-    end do
-    print'(A7,3I4,F12.8)','SDW/CDW',kmap(:,chikall),maxchi02
-  end subroutine ckchi
 
   subroutine get_invschi()
     integer(int32) l,m,i,j
@@ -190,6 +153,68 @@ contains
     end do
   end subroutine get_sgnsig
 end subroutine lin_eliash_soc
+
+subroutine get_chi0_soc(chi,Vmat,Gk,kmap,invk,invs,olist,sgnsig,sgnsig2,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Nchi,Norb)
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  implicit none
+  integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
+  integer(int64),intent(in),dimension(Nchi,2):: olist
+  integer(int64),intent(in),dimension(Norb):: invs
+  integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
+  real(real64),intent(in):: temp
+  real(real64),intent(in),dimension(Nchi,Nchi):: Vmat
+  real(real64),intent(in),dimension(Norb,Norb):: sgnsig
+  real(real64),intent(in),dimension(Nchi,Nchi):: sgnsig2
+  complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
+  complex(real64),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
+
+  integer(int32),dimension(Nchi,Nchi,2)::chi_map
+  integer(int32),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
+  
+  call get_chi_map_soc(chi_map,irr_chi,olist,invs,Nchi,Norb)
+  call get_chi0_conv_soc(chi,Gk,kmap,invk,invs,irr_chi,chi_map,olist,sgnsig,sgnsig2,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+  call ckchi()
+contains
+    subroutine ckchi()
+    integer(int32) i,l,m,n,info,chik,chikall,iorb
+    real(real64) maxchi0,maxchi02
+    real(real64),dimension(2*Nchi):: rwork
+    complex(real64),dimension(Nchi*Nchi*4+1):: work
+    complex(real64),dimension(Nchi):: eigc
+    complex(real64),dimension(Nchi,Nchi):: chi0,tmp,tmp1
+
+    maxchi02=-1.0d5
+    do i=1,Nk
+       !$omp parallel
+       !$omp workshare
+       chi0(:,:)=0.0d0
+       !$omp end workshare
+       !$omp do private(l,m,n)
+       do l=1,Nchi
+          do m=1,Nchi
+             do n=1,Nchi
+                chi0(m,l)=chi0(m,l)+chi(i,1,m,n)*Vmat(n,l)
+             end do
+          end do
+       end do
+       !$omp end do
+       !$omp end parallel
+       call zgeev('N','N',Nchi,chi0,Nchi,eigc,tmp1,Nchi,tmp,Nchi,work,Nchi*Nchi*4+1,rwork,info)
+       maxchi0=maxval(abs(dble(eigc)))
+       if(maxchi0>maxchi02)then
+          chik=i
+          maxchi02=maxchi0
+       end if
+    end do
+    do i=1,Nkall
+       if(invk(2,i)==0 .and. invk(1,i)==chik)then
+          chikall=i
+          exit
+       end if
+    end do
+    print'(A7,3I4,F12.8)','SDW/CDW',kmap(:,chikall),maxchi02
+  end subroutine ckchi
+end subroutine get_chi0_soc
 
 subroutine get_V_delta_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
@@ -714,6 +739,7 @@ subroutine get_chi_map_soc(chi_map,irr_chi,olist,invs,Nchi,Norb)
   integer(int32) l1,m1,l2,m2,iter
   integer(int32),dimension(Nchi,Nchi):: chi_irr
   integer(int32),dimension(4):: tmp1,tmp2
+  logical(int32) ck
 
   chi_irr(:,:)=0
   chi_map(:,:,:)=0
@@ -723,6 +749,7 @@ subroutine get_chi_map_soc(chi_map,irr_chi,olist,invs,Nchi,Norb)
      do m1=1,Nchi
         tmp1(3)=olist(m1,1) !3 of 1234
         tmp1(4)=olist(m1,2) !4 of 1234
+        ck=.false.
         do l2=1,Nchi
            tmp2(3)=invs(olist(l2,2)) !2 of 4321 with spin flip
            tmp2(4)=invs(olist(l2,1)) !1 of 4321 with spin flip
@@ -735,9 +762,11 @@ subroutine get_chi_map_soc(chi_map,irr_chi,olist,invs,Nchi,Norb)
                  if(chi_irr(m2,l2)==0)then !4321 is not irreducible
                     chi_irr(m1,l1)=1 !1 is irreducible index
                  end if
+                 ck=.true.
                  exit
               end if
            end do
+           if(ck)exit
         end do
      end do
   end do

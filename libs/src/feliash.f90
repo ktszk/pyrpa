@@ -36,8 +36,6 @@ subroutine lin_eliash(delta,Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,temp,eps
 
   integer(int32) i_iter,i_eig,count,i
   integer(int32),parameter:: eig_max=2
-  integer(int32),dimension(Nchi,Nchi,2)::chi_map
-  integer(int32),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
   logical(1) sw_pair
   real(real64) norm,normb,inorm,norm2,weight
   complex(real64),dimension(Nk,Nw,Nchi,Nchi):: chi
@@ -50,12 +48,10 @@ subroutine lin_eliash(delta,Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,temp,eps
      sw_pair=.false.
      print'(A7)','triplet'
   end if
-  call get_chi_map(chi_map,irr_chi,olist,Nchi)
   weight=temp/dble(Nkall)
   norm2=0.0d0
   normb=0.0d0
-  call get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
-  call ckchi()
+  call get_chi0(chi,Smat,Cmat,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
   call get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
@@ -123,7 +119,26 @@ contains
     !$omp end parallel
     norm=sqrt(2.0d0*tmp)
   end subroutine get_norm
-  
+end subroutine lin_eliash
+
+subroutine get_chi0(chi,Smat,Cmat,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  implicit none
+  integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
+  integer(int64),intent(in),dimension(Nchi,2):: olist
+  integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
+  real(real64),intent(in):: temp
+  real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
+  complex(real64),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
+
+  integer(int32),dimension(Nchi,Nchi,2)::chi_map
+  integer(int32),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
+
+  call get_chi_map(chi_map,irr_chi,olist,Nchi)
+  call get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+  call ckchi()
+contains
   subroutine ckchi()
     integer(int32) i,l,m,n,info,chisk,chick,chiskall,chickall
     real(real64) maxchi0s,maxchi0c,maxchi0s2,maxchi0c2
@@ -173,7 +188,7 @@ contains
     print'(A3,3I4,F12.8)','SDW',kmap(:,chiskall),maxchi0s2
     print'(A3,3I4,F12.8)','CDW',kmap(:,chickall),maxchi0c2
   end subroutine ckchi
-end subroutine lin_eliash
+end subroutine get_chi0
 
 subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
   !> This function obtains pairing interaction V_delta without soc

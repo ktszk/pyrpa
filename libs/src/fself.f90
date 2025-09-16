@@ -204,6 +204,7 @@ subroutine get_chi_map(chi_map,irr_chi,olist,Nchi)
   integer(int32) l1,m1,l2,m2,iter
   integer(int32),dimension(Nchi,Nchi):: chi_irr
   integer(int32),dimension(4):: tmp1,tmp2
+  logical(int32) ck
 
   chi_irr(:,:)=0
   chi_map(:,:,:)=0
@@ -213,6 +214,7 @@ subroutine get_chi_map(chi_map,irr_chi,olist,Nchi)
      do m1=1,Nchi
         tmp1(3)=olist(m1,1) !3 of 1234
         tmp1(4)=olist(m1,2) !4 of 1234
+        ck=.false.
         do l2=1,Nchi
            tmp2(3)=olist(l2,2) !2 of 4321
            tmp2(4)=olist(l2,1) !1 of 4321
@@ -225,9 +227,11 @@ subroutine get_chi_map(chi_map,irr_chi,olist,Nchi)
                  if(chi_irr(m2,l2)==0)then !4321 is not irreducible
                     chi_irr(m1,l1)=1 !1 is irreducible index
                  end if
+                 ck=.true.
                  exit
               end if
            end do
+           if(ck)exit
         end do
      end do
   end do
@@ -689,6 +693,7 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   iter_loop: do scf_i=1,scf_loop
      print'(A5,I5)','iter=',scf_i
      call get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+     call ckchi()
      call get_Vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi)
      print'(A16,E12.4,A5,E12.4)','Re V_sigma: max:',maxval(dble(chi)),' min:',minval(dble(chi))
      call calc_sigma(sigmak,Gk,chi,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
@@ -731,6 +736,56 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   end if
   call renew_mu()
 contains
+  subroutine ckchi()
+    integer(int32) i,l,m,n,info,chisk,chick,chiskall,chickall
+    real(real64) maxchi0s,maxchi0c,maxchi0s2,maxchi0c2
+    real(real64),dimension(2*Nchi):: rwork
+    complex(real64),dimension(Nchi*Nchi*4+1):: work
+    complex(real64),dimension(Nchi):: eigs,eigc
+    complex(real64),dimension(Nchi,Nchi):: chi0s,chi0c,tmp1,tmp2
+
+    maxchi0s2=-1.0d5
+    maxchi0c2=-1.0d5
+    do i=1,Nk
+       !$omp parallel
+       !$omp workshare
+       chi0s(:,:)=0.0d0
+       chi0c(:,:)=0.0d0
+       !$omp end workshare
+       !$omp do private(l,m,n)
+       do l=1,Nchi
+          do m=1,Nchi
+             do n=1,Nchi
+                chi0s(m,l)=chi0s(m,l)+chi(i,1,m,n)*Smat(n,l)
+                chi0c(m,l)=chi0c(m,l)-chi(i,1,m,n)*Cmat(n,l)
+             end do
+          end do
+       end do
+       !$omp end do
+       !$omp end parallel
+       call zgeev('N','N',Nchi,chi0s,Nchi,eigs,tmp1,Nchi,tmp2,Nchi,work,Nchi*Nchi*4+1,rwork,info)
+       call zgeev('N','N',Nchi,chi0c,Nchi,eigc,tmp1,Nchi,tmp2,Nchi,work,Nchi*Nchi*4+1,rwork,info)
+       maxchi0s=maxval(dble(eigs))
+       maxchi0c=maxval(dble(eigc))
+       if(maxchi0s>maxchi0s2)then
+          chisk=i
+          maxchi0s2=maxchi0s
+       end if
+       if(maxchi0c>maxchi0c2)then
+          chick=i
+          maxchi0c2=maxchi0c
+       end if
+    end do
+    do i=1,Nkall !get kmap footnote
+       if(invk(2,i)==0)then
+          if(invk(1,i)==chisk)chiskall=i
+          if(invk(1,i)==chick)chickall=i
+       end if
+    end do
+    print'(A3,3I4,F12.8)','SDW',kmap(:,chiskall),maxchi0s2
+    print'(A3,3I4,F12.8)','CDW',kmap(:,chickall),maxchi0c2
+  end subroutine ckchi
+
   subroutine compair_sigma()
     integer(int32) i,j,l,m, kerr,iwerr,lerr,merr
     real(real64) est

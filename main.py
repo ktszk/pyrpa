@@ -20,9 +20,11 @@ else: monoclinic
 """
 
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4nso',0,7,False
-fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
+#fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
 #fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
+#fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
+fname,ftype,brav,sw_soc='inputs/square_soc.hop',1,0,True
 
 sw_dec_axis=False
 
@@ -66,7 +68,7 @@ abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 alpha_beta_gamma=[90.,90.,90]
 temp=5.0e-2 #2.59e-2
 #tempK=300 #Kelvin
-fill=4.0 #2.9375
+fill=1.0 #2.9375
 
 #site_prof=[5]
 
@@ -81,7 +83,7 @@ olist=[[0,3],[1,4],[2,5]]
 U,J=1.2,0.15
 #U,J=1.3,0.2167
 #0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py
-gap_sym=2
+gap_sym=1
 
 #mu0=9.85114560061123
 #k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
@@ -482,10 +484,10 @@ def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,oli
         np.savez('self_en',sigmak,mu_self)
 
 def output_gap_function(invk,kmap,gap,uni):
-    f=open('gap_wdep.dat','w')
-    for i,gp in enumerate(gap[2,2,:,0]):
-        f.write(f'{i} {gp.real:12.8f} {gp.imag:12.8f}\n')
-    f.close()
+    #f=open('gap_wdep.dat','w')
+    #for i,gp in enumerate(gap[2,2,:,0]):
+    #    f.write(f'{i} {gp.real:12.8f} {gp.imag:12.8f}\n')
+    #f.close()
     gapb=flibs.conv_delta_orb_to_band(gap,uni,invk)
     #gapb=gap[:,:,0,:]
     print('output gap function')
@@ -539,9 +541,9 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,sw_
     maxgap=abs(gap).max()
     print((abs(gap)<maxgap*1.0e-6).sum())
     print((abs(gap)<maxgap*1.0e-6).sum()/gap.size*100)
-    plt.plot(iwlist,gap[2,2,:,i].real)
+    #plt.plot(iwlist,gap[2,2,:,i].real)
     #plt.plot(iwlist,gap[2,2,:,100].imag)
-    plt.show()
+    #plt.show()
     if sw_self:
         maxsigma=abs(sigmak).max()
         #print((abs(sigmak)<maxsigma*1.0e-6).sum())
