@@ -99,7 +99,7 @@ subroutine get_scmat_orb(Smat,Cmat,ol,site,Umat,Jmat,Nchi,Norb) bind(C)
   !$omp end parallel
 end subroutine get_scmat_orb
 
-subroutine get_Vmat_soc(Vmat,ol,sl,site,Uval,Jval,Nchi,Norb) bind(C)
+subroutine get_Vmat_soc(Vmat,ol,sl,site,invs,Uval,Jval,Nchi,Norb) bind(C)
   !> make onsite interaction vertex V with SOC
   !!@param Vmat,out: V-matrix (vertex matrix for soc calculation), size(Nchi,Nchi)
   !!@param    ol,in: list of orbitals, size(Nchi,2)
@@ -114,7 +114,7 @@ subroutine get_Vmat_soc(Vmat,ol,sl,site,Uval,Jval,Nchi,Norb) bind(C)
   integer(int64),intent(in):: Nchi,Norb
   integer(int64),intent(in),dimension(Nchi,2):: ol !1:orb1, 2:orb2
   integer(int64),intent(in),dimension(Nchi):: site
-  integer(int64),intent(in),dimension(Norb):: sl
+  integer(int64),intent(in),dimension(Norb):: sl,invs
   real(real64),intent(in):: Uval,Jval
   real(real64),intent(out),dimension(Nchi,Nchi):: Vmat
 
@@ -133,48 +133,36 @@ subroutine get_Vmat_soc(Vmat,ol,sl,site,Uval,Jval,Nchi,Norb) bind(C)
            if(sl(ol(i,1))==sl(ol(i,2)) .and. sl(ol(j,1))==sl(ol(j,2)))then
               if(sl(ol(i,1))==sl(ol(j,1)))then !Vuuuu or Vdddd ((C-S)/2)
                  if(ol(i,1)==ol(j,2) .and. ol(j,1)==ol(i,2))then
-                    continue               !Viiii and Vijji is zero
+                    continue             !Viiii and Vijji is zero (intra,pair hoppings)
                  else if(ol(i,1)==ol(i,2) .and. ol(j,1)==ol(j,2))then
-                    Vmat(j,i)=Upval-Jval   !Viijj=U'-J
+                    Vmat(j,i)=Upval-Jval !Viijj=U'-J (inter-hund)
                  else if(ol(i,1)==ol(j,1) .and. ol(i,2)==ol(j,2))then
-                    Vmat(j,i)=Jval-Upval   !Vijij=-Viijj=J-U'
+                    Vmat(j,i)=Jval-Upval !Vijij=-Viijj=J-U' (inter-hund)
                  end if
               else !Vuudd or Vdduu ((C+S)/2)
                  if(ol(i,1)==ol(i,2) .and. ol(j,1)==ol(j,2))then
-                    if(ol(i,1)==ol(j,1))then
-                       Vmat(j,i)=Uval  !Viiii=U
+                    if(ol(i,1)==invs(ol(j,1)))then
+                       Vmat(j,i)=Uval  !Viiii=U (intra)
                     else
-                       Vmat(j,i)=Upval !Viijj=U'
+                       Vmat(j,i)=Upval !Viijj=U' (inter)
                     end if
-                 else if(ol(i,1)==ol(j,1) .and. ol(i,2)==ol(j,2))then
-                    Vmat(j,i)=Jval     !Vijij=J
-                 else if(ol(i,1)==ol(j,2) .and. ol(j,1)==ol(i,2))then
-                    Vmat(j,i)=Jval     !Vijji=J'
+                 else if(ol(i,1)==invs(ol(j,1)) .and. ol(i,2)==invs(ol(j,2)))then
+                    Vmat(j,i)=Jval     !Vijij=J (hund)
+                 else if(ol(i,1)==invs(ol(j,2)) .and. ol(j,1)==invs(ol(i,2)))then
+                    Vmat(j,i)=Jval     !Vijji=J' (pair hoppings)
                  end if
               end if
            else if(sl(ol(i,1))==sl(ol(j,1)) .and. sl(ol(i,2))==sl(ol(j,2)))then !Vudud or Vdudu (-S)
-              if(ol(i,1)==ol(i,2) .and. ol(j,1)==ol(j,2))then
+              if(ol(i,1)==invs(ol(i,2)) .and. ol(j,1)==invs(ol(j,2)))then
                  if(ol(i,1)==ol(j,1))then
-                    Vmat(j,i)=-Uval !Viiii=-U
+                    Vmat(j,i)=-Uval !Viiii=-U (intra)
                  else
-                    Vmat(j,i)=-Jval !Viijj=-U'
+                    Vmat(j,i)=-Jval !Viijj=-J (hund)
                  end if
               else if(ol(i,1)==ol(j,1) .and. ol(i,2)==ol(j,2))then
-                 Vmat(j,i)=-Upval   !Vijij=-J
-              else if(ol(i,1)==ol(j,2) .and. ol(j,1)==ol(i,2))then
-                 Vmat(j,i)=-Jval    !Vijji=-J
-              end if
-           else if(sl(ol(i,1))==sl(ol(j,2)) .and. sl(ol(i,2))==sl(ol(j,1)))then !Vuddu or Vduud (-S)
-              if(ol(i,1)==ol(i,2) .and. ol(j,1)==ol(j,2))then
-                 if(ol(i,1)==ol(j,1))then
-                    Vmat(j,i)=-Uval !Viiii=-U
-                 else
-                    Vmat(j,i)=-Jval !Viijj=-U'
-                 end if
-              else if(ol(i,1)==ol(j,1) .and. ol(i,2)==ol(j,2))then
-                 Vmat(j,i)=-Upval   !Vijij=-J
-              else if(ol(i,1)==ol(j,2) .and. ol(j,1)==ol(i,2))then
-                 Vmat(j,i)=-Jval    !Vijji=-J
+                 Vmat(j,i)=-Upval   !Vijij=-U' (inter)
+              else if(ol(i,1)==invs(ol(j,2)) .and. ol(j,1)==invs(ol(i,2)))then
+                 Vmat(j,i)=-Jval    !Vijji=-J' (pair hoppings)
               end if
            end if
         end if
@@ -184,7 +172,7 @@ subroutine get_Vmat_soc(Vmat,ol,sl,site,Uval,Jval,Nchi,Norb) bind(C)
   !$omp end parallel
 end subroutine get_Vmat_soc
 
-subroutine get_Vmat_soc_orb(Vmat,ol,sl,site,Umat,Jmat,Nchi,Norb) bind(C)
+subroutine get_Vmat_soc_orb(Vmat,ol,sl,site,invs,Umat,Jmat,Nchi,Norb) bind(C)
   !> make orbital dependent onsite interaction vertex V with SOC
   !!@param Vmat,out: V-matrix (vertex matrix for soc calculation), size(Nchi,Nchi)
   !!@param    ol,in: list of orbitals, size(Nchi,2)
@@ -199,7 +187,7 @@ subroutine get_Vmat_soc_orb(Vmat,ol,sl,site,Umat,Jmat,Nchi,Norb) bind(C)
   integer(int64),intent(in):: Nchi,Norb
   integer(int64),intent(in),dimension(Nchi,2):: ol !1:orb1, 2:orb2
   integer(int64),intent(in),dimension(Nchi):: site
-  integer(int64),intent(in),dimension(Norb):: sl
+  integer(int64),intent(in),dimension(Norb):: sl,invs
   real(real64),intent(in),dimension(Norb,Norb):: Umat,Jmat
   real(real64),intent(out),dimension(Nchi,Nchi):: Vmat
 
@@ -216,48 +204,36 @@ subroutine get_Vmat_soc_orb(Vmat,ol,sl,site,Umat,Jmat,Nchi,Norb) bind(C)
            if(sl(ol(i,1))==sl(ol(i,2)) .and. sl(ol(j,1))==sl(ol(j,2)))then
               if(sl(ol(i,1))==sl(ol(j,1)))then !Vuuuu or Vdddd ((C-S)/2)
                  if(ol(i,1)==ol(j,2) .and. ol(j,1)==ol(i,2))then
-                    continue               !Viiii and Vijji is zero
+                    continue                   !Viiii and Vijji is zero (intra & pair hoppings)
                  else if(ol(i,1)==ol(i,2) .and. ol(j,1)==ol(j,2))then
-                    Vmat(j,i)=Umat(ol(i,1),ol(j,1))-Jmat(ol(i,1),ol(j,1)) !Viijj=U'-J
+                    Vmat(j,i)=Umat(ol(i,1),ol(j,1))-Jmat(ol(i,1),ol(j,1)) !Viijj=U'-J (inter-hund)
                  else if(ol(i,1)==ol(j,1) .and. ol(i,2)==ol(j,2))then
-                    Vmat(j,i)=Jmat(ol(i,1),ol(i,2))-Umat(ol(i,1),ol(i,2)) !Vijij=-Viijj=J-U'
+                    Vmat(j,i)=Jmat(ol(i,1),ol(i,2))-Umat(ol(i,1),ol(i,2)) !Vijij=-Viijj=J-U' (inter-hund)
                  end if
               else !Vuudd or Vdduu ((C+S)/2)
                  if(ol(i,1)==ol(i,2) .and. ol(j,1)==ol(j,2))then
-                    if(ol(i,1)==ol(j,1))then
-                       Vmat(j,i)=Umat(ol(i,1),ol(i,1))  !Viiii=U
+                    if(ol(i,1)==invs(ol(j,1)))then
+                       Vmat(j,i)=Umat(ol(i,1),ol(i,1)) !Viiii=U (intra)
                     else
-                       Vmat(j,i)=Umat(ol(i,1),ol(j,1)) !Viijj=U'
+                       Vmat(j,i)=Umat(ol(i,1),ol(j,1)) !Viijj=U' (inter)
                     end if
-                 else if(ol(i,1)==ol(j,1) .and. ol(i,2)==ol(j,2))then
-                    Vmat(j,i)=Jmat(ol(i,1),ol(i,2))     !Vijij=J
-                 else if(ol(i,1)==ol(j,2) .and. ol(j,1)==ol(i,2))then
-                    Vmat(j,i)=Jmat(ol(i,1),ol(i,2))     !Vijji=J'
+                 else if(ol(i,1)==invs(ol(j,1)) .and. ol(i,2)==invs(ol(j,2)))then
+                    Vmat(j,i)=Jmat(ol(i,1),ol(i,2))    !Vijij=J (hund)
+                 else if(ol(i,1)==invs(ol(j,2)) .and. ol(j,1)==invs(ol(i,2)))then
+                    Vmat(j,i)=Jmat(ol(i,1),ol(i,2))    !Vijji=J' (pair hoppings)
                  end if
               end if
            else if(sl(ol(i,1))==sl(ol(j,1)) .and. sl(ol(i,2))==sl(ol(j,2)))then !Vudud or Vdudu (-S)
-              if(ol(i,1)==ol(i,2) .and. ol(j,1)==ol(j,2))then
+              if(ol(i,1)==invs(ol(i,2)) .and. ol(j,1)==invs(ol(j,2)))then
                  if(ol(i,1)==ol(j,1))then
-                    Vmat(j,i)=-Umat(ol(i,1),ol(i,1)) !Viiii=-U
+                    Vmat(j,i)=-Umat(ol(i,1),ol(i,1)) !Viiii=-U (intra)
                  else
-                    Vmat(j,i)=-Jmat(ol(i,1),ol(j,1)) !Viijj=-U'
+                    Vmat(j,i)=-Jmat(ol(i,1),ol(j,1)) !Viijj=-U' (inter)
                  end if
               else if(ol(i,1)==ol(j,1) .and. ol(i,2)==ol(j,2))then
-                 Vmat(j,i)=-Umat(ol(i,1),ol(i,2))   !Vijij=-J
-              else if(ol(i,1)==ol(j,2) .and. ol(j,1)==ol(i,2))then
-                 Vmat(j,i)=-Jmat(ol(i,1),ol(i,2))    !Vijji=-J
-              end if
-           else if(sl(ol(i,1))==sl(ol(j,2)) .and. sl(ol(i,2))==sl(ol(j,1)))then !Vuddu or Vduud (-S)
-              if(ol(i,1)==ol(i,2) .and. ol(j,1)==ol(j,2))then
-                 if(ol(i,1)==ol(j,1))then
-                    Vmat(j,i)=-Umat(ol(i,1),ol(i,1)) !Viiii=-U
-                 else
-                    Vmat(j,i)=-Jmat(ol(i,1),ol(j,1)) !Viijj=-U'
-                 end if
-              else if(ol(i,1)==ol(j,1) .and. ol(i,2)==ol(j,2))then
-                 Vmat(j,i)=-Umat(ol(i,1),ol(i,2))   !Vijij=-J
-              else if(ol(i,1)==ol(j,2) .and. ol(j,1)==ol(i,2))then
-                 Vmat(j,i)=-Jmat(ol(i,1),ol(i,2))    !Vijji=-J
+                 Vmat(j,i)=-Umat(ol(i,1),ol(i,2))    !Vijij=-J (hund)
+              else if(ol(i,1)==invs(ol(j,2)) .and. ol(j,1)==invs(ol(i,2)))then
+                 Vmat(j,i)=-Jmat(ol(i,1),ol(i,2))    !Vijji=-J (pair hoppings)
               end if
            end if
         end if

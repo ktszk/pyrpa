@@ -68,7 +68,7 @@ abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 alpha_beta_gamma=[90.,90.,90]
 temp=5.0e-2 #2.59e-2
 #tempK=300 #Kelvin
-fill=1.0 #2.9375
+fill=1. #2.9375
 
 #site_prof=[5]
 
@@ -587,9 +587,9 @@ def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     if orb_dep:
-        Vmat=flibs.gen_Vmatrix_orb(chiolist,slist,site,Umat,Jmat)
+        Vmat=flibs.gen_Vmatrix_orb(chiolist,slist,site,invs,Umat,Jmat)
     else:
-        Vmat=flibs.gen_Vmatrix(chiolist,slist,site,U,J)
+        Vmat=flibs.gen_Vmatrix(chiolist,slist,site,invs,U,J)
     if sw_self:
         ham_k=flibs.gen_ham(klist,ham_r,rvec)
         if sw_from_file:

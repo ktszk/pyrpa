@@ -193,14 +193,14 @@ contains
        do l=1,Nchi
           do m=1,Nchi
              do n=1,Nchi
-                chi0(m,l)=chi0(m,l)+chi(i,1,m,n)*Vmat(n,l)
+                chi0(m,l)=chi0(m,l)-chi(i,1,m,n)*Vmat(n,l)
              end do
           end do
        end do
        !$omp end do
        !$omp end parallel
        call zgeev('N','N',Nchi,chi0,Nchi,eigc,tmp1,Nchi,tmp,Nchi,work,Nchi*Nchi*4+1,rwork,info)
-       maxchi0=maxval(abs(dble(eigc)))
+       maxchi0=maxval(dble(eigc))
        if(maxchi0>maxchi02)then
           chik=i
           maxchi02=maxchi0
@@ -269,13 +269,13 @@ subroutine get_V_delta_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
         end do
         !$omp end do
         !$omp workshare
-        cmat2(:,:)=-Vmat(:,:)
+        cmat2(:,:)=Vmat(:,:)
         !$omp end workshare
         !$omp do private(l,m,n)
         do l=1,Nchi
            do m=1,Nchi
               do n=1,Nchi
-                 cmat2(m,l)=cmat2(m,l)+Vmat(m,n)*cmat3(n,l)
+                 cmat2(m,l)=cmat2(m,l)-Vmat(m,n)*cmat3(n,l)
               end do
            end do
         end do
@@ -379,6 +379,7 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,kmap,invk,invs,
   complex(real64),intent(out),dimension(Nkall,Nw,Norb,Norb):: newdelta
 
   integer(int32) i,j,k,n,l,m
+  integer(int64),parameter::  par_mix=-10
   complex(real64),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpVdelta,tmpfk,tmp
   
   !$omp parallel workshare
@@ -387,7 +388,7 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,kmap,invk,invs,
   do l=1,Nchi
      do m=1,Nchi
         if((gap_sym<0) .or. (gap_sym>0 .and. slist(olist(l,1))*slist(olist(m,2))<0))then
-           if(slist(olist(l,1))==1)then
+           if((gap_sym==par_mix .and. slist(olist(l,1))*slist(olist(m,2))<0) .or. slist(olist(l,1))==1)then
               !$omp parallel
               !$omp do private(i)
               do i=1,Nkall
@@ -450,8 +451,6 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,kmap,invk,invs,
                  do i=1,Nkall
                     newdelta(i,j,olist(l,1),olist(m,2))=newdelta(i,j,olist(l,1),olist(m,2))&
                          +tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)
-                    newdelta(i,j,invs(olist(m,2)),invs(olist(l,1)))=newdelta(i,j,invs(olist(m,2)),invs(olist(l,1)))&
-                         -sgnsig(olist(l,1),olist(m,2))*conjg(tmp(kmap(1,i),kmap(2,i),kmap(3,i),j))
                  end do
               end do
               !$omp end parallel do
@@ -459,6 +458,31 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,kmap,invk,invs,
         end if
      end do
   end do
+  !$omp parallel
+  do l=1,Norb
+     if(slist(l)==1)then
+        do m=1,Norb
+           !$omp do private(i,j)
+           do j=1,Nw
+              do i=1,Nkall
+                 if(slist(m)==1)then !delta_uu(k)=-delta*_dd(k)
+                    newdelta(i,j,invs(l),invs(m))=-conjg(newdelta(i,j,l,m))
+                 else
+                    if(gap_sym>0)then !if system has parity, singlet Delta_ud(k)=-Delta_du(k)
+                       newdelta(i,j,invs(l),invs(m))=-newdelta(i,j,l,m)
+                    else if(gap_sym==par_mix)then !parity mixing
+                       continue
+                    else !if system has parity, triplet Delta_ud(k)=Delta_du(k)
+                       newdelta(i,j,invs(l),invs(m))=newdelta(i,j,l,m)
+                    end if
+                 end if
+              end do
+           end do
+           !$omp end do
+        end do
+     end if
+  end do
+  !$omp end parallel
 end subroutine mkdelta_soc
 
 subroutine get_chi0_conv_soc(chi,Gk,kmap,invk,invs,irr_chi,chi_map,olist,&
@@ -571,77 +595,6 @@ subroutine get_chi0_conv_soc(chi,Gk,kmap,invk,invs,irr_chi,chi_map,olist,&
   end do orb_loop
 end subroutine get_chi0_conv_soc
 
-subroutine get_vsigma_flex_soc(chi,Vmat,Nk,Nw,Nchi)
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
-  implicit none
-  integer(int64),intent(in):: Nk,Nw,Nchi
-  real(real64),intent(in),dimension(Nchi,Nchi):: Vmat
-  complex(real64),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
- 
-  integer(int32) i,j,l,m,n,info
-  integer(int32),dimension(Nchi):: ipiv
-  complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3
-  complex(real64),dimension(2*Nchi):: work
- 
-  do j=1,Nw
-     do i=1,Nk
-        !$omp parallel
-        !$omp workshare
-        cmat1(:,:)=0.0d0
-        !$omp end workshare
-        !$omp do private(m,n)
-        do l=1,Nchi
-           do m=1,Nchi
-              do n=1,Nchi
-                 cmat1(m,l)=cmat1(m,l)+chi(i,j,m,n)*Vmat(n,l) !-chi0V
-              end do
-           end do
-        end do
-        !$omp end do
-        !$omp workshare
-        cmat2(:,:)=cmat1(:,:)  !chi0V
-        !$omp end workshare
-        !$omp do 
-        do l=1,Nchi
-           cmat1(l,l)=cmat1(l,l)+1.0d0 !I-chi0S
-        end do
-        !$omp end do
-        !$omp end parallel
-        call zgetrf(Nchi,Nchi,cmat1,Nchi,ipiv,info)
-        call zgetri(Nchi,cmat1,Nchi,ipiv,work,2*Nchi,info)
-        !$omp parallel
-        !$omp workshare
-        cmat3(:,:)=0.0d0
-        !$omp end workshare
-        !$omp do private(m,n)
-        do l=1,Nchi
-           do m=1,Nchi
-              do n=1,Nchi
-                 cmat3(m,l)=cmat3(m,l)+cmat1(m,n)*cmat2(n,l) !(1-chi0S)^-1chi0S
-              end do
-           end do
-        end do
-        !$omp end do
-        !$omp workshare
-        cmat2(:,:)=-Vmat(:,:)
-        !$omp end workshare
-        !$omp do private(m,n)
-        do l=1,Nchi
-           do m=1,Nchi
-              do n=1,Nchi
-                 cmat2(m,l)=cmat2(m,l)+Vmat(m,n)*cmat3(n,l) !subtract double count 2nd order buble(ladder)
-              end do
-           end do
-        end do
-        !$omp end do
-        !!$omp workshare
-        chi(i,j,:,:)=cmat2(:,:)
-        !!$omp end workshare
-        !$omp end parallel
-     end do
-  end do
-end subroutine get_vsigma_flex_soc
-
 subroutine get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym)
   !> make orbital basis initial gap function
   !!@param     delta,out: gap function
@@ -677,11 +630,11 @@ subroutine get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,invs,Nkall
            do i=1,Nkall
               if(invk(2,i)==0)then
                  do n=1,Norb
-                    delta(i,1,m,l)=delta(i,1,m,l)+uni(m,n,invk(1,i))*init_delta(i,n)*conjg(uni(l,n,invk(1,i)))
+                    delta(i,1,m,l)=delta(i,1,m,l)+uni(m,n,invk(1,i))*init_delta(i,n)*slist(l)*conjg(uni(invs(l),n,invk(1,i)))
                  end do
               else if(invk(2,i)==1)then
                  do n=1,Norb
-                    delta(i,1,m,l)=delta(i,1,m,l)+uni(l,n,invk(1,i))*init_delta(i,n)*slist(m)*conjg(uni(invs(m),n,invk(1,i)))
+                    delta(i,1,m,l)=delta(i,1,m,l)-slist(m)*conjg(uni(invs(m),n,invk(1,i)))*init_delta(i,n)*uni(l,n,invk(1,i))
                  end do
               end if
            end do
