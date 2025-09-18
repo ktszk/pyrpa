@@ -757,6 +757,22 @@ def conv_delta_orb_to_band(delta,uni,invk):
                                  byref(c_int64(Nkall)),byref(c_int64(Nk)),byref(c_int64(Nw)))
     return deltab
 
+def conv_delta_orb_to_band_soc(delta,uni,invk,invs,slist):
+    Nkall,Nk,Nw,Norb=len(invk),len(uni),len(delta[0,0]),len(delta)
+    deltab=np.zeros((Norb,Norb,Nkall),dtype=np.complex128)
+    flibs.conv_delta_orb_to_band_soc.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #deltab
+                                               np.ctypeslib.ndpointer(dtype=np.complex128), #delta
+                                               np.ctypeslib.ndpointer(dtype=np.complex128), #uni
+                                               np.ctypeslib.ndpointer(dtype=np.int64),      #invk
+                                               np.ctypeslib.ndpointer(dtype=np.int64),      #invs
+                                               np.ctypeslib.ndpointer(dtype=np.int64),      #slist
+                                               POINTER(c_int64),POINTER(c_int64),           #Norb,Nkall
+                                               POINTER(c_int64),POINTER(c_int64)]           #Nk,Nw
+    flibs.conv_delta_orb_to_band_soc.retype=c_void_p
+    flibs.conv_delta_orb_to_band_soc(deltab,delta,uni,invk,invs,slist,byref(c_int64(Norb)),
+                                     byref(c_int64(Nkall)),byref(c_int64(Nk)),byref(c_int64(Nw)))
+    return deltab
+
 def gen_Fk(Gk,delta,invk):
     Nkall,Nk,Nw,Norb=len(invk),len(Gk[0,0,0]),len(delta[0,0]),len(delta)
     Fk=np.zeros((Norb,Norb,Nw,Nkall),dtype=np.complex128)

@@ -23,6 +23,8 @@ else: monoclinic
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
 #fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
+#fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
+#fname,ftype,brav,sw_soc='inputs/hop2_soc.input',1,0,True
 #fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
 fname,ftype,brav,sw_soc='inputs/square_soc.hop',1,0,True
 
@@ -55,9 +57,9 @@ color_option defines the meaning of color on Fermi surfaces
  2: velocity size
 """
 option=13
-color_option=2
+color_option=1
 
-Nx,Ny,Nz,Nw=32,32,4,512 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=32,32,1,512 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
@@ -66,9 +68,9 @@ kz=0.0
 abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 #abc=[3.90,3.90,12.68]
 alpha_beta_gamma=[90.,90.,90]
-temp=5.0e-2 #2.59e-2
+temp=2.0e-2 #2.59e-2
 #tempK=300 #Kelvin
-fill=1. #2.9375
+fill=1.0 #2.6 #2.9375
 
 #site_prof=[5]
 
@@ -76,12 +78,12 @@ Emin,Emax=-3,3
 delta=3.0e-2
 Ecut=1.0e-2
 tau_const=100
-#olist=[0,1,2]
-olist=[[0,3],[1,4],[2,5]]
+olist=[[0,2],[1,3],[1,3]]
+#olist=[0,1,1]
 #olist=[[0,4],[1,2,5,6],[3,7]]
-#U,J= 0.8, 0.1
-U,J=1.2,0.15
-#U,J=1.3,0.2167
+U,J= 0.8, 0.1
+#U,J=1.2,0.15
+#U,J=1.8,0.225
 #0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py
 gap_sym=1
 
@@ -483,13 +485,16 @@ def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,oli
     if sw_out_self:
         np.savez('self_en',sigmak,mu_self)
 
-def output_gap_function(invk,kmap,gap,uni):
+def output_gap_function(invk,kmap,gap,uni,soc=False,invs=None,slist=None):
     #f=open('gap_wdep.dat','w')
     #for i,gp in enumerate(gap[2,2,:,0]):
     #    f.write(f'{i} {gp.real:12.8f} {gp.imag:12.8f}\n')
     #f.close()
-    gapb=flibs.conv_delta_orb_to_band(gap,uni,invk)
-    #gapb=gap[:,:,0,:]
+    if soc:
+        gapb=flibs.conv_delta_orb_to_band_soc(gap,uni,invk,invs,slist)
+    else:
+        gapb=flibs.conv_delta_orb_to_band(gap,uni,invk)
+    gapb=gap[:,:,0,:]
     print('output gap function')
     for iorb in range(len(gapb)):
         for jorb in range(len(gapb)):
@@ -502,7 +507,7 @@ def output_gap_function(invk,kmap,gap,uni):
         f.close()
     return(0)
 
-def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,sw_self:bool):
+def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,sw_self:bool,sw_soc=False,invs=None,slist=None):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     if sw_self:
@@ -553,7 +558,7 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,sw_
         plt.plot(iwlist,sigmak[0,4,:,318].imag,color='b')
         #plt.plot(-iwlist,-Gk[4,0,:,318].imag,color='b')
         plt.show()
-    info=output_gap_function(invk,kmap,gap,uni)
+    info=output_gap_function(invk,kmap,gap,uni,sw_soc,invs,slist)
 
 def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,olist,site,
                            mu:float,temp:float,gap_sym:int,sw_self:bool):
@@ -605,7 +610,7 @@ def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
     gap=flibs.linearized_eliashberg_soc(Gk,uni,init_delta,Vmat,slist,chiolist,kmap,invk,invs,Nx,Ny,Nz,temp,gap_sym)
     if sw_out_self:
         np.save('gap',gap)
-    info=output_gap_function(invk,kmap,gap,uni)
+    info=output_gap_function(invk,kmap,gap,uni,True,invs,slist)
 
 def get_carrier_num(kmesh,rvec,ham_r,S_r,mu:float,Arot):
     Nk,eig,kwieght=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,S_r,rvec,Arot)
@@ -814,7 +819,7 @@ def main():
             plt.jet()
             #plt.show()
             plt.savefig(fname=susfname,dpi=300)
-    elif option in {12,13}:
+    elif option in {12,13,14}:
         if sw_soc: #with soc
             try:
                 slist
@@ -830,13 +835,15 @@ def main():
                 pass
             elif option==13:
                 calc_lin_eliash_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,invs,site)
+            elif option==14:
+                output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,sw_self,sw_soc,invs,slist)
         else: #without soc
             if option==12: #calc self-energy using flex
                 calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,site)
             elif option==13: #calc gap function
                 calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,site,mu,temp,gap_sym,sw_self)
-    elif option==14:
-        output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,sw_self)
+            elif option==14:
+                output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,sw_self)
     elif option==15: #calc carrier number
         get_carrier_num(Nx,rvec,ham_r,mu,Arot)
     elif option==16: #calc cycrtron mass

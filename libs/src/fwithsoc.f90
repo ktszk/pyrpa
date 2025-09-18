@@ -62,7 +62,7 @@ subroutine lin_eliash_soc(delta,Gk,uni,init_delta,Vmat,olist,slist,kmap,invk,inv
         !something worng mkdelta_soc
         call mkdelta_soc(newdelta,fk,chi,Vmat,sgnsig,sgnsig2,kmap,invk,invs,invschi,olist,slist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,gap_sym)
         !$omp parallel workshare
-        newdelta(:,:,:,:)=newdelta(:,:,:,:)*weight+delta(:,:,:,:)*norm2
+        newdelta(:,:,:,:)=newdelta(:,:,:,:)*weight-delta(:,:,:,:)*norm2
         !$omp end parallel workshare
         call get_norm(norm,newdelta)
         inorm=1.0d0/norm
@@ -72,10 +72,10 @@ subroutine lin_eliash_soc(delta,Gk,uni,init_delta,Vmat,olist,slist,kmap,invk,inv
            print'(I3,A13,2F12.8)',i_iter,' lambda_elsh=',norm-norm2
         end if
         if(abs(norm-normb)*inorm<eps)then
-           if((norm-norm2)>1.0d-1)then !do not finish until eig>0.1
+           if(norm-norm2>1.0d-1)then !do not finish until eig>0.1
               exit
            else if(.true.)then !consider small eig
-              if(abs((norm-normb)*inorm)<eps*1.0d-2)then
+              if((norm-norm2)>0.0 .and. abs((norm-normb)*inorm)<eps*1.0d-2)then
                  count=count+1
               end if
               if(count>30)exit !if eigenvalue <0.1  until 30 count exit
@@ -269,13 +269,13 @@ subroutine get_V_delta_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
         end do
         !$omp end do
         !$omp workshare
-        cmat2(:,:)=Vmat(:,:)
+        cmat2(:,:)=-Vmat(:,:)
         !$omp end workshare
         !$omp do private(l,m,n)
         do l=1,Nchi
            do m=1,Nchi
               do n=1,Nchi
-                 cmat2(m,l)=cmat2(m,l)-Vmat(m,n)*cmat3(n,l)
+                 cmat2(m,l)=cmat2(m,l)+Vmat(m,n)*cmat3(n,l)
               end do
            end do
         end do
@@ -387,73 +387,75 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,kmap,invk,invs,
   !$omp end parallel workshare
   do l=1,Nchi
      do m=1,Nchi
-        if((gap_sym<0) .or. (gap_sym>0 .and. slist(olist(l,1))*slist(olist(m,2))<0))then
-           if((gap_sym==par_mix .and. slist(olist(l,1))*slist(olist(m,2))<0) .or. slist(olist(l,1))==1)then
-              !$omp parallel
-              !$omp do private(i)
-              do i=1,Nkall
-                 if(invk(2,i)==0)then !k,0
-                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vdelta(invk(1,i),1,m,l) !j=1 corresponds to w_n=0
-                 else if(invk(2,i)==1)then !-k,0
-                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=sgnsig2(m,l)*Vdelta(invk(1,i),1,invschi(l),invschi(m)) !V^ml(-q,0)=V^lm(q,0)
-                 end if
-                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=-Vmat(m,l) !Nw+1 consider w_n=>inf limit
-              end do
-              !$omp end do
-              !$omp do private(i,j)
-              do j=2,Nw
+        if((gap_sym<0) .or. (gap_sym>0 .and. slist(olist(l,1))*slist(olist(m,2))<0))then !triplet gap need all D, singlet gap only Dud(du)
+           if((gap_sym==par_mix .and. slist(olist(l,1))*slist(olist(m,2))<0) .or. slist(olist(l,1))==1)then !calc only Duu, Dud
+              if(slist(olist(m,2))==1 .or. olist(l,1)>=invs(olist(m,2)))then !Duu all, Dud upper triangle
+                 !$omp parallel
+                 !$omp do private(i)
                  do i=1,Nkall
-                    if(invk(2,i)==0)then !k,iw,k,-iw
-                       tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vdelta(invk(1,i),j,m,l)
-                       tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vdelta(invk(1,i),j,l,m)) !V^ml(q,-iw)=V^*lm(q,iw)
-                    else if(invk(2,i)==1)then !-k,iw, -k,-iw
-                       tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)=&
-                            sgnsig2(m,l)*Vdelta(invk(1,i),j,invschi(l),invschi(m)) !V^ml(-q,iw)=V^lm(q,iw)
-                       tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=&
-                            sgnsig2(m,l)*conjg(Vdelta(invk(1,i),j,invschi(m),invschi(l))) !V^ml(-q,-iw)=V^*ml(q,iw)
+                    if(invk(2,i)==0)then !k,0
+                       tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vdelta(invk(1,i),1,m,l) !j=1 corresponds to w_n=0
+                    else if(invk(2,i)==1)then !-k,0
+                       tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=sgnsig2(m,l)*Vdelta(invk(1,i),1,invschi(l),invschi(m)) !V^ml(-q,0)=V^lm(q,0)
                     end if
+                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=-Vmat(m,l) !Nw+1 consider w_n=>inf limit
                  end do
-              end do
-              !$omp end do
-              !$omp do private(i,j)
-              do j=1,Nw
-                 do i=1,Nkall
-                    tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),j)=delta(i,j,olist(l,2),olist(m,1))
-                    tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=-delta(invk(3,i),j,olist(m,1),olist(l,2)) !F(k,-w)=F(-k,w)
+                 !$omp end do
+                 !$omp do private(i,j)
+                 do j=2,Nw
+                    do i=1,Nkall
+                       if(invk(2,i)==0)then !k,iw,k,-iw
+                          tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vdelta(invk(1,i),j,m,l)
+                          tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vdelta(invk(1,i),j,l,m)) !V^ml(q,-iw)=V^*lm(q,iw)
+                       else if(invk(2,i)==1)then !-k,iw, -k,-iw
+                          tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)=&
+                               sgnsig2(m,l)*Vdelta(invk(1,i),j,invschi(l),invschi(m)) !V^ml(-q,iw)=V^lm(q,iw)
+                          tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=&
+                               sgnsig2(m,l)*conjg(Vdelta(invk(1,i),j,invschi(m),invschi(l))) !V^ml(-q,-iw)=V^*ml(q,iw)
+                       end if
+                    end do
                  end do
-              end do
-              !$omp end do
-              !$omp end parallel
-              call FFT(tmpVdelta,tmp,Nx,Ny,Nz,2*Nw,.true.)
-              call FFT(tmpfk,tmp,Nx,Ny,Nz,2*Nw,.true.)
-              !$omp parallel
-              !$omp workshare
-              tmp(:,:,:,:)=0.0d0
-              !$omp end workshare
-              !$omp do private(i,j,k)
-              do n=1,2*Nw
-                 do k=0,Nz-1
-                    do j=0,Ny-1
-                       do i=0,Nx-1
-                          tmp(i,j,k,n)=tmpVdelta(i,j,k,n)*tmpfk(i,j,k,n)
+                 !$omp end do
+                 !$omp do private(i,j)
+                 do j=1,Nw
+                    do i=1,Nkall
+                       tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),j)=delta(i,j,olist(l,2),olist(m,1))
+                       tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=-delta(invk(3,i),j,olist(m,1),olist(l,2)) !F(k,-w)=F(-k,w)
+                    end do
+                 end do
+                 !$omp end do
+                 !$omp end parallel
+                 call FFT(tmpVdelta,tmp,Nx,Ny,Nz,2*Nw,.true.)
+                 call FFT(tmpfk,tmp,Nx,Ny,Nz,2*Nw,.true.)
+                 !$omp parallel
+                 !$omp workshare
+                 tmp(:,:,:,:)=0.0d0
+                 !$omp end workshare
+                 !$omp do private(i,j,k)
+                 do n=1,2*Nw
+                    do k=0,Nz-1
+                       do j=0,Ny-1
+                          do i=0,Nx-1
+                             tmp(i,j,k,n)=tmpVdelta(i,j,k,n)*tmpfk(i,j,k,n)
+                          end do
                        end do
                     end do
                  end do
-              end do
-              !$omp end do
-              !$omp workshare
-              tmpfk(:,:,:,:)=0.0d0
-              !$omp end workshare
-              !$omp end parallel
-              call FFT(tmp,tmpfk,Nx,Ny,Nz,2*Nw,.false.)
-              !$omp parallel do private(i)
-              do j=1,Nw
-                 do i=1,Nkall
-                    newdelta(i,j,olist(l,1),olist(m,2))=newdelta(i,j,olist(l,1),olist(m,2))&
-                         +tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)
+                 !$omp end do
+                 !$omp workshare
+                 tmpfk(:,:,:,:)=0.0d0
+                 !$omp end workshare
+                 !$omp end parallel
+                 call FFT(tmp,tmpfk,Nx,Ny,Nz,2*Nw,.false.)
+                 !$omp parallel do private(i)
+                 do j=1,Nw
+                    do i=1,Nkall
+                       newdelta(i,j,olist(l,1),olist(m,2))=newdelta(i,j,olist(l,1),olist(m,2))&
+                            +tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)
+                    end do
                  end do
-              end do
-              !$omp end parallel do
+                 !$omp end parallel do
+              end if
            end if
         end if
      end do
@@ -465,9 +467,28 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,kmap,invk,invs,
            !$omp do private(i,j)
            do j=1,Nw
               do i=1,Nkall
-                 if(slist(m)==1)then !delta_uu(k)=-delta*_dd(k)
-                    newdelta(i,j,invs(l),invs(m))=-conjg(newdelta(i,j,l,m))
+                 if(slist(m)==1)then !delta_uu(k)=-delta^+_dd(k)
+                    newdelta(i,j,invs(l),invs(m))=-conjg(newdelta(i,j,m,l))
                  else
+                    if(invs(m)==l)then !Dud(k)=D^+ud(k)
+                       newdelta(i,j,l,m)=dble(newdelta(i,j,l,m))
+                    else if(l>invs(m))then !Dud(k)=D^+ud(k)
+                       newdelta(i,j,invs(m),invs(l))=conjg(newdelta(i,j,l,m))
+                    end if
+                 end if
+              end do
+           end do
+           !$omp end do
+        end do
+     end if
+  end do
+  do l=1,Norb
+     if (slist(l)==1)then
+        do m=1,Norb
+           if(slist(m)==-1)then
+              !$omp do private(j,i)
+              do j=1,Nw
+                 do i=1,Nkall
                     if(gap_sym>0)then !if system has parity, singlet Delta_ud(k)=-Delta_du(k)
                        newdelta(i,j,invs(l),invs(m))=-newdelta(i,j,l,m)
                     else if(gap_sym==par_mix)then !parity mixing
@@ -475,10 +496,10 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,kmap,invk,invs,
                     else !if system has parity, triplet Delta_ud(k)=Delta_du(k)
                        newdelta(i,j,invs(l),invs(m))=newdelta(i,j,l,m)
                     end if
-                 end if
+                 end do
               end do
-           end do
-           !$omp end do
+              !$omp end do
+           end if
         end do
      end if
   end do
@@ -623,18 +644,18 @@ subroutine get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,invs,Nkall
   !$omp workshare
   delta(:,:,:,:)=0.0d0
   !$omp end workshare
-  do l=1,Norb
+  do l=1,Norb !Delta_b(k)=U(k)Delta_o(k)U^T(-k)=-sU(k)Delta_o(k)U*^(nl)_(-s)(k)
      do m=1,Norb
         if(gap_sym<0 .or. (gap_sym>0 .and. slist(m)*slist(l)<0))then !singlet gap only ud,du spin
            !$omp do private(i,n)
            do i=1,Nkall
               if(invk(2,i)==0)then
                  do n=1,Norb
-                    delta(i,1,m,l)=delta(i,1,m,l)+uni(m,n,invk(1,i))*init_delta(i,n)*slist(l)*conjg(uni(invs(l),n,invk(1,i)))
+                    delta(i,1,m,l)=delta(i,1,m,l)-uni(m,n,invk(1,i))*init_delta(i,n)*slist(l)*conjg(uni(invs(l),n,invk(1,i)))
                  end do
               else if(invk(2,i)==1)then
                  do n=1,Norb
-                    delta(i,1,m,l)=delta(i,1,m,l)-slist(m)*conjg(uni(invs(m),n,invk(1,i)))*init_delta(i,n)*uni(l,n,invk(1,i))
+                    delta(i,1,m,l)=delta(i,1,m,l)+slist(m)*conjg(uni(invs(m),n,invk(1,i)))*init_delta(i,n)*uni(l,n,invk(1,i))
                  end do
               end if
            end do
@@ -736,3 +757,64 @@ subroutine get_chi_map_soc(chi_map,irr_chi,olist,invs,Nchi,Norb)
      end do
   end do
 end subroutine get_chi_map_soc
+
+subroutine conv_delta_orb_to_band_soc(deltab,delta,uni,invk,invs,slist,Norb,Nkall,Nk,Nw) bind(C)
+  !> This function transform orbital basis gap function into band basis gap function
+  !!@param deltab,out: band basis gap function
+  !!@param   delta,in: orbital basis gap function
+  !!@param     uni,in: unitary matrix
+  !!@param    invk,in: footnote of reverse k
+  !!@param    Norb,in: Number of orbital
+  !!@param   Nkall,in: Number of all k-points
+  !!@param      Nk,in: Number of irreducible k-points
+  !!oparam      Nw,in: Number of Matsubara frequencies
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  implicit none
+  integer(int64),intent(in):: Nw,Norb,Nk,Nkall
+  integer(int64),intent(in),dimension(Norb):: slist,invs
+  integer(int64),intent(in),dimension(3,Nkall):: invk
+  complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
+  complex(real64),intent(in),dimension(Nkall,Nw,Norb,Norb):: delta
+  complex(real64),intent(out),dimension(Nkall,Norb,Norb):: deltab
+
+  integer(int32) i,l,m,n
+  complex(real64),dimension(Nkall,Norb,Norb):: tmp
+
+  !$omp parallel
+  !$omp workshare
+  deltab(:,:,:)=0.0d0
+  tmp(:,:,:)=0.0d0
+  !$omp end workshare
+  do l=1,Norb
+     do m=1,Norb
+        do n=1,Norb
+           !$omp do private(i)
+           do i=1,Nkall
+              if(invk(2,i)==0)then
+                 tmp(i,m,l)=tmp(i,m,l)+conjg(uni(n,m,invk(1,i)))*delta(i,1,n,l)
+              else if(invk(2,i)==1)then
+                 tmp(i,m,l)=tmp(i,m,l)+slist(m)*uni(invs(n),m,invk(1,i))*delta(i,1,n,l)
+              end if
+           end do
+           !$omp end do
+        end do
+     end do
+  end do
+
+  do l=1,Norb
+     do m=1,Norb
+        do n=1,Norb
+           !$omp do private(i)
+           do i=1,Nkall
+              if(invk(2,i)==0)then
+                 deltab(i,m,l)=deltab(i,m,l)+tmp(i,m,n)*slist(n)*uni(invs(n),l,invk(1,i))
+              else if(invk(2,i)==1)then
+                 deltab(i,m,l)=deltab(i,m,l)+tmp(i,m,n)*conjg(uni(n,l,invk(1,i)))
+              end if
+           end do
+           !$omp end do
+        end do
+     end do
+  end do
+  !$omp end parallel
+end subroutine conv_delta_orb_to_band_soc
