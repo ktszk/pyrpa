@@ -1,4 +1,4 @@
-subroutine lin_eliash(delta,Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,temp,eps,&
+subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,temp,eps,&
      Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym) bind(C)
   !> calculate linearized eliashberg equations with TRS without soc
   !!@param     delta,out: gap function
@@ -33,12 +33,12 @@ subroutine lin_eliash(delta,Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,temp,eps
   complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(real64),intent(out),dimension(Nkall,Nw,Norb,Norb):: delta
+  complex(real64),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
 
   integer(int32) i_iter,i_eig,count,i
   integer(int32),parameter:: eig_max=2
   logical(1) sw_pair
   real(real64) norm,normb,inorm,norm2,weight
-  complex(real64),dimension(Nk,Nw,Nchi,Nchi):: chi
   complex(real64),dimension(Nkall,Nw,Norb,Norb):: newdelta,fk
 
   if(gap_sym>=0)then
@@ -51,7 +51,7 @@ subroutine lin_eliash(delta,Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,temp,eps
   weight=temp/dble(Nkall)
   norm2=0.0d0
   normb=0.0d0
-  call get_chi0(chi,Smat,Cmat,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+  !call get_chi0(chi,Smat,Cmat,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
   call get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
@@ -121,7 +121,7 @@ contains
   end subroutine get_norm
 end subroutine lin_eliash
 
-subroutine get_chi0(chi,Smat,Cmat,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+subroutine get_chi0(chi,Smat,Cmat,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi) bind(C)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz

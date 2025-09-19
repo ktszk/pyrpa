@@ -656,11 +656,36 @@ def pade_with_trace(A,iwlist,wlist):
                           byref(c_int64(Nw)),byref(c_int64(Norb)))
     return B
 
-def linearized_eliashberg(Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,Nx:int,Ny:int,Nz:int,temp:float,gap_sym:int,eps=1.0e-5,itemax=300):
+def get_chi0(Smat,Cmat,Gk,olist,kmap,invk,temp:float,Nx:int,Ny:int,Nz:int):
+    Norb,Nchi=len(Gk),len(olist)
+    Nkall,Nk,Nw=len(kmap),len(Gk[0,0,0]),len(Gk[0,0])
+    chi=np.zeros((Nchi,Nchi,Nw,Nk),dtype=np.complex128)
+    flibs.get_chi0.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #chi
+                             np.ctypeslib.ndpointer(dtype=np.float64),    #Smat
+                             np.ctypeslib.ndpointer(dtype=np.float64),    #Cmat
+                             np.ctypeslib.ndpointer(dtype=np.complex128), #Gk
+                             np.ctypeslib.ndpointer(dtype=np.int64),      #kmap
+                             np.ctypeslib.ndpointer(dtype=np.int64),      #invk
+                             np.ctypeslib.ndpointer(dtype=np.int64),      #olist
+                             POINTER(c_double),POINTER(c_int64),          #temp,Nx
+                             POINTER(c_int64),POINTER(c_int64),           #Ny,Nz
+                             POINTER(c_int64),POINTER(c_int64),           #Nw,Nk
+                             POINTER(c_int64),POINTER(c_int64),           #Nkall,Nchi
+                             POINTER(c_int64)                             
+                             ]
+    flibs.get_chi0.retype=c_void_p
+    flibs.get_chi0(chi,Smat,Cmat,Gk,kmap,invk,olist,byref(c_double(temp)),
+                   byref(c_int64(Nx)),byref(c_int64(Ny)),byref(c_int64(Nz)),
+                   byref(c_int64(Nw)),byref(c_int64(Nk)),byref(c_int64(Nkall)),
+                   byref(c_int64(Nchi)),byref(c_int64(Norb)))
+    return chi
+
+def linearized_eliashberg(chi,Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,Nx:int,Ny:int,Nz:int,temp:float,gap_sym:int,eps=1.0e-5,itemax=300):
     Norb,Nchi=len(Gk),len(Smat)
     Nkall,Nk,Nw=len(kmap),len(Gk[0,0,0]),len(Gk[0,0])
     delta=np.zeros((Norb,Norb,Nw,Nkall),dtype=np.complex128)
     flibs.lin_eliash.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #delta
+                               np.ctypeslib.ndpointer(dtype=np.complex128), #chi
                                np.ctypeslib.ndpointer(dtype=np.complex128), #Gk
                                np.ctypeslib.ndpointer(dtype=np.complex128), #uni
                                np.ctypeslib.ndpointer(dtype=np.float64),    #init_delta
@@ -676,23 +701,26 @@ def linearized_eliashberg(Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,Nx:int,Ny:
                                POINTER(c_int64),POINTER(c_int64),           #Ny,Nz
                                POINTER(c_int64),POINTER(c_int64)]           #itemax,gapsym
     flibs.lin_eliash.retype=c_void_p
-    flibs.lin_eliash(delta,Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,
+    flibs.lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,
                      byref(c_double(temp)),byref(c_double(eps)),byref(c_int64(Nkall)),
                      byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Nchi)),
                      byref(c_int64(Norb)),byref(c_int64(Nx)),byref(c_int64(Ny)),
                      byref(c_int64(Nz)),byref(c_int64(itemax)),byref(c_int64(gap_sym)))
     return delta
 
-def linearized_eliashberg_soc(Gk,uni,init_delta,Vmat,slist,olist,kmap,invk,invs,
+def linearized_eliashberg_soc(chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,slist,olist,kmap,invk,invs,
                               Nx:int,Ny:int,Nz:int,temp:float,gap_sym:int,eps=1.0e-4,itemax=300):
     Norb,Nchi=len(slist),len(Vmat)
     Nkall,Nk,Nw=len(kmap),len(Gk[0,0,0]),len(Gk[0,0])
     delta=np.zeros((Norb,Norb,Nw,Nkall),dtype=np.complex128)
     flibs.lin_eliash_soc.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #delta
+                                   np.ctypeslib.ndpointer(dtype=np.complex128), #chi
                                    np.ctypeslib.ndpointer(dtype=np.complex128), #Gk
                                    np.ctypeslib.ndpointer(dtype=np.complex128), #uni
                                    np.ctypeslib.ndpointer(dtype=np.float64),    #init_delta
                                    np.ctypeslib.ndpointer(dtype=np.float64),    #Vmat
+                                   np.ctypeslib.ndpointer(dtype=np.float64),    #sgnsig
+                                   np.ctypeslib.ndpointer(dtype=np.float64),    #sgnsig2
                                    np.ctypeslib.ndpointer(dtype=np.int64),      #olist
                                    np.ctypeslib.ndpointer(dtype=np.int64),      #slist
                                    np.ctypeslib.ndpointer(dtype=np.int64),      #kmap
@@ -705,11 +733,12 @@ def linearized_eliashberg_soc(Gk,uni,init_delta,Vmat,slist,olist,kmap,invk,invs,
                                    POINTER(c_int64),POINTER(c_int64),           #Ny,Nz
                                    POINTER(c_int64),POINTER(c_int64)]           #itemax,gapsym
     flibs.lin_eliash_soc.retype=c_void_p
-    flibs.lin_eliash_soc(delta,Gk,uni,init_delta,Vmat,olist,slist,kmap,invk,invs,
-                         byref(c_double(temp)),byref(c_double(eps)),byref(c_int64(Nkall)),
-                         byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Nchi)),
-                         byref(c_int64(Norb)),byref(c_int64(Nx)),byref(c_int64(Ny)),
-                         byref(c_int64(Nz)),byref(c_int64(itemax)),byref(c_int64(gap_sym)))
+    flibs.lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,olist,slist,
+                         kmap,invk,invs,byref(c_double(temp)),byref(c_double(eps)),
+                         byref(c_int64(Nkall)),byref(c_int64(Nk)),byref(c_int64(Nw)),
+                         byref(c_int64(Nchi)),byref(c_int64(Norb)),byref(c_int64(Nx)),
+                         byref(c_int64(Ny)),byref(c_int64(Nz)),byref(c_int64(itemax)),
+                         byref(c_int64(gap_sym)))
     return delta
 
 def gen_Vmatrix(olist,slist,site,invs,U,J):
@@ -742,6 +771,34 @@ def gen_Vmatrix_orb(olist,slist,site,invs,Umat,Jmat):
     flibs.get_vmat_soc_orb(Vmat,olist,slist,site,invs,Umat,Jmat,
                            byref(c_int64(Nchi)),byref(c_int64(Norb)))
     return Vmat
+
+def get_chi0_soc(Vmat,Gk,olist,slist,kmap,invk,invs,temp,Nx,Ny,Nz):
+    Norb,Nchi=len(slist),len(olist)
+    Nkall,Nk,Nw=len(kmap),len(Gk[0,0,0]),len(Gk[0,0])
+    chi=np.zeros((Nchi,Nchi,Nw,Nk),dtype=np.complex128)
+    sgnsig=np.zeros((Norb,Norb),dtype=np.float64)
+    sgnsig2=np.zeros((Nchi,Nchi),dtype=np.float64)
+    flibs.get_chi0_soc.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #chi
+                                 np.ctypeslib.ndpointer(dtype=np.float64),    #sgnsig
+                                 np.ctypeslib.ndpointer(dtype=np.float64),    #sgnsig2
+                                 np.ctypeslib.ndpointer(dtype=np.float64),    #Vmat
+                                 np.ctypeslib.ndpointer(dtype=np.complex128), #Gk
+                                 np.ctypeslib.ndpointer(dtype=np.int64),      #kmape
+                                 np.ctypeslib.ndpointer(dtype=np.int64),      #invk
+                                 np.ctypeslib.ndpointer(dtype=np.int64),      #invs
+                                 np.ctypeslib.ndpointer(dtype=np.int64),      #olist
+                                 np.ctypeslib.ndpointer(dtype=np.int64),      #slist
+                                 POINTER(c_double),POINTER(c_int64),         #temp,Nx
+                                 POINTER(c_int64),POINTER(c_int64),           #Ny,Nz
+                                 POINTER(c_int64),POINTER(c_int64),           #Nw,Nk
+                                 POINTER(c_int64),POINTER(c_int64),           #Nkall,Nchi
+                                 POINTER(c_int64)]                            #Norb
+    flibs.get_chi0_soc.restype=c_void_p
+    flibs.get_chi0_soc(chi,sgnsig,sgnsig2,Vmat,Gk,kmap,invk,invs,olist,slist,
+                       byref(c_double(temp)),byref(c_int64(Nx)),byref(c_int64(Ny)),
+                       byref(c_int64(Nz)),byref(c_int64(Nw)),byref(c_int64(Nk)),
+                       byref(c_int64(Nkall)),byref(c_int64(Nchi)),byref(c_int64(Norb)))
+    return chi,sgnsig,sgnsig2
 
 def conv_delta_orb_to_band(delta,uni,invk):
     Nkall,Nk,Nw,Norb=len(invk),len(uni),len(delta[0,0]),len(delta)

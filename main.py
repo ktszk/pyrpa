@@ -68,9 +68,9 @@ kz=0.0
 abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 #abc=[3.90,3.90,12.68]
 alpha_beta_gamma=[90.,90.,90]
-temp=2.0e-2 #2.59e-2
+temp=2.5e-2 #2.59e-2
 #tempK=300 #Kelvin
-fill=1.0 #2.6 #2.9375
+fill=1. #2.6 #2.9375
 
 #site_prof=[5]
 
@@ -494,7 +494,7 @@ def output_gap_function(invk,kmap,gap,uni,soc=False,invs=None,slist=None):
         gapb=flibs.conv_delta_orb_to_band_soc(gap,uni,invk,invs,slist)
     else:
         gapb=flibs.conv_delta_orb_to_band(gap,uni,invk)
-    gapb=gap[:,:,0,:]
+    #gapb=gap[:,:,0,:]
     print('output gap function')
     for iorb in range(len(gapb)):
         for jorb in range(len(gapb)):
@@ -581,7 +581,13 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,olist,site
     else:
         Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
     init_delta=plibs.get_initial_gap(kmap,klist,len(eig.T),gap_sym)
-    gap=flibs.linearized_eliashberg(Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
+    chi=flibs.get_chi0(Smat,Cmat,Gk,olist,kmap,invk,temp,Nx,Ny,Nz)
+    f=open('chi.dat','w')
+    for i,k in enumerate(klist):
+        if k[2]==0.0:
+            f.write(f'{k[0]} {k[1]} {chi[0,0,0,i].real}\n')
+    f.close()
+    gap=flibs.linearized_eliashberg(chi,Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
     #Fk=flibs.gen_Fk(Gk,Delta,invk)
     if sw_out_self:
         np.save('gap',gap)
@@ -606,8 +612,15 @@ def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
         Gk=flibs.gen_green(sigmak,ham_k,mu_self,temp)
     else:
         Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
+    chi,sgnsig,sgnsig2=flibs.get_chi0_soc(Vmat,Gk,chiolist,slist,kmap,invk,invs,temp,Nx,Ny,Nz)
+    f=open('chi.dat','w')
+    for i,k in enumerate(klist):
+        if k[2]==0.0:
+            f.write(f'{k[0]} {k[1]} {chi[0,0,0,i].real}\n')
+    f.close()
     init_delta=plibs.get_initial_gap(kmap,klist,len(slist),gap_sym)
-    gap=flibs.linearized_eliashberg_soc(Gk,uni,init_delta,Vmat,slist,chiolist,kmap,invk,invs,Nx,Ny,Nz,temp,gap_sym)
+    gap=flibs.linearized_eliashberg_soc(chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,slist,chiolist,
+                                        kmap,invk,invs,Nx,Ny,Nz,temp,gap_sym)
     if sw_out_self:
         np.save('gap',gap)
     info=output_gap_function(invk,kmap,gap,uni,True,invs,slist)

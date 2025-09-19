@@ -1,4 +1,4 @@
-subroutine lin_eliash_soc(delta,Gk,uni,init_delta,Vmat,olist,slist,kmap,invk,invs,temp,eps,&
+subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,olist,slist,kmap,invk,invs,temp,eps,&
      Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym) bind(C)
   !> calculate linearized eliashberg equations with soc and TRS
   !!@param     delta,out: gap function
@@ -31,26 +31,24 @@ subroutine lin_eliash_soc(delta,Gk,uni,init_delta,Vmat,olist,slist,kmap,invk,inv
   integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
   real(real64),intent(in):: temp,eps
   real(real64),intent(in),dimension(Nchi,Nchi):: Vmat
+  real(real64),intent(in),dimension(Norb,Norb):: sgnsig
+  real(real64),intent(in),dimension(Nchi,Nchi):: sgnsig2
   real(real64),intent(in),dimension(Nk,Norb):: init_delta
   complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(real64),intent(out),dimension(Nkall,Nw,Norb,Norb):: delta
+  complex(real64),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
 
   integer(int32) i_iter,i_eig,count,i
   integer(int32),parameter:: eig_max=2
   integer(int32),dimension(Nchi):: invschi
   real(real64) norm,normb,inorm,norm2,weight
-  real(real64),dimension(Norb,Norb):: sgnsig
-  real(real64),dimension(Nchi,Nchi):: sgnsig2
-  complex(real64),dimension(Nk,Nw,Nchi,Nchi):: chi
   complex(real64),dimension(Nkall,Nw,Norb,Norb):: newdelta,fk
 
   weight=temp/dble(Nkall)
   norm2=0.0d0
   normb=0.0d0
   call get_invschi()
-  call get_sgnsig()
-  call get_chi0_soc(chi,Vmat,Gk,kmap,invk,invs,olist,sgnsig,sgnsig2,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Nchi,Norb)
   call get_V_delta_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
@@ -134,7 +132,31 @@ contains
        end do
     end do
   end subroutine get_invschi
-  
+end subroutine lin_eliash_soc
+
+subroutine get_chi0_soc(chi,sgnsig,sgnsig2,Vmat,Gk,kmap,invk,invs,olist,slist,temp,&
+     Nx,Ny,Nz,Nw,Nk,Nkall,Nchi,Norb) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  implicit none
+  integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
+  integer(int64),intent(in),dimension(Nchi,2):: olist
+  integer(int64),intent(in),dimension(Norb):: slist,invs
+  integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
+  real(real64),intent(in):: temp
+  real(real64),intent(in),dimension(Nchi,Nchi):: Vmat
+  real(real64),intent(out),dimension(Norb,Norb):: sgnsig
+  real(real64),intent(out),dimension(Nchi,Nchi):: sgnsig2
+  complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
+  complex(real64),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
+
+  integer(int32),dimension(Nchi,Nchi,2)::chi_map
+  integer(int32),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
+
+  call get_sgnsig()
+  call get_chi_map_soc(chi_map,irr_chi,olist,invs,Nchi,Norb)
+  call get_chi0_conv_soc(chi,Gk,kmap,invk,invs,irr_chi,chi_map,olist,sgnsig,sgnsig2,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+  call ckchi()
+contains
   subroutine get_sgnsig()
     integer(int32) i,j
     do j=1,Norb
@@ -152,29 +174,7 @@ contains
        end do
     end do
   end subroutine get_sgnsig
-end subroutine lin_eliash_soc
 
-subroutine get_chi0_soc(chi,Vmat,Gk,kmap,invk,invs,olist,sgnsig,sgnsig2,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Nchi,Norb)
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
-  implicit none
-  integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
-  integer(int64),intent(in),dimension(Nchi,2):: olist
-  integer(int64),intent(in),dimension(Norb):: invs
-  integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
-  real(real64),intent(in):: temp
-  real(real64),intent(in),dimension(Nchi,Nchi):: Vmat
-  real(real64),intent(in),dimension(Norb,Norb):: sgnsig
-  real(real64),intent(in),dimension(Nchi,Nchi):: sgnsig2
-  complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
-  complex(real64),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
-
-  integer(int32),dimension(Nchi,Nchi,2)::chi_map
-  integer(int32),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
-  
-  call get_chi_map_soc(chi_map,irr_chi,olist,invs,Nchi,Norb)
-  call get_chi0_conv_soc(chi,Gk,kmap,invk,invs,irr_chi,chi_map,olist,sgnsig,sgnsig2,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
-  call ckchi()
-contains
     subroutine ckchi()
     integer(int32) i,l,m,n,info,chik,chikall,iorb
     real(real64) maxchi0,maxchi02
