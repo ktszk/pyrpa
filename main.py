@@ -612,7 +612,7 @@ def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
         Gk=flibs.gen_green(sigmak,ham_k,mu_self,temp)
     else:
         Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
-    chi,sgnsig,sgnsig2=flibs.get_chi0_soc(Vmat,Gk,chiolist,slist,kmap,invk,invs,temp,Nx,Ny,Nz)
+    chi,sgnsig,sgnsig2,invschi=flibs.get_chi0_soc(Vmat,Gk,chiolist,slist,kmap,invk,invs,temp,Nx,Ny,Nz)
     f=open('chi.dat','w')
     for i,k in enumerate(klist):
         if k[2]==0.0:
@@ -620,7 +620,7 @@ def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
     f.close()
     init_delta=plibs.get_initial_gap(kmap,klist,len(slist),gap_sym)
     gap=flibs.linearized_eliashberg_soc(chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,slist,chiolist,
-                                        kmap,invk,invs,Nx,Ny,Nz,temp,gap_sym)
+                                        kmap,invk,invs,invschi,Nx,Ny,Nz,temp,gap_sym)
     if sw_out_self:
         np.save('gap',gap)
     info=output_gap_function(invk,kmap,gap,uni,True,invs,slist)
