@@ -759,6 +759,83 @@ subroutine get_chi_map_soc(chi_map,irr_chi,olist,invs,Nchi,Norb)
   end do
 end subroutine get_chi_map_soc
 
+subroutine get_chis_chic(chic,chiszz,chispm,chi,Vmat,orb_list,olist,slist,invs,Nk,Nw,Nchi,Norb)
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  implicit none
+  integer(int64),intent(in):: Nk,Nw,Nchi,Norb
+  integer(int64),intent(in),dimension(Nchi,2):: olist
+  integer(int64),intent(in),dimension(Norb):: slist,invs
+  integer(int64),dimension(Nchi):: orb_list
+  complex(real64),intent(in),dimension(Nk,Nw,Nchi,Nchi):: chi
+  complex(real64),intent(out),dimension(Nk,Nchi/4,Nchi/4):: chiszz,chic,chispm
+  real(real64),intent(in),dimension(Nchi,Nchi):: Vmat
+
+  integer(int32) i,l,m,n,info
+  integer(int32),dimension(Nchi):: ipiv
+  complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3
+  complex(real64),dimension(2*Nchi):: work
+
+  qloop:do i=1,Nk
+     !$omp parallel
+     !$omp workshare
+     cmat1(:,:)=0.0d0
+     !$omp end workshare
+     !$omp do private(m,n)
+     do l=1,Nchi
+        do m=1,Nchi
+           do n=1,Nchi
+              cmat1(m,l)=cmat1(m,l)+chi(i,1,m,n)*Vmat(n,l) !-chi0V
+           end do
+        end do
+     end do
+     !$omp end do
+     !$omp workshare
+     cmat2(:,:)=cmat1(:,:) !chi0V
+     !$omp end workshare
+     !$omp do
+     do l=1,Nchi
+        cmat1(l,l)=cmat1(l,l)+1.0d0 !I-chi0V
+     end do
+     !$omp end do
+     !$omp end parallel
+     call zgetrf(Nchi,Nchi,cmat1,Nchi,ipiv,info)
+     call zgetri(Nchi,cmat1,Nchi,ipiv,work,2*Nchi,info)
+     !$omp parallel
+     !$omp workshare
+     cmat3(:,:)=0.0d0
+     !$omp end workshare
+     !$omp do private(l,m,n)
+     do l=1,Nchi
+        do m=1,Nchi
+           do n=1,Nchi
+              cmat3(m,l)=cmat3(m,l)+cmat1(m,n)*cmat2(n,l) !(1-chi0V)^-1chi0V
+           end do
+        end do
+     end do
+     !$omp end do
+     !$omp end parallel
+     do l=1,Nchi
+        do m=1,Nchi
+           if(slist(olist(l,1))==slist(olist(m,1)) .and. slist(olist(l,2))==slist(olist(m,2)))then
+              if(slist(olist(l,1))==-slist(olist(l,2)))then
+                 chispm(i,orb_list(l),orb_list(m))=chispm(i,orb_list(l),orb_list(m))+cmat3(m,l)
+              end if
+           end if
+           if(slist(olist(l,1))==slist(olist(l,2)) .and. slist(olist(m,1))==slist(olist(m,2)))then
+              chic(i,orb_list(l),orb_list(m))=chic(i,orb_list(l),orb_list(m))+cmat3(m,l)
+              if(slist(olist(l,1))==slist(olist(m,1)))then
+                 chiszz(i,orb_list(l),orb_list(m))=chiszz(i,orb_list(l),orb_list(m))+cmat3(m,l)
+              else
+                 chiszz(i,orb_list(l),orb_list(m))=chiszz(i,orb_list(l),orb_list(m))-cmat3(m,l)
+              end if
+           end if
+        end do
+     end do
+  end do qloop
+  chic(:,:,:)=chic(:,:,:)*0.25d0
+  chiszz(:,:,:)=chiszz(:,:,:)*0.25
+end subroutine get_chis_chic
+
 subroutine conv_delta_orb_to_band_soc(deltab,delta,uni,invk,invs,slist,Norb,Nkall,Nk,Nw) bind(C)
   !> This function transform orbital basis gap function into band basis gap function
   !!@param deltab,out: band basis gap function
