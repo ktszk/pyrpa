@@ -803,6 +803,34 @@ def get_chi0_soc(Vmat,Gk,olist,slist,kmap,invk,invs,temp,Nx,Ny,Nz):
                        byref(c_int64(Nkall)),byref(c_int64(Nchi)),byref(c_int64(Norb)))
     return chi,sgnsig,sgnsig2,invschi
 
+def get_chis_chic_soc(chi,Vmat,olist,slist,invs):
+    def get_orb_list(olist,slist,invs):
+        orblist=np.zeros(Nchi,dtype=np.int64)
+        for ol in olist:
+            pass
+        return orb_list
+    Norb,Nchi=len(slist),len(olist)
+    Nk,Nw=len(chi[0,0,0]),len(chi[0,0])
+    orb_list=get_orb_list(olist,slist,invs)
+    chic=np.zeros((Nchi/4,Nchi/4,Nk),dtype=np.complex128)
+    chiszz=np.zeros((Nchi/4,Nchi/4,Nk),dtype=np.complex128)
+    chispm=np.zeros((Nchi/4,Nchi/4,Nk),dtype=np.complex128)
+    flibs.get_chis_chic_soc.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #chic
+                                      np.ctypeslib.ndpointer(dtype=np.complex128), #chiszz
+                                      np.ctypeslib.ndpointer(dtype=np.complex128), #chispm
+                                      np.ctypeslib.ndpointer(dtype=np.complex128), #chi
+                                      np.ctypeslib.ndpointer(dtype=np.float64),    #Vmat
+                                      np.ctypeslib.ndpointer(dtype=np.int64),      #orb_list
+                                      np.ctypeslib.ndpointer(dtype=np.int64),      #olist
+                                      np.ctypeslib.ndpointer(dtype=np.int64),      #slist
+                                      np.ctypeslib.ndpointer(dtype=np.int64),      #invs
+                                      POINTER(c_int64),POINTER(c_int64),           #Nk,Nw
+                                      POINTER(c_int64),POINTER(c_int64)]           #Nchi,Norb
+    flibs.get_chis_chic_soc.retype=c_void_p
+    flibs.get_chis_chic_soc(chic,chiszz,chispm,chi,Vmat,orb_list,olist,slist,invs,byref(c_int64(Nk)),
+                            byref(c_int64(Nw)),byref(c_int64(Nchi)),byref(c_int64(Norb)))
+    return chic,chiszz,chispm
+
 def conv_delta_orb_to_band(delta,uni,invk):
     Nkall,Nk,Nw,Norb=len(invk),len(uni),len(delta[0,0]),len(delta)
     deltab=np.zeros((Norb,Norb,Nkall),dtype=np.complex128)

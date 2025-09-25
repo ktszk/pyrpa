@@ -48,7 +48,7 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,olist,
   weight=temp/dble(Nkall)
   norm2=0.0d0
   normb=0.0d0
-  call get_V_delta_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
+  call get_V_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
   eigenval_loop:do i_eig=1,eig_max !solve eig_val using power method, 1st eig is usually large negative value
@@ -217,7 +217,7 @@ contains
   end subroutine get_invschi
 end subroutine get_chi0_soc
 
-subroutine get_V_delta_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
+subroutine get_V_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nk,Nw,Nchi
@@ -285,7 +285,7 @@ subroutine get_V_delta_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
         chi(i,j,:,:)=cmat2(:,:)
      end do qloop
   end do wloop
-end subroutine get_V_delta_soc_flex
+end subroutine get_V_soc_flex
 
 subroutine mkfk_trs_soc(fk,Gk,delta,sgnsig,invk,invs,Nkall,Nk,Nw,Norb)
   !
@@ -759,7 +759,7 @@ subroutine get_chi_map_soc(chi_map,irr_chi,olist,invs,Nchi,Norb)
   end do
 end subroutine get_chi_map_soc
 
-subroutine get_chis_chic(chic,chiszz,chispm,chi,Vmat,orb_list,olist,slist,invs,Nk,Nw,Nchi,Norb)
+subroutine get_chis_chic_soc(chic,chiszz,chispm,chi,Vmat,orb_list,olist,slist,invs,Nk,Nw,Nchi,Norb) bind(C)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nk,Nw,Nchi,Norb
@@ -832,9 +832,9 @@ subroutine get_chis_chic(chic,chiszz,chispm,chi,Vmat,orb_list,olist,slist,invs,N
         end do
      end do
   end do qloop
-  chic(:,:,:)=chic(:,:,:)*0.25d0
+  chic(:,:,:)=chic(:,:,:)*0.5d0
   chiszz(:,:,:)=chiszz(:,:,:)*0.25
-end subroutine get_chis_chic
+end subroutine get_chis_chic_soc
 
 subroutine conv_delta_orb_to_band_soc(deltab,delta,uni,invk,invs,slist,Norb,Nkall,Nk,Nw) bind(C)
   !> This function transform orbital basis gap function into band basis gap function
@@ -896,3 +896,4 @@ subroutine conv_delta_orb_to_band_soc(deltab,delta,uni,invk,invs,slist,Norb,Nkal
   end do
   !$omp end parallel
 end subroutine conv_delta_orb_to_band_soc
+
