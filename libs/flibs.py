@@ -73,10 +73,10 @@ def get_vlm0(klist,ham_r,rvec):
     Norb=int(np.sqrt(ham_r.size/Nr))
     vk=np.zeros((Nk,Norb,Norb,3),dtype=np.complex128)
     flibs.get_vlm0.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),
-                            np.ctypeslib.ndpointer(dtype=np.float64),
-                            np.ctypeslib.ndpointer(dtype=np.complex128),
-                            np.ctypeslib.ndpointer(dtype=np.float64),
-                            POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)]
+                             np.ctypeslib.ndpointer(dtype=np.float64),
+                             np.ctypeslib.ndpointer(dtype=np.complex128),
+                             np.ctypeslib.ndpointer(dtype=np.float64),
+                             POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)]
     flibs.get_vlm0.restype=c_void_p
     flibs.get_vlm0(vk,klist,ham_r,rvec,byref(c_int64(Nk)),byref(c_int64(Nr)),byref(c_int64(Norb)))
     return vk
@@ -99,10 +99,10 @@ def get_vnm(vk0,mrot,uni):
     Norb=int(np.sqrt(uni.size/Nk))
     vk=np.zeros((Nk,Norb,Norb,3),dtype=np.complex128)
     flibs.get_vnm.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),
-                              np.ctypeslib.ndpointer(dtype=np.complex128),
-                              np.ctypeslib.ndpointer(dtype=np.float64),
-                              np.ctypeslib.ndpointer(dtype=np.complex128),
-                              POINTER(c_int64),POINTER(c_int64)]
+                            np.ctypeslib.ndpointer(dtype=np.complex128),
+                            np.ctypeslib.ndpointer(dtype=np.float64),
+                            np.ctypeslib.ndpointer(dtype=np.complex128),
+                            POINTER(c_int64),POINTER(c_int64)]
     flibs.get_vnm.restype=c_void_p
     flibs.get_vnm(vk,vk0,mrot,uni,byref(c_int64(Nk)),byref(c_int64(Norb)))
     return vk
@@ -159,10 +159,10 @@ def gen_Green0(eig,uni,mu:float,temp:float,Nw:int):
     Norb=int(eig.size/Nk)
     Gk=np.zeros((Norb,Norb,Nw,Nk),dtype=np.complex128)
     flibs.gen_green0_.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),        #Gk
-                               np.ctypeslib.ndpointer(dtype=np.float64),           #eig
-                               np.ctypeslib.ndpointer(dtype=np.complex128),        #uni
-                               POINTER(c_double),POINTER(c_double),                #mu,temp
-                               POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)] #Nk,Nw,Norb
+                                np.ctypeslib.ndpointer(dtype=np.float64),           #eig
+                                np.ctypeslib.ndpointer(dtype=np.complex128),        #uni
+                                POINTER(c_double),POINTER(c_double),                #mu,temp
+                                POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)] #Nk,Nw,Norb
     flibs.gen_green0_.restype=c_void_p
     flibs.gen_green0_(Gk,eig,uni,byref(c_double(mu)),byref(c_double(temp)),
                      byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Norb)))
@@ -174,10 +174,10 @@ def gen_green(selfen,hamk,mu:float,temp:float):
     Nw=int(selfen.size/(Nk*Norb*Norb))
     Gk=np.zeros((Norb,Norb,Nw,Nk),dtype=np.complex128)
     flibs.gen_green_inv_.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),        #Gk
-                                  np.ctypeslib.ndpointer(dtype=np.complex128),        #selfen
-                                  np.ctypeslib.ndpointer(dtype=np.complex128),        #hamk
-                                  POINTER(c_double),POINTER(c_double),                #mu,temp
-                                  POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)] #Nk,Nw,Norb
+                                   np.ctypeslib.ndpointer(dtype=np.complex128),        #selfen
+                                   np.ctypeslib.ndpointer(dtype=np.complex128),        #hamk
+                                   POINTER(c_double),POINTER(c_double),                #mu,temp
+                                   POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)] #Nk,Nw,Norb
     flibs.gen_green_inv_.restype=c_void_p
     flibs.gen_green_inv_(Gk,selfen,hamk,byref(c_double(mu)),byref(c_double(temp)),
                         byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Norb)))
@@ -199,9 +199,8 @@ def gen_green_from_eig(selfen,eig,uni,mu:float,temp:float):
                                            POINTER(c_double),POINTER(c_double),                #mu,temp
                                            POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)] #Nk,Nw,Norb
     flibs.gen_green_inv_from_eig.restype=c_void_p
-    flibs.gen_green_inv_from_eig(Gk,selfen,uni,eig,byref(c_double(mu)),
-                                 byref(c_double(temp)),byref(c_int64(Nk)),
-                                 byref(c_int64(Nw)),byref(c_int64(Norb)))
+    flibs.gen_green_inv_from_eig(Gk,selfen,uni,eig,byref(c_double(mu)),byref(c_double(temp)),
+                                 byref(c_int64(Nk)),byref(c_int64(Nw)),byref(c_int64(Norb)))
     flibs.getinv.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),        #Gk
                            POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)] #Nk,Nw,Norb
     flibs.getinv.restype=c_void_p
@@ -322,9 +321,9 @@ def get_qshift(klist,qpoint):
     Nk=len(klist)
     qshift=np.zeros(Nk,dtype=np.int64)
     flibs.get_qshift_.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64), #qpoint
-                               np.ctypeslib.ndpointer(dtype=np.float64), #klist
-                               np.ctypeslib.ndpointer(dtype=np.int64),   #qshift
-                               POINTER(c_int64)]                         #Nk
+                                np.ctypeslib.ndpointer(dtype=np.float64), #klist
+                                np.ctypeslib.ndpointer(dtype=np.int64),   #qshift
+                                POINTER(c_int64)]                         #Nk
     flibs.get_qshift_.restype=c_void_p
     flibs.get_qshift_(qpoint,klist,qshift,byref(c_int64(Nk)))
     return qshift
@@ -333,9 +332,9 @@ def get_iqshift(klist,qpoint):
     Nk=len(klist)
     qshift=np.zeros(Nk,dtype=np.int64)
     flibs.get_iqshift_.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64), #qpoint
-                               np.ctypeslib.ndpointer(dtype=np.float64), #klist
-                               np.ctypeslib.ndpointer(dtype=np.int64),   #qshift
-                               POINTER(c_int64)]                         #Nk
+                                 np.ctypeslib.ndpointer(dtype=np.float64), #klist
+                                 np.ctypeslib.ndpointer(dtype=np.int64),   #qshift
+                                 POINTER(c_int64)]                         #Nk
     flibs.get_iqshift_.restype=c_void_p
     flibs.get_iqshift_(qpoint,klist,qshift,byref(c_int64(Nk)))
     return qshift
@@ -513,16 +512,16 @@ def calc_Lij(eig,vk,ffermi,mu:float,w:float,idelta:float,temp:float):
     L12=np.zeros((3,3),dtype=np.complex128)
     L22=np.zeros((3,3),dtype=np.complex128)
     eps=idelta*1e-3
-    flibs.calc_lij.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),    #L11
-                                np.ctypeslib.ndpointer(dtype=np.complex128), #L12
-                                np.ctypeslib.ndpointer(dtype=np.complex128), #L22
-                                np.ctypeslib.ndpointer(dtype=np.complex128), #vk
-                                np.ctypeslib.ndpointer(dtype=np.float64),    #eig
-                                np.ctypeslib.ndpointer(dtype=np.float64),    #ffermi
-                                POINTER(c_int64),POINTER(c_int64),           #Norb,Nk
-                                POINTER(c_double),                           #mu
-                                POINTER(c_double),POINTER(c_double),         #w,idelta
-                                POINTER(c_double),POINTER(c_double)]         #eps,temp
+    flibs.calc_lij.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #L11
+                             np.ctypeslib.ndpointer(dtype=np.complex128), #L12
+                             np.ctypeslib.ndpointer(dtype=np.complex128), #L22
+                             np.ctypeslib.ndpointer(dtype=np.complex128), #vk
+                             np.ctypeslib.ndpointer(dtype=np.float64),    #eig
+                             np.ctypeslib.ndpointer(dtype=np.float64),    #ffermi
+                             POINTER(c_int64),POINTER(c_int64),           #Norb,Nk
+                             POINTER(c_double),                           #mu
+                             POINTER(c_double),POINTER(c_double),         #w,idelta
+                             POINTER(c_double),POINTER(c_double)]         #eps,temp
     flibs.calc_lij.restype=c_void_p
     flibs.calc_lij(L11,L22,L12,vk,eig,ffermi,byref(c_int64(Norb)),byref(c_int64(Nk)),
                    byref(c_double(mu)),byref(c_double(w)),byref(c_double(idelta)),
@@ -554,12 +553,12 @@ def calc_tdf(eig,veloc,kweight,tau,Nw:int):
     Norb=int(eig.size/Nk)
     tdf=np.zeros((Nw,3,3),dtype=np.float64)
     flibs.calc_tdf.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64), #tdf
-                            np.ctypeslib.ndpointer(dtype=np.float64), #eig
-                            np.ctypeslib.ndpointer(dtype=np.float64), #veloc
-                            np.ctypeslib.ndpointer(dtype=np.float64), #kweight
-                            np.ctypeslib.ndpointer(dtype=np.float64), #tau
-                            POINTER(c_int64),POINTER(c_int64),        #Nw,Nk
-                            POINTER(c_int64)]                         #Norb    
+                             np.ctypeslib.ndpointer(dtype=np.float64), #eig
+                             np.ctypeslib.ndpointer(dtype=np.float64), #veloc
+                             np.ctypeslib.ndpointer(dtype=np.float64), #kweight
+                             np.ctypeslib.ndpointer(dtype=np.float64), #tau
+                             POINTER(c_int64),POINTER(c_int64),        #Nw,Nk
+                             POINTER(c_int64)]                         #Norb    
     flibs.calc_tdf.restype=c_void_p
     flibs.calc_tdf(tdf,eig,veloc,kweight,tau,byref(c_int64(Nw)),
                    byref(c_int64(Nk)),byref(c_int64(Norb)))
@@ -620,9 +619,9 @@ def get_a(inp_data,xlist):
     Np=len(inp_data)
     a=np.zeros(Np,dtype=np.complex128)
     flibs.get_a_.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #a
-                          np.ctypeslib.ndpointer(dtype=np.complex128), #xlist
-                          np.ctypeslib.ndpointer(dtype=np.complex128), #inpdata
-                          POINTER(c_int64)]                            #Np
+                           np.ctypeslib.ndpointer(dtype=np.complex128), #xlist
+                           np.ctypeslib.ndpointer(dtype=np.complex128), #inpdata
+                           POINTER(c_int64)]                            #Np
     flibs.get_a_.retype=c_void_p
     flibs.get_a_(a,xlist,inp_data,byref(c_int64(Np)))
     return a
@@ -632,11 +631,11 @@ def get_QP(a,xlist,wlist):
     Q=np.zeros(Nw,dtype=np.complex128)
     P=np.zeros(Nw,dtype=np.complex128)
     flibs.get_qp_.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #P
-                           np.ctypeslib.ndpointer(dtype=np.complex128), #Q
-                           np.ctypeslib.ndpointer(dtype=np.complex128), #a
-                           np.ctypeslib.ndpointer(dtype=np.complex128), #xlist
-                           np.ctypeslib.ndpointer(dtype=np.complex128), #wlist
-                           POINTER(c_int64),POINTER(c_int64)]           #Nw,Np
+                            np.ctypeslib.ndpointer(dtype=np.complex128), #Q
+                            np.ctypeslib.ndpointer(dtype=np.complex128), #a
+                            np.ctypeslib.ndpointer(dtype=np.complex128), #xlist
+                            np.ctypeslib.ndpointer(dtype=np.complex128), #wlist
+                            POINTER(c_int64),POINTER(c_int64)]           #Nw,Np
     flibs.get_qp_.retype=c_void_p
     flibs.get_qp_(P,Q,a,xlist,wlist,byref(c_int64(Nw)),byref(c_int64(Np)))
     return Q,P
@@ -671,13 +670,12 @@ def get_chi0(Smat,Cmat,Gk,olist,kmap,invk,temp:float,Nx:int,Ny:int,Nz:int):
                              POINTER(c_int64),POINTER(c_int64),           #Ny,Nz
                              POINTER(c_int64),POINTER(c_int64),           #Nw,Nk
                              POINTER(c_int64),POINTER(c_int64),           #Nkall,Nchi
-                             POINTER(c_int64)                             
-                             ]
+                             POINTER(c_int64)]                            #Norb
     flibs.get_chi0.retype=c_void_p
     flibs.get_chi0(chi,Smat,Cmat,Gk,kmap,invk,olist,byref(c_double(temp)),
                    byref(c_int64(Nx)),byref(c_int64(Ny)),byref(c_int64(Nz)),
                    byref(c_int64(Nw)),byref(c_int64(Nk)),byref(c_int64(Nkall)),
-                   byref(c_int64(Nchi)),byref(c_int64(Norb)))
+                   byref(c_int64(Norb)),byref(c_int64(Nchi)))
     return chi
 
 def linearized_eliashberg(chi,Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,Nx:int,Ny:int,Nz:int,temp:float,gap_sym:int,eps=1.0e-5,itemax=300):
@@ -805,16 +803,24 @@ def get_chi0_soc(Vmat,Gk,olist,slist,kmap,invk,invs,temp,Nx,Ny,Nz):
 
 def get_chis_chic_soc(chi,Vmat,olist,slist,invs):
     def get_orb_list(olist,slist,invs):
-        orblist=np.zeros(Nchi,dtype=np.int64)
-        for ol in olist:
-            pass
+        orb_list=np.zeros(Nchi,dtype=np.int64)
+        orbs=np.where(slist==1)
+        o1,o2=np.meshgrid(orbs,orbs)
+        orb_chi=np.array([o1.flatten(),o2.flatten()]).T
+        for i,ol in enumerate(olist):
+            o1=(ol[0] if slist[ol[0]-1]==1 else invs[ol[0]-1])-1
+            o2=(ol[1] if slist[ol[1]-1]==1 else invs[ol[1]-1])-1
+            for j,ob2 in enumerate(orb_chi):
+                if(o1==ob2[0] and o2==ob2[1]):
+                    orb_list[i]=j+1
+                    break
         return orb_list
     Norb,Nchi=len(slist),len(olist)
     Nk,Nw=len(chi[0,0,0]),len(chi[0,0])
     orb_list=get_orb_list(olist,slist,invs)
-    chic=np.zeros((Nchi/4,Nchi/4,Nk),dtype=np.complex128)
-    chiszz=np.zeros((Nchi/4,Nchi/4,Nk),dtype=np.complex128)
-    chispm=np.zeros((Nchi/4,Nchi/4,Nk),dtype=np.complex128)
+    chic=np.zeros((int(Nchi/4),int(Nchi/4),Nk),dtype=np.complex128)
+    chiszz=np.zeros((int(Nchi/4),int(Nchi/4),Nk),dtype=np.complex128)
+    chispm=np.zeros((int(Nchi/4),int(Nchi/4),Nk),dtype=np.complex128)
     flibs.get_chis_chic_soc.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128), #chic
                                       np.ctypeslib.ndpointer(dtype=np.complex128), #chiszz
                                       np.ctypeslib.ndpointer(dtype=np.complex128), #chispm
@@ -830,6 +836,21 @@ def get_chis_chic_soc(chi,Vmat,olist,slist,invs):
     flibs.get_chis_chic_soc(chic,chiszz,chispm,chi,Vmat,orb_list,olist,slist,invs,byref(c_int64(Nk)),
                             byref(c_int64(Nw)),byref(c_int64(Nchi)),byref(c_int64(Norb)))
     return chic,chiszz,chispm
+
+def get_chis_chic(chi,Smat,Cmat):
+    Nk,Nw,Nchi=len(chi[0,0,0]),len(chi[0,0]),len(Smat)
+    chis=np.zeros((Nchi,Nchi,Nk),dtype=np.complex128)
+    chic=np.zeros((Nchi,Nchi,Nk),dtype=np.complex128)
+    flibs.get_chis_chic.argtypes=[np.ctypeslib.ndpointer(dtype=np.complex128),        #chis
+                                  np.ctypeslib.ndpointer(dtype=np.complex128),        #chic
+                                  np.ctypeslib.ndpointer(dtype=np.complex128),        #chi
+                                  np.ctypeslib.ndpointer(dtype=np.float64),           #Smat
+                                  np.ctypeslib.ndpointer(dtype=np.float64),           #Cmat
+                                  POINTER(c_int64),POINTER(c_int64),POINTER(c_int64)] #Nk,Nw,Nchi
+    flibs.get_chis_chic.retype=c_void_p
+    flibs.get_chis_chic(chis,chic,chi,Smat,Cmat,byref(c_int64(Nk)),
+                        byref(c_int64(Nw)),byref(c_int64(Nchi)))
+    return chis,chic
 
 def conv_delta_orb_to_band(delta,uni,invk):
     Nkall,Nk,Nw,Norb=len(invk),len(uni),len(delta[0,0]),len(delta)

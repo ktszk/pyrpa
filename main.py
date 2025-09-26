@@ -70,7 +70,7 @@ abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 alpha_beta_gamma=[90.,90.,90]
 temp=2.5e-2 #2.59e-2
 #tempK=300 #Kelvin
-fill=1. #2.6 #2.9375
+fill=1.0 #2.9375
 
 #site_prof=[5]
 
@@ -96,9 +96,9 @@ sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 sw_omega=False #True: real freq, False: Matsubara freq.
 sw_self=False  #True: use calculated self energy for spectrum band plot
-sw_out_self=True
+sw_out_self=False
 sw_in_self=False
-sw_from_file=True
+sw_from_file=False
 #------------------------ initial parameters are above -------------------------------
 #----------------------------------main functions-------------------------------------
 #-------------------------------- import packages ------------------------------------
@@ -560,34 +560,35 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,sw_
         plt.show()
     info=output_gap_function(invk,kmap,gap,uni,sw_soc,invs,slist)
 
-def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,olist,site,
+def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,chiolist,site,
                            mu:float,temp:float,gap_sym:int,sw_self:bool):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     if orb_dep:
-        Smat,Cmat=flibs.gen_SCmatrix_orb(olist,site,Umat,Jmat)
+        Smat,Cmat=flibs.gen_SCmatrix_orb(chiolist,site,Umat,Jmat)
     else:
-        Smat,Cmat=flibs.gen_SCmatrix(olist,site,U,J)
+        Smat,Cmat=flibs.gen_SCmatrix(chiolist,site,U,J)
     if sw_self:
         ham_k=flibs.gen_ham(klist,ham_r,rvec)
         if sw_from_file:
             npz=np.load('self_en.npz')
             sigmak,mu_self=npz['arr_0'],npz['arr_1']
         else:
-            sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,
+            sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,chiolist,ham_k,eig,uni,
                                         mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
         print(f'chem. pot. with self= {mu:.4f} eV',flush=True)
         Gk=flibs.gen_green(sigmak,ham_k,mu_self,temp)
     else:
         Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
     init_delta=plibs.get_initial_gap(kmap,klist,len(eig.T),gap_sym)
-    chi=flibs.get_chi0(Smat,Cmat,Gk,olist,kmap,invk,temp,Nx,Ny,Nz)
+    chi=flibs.get_chi0(Smat,Cmat,Gk,chiolist,kmap,invk,temp,Nx,Ny,Nz)
+    chis,chic=flibs.get_chis_chic(chi,Smat,Cmat)
     f=open('chi.dat','w')
     for i,k in enumerate(klist):
         if k[2]==0.0:
-            f.write(f'{k[0]} {k[1]} {chi[0,0,0,i].real}\n')
+            f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chis[0,0,i].real:11.4e}\n')
     f.close()
-    gap=flibs.linearized_eliashberg(chi,Gk,uni,init_delta,Smat,Cmat,olist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
+    gap=flibs.linearized_eliashberg(chi,Gk,uni,init_delta,Smat,Cmat,chiolist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
     #Fk=flibs.gen_Fk(Gk,Delta,invk)
     if sw_out_self:
         np.save('gap',gap)
@@ -613,10 +614,11 @@ def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
     else:
         Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
     chi,sgnsig,sgnsig2,invschi=flibs.get_chi0_soc(Vmat,Gk,chiolist,slist,kmap,invk,invs,temp,Nx,Ny,Nz)
+    chic,chiszz,chispm=flibs.get_chis_chic_soc(chi,Vmat,chiolist,slist,invs)
     f=open('chi.dat','w')
     for i,k in enumerate(klist):
         if k[2]==0.0:
-            f.write(f'{k[0]} {k[1]} {chi[0,0,0,i].real}\n')
+            f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chiszz[0,0,i].real:11.4e} {chispm[0,0,i].real:11.4e}\n')
     f.close()
     init_delta=plibs.get_initial_gap(kmap,klist,len(slist),gap_sym)
     gap=flibs.linearized_eliashberg_soc(chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,slist,chiolist,

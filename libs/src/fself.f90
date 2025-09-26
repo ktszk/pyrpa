@@ -187,6 +187,76 @@ subroutine getinv(Gk,Nk,Nw,Norb) bind(C,name="getinv_")
   !$omp end parallel do
 end subroutine getinv
 
+subroutine get_chi0(chi,Smat,Cmat,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  implicit none
+  integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
+  integer(int64),intent(in),dimension(Nchi,2):: olist
+  integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
+  real(real64),intent(in):: temp
+  real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
+  complex(real64),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
+
+  integer(int32),dimension(Nchi,Nchi,2)::chi_map
+  integer(int32),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
+
+  call get_chi_map(chi_map,irr_chi,olist,Nchi)
+  call get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+  call ckchi()
+contains
+  subroutine ckchi()
+    integer(int32) i,l,m,n,info,chisk,chick,chiskall,chickall
+    real(real64) maxchi0s,maxchi0c,maxchi0s2,maxchi0c2
+    real(real64),dimension(2*Nchi):: rwork
+    complex(real64),dimension(Nchi*Nchi*4+1):: work
+    complex(real64),dimension(Nchi):: eigs,eigc
+    complex(real64),dimension(Nchi,Nchi):: chi0s,chi0c,tmp1,tmp2
+
+    maxchi0s2=-1.0d5
+    maxchi0c2=-1.0d5
+    do i=1,Nk
+       !$omp parallel
+       !$omp workshare
+       chi0s(:,:)=0.0d0
+       chi0c(:,:)=0.0d0
+       !$omp end workshare
+       !$omp do private(l,m,n)
+       do l=1,Nchi
+          do m=1,Nchi
+             do n=1,Nchi
+                chi0s(m,l)=chi0s(m,l)+chi(i,1,m,n)*Smat(n,l)
+                chi0c(m,l)=chi0c(m,l)-chi(i,1,m,n)*Cmat(n,l)
+             end do
+          end do
+       end do
+       !$omp end do
+       !$omp end parallel
+       call zgeev('N','N',Nchi,chi0s,Nchi,eigs,tmp1,Nchi,tmp2,Nchi,work,Nchi*Nchi*4+1,rwork,info)
+       call zgeev('N','N',Nchi,chi0c,Nchi,eigc,tmp1,Nchi,tmp2,Nchi,work,Nchi*Nchi*4+1,rwork,info)
+       maxchi0s=maxval(dble(eigs))
+       maxchi0c=maxval(dble(eigc))
+       if(maxchi0s>maxchi0s2)then
+          chisk=i
+          maxchi0s2=maxchi0s
+       end if
+       if(maxchi0c>maxchi0c2)then
+          chick=i
+          maxchi0c2=maxchi0c
+       end if
+    end do
+    do i=1,Nkall !get kmap footnote
+       if(invk(2,i)==0)then
+          if(invk(1,i)==chisk)chiskall=i
+          if(invk(1,i)==chick)chickall=i
+       end if
+    end do
+    print'(A3,3I4,F12.8)','SDW',kmap(:,chiskall),maxchi0s2
+    print'(A3,3I4,F12.8)','CDW',kmap(:,chickall),maxchi0c2
+  end subroutine ckchi
+end subroutine get_chi0
+
+
 subroutine get_chi_map(chi_map,irr_chi,olist,Nchi)
   !> This function generate index of exchange symmetry chi1234(q,iw)=chi*4321(q,iw).
   !> This symmetry can use system has no spin dependence and TRS.
@@ -996,3 +1066,66 @@ contains
     close(55)
   end subroutine io_sigma
 end subroutine mkself
+
+subroutine get_chis_chic(chis,chic,chi,Smat,Cmat,Nk,Nw,Nchi) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  implicit none
+  integer(int64),intent(in):: Nk,Nw,Nchi
+  real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  complex(real64),intent(in),dimension(Nk,Nw,Nchi,Nchi):: chi
+  complex(real64),intent(out),dimension(Nk,Nchi,Nchi):: chis,chic
+
+  integer(int32) i,l,m,n,info
+  integer(int32),dimension(Nchi):: ipiv
+  complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4
+  complex(real64),dimension(2*Nchi):: work
+
+  qloop:do i=1,Nk
+     !$omp parallel
+     !$omp workshare
+     cmat1(:,:)=0.0d0
+     cmat2(:,:)=0.0d0
+     !$omp end workshare
+     !$omp do private(l,m,n)
+     do l=1,Nchi
+        do m=1,Nchi
+           do n=1,Nchi
+              cmat1(m,l)=cmat1(m,l)-chi(i,1,m,n)*Smat(n,l) !-chi0S
+              cmat2(m,l)=cmat2(m,l)+chi(i,1,m,n)*Cmat(n,l) !chi0C
+           end do
+        end do
+     end do
+     !$omp end do
+     !$omp do
+     do l=1,Nchi
+        cmat1(l,l)=cmat1(l,l)+1.0d0 !I-chi0S
+        cmat2(l,l)=cmat2(l,l)+1.0d0 !I+chi0C
+     end do
+     !$omp end do
+     !$omp end parallel
+     call zgetrf(Nchi,Nchi,cmat1,Nchi,ipiv,info)
+     call zgetri(Nchi,cmat1,Nchi,ipiv,work,2*Nchi,info)
+     call zgetrf(Nchi,Nchi,cmat2,Nchi,ipiv,info)
+     call zgetri(Nchi,cmat2,Nchi,ipiv,work,2*Nchi,info)
+     !$omp parallel
+     !$omp workshare
+     cmat3(:,:)=0.0d0
+     cmat4(:,:)=0.0d0
+     !$omp end workshare
+     !$omp do private(l,m,n)
+     do l=1,Nchi
+        do m=1,Nchi
+           do n=1,Nchi
+              cmat3(m,l)=cmat3(m,l)+cmat1(m,n)*chi(i,1,n,l) !(1+chi0S)^-1chi0
+              cmat4(m,l)=cmat4(m,l)+cmat2(m,n)*chi(i,1,n,l) !(1+chi0C)^-1chi0
+           end do
+        end do
+     end do
+     !$omp end do
+     !$omp workshare
+     chis(i,:,:)=cmat3(:,:)
+     chic(i,:,:)=cmat4(:,:)
+     !$omp end workshare
+     !$omp end parallel
+  end do qloop
+end subroutine get_chis_chic

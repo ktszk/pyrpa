@@ -766,13 +766,13 @@ subroutine get_chis_chic_soc(chic,chiszz,chispm,chi,Vmat,orb_list,olist,slist,in
   integer(int64),intent(in),dimension(Nchi,2):: olist
   integer(int64),intent(in),dimension(Norb):: slist,invs
   integer(int64),dimension(Nchi):: orb_list
+  real(real64),intent(in),dimension(Nchi,Nchi):: Vmat
   complex(real64),intent(in),dimension(Nk,Nw,Nchi,Nchi):: chi
   complex(real64),intent(out),dimension(Nk,Nchi/4,Nchi/4):: chiszz,chic,chispm
-  real(real64),intent(in),dimension(Nchi,Nchi):: Vmat
 
   integer(int32) i,l,m,n,info
   integer(int32),dimension(Nchi):: ipiv
-  complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3
+  complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2
   complex(real64),dimension(2*Nchi):: work
 
   qloop:do i=1,Nk
@@ -789,9 +789,6 @@ subroutine get_chis_chic_soc(chic,chiszz,chispm,chi,Vmat,orb_list,olist,slist,in
         end do
      end do
      !$omp end do
-     !$omp workshare
-     cmat2(:,:)=cmat1(:,:) !chi0V
-     !$omp end workshare
      !$omp do
      do l=1,Nchi
         cmat1(l,l)=cmat1(l,l)+1.0d0 !I-chi0V
@@ -802,13 +799,13 @@ subroutine get_chis_chic_soc(chic,chiszz,chispm,chi,Vmat,orb_list,olist,slist,in
      call zgetri(Nchi,cmat1,Nchi,ipiv,work,2*Nchi,info)
      !$omp parallel
      !$omp workshare
-     cmat3(:,:)=0.0d0
+     cmat2(:,:)=0.0d0
      !$omp end workshare
      !$omp do private(l,m,n)
      do l=1,Nchi
         do m=1,Nchi
            do n=1,Nchi
-              cmat3(m,l)=cmat3(m,l)+cmat1(m,n)*cmat2(n,l) !(1-chi0V)^-1chi0V
+              cmat2(m,l)=cmat2(m,l)+cmat1(m,n)*chi(i,1,n,l) !(1-chi0V)^-1chi0V
            end do
         end do
      end do
@@ -817,16 +814,16 @@ subroutine get_chis_chic_soc(chic,chiszz,chispm,chi,Vmat,orb_list,olist,slist,in
      do l=1,Nchi
         do m=1,Nchi
            if(slist(olist(l,1))==slist(olist(m,1)) .and. slist(olist(l,2))==slist(olist(m,2)))then
-              if(slist(olist(l,1))==-slist(olist(l,2)))then
-                 chispm(i,orb_list(l),orb_list(m))=chispm(i,orb_list(l),orb_list(m))+cmat3(m,l)
+              if(slist(olist(l,1))==-slist(olist(l,2)) .and. slist(olist(l,1))==1)then
+                 chispm(i,orb_list(l),orb_list(m))=chispm(i,orb_list(l),orb_list(m))+cmat2(m,l)
               end if
            end if
            if(slist(olist(l,1))==slist(olist(l,2)) .and. slist(olist(m,1))==slist(olist(m,2)))then
-              chic(i,orb_list(l),orb_list(m))=chic(i,orb_list(l),orb_list(m))+cmat3(m,l)
+              chic(i,orb_list(l),orb_list(m))=chic(i,orb_list(l),orb_list(m))+cmat2(m,l)
               if(slist(olist(l,1))==slist(olist(m,1)))then
-                 chiszz(i,orb_list(l),orb_list(m))=chiszz(i,orb_list(l),orb_list(m))+cmat3(m,l)
+                 chiszz(i,orb_list(l),orb_list(m))=chiszz(i,orb_list(l),orb_list(m))+cmat2(m,l)
               else
-                 chiszz(i,orb_list(l),orb_list(m))=chiszz(i,orb_list(l),orb_list(m))-cmat3(m,l)
+                 chiszz(i,orb_list(l),orb_list(m))=chiszz(i,orb_list(l),orb_list(m))-cmat2(m,l)
               end if
            end if
         end do
