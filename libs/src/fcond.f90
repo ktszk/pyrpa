@@ -77,7 +77,7 @@ subroutine calc_kn(K0,K1,K2,eig,veloc,kweight,tau,temp,mu,Nk,Norb) bind(C)
   !!@param      mu,in: chemical potential
   !!@param      Nk,in: The number of k-points
   !!@param    Norb,in: The numbrer of orbitals
-  use,intrinsic:: iso_fortran_env, only:int64,real64
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nk,Norb
   real(real64),intent(in):: temp,mu
@@ -87,7 +87,7 @@ subroutine calc_kn(K0,K1,K2,eig,veloc,kweight,tau,temp,mu,Nk,Norb) bind(C)
   real(real64),intent(out),dimension(3,3):: K0,K1,K2
 
   real(real64),dimension(Norb,Nk):: dfermi
-  integer(int64) i,j,l,m
+  integer(int32) i,j,l,m
   real(real64) tmp
 
   !$omp parallel
@@ -134,7 +134,7 @@ subroutine calc_tdf(tdf,eig,veloc,kweight,tau,Nw,Nk,Norb) bind(C)
   !!@param      Nw,in: The number of energy mesh
   !!@param      Nk,in: The number of k-points
   !!@param    Norb,in: The numbrer of orbitals
-  use,intrinsic:: iso_fortran_env, only:int64,real64
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nk,Norb,Nw
   real(real64),intent(in),dimension(Norb,Nk):: eig,tau
@@ -142,7 +142,7 @@ subroutine calc_tdf(tdf,eig,veloc,kweight,tau,Nw,Nk,Norb) bind(C)
   real(real64),intent(in),dimension(3,Norb,Nk):: veloc
   real(real64),intent(out),dimension(3,3,Nw):: tdf
 
-  integer(int64) i,j,l,m,iw
+  integer(int32) i,j,l,m,iw
   real(real64) tmp,emax,emin,id,dw
   id=1.0d-3
   emax=maxval(eig)
@@ -171,3 +171,35 @@ subroutine calc_tdf(tdf,eig,veloc,kweight,tau,Nw,Nk,Norb) bind(C)
   !$omp end workshare
   !$omp end parallel
 end subroutine calc_tdf
+
+subroutine get_tau(tau,tauw,eig,tau_max,eps,tau_mode,Nk,Nw,Norb) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  implicit none
+  integer(int64),intent(in):: Nk,Nw,Norb,tau_mode
+  real(real64),intent(in):: eps,tau_max
+  real(real64),intent(in),dimension(Nw):: tauw
+  real(real64),intent(in),dimension(Norb,Nk):: eig
+  real(real64),intent(out),dimension(Norb,Nk):: tau
+
+  integer(int32) i,j,iter_w
+  real(real64) Emax,Emin,Elength
+  Emin=minval(eig(:,:))
+  Emax=maxval(eig(:,:))
+  Elength=Emax-Emin
+  !$omp parallel do private(i,j,iter_w)
+  do i=1,Nk
+     do j=1,Norb
+        iter_w=int((eig(j,i)-Emin)/Elength)*Nw+1
+        if(tau_mode==1)then
+           if(tauw(iter_w)<eps)then
+              tau(j,i)=tau_max
+           else
+              tau(j,i)=tau_max*eps/tauw(iter_w)
+           end if
+        else if(tau_mode==2)then
+           tau(j,i)=tauw(iter_w)
+        end if
+     end do
+  end do
+  !$omp end parallel do
+end subroutine get_tau

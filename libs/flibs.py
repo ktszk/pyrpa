@@ -564,6 +564,22 @@ def calc_tdf(eig,veloc,kweight,tau,Nw:int):
                    byref(c_int64(Nk)),byref(c_int64(Norb)))
     return tdf
 
+def get_tau(tauw,eig,tau_max,tau_mode,eps=1.0e-4):
+    Nk,Nw=len(eig),len(tauw)
+    Norb=int(eig.size/Nk)
+    tau=np.zeros((Nk,Norb),dtype=np.float64)
+    flibs.get_tau.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64), #tau
+                            np.ctypeslib.ndpointer(dtype=np.float64), #tauw
+                            np.ctypeslib.ndpointer(dtype=np.float64), #eig
+                            POINTER(c_double),POINTER(c_double),      #tau_max,eps
+                            POINTER(c_int64),POINTER(c_int64),        #tau_mode,Nk
+                            POINTER(c_int64),POINTER(c_int64)]        #Nw,Norb
+    flibs.get_tau.restype=c_void_p
+    flibs.get_tau(tau,tauw,eig,byref(c_double(tau_max)),byref(c_double(eps)),
+                  byref(c_int64(tau_mode)),byref(c_int64(Nk)),byref(c_int64(Nw)),
+                  byref(c_int64(Norb)))
+    return tau
+
 def gen_imp_ham(rvec,ham_r,ham_i,rlist,imp_list,eps=1.0e-5):
     Nr,Nimp,Nsite=len(rvec),len(imp_list),len(rlist)
     Norb=int(np.sqrt(ham_r.size/Nr))

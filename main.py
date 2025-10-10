@@ -22,11 +22,11 @@ else: monoclinic
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4nso',0,7,False
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
-#fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
+fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2_soc.input',1,0,True
 #fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
-fname,ftype,brav,sw_soc='inputs/square_soc.hop',1,0,True
+#fname,ftype,brav,sw_soc='inputs/square_soc.hop',1,0,True
 
 sw_dec_axis=False
 
@@ -56,7 +56,7 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=13
+option=5
 color_option=1
 
 Nx,Ny,Nz,Nw=32,32,1,512 #k and energy(or matsubara freq.) mesh size
@@ -68,9 +68,9 @@ kz=0.0
 abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 #abc=[3.90,3.90,12.68]
 alpha_beta_gamma=[90.,90.,90]
-temp=2.5e-2 #2.59e-2
-#tempK=300 #Kelvin
-fill=1.0 #2.9375
+#temp=2.5e-2 #2.59e-2
+tempK=300 #Kelvin
+fill=2.9375
 
 #site_prof=[5]
 
@@ -323,14 +323,19 @@ def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
     Vuc=sclin.det(avec)*1e-30
     gsp=(1.0 if with_spin else 2.0) #spin weight
     iNV=1./(Nk*Vuc)
-    tauconst=True
-    tau=eig*0.+tau_const
-
     itemp=1./temp
     mu=plibs.calc_mu(eig,Nk,fill,temp)
+    tau_mode=1
+    if tau_mode==0:
+        tau=eig*0.+tau_const
+    else:
+        Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=True)
+        wlist=np.linspace(eig.min(),eig.max(),Nw,True)
+        Dos=flibs.gen_dos(eig,uni,mu,wlist,delta)
+        tau=flibs.get_tau(Dos,eig,tau_const,tau_mode)
     print(f"T = {temp/kb:.3f} K",flush=True)
     print(f"mu = {mu:.4f} eV",flush=True)
-    if tauconst:
+    if tau_mode==0:
         print(f"tau = {tau_const} "+('fs' if sw_unit else ''),flush=True)
     else:
         print(f"max tau = {tau.max()} "+('fs' if sw_unit else ''),flush=True)
@@ -644,7 +649,7 @@ def get_mu(ham_r,S_r,rvec,Arot,temp:float,kmesh=40)->float:
     mu=plibs.calc_mu(eig,Nk,fill,temp)
     return mu
 
-def get_mass(mesh,rvec,ham_r,mu:float,de=3.e-4,meshkz=20):
+def get_mass(mesh,rvec,ham_r,S_r,mu:float,de=3.e-4,meshkz=20):
     import skimage.measure as sk
     al=alatt[:2]
     eV2J=scconst.physical_constants['electron volt-joule relationship'][0]
@@ -656,6 +661,7 @@ def get_mass(mesh,rvec,ham_r,mu:float,de=3.e-4,meshkz=20):
     kz0=np.linspace(-np.pi,np.pi,meshkz,False)
     sband=[]
     sband2=[]
+    ham_k=flibs.gen_ham(klist,ham_r,rvec)
 
 def main():
     omp_num,omp_check=flibs.omp_params()
@@ -860,9 +866,9 @@ def main():
             elif option==14:
                 output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,sw_self)
     elif option==15: #calc carrier number
-        get_carrier_num(Nx,rvec,ham_r,mu,Arot)
+        get_carrier_num(Nx,rvec,ham_r,S_r,mu,Arot)
     elif option==16: #calc cycrtron mass
-        get_mass(Nx,rvec,ham_r,mu)
+        get_mass(Nx,rvec,ham_r,S_r,mu)
     elif option==17: #mass calc
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
