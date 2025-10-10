@@ -189,7 +189,7 @@ subroutine get_tau(tau,tauw,eig,tau_max,eps,tau_mode,Nk,Nw,Norb) bind(C)
   !$omp parallel do private(i,j,iter_w)
   do i=1,Nk
      do j=1,Norb
-        iter_w=int((eig(j,i)-Emin)/Elength)*Nw+1
+        iter_w=int(Nw*(eig(j,i)-Emin)/Elength)+1
         if(tau_mode==1)then
            if(tauw(iter_w)<eps)then
               tau(j,i)=tau_max

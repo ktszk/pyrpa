@@ -332,7 +332,7 @@ def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
         Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=True)
         wlist=np.linspace(eig.min(),eig.max(),Nw,True)
         Dos=flibs.gen_dos(eig,uni,mu,wlist,delta)
-        tau=flibs.get_tau(Dos,eig,tau_const,tau_mode)
+        tau=flibs.get_tau(Dos.sum(axis=0),eig,tau_const,tau_mode)
     print(f"T = {temp/kb:.3f} K",flush=True)
     print(f"mu = {mu:.4f} eV",flush=True)
     if tau_mode==0:
