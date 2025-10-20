@@ -588,3 +588,11 @@ def get_initial_gap(kmap,klist,Norb,gap_sym):
             elif gap_sym==-2: #py
                 init_gap[i,:]=2*np.sin(B*kmap[:,1])
     return init_gap
+
+def calc_carrier(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,temp:float,with_spin=False):
+    Nk,eig,kweight=get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec.T)
+    Vuc=sclin.det(avec)*1e-24
+    mu=calc_mu(eig,Nk,fill,temp)
+    dfermi=0.25*(1.-np.tanh(0.5*(eig-mu)/temp)**2)/temp
+    n_carr=2*dfermi.sum(axis=0)/(Vuc*Nk)
+    return n_carr

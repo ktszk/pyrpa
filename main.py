@@ -56,7 +56,7 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=5
+option=15
 color_option=1
 
 Nx,Ny,Nz,Nw=32,32,1,512 #k and energy(or matsubara freq.) mesh size
@@ -69,7 +69,7 @@ abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 #abc=[3.90,3.90,12.68]
 alpha_beta_gamma=[90.,90.,90]
 #temp=2.5e-2 #2.59e-2
-tempK=300 #Kelvin
+tempK=200 #Kelvin
 fill=2.9375
 
 #site_prof=[5]
@@ -312,7 +312,7 @@ def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu:float,ham_r,S_r,rvec,Emin:float,Em
     plt.xticks(xticks,xlabel)
     plt.colorbar()
     plt.show()
-    
+
 def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
                                fill:float,temp:float,tau_const,Nw=300,with_spin=False):
     '''
@@ -325,12 +325,12 @@ def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
     iNV=1./(Nk*Vuc)
     itemp=1./temp
     mu=plibs.calc_mu(eig,Nk,fill,temp)
-    tau_mode=1
+    tau_mode=0
     if tau_mode==0:
         tau=eig*0.+tau_const
     else:
         Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=True)
-        wlist=np.linspace(eig.min(),eig.max(),Nw,True)
+        wlist=np.linspace(eig.min()-mu,eig.max()-mu,Nw,True)
         Dos=flibs.gen_dos(eig,uni,mu,wlist,delta)
         tau=flibs.get_tau(Dos.sum(axis=0),eig,tau_const,tau_mode)
     print(f"T = {temp/kb:.3f} K",flush=True)
@@ -341,7 +341,7 @@ def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
         print(f"max tau = {tau.max()} "+('fs' if sw_unit else ''),flush=True)
     if sw_tdf:
         tdf=flibs.calc_tdf(eig,vk,kweight,tau,Nw)
-        wlist=np.linspace(eig.min(),eig.max(),Nw)
+        wlist=np.linspace(eig.min()-mu,eig.max()-mu,Nw)
         dw=(eig.max()-eig.min())/Nw
         dfermi=0.25*(1.-np.tanh(0.5*(wlist-mu)/temp)**2)/temp
         K0=(dfermi*tdf.T).T.sum(axis=0)*dw
@@ -866,6 +866,9 @@ def main():
             elif option==14:
                 output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,sw_self)
     elif option==15: #calc carrier number
+        n_carr=plibs.calc_carrier(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp)
+        print(n_carr)
+        print(n_carr.sum())
         get_carrier_num(Nx,rvec,ham_r,S_r,mu,Arot)
     elif option==16: #calc cycrtron mass
         get_mass(Nx,rvec,ham_r,S_r,mu)
