@@ -147,11 +147,14 @@ def get_imassk(imass0,mrot,uni):
     flibs.get_imassk(imass,imass0,mrot,uni,byref(c_int64(Nk)),byref(c_int64(Norb)))
     return imass
 
-def get_mass(klist,ham_r,rvec,mrot,uni):
+def get_mass(klist,ham_r,rvec,mrot,uni,sw_imass=False):
     import scipy.linalg as sclin
     imass0=get_imass0(klist,ham_r,rvec)
     imass=get_imassk(imass0,mrot,uni)
-    mass=np.array([[sclin.inv(im) for im in imas] for imas in imass])
+    if sw_imass:
+        mass=imass
+    else:
+        mass=np.array([[sclin.inv(im) for im in imas] for imas in imass])
     return mass
 
 def gen_Green0(eig,uni,mu:float,temp:float,Nw:int):
@@ -547,6 +550,23 @@ def calc_Kn(eig,veloc,kweight,temp:float,mu:float,tau):
     flibs.calc_kn(K0,K1,K2,eig,veloc,kweight,tau,byref(c_double(temp)),
                   byref(c_double(mu)),byref(c_int64(Nk)),byref(c_int64(Norb)))
     return K0,K1,K2
+
+def calc_sigmahall(eig,veloc,imass,kweight,tau,temp:float,mu:float):
+    Nk=len(eig)
+    Norb=int(eig.size/Nk)
+    sigma_hall=c_double(0.0)
+    flibs.calc_sigma_hall.argtypes=[np.ctypeslib.ndpointer(dtype=np.float64), #eig
+                                    np.ctypeslib.ndpointer(dtype=np.float64), #veloc
+                                    np.ctypeslib.ndpointer(dtype=np.float64), #imass
+                                    np.ctypeslib.ndpointer(dtype=np.float64), #kweight
+                                    np.ctypeslib.ndpointer(dtype=np.float64), #tau
+                                    POINTER(c_double),POINTER(c_double),      #temp,mu
+                                    POINTER(c_int64),POINTER(c_int64),        #Nk,Norb
+                                    POINTER(c_double)]                        #sigma_hall
+    flibs.calc_sigma_hall.restype=c_void_p
+    flibs.calc_sigma_hall(eig,veloc,imass,kweight,tau,byref(c_double(temp)),byref(c_double(mu)),
+                          byref(c_int64(Nk)),byref(c_int64(Norb)),byref(sigma_hall)) #byref(c_double(sigma_hall)))
+    return sigma_hall.value
 
 def calc_tdf(eig,veloc,kweight,tau,Nw:int):
     Nk=len(eig)

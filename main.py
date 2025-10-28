@@ -22,10 +22,10 @@ else: monoclinic
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4nso',0,7,False
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
-fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
+#fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2_soc.input',1,0,True
-#fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
+fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
 #fname,ftype,brav,sw_soc='inputs/square_soc.hop',1,0,True
 
 sw_dec_axis=False
@@ -56,10 +56,10 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=15
+option=5
 color_option=1
 
-Nx,Ny,Nz,Nw=32,32,1,512 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=40,40,10,512 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
@@ -69,8 +69,8 @@ abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 #abc=[3.90,3.90,12.68]
 alpha_beta_gamma=[90.,90.,90]
 #temp=2.5e-2 #2.59e-2
-tempK=200 #Kelvin
-fill=2.9375
+tempK=300 #Kelvin
+fill=0.5 # 2.9375
 
 #site_prof=[5]
 
@@ -313,6 +313,33 @@ def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu:float,ham_r,S_r,rvec,Emin:float,Em
     plt.colorbar()
     plt.show()
 
+def get_hall_coe(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
+                               fill:float,temp:float,tau_const,Nw=300,with_spin=False):
+    Nk,eig,vk,imass,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec.T*ihbar,sw_veloc=True,sw_mass=True)
+    Vuc=sclin.det(avec)*1e-30
+    gsp=(1.0 if with_spin else 2.0) #spin weight
+    mu=plibs.calc_mu(eig,Nk,fill,temp)
+    tau_mode=0
+    if tau_mode==0:
+        tau=eig*0.+tau_const
+    else:
+        Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=True)
+        wlist=np.linspace(eig.min()-mu,eig.max()-mu,Nw,True)
+        Dos=flibs.gen_dos(eig,uni,mu,wlist,delta)
+        tau=flibs.get_tau(Dos.sum(axis=0),eig,tau_const,tau_mode)
+    print(f"T = {temp/kb:.3f} K",flush=True)
+    print(f"mu = {mu:.4f} eV",flush=True)
+    if tau_mode==0:
+        print(f"tau = {tau_const} "+('fs' if sw_unit else ''),flush=True)
+    else:
+        print(f"max tau = {tau.max()} "+('fs' if sw_unit else ''),flush=True)
+    sigma_hall=flibs.calc_sigmahall(eig,vk,imass/eC,kweight,tau,temp,mu)
+    K0,K1,K2=flibs.calc_Kn(eig,vk,kweight,temp,mu,tau)
+    print(sigma_hall,K0[0,0],K0[1,1])
+    Rh=-Vuc*Nk*sigma_hall/(gsp*K0[0,0]*K0[1,1])
+    nh=-1./(Rh*eC)/1e-6
+    print(Rh)
+    print(nh)
 def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
                                fill:float,temp:float,tau_const,Nw=300,with_spin=False):
     '''
@@ -351,7 +378,7 @@ def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
         plt.show()
     else:
         K0,K1,K2=flibs.calc_Kn(eig,vk,kweight,temp,mu,tau)
-    sigma=gsp*tau_unit*eC*K0*iNV
+    sigma=gsp*tau_unit*eC*K0*iNV #a e is canceled effect of eV2J 
     kappa=gsp*tau_unit*eC*kb*K2*iNV*itemp
     kappa2=gsp*tau_unit*eC*kb*(K2-K1.dot(sclin.inv(K0).dot(K1)))*iNV*itemp
     Seebeck=-kb*sclin.inv(K0).dot(K1)*itemp
@@ -789,7 +816,8 @@ def main():
     elif option==4: #plot spectrum
         plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw,sw_self)
     elif option==5: #calc conductivity
-        calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,tau_const)
+        get_hall_coe(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,tau_const)
+        #calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,tau_const)
     elif option==6: #calc_optical conductivity
         calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta)
     elif option in {7,8,9,10,11}: #calc_chis_spectrum

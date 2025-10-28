@@ -200,7 +200,7 @@ subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
            !$omp simd
            axis12: do k=1,3
               axis22: do n=k,3
-                 imk(k,n,m,l,i)=imk(n,k,l,m,i)
+                 imk(k,n,m,l,i)=imk(n,k,m,l,i)
                  imk(n,k,l,m,i)=conjg(imk(n,k,m,l,i))
                  imk(k,n,m,l,i)=imk(n,k,l,m,i)
               end do axis22

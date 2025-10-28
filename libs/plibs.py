@@ -380,7 +380,7 @@ def get_colors(klist,blist,mrot,rvec,ham_r,S_r,ol,color_option,sw_2d=False):
             clist=[np.sqrt((abs(vkk)*abs(vkk)).sum(axis=1)) for vkk in vk]
         return clist
 
-def get_emesh(Nx:int,Ny:int,Nz:int,ham_r,S_r,rvec,avec,sw_uni=False,sw_veloc=False):
+def get_emesh(Nx:int,Ny:int,Nz:int,ham_r,S_r,rvec,avec,sw_uni=False,sw_veloc=False,sw_mass=False):
     Nk,klist=gen_klist(Nx,Ny,Nz,sw_pp=False)
     eig,uni=get_eigs(klist,ham_r,S_r,rvec)
     kweight=np.ones(len(eig),dtype=np.float64)
@@ -390,7 +390,11 @@ def get_emesh(Nx:int,Ny:int,Nz:int,ham_r,S_r,rvec,avec,sw_uni=False,sw_veloc=Fal
             return Nk,eig,vk,kweight
         else:
             vk=flibs.get_veloc(klist,ham_r,rvec,avec,uni)
-            return Nk,eig,vk,kweight
+            if sw_mass:
+                imass=flibs.get_mass(klist,ham_r,rvec,avec,uni,True)
+                return Nk,eig,vk,imass,kweight
+            else:
+                return Nk,eig,vk,kweight
     else:
         if sw_uni:
             return Nk,klist,eig,uni,kweight

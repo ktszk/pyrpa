@@ -123,6 +123,51 @@ subroutine calc_kn(K0,K1,K2,eig,veloc,kweight,tau,temp,mu,Nk,Norb) bind(C)
   !$omp end parallel
 end subroutine calc_kn
 
+subroutine calc_sigma_hall(eig,veloc,imass,kweight,tau,temp,mu,Nk,Norb,sigma_hall) bind(C)
+  !!@param sigma_hall,out: conductivity in MF and EF
+  !!@param        eig,in: energy of bands
+  !!@param      veloc,in: group velocity:
+  !!@param      imass,in: inverse of effective mass
+  !!@param    kweight,in: weight of k-points
+  !!@param        tau,in: relaxation time
+  !!@param       temp,in: Temperature
+  !!@param         mu,in: chemical potential
+  !!@param         Nk,in: The number of k-points
+  !!@param       Norb,in: The numbrer of orbitals
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  implicit none
+  integer(int64),intent(in):: Nk,Norb
+  real(real64),intent(in):: temp,mu
+  real(real64),intent(in),dimension(Norb,Nk):: eig,tau
+  real(real64),intent(in),dimension(Nk):: kweight
+  real(real64),intent(in),dimension(3,Norb,Nk):: veloc
+  real(real64),intent(in),dimension(3,3,Norb,Nk):: imass
+  real(real64),intent(out):: sigma_hall
+
+  real(real64),dimension(Norb,Nk):: dfermi
+  integer(int32) i,j
+  sigma_hall=0.0d0
+  !$omp parallel
+  !$omp do private(j)
+  get_dfermi: do i=1,Nk
+     do j=1,Norb
+        dfermi(j,i)=0.25d0*(1.0d0-tanh(0.5d0*(eig(j,i)-mu)/temp)**2)/temp
+     end do
+  end do get_dfermi
+  !$omp end do
+
+  !$omp do private(i,j) reduction(+:sigma_hall)
+  get_Kn: do i=1,Nk
+     band_loop: do j=1,Norb
+        sigma_hall=sigma_hall+(veloc(1,j,i)*veloc(1,j,i)*imass(2,2,j,i)-veloc(1,j,i)*veloc(2,j,i)*imass(1,2,j,i))&
+             *dfermi(j,i)*kweight(i)*tau(j,i) !**2
+     end do band_loop
+  end do get_Kn
+  !$omp end do
+  !$omp end parallel
+  print*,sigma_hall
+end subroutine calc_sigma_hall
+
 subroutine calc_tdf(tdf,eig,veloc,kweight,tau,Nw,Nk,Norb) bind(C)
   !> calc tdf function
   !> sum_k(v_ki*v_kj*tau)
