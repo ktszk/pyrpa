@@ -95,7 +95,7 @@ def import_MLO_hoppings(name:str):
     S_r=tmpS.reshape((no*no,nr)).T.reshape((nr,no,no)).round(6).copy()*13.6
     return rvec,ham_r,S_r,no,nr
 
-def get_bvec(avec):
+def get_bvec(avec: np.ndarray) -> np.ndarray:
     """
     @fn get_bvec()
     @brief THis function generate reciprocal lattice vector from primitive translation vector
@@ -105,7 +105,8 @@ def get_bvec(avec):
     bvec=2*np.pi*sclin.inv(avec).T
     return bvec
 
-def get_eigs(klist,ham_r,S_r,rvec,sw_uni=False,sw_std=False):
+def get_eigs(klist: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray,
+             sw_uni: bool = False, sw_std: bool = False) -> tuple[np.ndarray, np.ndarray] | np.ndarray:
     """
     @fn get_eigs
     @brief This function generate eigenvalues of Hamiltonian
@@ -168,7 +169,7 @@ def calc_mu_imp(eigs,Nsite,fill:float,temp:float)-> float:
     mu=scopt.brentq(func,emin,emax)
     return mu
 
-def gen_rlist(Nx:int,Ny:int,Nz:int):
+def gen_rlist(Nx: int, Ny: int, Nz: int) -> np.ndarray:
     """
     @fn gen_rlist
     @brief This function generate the list of r-vector
@@ -185,7 +186,7 @@ def gen_rlist(Nx:int,Ny:int,Nz:int):
     
     return rlist
 
-def gen_klist_with_kmap(Nx:int,Ny:int,Nz:int):
+def gen_klist_with_kmap(Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, np.ndarray]:
     """
     @fn gen_klist_with_kmap
     @brief This function generate the list of r-vector
@@ -203,7 +204,7 @@ def gen_klist_with_kmap(Nx:int,Ny:int,Nz:int):
     klist=np.array([x.ravel()/Nx,y.ravel()/Ny,z.ravel()/Nz]).T.copy()
     return klist,kmap
 
-def gen_klist(Nx:int,Ny:int,Nz=None,sw_pp=True,kz=0):
+def gen_klist(Nx: int, Ny: int, Nz: int | None = None, sw_pp: bool = True, kz: float = 0.0) -> tuple[int, np.ndarray]:
     """
     @fn gen_klist()
     @brief This function generate k-point list messhed Nx,Ny,Nz
@@ -230,7 +231,7 @@ def gen_klist(Nx:int,Ny:int,Nz=None,sw_pp=True,kz=0):
     klist=np.array([x.ravel(),y.ravel(),z.ravel()]).T.copy()
     return len(klist),klist
 
-def mk_klist(k_list,N:int,bvec):
+def mk_klist(k_list: np.ndarray | list, N: int, bvec: np.ndarray) -> tuple[np.ndarray, np.ndarray, list]:
     """
     @fn mk_klist()
     @brief This function generate k-point list for symmetry line
@@ -259,7 +260,7 @@ def mk_klist(k_list,N:int,bvec):
     xticks+=[splen[-1]]
     return np.array(klist),np.array(splen),xticks
 
-def mk_qlist(k_set,Nx:int,Ny:int,Nz:int,bvec):
+def mk_qlist(k_set: np.ndarray | list, Nx: int, Ny: int, Nz: int, bvec: np.ndarray) -> tuple[np.ndarray, np.ndarray, list]:
     """
     @fn mk_qlist()
     @brief This function generate q-point list for symmetry line
@@ -293,7 +294,7 @@ def mk_qlist(k_set,Nx:int,Ny:int,Nz:int,bvec):
     xticks+=[splen[-1]]
     return np.array(qlist),np.array(splen),xticks
 
-def mk_kf(mesh,rvec,ham_r,S_r,RotMat,mu:float,kz):
+def mk_kf(mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, RotMat: np.ndarray, mu: float, kz: float) -> tuple[list, list]:
     """
     @fn mk_kf()
     @brief This function obtains 2d fermi wave-number
@@ -319,7 +320,8 @@ def mk_kf(mesh,rvec,ham_r,S_r,RotMat,mu:float,kz):
             v2.append(ct)
     return v2,fsband
 
-def gen_3d_surf_points(mesh,rvec,ham_r,S_r,mu,kscale=1.0):
+def gen_3d_surf_points(mesh: int, rvec: np.ndarray, ham_r: np.ndarray,
+                       S_r: np.ndarray, mu: float, kscale: float = 1.0) -> tuple[list, list, list]:
     """
     @fn gen_3d_surf_points()
     @brief This function obtains 3d fermi wave-numbers
@@ -352,7 +354,8 @@ def gen_3d_surf_points(mesh,rvec,ham_r,S_r,mu,kscale=1.0):
             fsband.append(i)
     return fspolys,fscenters,fsband
 
-def get_colors(klist,blist,mrot,rvec,ham_r,S_r,ol,color_option,sw_2d=False):
+def get_colors(klist: np.ndarray, blist, mrot, rvec: np.ndarray, ham_r: np.ndarray,
+               S_r: np.ndarray, ol, color_option: int, sw_2d: bool = False):
     def get_col(cl,ol):
         col=(np.abs(cl[:,ol])**2 if isinstance(ol,int)
              else (np.abs(cl[:,ol])**2).sum(axis=1)).round(4)
@@ -380,10 +383,11 @@ def get_colors(klist,blist,mrot,rvec,ham_r,S_r,ol,color_option,sw_2d=False):
             clist=[np.sqrt((abs(vkk)*abs(vkk)).sum(axis=1)) for vkk in vk]
         return clist
 
-def get_emesh(Nx:int,Ny:int,Nz:int,ham_r,S_r,rvec,avec,sw_uni=False,sw_veloc=False,sw_mass=False):
-    Nk,klist=gen_klist(Nx,Ny,Nz,sw_pp=False)
-    eig,uni=get_eigs(klist,ham_r,S_r,rvec)
-    kweight=np.ones(len(eig),dtype=np.float64)
+def get_emesh(Nx: int, Ny: int, Nz: int, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray,
+              avec: np.ndarray, sw_uni: bool = False, sw_veloc: bool = False, sw_mass: bool = False):
+    Nk, klist = gen_klist(Nx, Ny, Nz, sw_pp=False)
+    eig, uni = get_eigs(klist, ham_r, S_r, rvec)
+    kweight = np.ones(len(eig), dtype=np.float64)
     if sw_veloc:
         if sw_uni:
             vk=flibs.get_vnmk(klist,ham_r,rvec,avec,uni)
@@ -401,7 +405,7 @@ def get_emesh(Nx:int,Ny:int,Nz:int,ham_r,S_r,rvec,avec,sw_uni=False,sw_veloc=Fal
         else:
             return Nk,eig,kweight
 
-def get_ptv(alatt,deg,brav):
+def get_ptv(alatt: np.ndarray, deg: np.ndarray, brav: int) -> tuple[np.ndarray, np.ndarray]:
     if brav==0: #simple
         Arot=np.array([[ 1., 0., 0.],[ 0., 1., 0.],[ 0.,0., 1.]])
     elif brav==1: #face center
@@ -459,10 +463,11 @@ def get_symm_line(brav:int)->tuple[list,list]:
         pass
     return k_list,xlabel
 
-def BZedge(brav:int):
+def BZedge(brav: int) -> None:
     pass
 
-def get_conductivity(mu,temp,eig,vk,Nw,Emax,idelta=1.e-3):
+def get_conductivity(mu: float, temp: float, eig: np.ndarray, vk: np.ndarray, Nw: int, Emax: float,
+                     idelta: float = 1.e-3) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     wlist=np.linspace(0,Emax,Nw)
     ffermi=flibs.get_ffermi(eig,mu,temp)
     L11=[]
@@ -478,7 +483,9 @@ def get_conductivity(mu,temp,eig,vk,Nw,Emax,idelta=1.e-3):
     L22=np.array(L22)
     return L11,L12,L22,wlist
 
-def chis_spectrum(mu,temp,Smat,klist,qlist,olist,eig,uni,Nw,Emax,idelta=1.e-3):
+def chis_spectrum(mu: float, temp: float, Smat: np.ndarray, klist: np.ndarray, qlist: np.ndarray,
+                  olist: np.ndarray, eig: np.ndarray, uni: np.ndarray, Nw: int, Emax: float,
+                  idelta: float = 1.e-3) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     ffermi=flibs.get_ffermi(eig,mu,temp)
     wlist=np.linspace(0,Emax,Nw)
     chisq=[]
@@ -502,7 +509,9 @@ def chis_spectrum(mu,temp,Smat,klist,qlist,olist,eig,uni,Nw,Emax,idelta=1.e-3):
     fq.close()
     return np.array(chisq),np.array(chis_orbq),wlist
 
-def chis_q_point(q,eig,uni,Emax,Nw,mu,temp,Smat,klist,olist,idelta):
+def chis_q_point(q: np.ndarray, eig: np.ndarray, uni: np.ndarray, Emax: float,
+                 Nw: int, mu: float, temp: float, Smat: np.ndarray, klist: np.ndarray,
+                 olist: np.ndarray, idelta: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     ffermi=flibs.get_ffermi(eig,mu,temp)
     wlist=np.linspace(0,Emax,Nw)
     qshift=flibs.get_qshift(klist,q)
@@ -511,7 +520,9 @@ def chis_q_point(q,eig,uni,Emax,Nw,mu,temp,Smat,klist,olist,idelta):
     trchis,trchi0,chis_orb=flibs.get_tr_chi(chis,chi0,olist)
     return trchis,chis_orb,wlist
 
-def chis_qmap(Nx,Ny,Ecut,mu,temp,Smat,klist,olist,eig,uni,idelta=1.e-3):
+def chis_qmap(Nx: int, Ny: int, Ecut: float, mu: float, temp: float, Smat: np.ndarray,
+              klist: np.ndarray, olist: np.ndarray, eig: np.ndarray, uni: np.ndarray,
+              idelta: float = 1.e-3) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     ffermi=flibs.get_ffermi(eig,mu,temp)
     chis,chi0=flibs.chis_qmap(uni,eig,ffermi,klist,Smat,olist,Nx,Ny,temp,Ecut,idelta)
     x0=np.linspace(0,1,Nx,False)
@@ -519,7 +530,9 @@ def chis_qmap(Nx,Ny,Ecut,mu,temp,Smat,klist,olist,eig,uni,idelta=1.e-3):
     qx,qy=np.meshgrid(x0,y0)
     return chis,chi0,qx,qy
 
-def phi_spectrum(mu,temp,klist,qlist,olist,eig,uni,Nw,Emax,idelta=1.e-3):
+def phi_spectrum(mu: float, temp: float, klist: np.ndarray, qlist: np.ndarray, olist: np.ndarray,
+                 eig: np.ndarray,   uni: np.ndarray, Nw: int, Emax: float,
+                 idelta: float = 1.e-3) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     ffermi=flibs.get_ffermi(eig,mu,temp)
     wlist=np.linspace(0,Emax,Nw)
     phiq=[]
@@ -536,7 +549,9 @@ def phi_spectrum(mu,temp,klist,qlist,olist,eig,uni,Nw,Emax,idelta=1.e-3):
     fq.close()
     return np.array(phiq),np.array(phi_orbq),wlist
 
-def phi_qmap(Nx,Ny,Ecut,mu,temp,klist,olist,eig,uni,idelta=1.e-3,sw_omega=True):
+def phi_qmap(Nx: int, Ny: int, Ecut: float, mu: float, temp: float, klist: np.ndarray,
+             olist: np.ndarray, eig: np.ndarray, uni: np.ndarray, idelta: float = 1.e-3,
+             sw_omega: bool = True) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     ffermi=flibs.get_ffermi(eig,mu,temp)
     phi=flibs.phi_qmap(uni,eig,ffermi,klist,olist,Nx,Ny,mu,temp,Ecut,idelta,sw_omega)
     x0=np.linspace(0,1,Nx,False)
@@ -544,7 +559,7 @@ def phi_qmap(Nx,Ny,Ecut,mu,temp,klist,olist,eig,uni,idelta=1.e-3,sw_omega=True):
     qx,qy=np.meshgrid(x0,y0)
     return phi,qx,qy
 
-def get_chi_orb_list(Norb,site_prof):
+def get_chi_orb_list(Norb: int, site_prof: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     if(len(site_prof)==1):
         tmp=np.arange(Norb)+1
         o1,o2=np.meshgrid(tmp,tmp)
@@ -567,7 +582,7 @@ def get_chi_orb_list(Norb,site_prof):
             exit()
     return chiolist,site
 
-def get_initial_gap(kmap,klist,Norb,gap_sym):
+def get_initial_gap(kmap: np.ndarray, klist: np.ndarray, Norb: int, gap_sym: int) -> np.ndarray:
     if gap_sym>=0:
         gapsym=['s','dx2-y2','spm','dxy']
         print('gap symmetry is '+gapsym[gap_sym])
@@ -593,7 +608,8 @@ def get_initial_gap(kmap,klist,Norb,gap_sym):
                 init_gap[i,:]=2*np.sin(B*kmap[:,1])
     return init_gap
 
-def calc_carrier(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,temp:float,with_spin=False):
+def calc_carrier(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray,
+                 Nx: int, Ny: int, Nz: int, fill: float, temp: float, with_spin: bool = False) -> np.ndarray:
     Nk,eig,kweight=get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec.T)
     Vuc=sclin.det(avec)*1e-24
     mu=calc_mu(eig,Nk,fill,temp)

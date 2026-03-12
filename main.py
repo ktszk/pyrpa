@@ -22,10 +22,10 @@ else: monoclinic
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4nso',0,7,False
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
-#fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
+fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2_soc.input',1,0,True
-fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
+#fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
 #fname,ftype,brav,sw_soc='inputs/square_soc.hop',1,0,True
 
 sw_dec_axis=False
@@ -56,7 +56,7 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=5
+option=1
 color_option=1
 
 Nx,Ny,Nz,Nw=40,40,10,512 #k and energy(or matsubara freq.) mesh size
@@ -70,7 +70,7 @@ abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 alpha_beta_gamma=[90.,90.,90]
 #temp=2.5e-2 #2.59e-2
 tempK=300 #Kelvin
-fill=0.5 # 2.9375
+fill= 2.9375
 
 #site_prof=[5]
 
@@ -78,7 +78,7 @@ Emin,Emax=-3,3
 delta=3.0e-2
 Ecut=1.0e-2
 tau_const=100
-olist=[[0,2],[1,3],[1,3]]
+olist=[0,[1,2],3]
 #olist=[0,1,1]
 #olist=[[0,4],[1,2,5,6],[3,7]]
 U,J= 0.8, 0.1
@@ -785,7 +785,10 @@ def main():
                     if ol==[]:
                         pass
                     else:
-                        plt.plot(wlist,Dos[ol,:].sum(axis=0),color=cl)
+                        if isinstance(ol,int):
+                            plt.plot(wlist,Dos[ol],color=cl)
+                        else:
+                            plt.plot(wlist,Dos[ol,:].sum(axis=0),color=cl)
             plt.plot(wlist,Dos.sum(axis=0),color='black')
         elif color_option==0:
             clist=['k','r','g','b','c','m','y']
