@@ -56,10 +56,10 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=1
+option=13
 color_option=1
 
-Nx,Ny,Nz,Nw=40,40,10,512 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=16,16,2,256 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
@@ -69,7 +69,7 @@ abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 #abc=[3.90,3.90,12.68]
 alpha_beta_gamma=[90.,90.,90]
 #temp=2.5e-2 #2.59e-2
-tempK=300 #Kelvin
+tempK=700 #Kelvin
 fill= 2.9375
 
 #site_prof=[5]
@@ -81,11 +81,11 @@ tau_const=100
 olist=[0,[1,2],3]
 #olist=[0,1,1]
 #olist=[[0,4],[1,2,5,6],[3,7]]
-U,J= 0.8, 0.1
-#U,J=1.2,0.15
+#U,J= 0.8, 0.1
+U,J=1.2,0.15
 #U,J=1.8,0.225
 #0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py
-gap_sym=1
+gap_sym=2
 
 #mu0=9.85114560061123
 #k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
@@ -337,7 +337,7 @@ def get_hall_coe(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
     K0,K1,K2=flibs.calc_Kn(eig,vk,kweight,temp,mu,tau)
     print(sigma_hall,K0[0,0],K0[1,1])
     Rh=-Vuc*Nk*sigma_hall/(gsp*K0[0,0]*K0[1,1])
-    nh=-1./(Rh*eC)/1e-6
+    nh=-1./(Rh*eC)/1e6
     print(Rh)
     print(nh)
 def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,

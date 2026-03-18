@@ -160,7 +160,7 @@ subroutine calc_sigma_hall(eig,veloc,imass,kweight,tau,temp,mu,Nk,Norb,sigma_hal
   get_Kn: do i=1,Nk
      band_loop: do j=1,Norb
         sigma_hall=sigma_hall+(veloc(1,j,i)*veloc(1,j,i)*imass(2,2,j,i)-veloc(1,j,i)*veloc(2,j,i)*imass(1,2,j,i))&
-             *dfermi(j,i)*kweight(i)*tau(j,i) !**2
+             *dfermi(j,i)*kweight(i)*tau(j,i)**2
      end do band_loop
   end do get_Kn
   !$omp end do
