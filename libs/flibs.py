@@ -1294,9 +1294,10 @@ def linearized_eliashberg(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init
     return delta
 
 def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init_delta: np.ndarray,
-                              Vmat: np.ndarray, sgnsig: np.ndarray, sgnsig2: np.ndarray, slist: np.ndarray,
-                              olist: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.ndarray, invschi: np.ndarray,
-                              Nx: int, Ny: int, Nz: int, temp: float, gap_sym: int, eps: float = 1.0e-4, itemax: int = 300) -> np.ndarray:
+                              Vmat: np.ndarray, sgnsig: np.ndarray, sgnsig2: np.ndarray, plist: np.ndarray,
+                              slist: np.ndarray, olist: np.ndarray, kmap: np.ndarray, invk: np.ndarray,
+                              invs: np.ndarray, invschi: np.ndarray, Nx: int, Ny: int, Nz: int, temp: float,
+                              gap_sym: int, eps: float = 1.0e-4, itemax: int = 300) -> np.ndarray:
     """Linearized Eliashberg solver including spin–orbit coupling effects.
     This more general version accepts additional sign and orbital mapping arrays associated 
     with SOC (`sgnsig`, `sgnsig2`, `invs`, `invschi`).
@@ -1314,6 +1315,7 @@ def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, 
         np.ctypeslib.ndpointer(dtype=np.float64),    # Vmat
         np.ctypeslib.ndpointer(dtype=np.float64),    # sgnsig
         np.ctypeslib.ndpointer(dtype=np.float64),    # sgnsig2
+        np.ctypeslib.ndpointer(dtype=np.float64),    # plist
         np.ctypeslib.ndpointer(dtype=np.int64),      # olist
         np.ctypeslib.ndpointer(dtype=np.int64),      # slist
         np.ctypeslib.ndpointer(dtype=np.int64),      # kmap
@@ -1328,12 +1330,12 @@ def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, 
         POINTER(c_int64), POINTER(c_int64)            # itemax, gapsym
     ]
     flibs.lin_eliash_soc.retype = c_void_p
-    flibs.lin_eliash_soc(delta, chi, Gk, uni, init_delta, Vmat, sgnsig, sgnsig2, olist, slist,
-                         kmap, invk, invs, invschi, byref(c_double(temp)), byref(c_double(eps)),
-                         byref(c_int64(Nkall)), byref(c_int64(Nk)), byref(c_int64(Nw)),
-                         byref(c_int64(Nchi)), byref(c_int64(Norb)), byref(c_int64(Nx)),
-                         byref(c_int64(Ny)), byref(c_int64(Nz)), byref(c_int64(itemax)),
-                         byref(c_int64(gap_sym)))
+    flibs.lin_eliash_soc(delta, chi, Gk, uni, init_delta, Vmat, sgnsig, sgnsig2, plist, olist,
+                         slist, kmap, invk, invs, invschi, byref(c_double(temp)),
+                         byref(c_double(eps)), byref(c_int64(Nkall)), byref(c_int64(Nk)),
+                         byref(c_int64(Nw)), byref(c_int64(Nchi)), byref(c_int64(Norb)),
+                         byref(c_int64(Nx)), byref(c_int64(Ny)), byref(c_int64(Nz)),
+                         byref(c_int64(itemax)), byref(c_int64(gap_sym)))
     return delta
 
 def gen_Vmatrix(olist: np.ndarray, slist: np.ndarray, site: np.ndarray, invs: np.ndarray,

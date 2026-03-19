@@ -71,7 +71,6 @@ alpha_beta_gamma=[90.,90.,90]
 #temp=2.5e-2 #2.59e-2
 tempK=700 #Kelvin
 fill= 2.9375
-
 #site_prof=[5]
 
 Emin,Emax=-3,3
@@ -592,7 +591,7 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,sw_
         plt.show()
     info=output_gap_function(invk,kmap,gap,uni,sw_soc,invs,slist)
 
-def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,chiolist,site,
+def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,chiolist,site,plist,
                            mu:float,temp:float,gap_sym:int,sw_self:bool):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
@@ -620,14 +619,13 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,chiolist,s
         if k[2]==0.0:
             f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chis[0,0,i].real:11.4e}\n')
     f.close()
-    gap=flibs.linearized_eliashberg(chi,Gk,uni,init_delta,Smat,Cmat,chiolist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
-    #Fk=flibs.gen_Fk(Gk,Delta,invk)
+    gap=flibs.linearized_eliashberg(chi,Gk,uni,init_delta,Smat,Cmat,chiolist,plist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
     if sw_out_self:
         np.save('gap',gap)
     info=output_gap_function(invk,kmap,gap,uni)
 
 def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
-                        mu:float,temp:float,chiolist,slist,invs,site):
+                        mu:float,temp:float,chiolist,slist,plist,invs,site):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     if orb_dep:
@@ -653,7 +651,7 @@ def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
             f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chiszz[0,0,i].real:11.4e} {chispm[0,0,i].real:11.4e}\n')
     f.close()
     init_delta=plibs.get_initial_gap(kmap,klist,len(slist),gap_sym)
-    gap=flibs.linearized_eliashberg_soc(chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,slist,chiolist,
+    gap=flibs.linearized_eliashberg_soc(chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,plist,slist,chiolist,
                                         kmap,invk,invs,invschi,Nx,Ny,Nz,temp,gap_sym)
     if sw_out_self:
         np.save('gap',gap)
@@ -698,6 +696,7 @@ def main():
     else:
         rvec,ham_r,no,Nr=plibs.import_hoppings(fname,ftype)
         S_r=[]
+    plist=plibs.check_parity(rvec,ham_r)
     #set lattice vector
     avec,Arot=plibs.get_ptv(alatt,deg,brav)
     #rotation axis
@@ -886,14 +885,14 @@ def main():
             if option==12:
                 pass
             elif option==13:
-                calc_lin_eliash_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,invs,site)
+                calc_lin_eliash_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,plist,invs,site)
             elif option==14:
                 output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,sw_self,sw_soc,invs,slist)
         else: #without soc
             if option==12: #calc self-energy using flex
                 calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,site)
             elif option==13: #calc gap function
-                calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,site,mu,temp,gap_sym,sw_self)
+                calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,site,plist,mu,temp,gap_sym,sw_self)
             elif option==14:
                 output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,sw_self)
     elif option==15: #calc carrier number
