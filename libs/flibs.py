@@ -1236,9 +1236,9 @@ def get_chi0(Smat: np.ndarray, Cmat: np.ndarray, Gk: np.ndarray, olist: np.ndarr
     return chi
 
 def linearized_eliashberg(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init_delta: np.ndarray,
-                          Smat: np.ndarray, Cmat: np.ndarray, olist: np.ndarray, kmap: np.ndarray,
-                          invk: np.ndarray, Nx: int, Ny: int, Nz: int, temp: float, gap_sym: int,
-                          eps: float = 1.0e-5, itemax: int = 300) -> np.ndarray:
+                          Smat: np.ndarray, Cmat: np.ndarray, olist: np.ndarray, plist: np.ndarray,
+                          kmap: np.ndarray,invk: np.ndarray, Nx: int, Ny: int, Nz: int,
+                          temp: float, gap_sym: int, eps: float = 1.0e-5, itemax: int = 300) -> np.ndarray:
     """Solve the linearized Eliashberg equation without SOC.
     The output ``delta`` is the superconducting gap function in orbital representation.
     It has shape (``Norb, Norb, Nw, Nkall``), where ``Nkall`` is the full number of k‑points.
@@ -1275,6 +1275,7 @@ def linearized_eliashberg(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init
         np.ctypeslib.ndpointer(dtype=np.float64),    # Smat
         np.ctypeslib.ndpointer(dtype=np.float64),    # Cmat
         np.ctypeslib.ndpointer(dtype=np.int64),      # olist
+        np.ctypeslib.ndpointer(dtype=np.float64),    # plist
         np.ctypeslib.ndpointer(dtype=np.int64),      # kmap
         np.ctypeslib.ndpointer(dtype=np.int64),      # invk
         POINTER(c_double), POINTER(c_double),         # temp, eps
@@ -1285,7 +1286,7 @@ def linearized_eliashberg(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init
         POINTER(c_int64), POINTER(c_int64)            # itemax, gapsym
     ]
     flibs.lin_eliash.retype = c_void_p
-    flibs.lin_eliash(delta, chi, Gk, uni, init_delta, Smat, Cmat, olist, kmap, invk,
+    flibs.lin_eliash(delta, chi, Gk, uni, init_delta, Smat, Cmat, olist, plist, kmap, invk,
                      byref(c_double(temp)), byref(c_double(eps)), byref(c_int64(Nkall)),
                      byref(c_int64(Nk)), byref(c_int64(Nw)), byref(c_int64(Nchi)),
                      byref(c_int64(Norb)), byref(c_int64(Nx)), byref(c_int64(Ny)),

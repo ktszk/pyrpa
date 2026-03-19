@@ -8,7 +8,7 @@
 import libs.flibs as flibs
 import numpy as np, scipy.optimize as scopt, scipy.linalg as sclin
 
-def import_hoppings(fname:str,ftype:int):
+def import_hoppings(fname:str,ftype:int) -> tuple[np.ndarray,np.ndarray,int,int]:
     """
     @fn import_hoppings()
     @brief this function import hopping parameters from files
@@ -26,7 +26,7 @@ def import_hoppings(fname:str,ftype:int):
         tmp=np.array([complex(float(tp[0]),float(tp[1])) for tp in
                       [f.strip(' ()\n').split(',') for f in open(f'{name}/ham_r.txt','r')]])
         no=int(np.sqrt(tmp.size/nr))
-        ham_r=(tmp.reshape(nr,no,no).T/ndegen).T
+        ham_r=(tmp.reshape(nr,no,no).T/ndegen).T.round(6).copy()
         return(rvec,ham_r,no,nr)
 
     def import_out(name:str):
@@ -73,7 +73,7 @@ def import_hoppings(fname:str,ftype:int):
         rvec,ham_r,no,nr=import_Hopping(fname)
     return(rvec,ham_r,no,nr)
 
-def import_MLO_hoppings(name:str):
+def import_MLO_hoppings(name:str) -> tuple[np.ndarray,np.ndarray,np.ndarray,int,int]:
     """
     @fn import_MLO_hoppings()
     @brief this function import MLO hopping parameters from files
@@ -94,6 +94,27 @@ def import_MLO_hoppings(name:str):
     ham_r=tmp.reshape((no*no,nr)).T.reshape((nr,no,no)).round(6).copy()*13.6
     S_r=tmpS.reshape((no*no,nr)).T.reshape((nr,no,no)).round(6).copy()*13.6
     return rvec,ham_r,S_r,no,nr
+
+def check_parity(rvec: np.ndarray,ham_r: np.ndarray) -> np.ndarray:
+    no=int(np.sqrt(ham_r.size/len(rvec)))
+    parity_num=np.zeros((no,no))
+    parity_den=np.zeros((no,no))
+    for i, r in enumerate(rvec):
+        neg_idx=np.where(np.all(np.isclose(rvec,-r),axis=1))[0]
+        if len(neg_idx)==0:
+            continue
+        j=neg_idx[0]
+        if j<= i:
+            continue
+        H_r=ham_r[i]
+        H_nr=ham_r[j]
+        parity_num+=np.real(H_nr*np.conj(H_r))
+        parity_den+=np.abs(H_r)**2
+    with np.errstate(invalid='ignore'):
+        P_mn=np.where(parity_den>1e-10,np.sign(parity_num/parity_den),0)
+    plist=np.sign(P_mn[0,:])
+    print("Effective parity p_m:", plist)
+    return plist
 
 def get_bvec(avec: np.ndarray) -> np.ndarray:
     """
