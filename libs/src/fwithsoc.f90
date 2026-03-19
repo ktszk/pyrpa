@@ -1,4 +1,4 @@
-subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,olist,slist,kmap,invk,invs,invschi,&
+subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,olist,slist,kmap,invk,invs,invschi,&
      temp,eps,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym) bind(C)
   !> calculate linearized eliashberg equations with soc and TRS
   !!@param     delta,out: gap function
@@ -34,6 +34,7 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,olist,
   real(real64),intent(in),dimension(Nchi,Nchi):: Vmat
   real(real64),intent(in),dimension(Norb,Norb):: sgnsig
   real(real64),intent(in),dimension(Nchi,Nchi):: sgnsig2
+  real(real64),intent(in),dimension(Norb):: prt
   real(real64),intent(in),dimension(Nk,Norb):: init_delta
   complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni

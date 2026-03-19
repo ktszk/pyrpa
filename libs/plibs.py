@@ -113,7 +113,7 @@ def check_parity(rvec: np.ndarray,ham_r: np.ndarray) -> np.ndarray:
     with np.errstate(invalid='ignore'):
         P_mn=np.where(parity_den>1e-10,np.sign(parity_num/parity_den),0)
     plist=np.sign(P_mn[0,:])
-    print("Effective parity p_m:", plist)
+    print("Effective parity of wanier functions:", plist)
     return plist
 
 def get_bvec(avec: np.ndarray) -> np.ndarray:
@@ -611,22 +611,21 @@ def get_initial_gap(kmap: np.ndarray, klist: np.ndarray, Norb: int, gap_sym: int
         gapsym=['s','px','py']
         print('gap symmetry is '+gapsym[-gap_sym])
     if gap_sym==0: #s
-        init_gap=np.ones((Norb,len(kmap)),dtype=np.float64)
+        init_gap=np.ones((Norb,len(klist)),dtype=np.float64)
     else:
-        A=2*np.pi/(kmap[:,0].max()+1)
-        B=2*np.pi/(kmap[:,1].max()+1)
-        init_gap=np.zeros((Norb,len(kmap)),dtype=np.float64)
+        A=2*np.pi
+        init_gap=np.zeros((Norb,len(klist)),dtype=np.float64)
         for i in range(Norb):
             if gap_sym==1: #dx2-y2
-                init_gap[i,:]=np.cos(A*kmap[:,0])-np.cos(B*kmap[:,1])
+                init_gap[i,:]=np.cos(A*klist[:,0])-np.cos(A*klist[:,1])
             elif gap_sym==2: #spm
-                init_gap[i,:]=2*np.cos(A*kmap[:,0])*np.cos(B*kmap[:,1])
+                init_gap[i,:]=2*np.cos(A*klist[:,0])*np.cos(A*klist[:,1])
             elif gap_sym==3: #dxy
-                init_gap[i,:]=2*np.sin(A*kmap[:,0])*np.sin(B*kmap[:,1])
+                init_gap[i,:]=2*np.sin(A*klist[:,0])*np.sin(A*klist[:,1])
             elif gap_sym==-1: #px
-                init_gap[i,:]=2*np.sin(A*kmap[:,0])
+                init_gap[i,:]=2*np.sin(A*klist[:,0])
             elif gap_sym==-2: #py
-                init_gap[i,:]=2*np.sin(B*kmap[:,1])
+                init_gap[i,:]=2*np.sin(A*klist[:,1])
     return init_gap
 
 def calc_carrier(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray,

@@ -620,13 +620,12 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,chiolist,s
             f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chis[0,0,i].real:11.4e}\n')
     f.close()
     gap=flibs.linearized_eliashberg(chi,Gk,uni,init_delta,Smat,Cmat,chiolist,plist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
-    #Fk=flibs.gen_Fk(Gk,Delta,invk)
     if sw_out_self:
         np.save('gap',gap)
     info=output_gap_function(invk,kmap,gap,uni)
 
 def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
-                        mu:float,temp:float,chiolist,slist,invs,site):
+                        mu:float,temp:float,chiolist,slist,plist,invs,site):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     if orb_dep:
@@ -652,7 +651,7 @@ def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
             f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chiszz[0,0,i].real:11.4e} {chispm[0,0,i].real:11.4e}\n')
     f.close()
     init_delta=plibs.get_initial_gap(kmap,klist,len(slist),gap_sym)
-    gap=flibs.linearized_eliashberg_soc(chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,slist,chiolist,
+    gap=flibs.linearized_eliashberg_soc(chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,plist,slist,chiolist,
                                         kmap,invk,invs,invschi,Nx,Ny,Nz,temp,gap_sym)
     if sw_out_self:
         np.save('gap',gap)
@@ -886,7 +885,7 @@ def main():
             if option==12:
                 pass
             elif option==13:
-                calc_lin_eliash_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,invs,site)
+                calc_lin_eliash_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,plist,invs,site)
             elif option==14:
                 output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,sw_self,sw_soc,invs,slist)
         else: #without soc
