@@ -1604,3 +1604,15 @@ def gen_irr_k_TRS(Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, np.ndarray, np
     flibs.generate_irr_kpoint_inv(klist, kmap, invk_ft_list, byref(c_int64(Nk)),
                                   byref(c_int64(Nx)), byref(c_int64(Ny)), byref(c_int64(Nz)))
     return klist, kmap, invk_ft_list
+
+def gen_kpoint_weight(invk,Nk):
+    Nkall=len(invk)
+    weight=np.zeros(Nk,dtype=np.float64)
+    flibs.get_kweight.argtypes = [
+        np.ctypeslib.ndpointer(dtype=np.float64),   # invk
+        np.ctypeslib.ndpointer(dtype=np.int64), # weight
+        POINTER(c_int64), POINTER(c_int64)        # Nk, Nkall
+    ]
+    flibs.get_kweight.retype = c_void_p
+    flibs.get_kweight(weight,invk,byref(c_int64(Nk)),byref(c_int64(Nkall)))
+    return weight

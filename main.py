@@ -20,15 +20,15 @@ else: monoclinic
 """
 
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4nso',0,7,False
-#fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
+fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
-fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
+#fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2_soc.input',1,0,True
 #fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
 #fname,ftype,brav,sw_soc='inputs/square_soc.hop',1,0,True
 
-sw_dec_axis=False
+sw_dec_axis=True
 
 """
 option defines calculation modes
@@ -70,7 +70,7 @@ abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 alpha_beta_gamma=[90.,90.,90]
 #temp=2.5e-2 #2.59e-2
 tempK=700 #Kelvin
-fill= 2.9375
+fill= 4.0 #2.9375
 #site_prof=[5]
 
 Emin,Emax=-3,3
@@ -84,7 +84,7 @@ olist=[0,[1,2],3]
 U,J=1.2,0.15
 #U,J=1.8,0.225
 #0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py
-gap_sym=2
+gap_sym=-1
 
 #mu0=9.85114560061123
 #k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
@@ -594,6 +594,7 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,sw_
 def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,chiolist,site,plist,
                            mu:float,temp:float,gap_sym:int,sw_self:bool):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
+    #weight=flibs.gen_kpoint_weight(invk,len(klist))
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     if orb_dep:
         Smat,Cmat=flibs.gen_SCmatrix_orb(chiolist,site,Umat,Jmat)

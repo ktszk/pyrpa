@@ -15,14 +15,15 @@ subroutine generate_irr_kpoint_inv(klist,kmap,invk_ft_list,Nk,Nx,Ny,Nz) bind(C)
 
   real(real64),dimension(3,Nx*Ny*Nz):: all_k
 
-  call gen_allk(all_k,kmap)
-  call gen_invk(klist)
+  call gen_allk(all_k,kmap) !get info of all k-points
+  call gen_irr_k(klist) !get irreducible k-points' info
 
   gen_inv_ft:block
     integer(int32) Nkall,i,j,k
     real(real64) tmp(3),iktmp(3),eps
     eps=1.0d0/max(Nx,Ny,Nz)
     Nkall=Nx*Ny*Nz
+
     !$omp parallel do private(i,j,k,tmp,iktmp)
     do i=1,Nkall
        do j=1,Nk !set invk(1,:) and invk(2,:)
@@ -47,7 +48,7 @@ subroutine generate_irr_kpoint_inv(klist,kmap,invk_ft_list,Nk,Nx,Ny,Nz) bind(C)
           end if
        end do
 
-       do j=1,Nkall
+       do j=1,Nkall !set invk(3,:)
           do k=1,3
              if(all_k(k,j)==0.0d0)then
                 iktmp(k)=0.0d0
@@ -57,7 +58,7 @@ subroutine generate_irr_kpoint_inv(klist,kmap,invk_ft_list,Nk,Nx,Ny,Nz) bind(C)
           end do
           tmp(:)=all_k(:,i)-iktmp(:)
           if(sum(abs(tmp))<eps)then
-             invk_ft_list(3,i)=j !index of -k in all k-point
+             invk_ft_list(3,i)=j !save index of -k in all k-point
              exit
           end if
        end do
@@ -95,7 +96,7 @@ contains
     !$omp end parallel
   end subroutine gen_allk
 
-  subroutine gen_invk(klist)
+  subroutine gen_irr_k(klist)
     real(real64),intent(out),dimension(3,Nk)::klist
 
     integer(int32) i,j,k,iter_k,iter_k_ini
@@ -282,5 +283,20 @@ contains
           !$omp end parallel
        end if !kz even or not
     end if !Nz>1
-  end subroutine gen_invk
+  end subroutine gen_irr_k
 end subroutine generate_irr_kpoint_inv
+
+subroutine get_kweight(weight,invk,Nk,Nkall) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  implicit none
+  integer(int64),intent(in):: Nkall,Nk
+  integer(int64),intent(in),dimension(3,Nkall):: invk
+  real(real64),intent(out),dimension(Nk):: weight
+
+  integer(int32) i
+
+  weight(:)=0.0d0
+  do i=1,Nkall
+     weight(invk(1,i))=weight(invk(1,i))+1.0d0
+  end do
+end subroutine get_kweight
