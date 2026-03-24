@@ -522,7 +522,7 @@ def output_gap_function(invk,kmap,gap,uni,soc=False,invs=None,slist=None):
     #    f.write(f'{i} {gp.real:12.8f} {gp.imag:12.8f}\n')
     #f.close()
     if soc:
-        gapb=flibs.conv_delta_orb_to_band_soc(gap,uni,invk,invs,slist)
+        gapb=gap[:,:,0,:] #flibs.conv_delta_orb_to_band_soc(gap,uni,invk,invs,slist)
     else:
         gapb=flibs.conv_delta_orb_to_band(gap,uni,invk)
     #gapb=gap[:,:,0,:]

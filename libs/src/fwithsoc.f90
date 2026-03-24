@@ -55,8 +55,10 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,ol
   eigenval_loop:do i_eig=1,eig_max !solve eig_val using power method, 1st eig is usually large negative value
      call get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym)
      count=0 !count too small eigenvalue
-     iter_loop:do i_iter=1,itemax !iteration
-        call mkfk_trs_soc(fk,Gk,delta,sgnsig,invk,invs,Nkall,Nk,Nw,Norb)
+     iter_loop:do i_iter=1, itemax !iteration
+        call mkfk_trs_soc(fk,Gk,delta,sgnsig,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym)
+        print *,fk(1,2,1,4)
+        print *,conjg(fk(invk(3,1),2,4,1))
         !something worng mkdelta_soc
         call mkdelta_soc(newdelta,fk,chi,Vmat,sgnsig,sgnsig2,kmap,invk,invs,invschi,olist,slist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,gap_sym)
         !$omp parallel workshare
@@ -288,7 +290,7 @@ subroutine get_V_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
   end do wloop
 end subroutine get_V_soc_flex
 
-subroutine mkfk_trs_soc(fk,Gk,delta,sgnsig,invk,invs,Nkall,Nk,Nw,Norb)
+subroutine mkfk_trs_soc(fk,Gk,delta,sgnsig,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym)
   !
   !>calculate linearized anomalous green function Fk with TRS
   !>if we considder TRS,F_ab(k)=G_ac(k)Delta_cd(k)Gbd(-k)
@@ -296,9 +298,9 @@ subroutine mkfk_trs_soc(fk,Gk,delta,sgnsig,invk,invs,Nkall,Nk,Nw,Norb)
   !
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
-  integer(int64),intent(in):: Nkall,Nk,Nw,Norb
+  integer(int64),intent(in):: Nkall,Nk,Nw,Norb,gap_sym
   integer(int64),intent(in),dimension(3,Nkall):: invk
-  integer(int64),intent(in),dimension(Norb):: invs
+  integer(int64),intent(in),dimension(Norb):: invs,slist
   real(real64),intent(in),dimension(Norb,Norb):: sgnsig
   complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
   complex(real64),intent(in),dimension(Nkall,Nw,Norb,Norb):: delta
@@ -330,38 +332,62 @@ subroutine mkfk_trs_soc(fk,Gk,delta,sgnsig,invk,invs,Nkall,Nk,Nw,Norb)
   end do
   
   do l=1,Norb
-     do m=l,Norb
-        do n=1,Norb
+     if(slist(l)==1)then
+        do m=1,Norb
+           do n=1,Norb
+              !$omp do private(i,j)
+              do j=1,Nw
+                 do i=1,Nkall
+                    if(invk(2,i)==0)then
+                       fk(i,j,m,l)=fk(i,j,m,l)-cmat1(i,j,m,n)*sgnsig(n,l)*conjg(Gk(invk(1,i),j,invs(l),invs(n)))
+                    else if(invk(2,i)==1)then
+                       fk(i,j,m,l)=fk(i,j,m,l)-cmat1(i,j,m,n)*conjg(Gk(invk(1,i),j,n,l))
+                    end if
+                 end do
+              end do
+              !$omp end do
+           end do
            !$omp do private(i,j)
            do j=1,Nw
               do i=1,Nkall
-                 if(invk(2,i)==0)then
-                    fk(i,j,m,l)=fk(i,j,m,l)-cmat1(i,j,m,n)*conjg(Gk(invk(1,invk(3,i)),j,l,n))
-                 else if(invk(2,i)==1)then
-                    fk(i,j,m,l)=fk(i,j,m,l)-cmat1(i,j,m,n)*sgnsig(n,l)*conjg(Gk(invk(1,invk(3,i)),j,invs(n),invs(l)))
+                 if(slist(m)==1)then
+                    if(gap_sym<0)then
+                       fk(i,j,invs(l),invs(m))=-conjg(fk(i,j,m,l))
+                    else
+                       fk(i,j,m,l)=0.0d0
+                       fk(i,j,invs(l),invs(m))=0.0d0
+                    end if
+                 else
+                    if(invs(m)==l)then
+                       fk(i,j,invs(l),invs(m))=dble(fk(i,j,m,l))
+                    end if
                  end if
               end do
            end do
            !$omp end do
         end do
-        if(l/=m)then !if TRS and no SOC delta^+(k,iw)=delta(k,iw)
-           !$omp do private(i,j)
-           do j=1,Nw
-              do i=1,Nkall
-                 fk(i,j,l,m)=conjg(fk(i,j,m,l))
+     end if
+  end do
+  do l=1,Norb
+     if(slist(l)==1)then
+        do m=1,Norb
+           if(slist(m)==-1)then
+              !$omp do private(i,j)
+              do j=1,Nw
+                 do i=1,Nkall
+                    if(gap_sym==-10)then
+                       continue
+                    else if(gap_sym<0)then
+                       fk(i,j,invs(m),invs(l))=fk(i,j,m,l)
+                    else
+                       fk(i,j,invs(m),invs(l))=-fk(i,j,m,l)
+                    end if
+                 end do
               end do
-           end do
-           !$omp end do
-        else
-           !$omp do private(i,j)
-           do j=1,Nw
-              do i=1,Nkall
-                 fk(i,j,l,l)=dble(fk(i,j,l,l))
-              end do
-           end do
-           !$omp end do
-        end if
-     end do
+              !$omp end do
+           end if
+        end do
+     end if
   end do
   !$omp end parallel
 end subroutine mkfk_trs_soc
@@ -635,7 +661,7 @@ subroutine get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,invs,Nkall
   integer(int64),intent(in):: Nw,Norb,Nkall,Nk,gap_sym
   integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
   integer(int64),intent(in),dimension(Norb):: slist,invs
-  real(real64),intent(in),dimension(Nkall,Norb):: init_delta
+  real(real64),intent(in),dimension(Nk,Norb):: init_delta
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(real64),intent(out),dimension(Nkall,Nw,Norb,Norb):: delta
 
@@ -653,11 +679,11 @@ subroutine get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,invs,Nkall
            do i=1,Nkall
               if(invk(2,i)==0)then
                  do n=1,Norb
-                    delta(i,1,m,l)=delta(i,1,m,l)-uni(m,n,invk(1,i))*init_delta(i,n)*slist(l)*conjg(uni(invs(l),n,invk(1,i)))
+                    delta(i,1,m,l)=delta(i,1,m,l)-uni(m,n,invk(1,i))*init_delta(invk(1,i),n)*slist(l)*conjg(uni(invs(l),n,invk(1,i)))
                  end do
               else if(invk(2,i)==1)then
                  do n=1,Norb
-                    delta(i,1,m,l)=delta(i,1,m,l)+slist(m)*conjg(uni(invs(m),n,invk(1,i)))*init_delta(i,n)*uni(l,n,invk(1,i))
+                    delta(i,1,m,l)=delta(i,1,m,l)+slist(m)*conjg(uni(invs(m),n,invk(1,i)))*init_delta(invk(1,i),n)*uni(l,n,invk(1,i))
                  end do
               end if
            end do
