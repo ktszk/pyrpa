@@ -1609,10 +1609,24 @@ def gen_kpoint_weight(invk,Nk):
     Nkall=len(invk)
     weight=np.zeros(Nk,dtype=np.float64)
     flibs.get_kweight.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.float64),   # invk
-        np.ctypeslib.ndpointer(dtype=np.int64), # weight
+        np.ctypeslib.ndpointer(dtype=np.float64), # invk
+        np.ctypeslib.ndpointer(dtype=np.int64),   # weight
         POINTER(c_int64), POINTER(c_int64)        # Nk, Nkall
     ]
     flibs.get_kweight.retype = c_void_p
     flibs.get_kweight(weight,invk,byref(c_int64(Nk)),byref(c_int64(Nkall)))
     return weight
+
+def get_plist(rvec,ham_r):
+    Nr=len(rvec)
+    Norb=int(np.sqrt(ham_r.size/Nr))
+    Pmn=np.zeros((Norb,Norb),dtype=np.float64)
+    flibs.get_parity_prop.argtypes = [
+        np.ctypeslib.ndpointer(dtype=np.float64),    #Pmn
+        np.ctypeslib.ndpointer(dtype=np.float64),    #rvec
+        np.ctypeslib.ndpointer(dtype=np.complex128), #ham_r
+        POINTER(c_int64), POINTER(c_int64)           #Norb,Nr
+    ]
+    flibs.get_parity_prop.retype = c_void_p
+    flibs.get_parity_prop(Pmn,rvec,ham_r,byref(c_int64(Norb)),byref(c_int64(Nr)))
+    return np.sign(Pmn[0,:])
