@@ -468,3 +468,62 @@ subroutine gen_dos(Dos,wl,eig,uni,mu,delta,Nk,Nw,Norb) bind(C)
   !$omp end workshare
   !$omp end parallel
 end subroutine gen_dos
+
+subroutine get_parity_prop(Pmn,rvec,ham_r,Norb,Nr) bind(C)
+  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  implicit none
+  integer(int64),intent(in):: Norb,Nr
+  real(real64),intent(in),dimension(3,Nr):: rvec
+  complex(real64),intent(in),dimension(Norb,Norb,Nr):: ham_r
+  real(real64),intent(inout),dimension(Norb,Norb):: Pmn
+
+  integer(int32) i,j,l,m
+  real(real64) diff_r
+  real(real64),parameter:: eps=1e-6
+  real(real64),dimension(Norb,Norb):: parity_den,parity_num
+  
+  !$omp parallel
+  !$omp workshare
+  parity_num(:,:)=0.0d0
+  parity_den(:,:)=0.0d0
+  !$omp end workshare
+  !$omp do private(i,j,diff_r) reduction(+: parity_num,parity_den)
+  do i=1,Nr
+     do j=i+1,Nr
+        diff_r=sum(abs(rvec(:,i)+rvec(:,j)))
+        if(diff_r<eps)then
+           do l=1,Norb
+              do m=1,Norb
+                 parity_num(m,l)=parity_num(m,l)+dble(ham_r(m,l,j)*conjg(ham_r(m,l,i)))
+                 parity_den(m,l)=parity_den(m,l)+abs(ham_r(m,l,i))**2
+              end do
+           end do
+           exit
+        end if
+     end do
+  end do
+  !$omp end do
+  !$omp do private(l,m)
+  do l=1,Norb
+     do m=1,Norb
+        if(parity_den(m,l)>1e-10)then
+           Pmn(m,l)=parity_num(m,l)/parity_den(m,l)
+        else
+           Pmn(m,l)=0.0d0
+        end if
+     end do
+  end do
+  !$omp end do
+  !$omp do private(l,m)
+  do l=1,Norb
+     do m=1,Norb
+        if(Pmn(l,m)>=0.0d0)then
+           Pmn(m,l)=1.0d0
+        else
+           Pmn(m,l)=-1.0d0
+        end if
+     end do
+  end do
+  !$omp end do
+  !$omp end parallel
+end subroutine get_parity_prop

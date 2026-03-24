@@ -95,27 +95,6 @@ def import_MLO_hoppings(name:str) -> tuple[np.ndarray,np.ndarray,np.ndarray,int,
     S_r=tmpS.reshape((no*no,nr)).T.reshape((nr,no,no)).round(6).copy()*13.6
     return rvec,ham_r,S_r,no,nr
 
-def check_parity(rvec: np.ndarray,ham_r: np.ndarray) -> np.ndarray:
-    no=int(np.sqrt(ham_r.size/len(rvec)))
-    parity_num=np.zeros((no,no))
-    parity_den=np.zeros((no,no))
-    for i, r in enumerate(rvec):
-        neg_idx=np.where(np.all(np.isclose(rvec,-r),axis=1))[0]
-        if len(neg_idx)==0:
-            continue
-        j=neg_idx[0]
-        if j<= i:
-            continue
-        H_r=ham_r[i]
-        H_nr=ham_r[j]
-        parity_num+=np.real(H_nr*np.conj(H_r))
-        parity_den+=np.abs(H_r)**2
-    with np.errstate(invalid='ignore'):
-        P_mn=np.where(parity_den>1e-10,np.sign(parity_num/parity_den),0)
-    plist=np.sign(P_mn[0,:])
-    print("Effective parity of wanier functions:", plist)
-    return plist
-
 def get_bvec(avec: np.ndarray) -> np.ndarray:
     """
     @fn get_bvec()

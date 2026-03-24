@@ -84,7 +84,7 @@ olist=[0,[1,2],3]
 U,J=1.2,0.15
 #U,J=1.8,0.225
 #0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py
-gap_sym=-1
+gap_sym=1
 
 #mu0=9.85114560061123
 #k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
@@ -697,7 +697,8 @@ def main():
     else:
         rvec,ham_r,no,Nr=plibs.import_hoppings(fname,ftype)
         S_r=[]
-    plist=plibs.check_parity(rvec,ham_r)
+    plist=flibs.get_plist(rvec,ham_r)
+    print("Effective parity of wanier functions:", plist)
     #set lattice vector
     avec,Arot=plibs.get_ptv(alatt,deg,brav)
     #rotation axis
