@@ -895,7 +895,7 @@ subroutine conv_delta_orb_to_band_soc(deltab,delta,uni,invk,invs,slist,Norb,Nkal
               if(invk(2,i)==0)then
                  tmp(i,m,l)=tmp(i,m,l)+conjg(uni(n,m,invk(1,i)))*delta(i,1,n,l)
               else if(invk(2,i)==1)then
-                 tmp(i,m,l)=tmp(i,m,l)+slist(m)*uni(invs(n),m,invk(1,i))*delta(i,1,n,l)
+                 tmp(i,m,l)=tmp(i,m,l)-slist(n)*uni(invs(n),m,invk(1,i))*delta(i,1,n,l)
               end if
            end do
            !$omp end do
@@ -978,7 +978,7 @@ subroutine mkself_soc(sigmak,mu,Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,mu_
      call ckchi()
      call get_V_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
      print'(A16,E12.4,A5,E12.4)','Re V_sigma: max:',maxval(dble(chi)),' min:',minval(dble(chi))
-     call calc_sigma_soc(sigmak,Gk,chi,Vmat,kmap,invk,olist,temp,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
+     call calc_sigma_soc(sigmak,Gk,chi,Vmat,kmap,invk,invs,olist,slist,sgnsig,sgnsig2,temp,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
      if(sw_sub_sigma)then
         sub_self:block
           integer(int32) iw,l,m
@@ -1302,7 +1302,7 @@ contains
   end subroutine io_sigma
 end subroutine mkself_soc
 
-subroutine calc_sigma_soc(sigmak,Gk,Vsigma,Vmat,kmap,invk,olist,temp,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
+subroutine calc_sigma_soc(sigmak,Gk,Vsigma,Vmat,kmap,invk,invs,olist,slist,sgnsig,sgnsig2,temp,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
   !> This function obtain new gap function Delta=sum VF
   !!@param sigmak,out: self energy
   !!@param      Gk,in: green function
@@ -1326,8 +1326,11 @@ subroutine calc_sigma_soc(sigmak,Gk,Vsigma,Vmat,kmap,invk,olist,temp,Nkall,Nk,Nw
   integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
   integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
   integer(int64),intent(in),dimension(Nchi,2):: olist
+  integer(int64),intent(in),dimension(Norb):: slist,invs
   real(real64),intent(in):: temp
   real(real64),intent(in),dimension(Nchi,Nchi):: Vmat
+  real(real64),dimension(Norb,Norb):: sgnsig
+  real(real64),dimension(Nchi,Nchi):: sgnsig2
   complex(real64),intent(in),dimension(Nk,Nw,Nchi,Nchi):: Vsigma
   complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
   complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: sigmak
@@ -1374,8 +1377,8 @@ subroutine calc_sigma_soc(sigmak,Gk,Vsigma,Vmat,kmap,invk,olist,temp,Nkall,Nk,Nw
                  tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(m,2),olist(l,2)) !G42(iw)
                  tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(l,2),olist(m,2))) !G42(k,-iw)=G^*24(k,iw)
               else if(invk(2,i)==1)then
-                 tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(l,2),olist(m,2)) !G42(-k,iw)=G24(k,iw)
-                 tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(m,2),olist(l,2))) !G42(-k,-iw)=G^*42(k,iw)
+                 tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),j)=sgnsig2(m,l)*Gk(invk(1,i),j,invs(olist(l,2)),invs(olist(m,2))) !G42(-k,iw)=G24(k,iw)
+                 tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgnsig2(m,l)*conjg(Gk(invk(1,i),j,invs(olist(m,2)),invs(olist(l,2)))) !G42(-k,-iw)=G^*42(k,iw)
               end if
            end do
         end do

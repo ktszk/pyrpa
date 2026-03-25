@@ -69,7 +69,7 @@ abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 #abc=[3.90,3.90,12.68]
 alpha_beta_gamma=[90.,90.,90]
 #temp=2.5e-2 #2.59e-2
-tempK=700 #Kelvin
+tempK=500 #Kelvin
 fill= 4.0 #2.9375
 #site_prof=[5]
 
@@ -80,8 +80,8 @@ tau_const=100
 olist=[0,[1,2],3]
 #olist=[0,1,1]
 #olist=[[0,4],[1,2,5,6],[3,7]]
-#U,J= 0.8, 0.1
-U,J=1.2,0.15
+U,J= 0.8, 0.1
+#U,J=1.2,0.15
 #U,J=1.8,0.225
 #0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py
 gap_sym=1
@@ -522,7 +522,7 @@ def output_gap_function(invk,kmap,gap,uni,soc=False,invs=None,slist=None):
     #    f.write(f'{i} {gp.real:12.8f} {gp.imag:12.8f}\n')
     #f.close()
     if soc:
-        gapb=gap[:,:,0,:] #flibs.conv_delta_orb_to_band_soc(gap,uni,invk,invs,slist)
+        gapb=flibs.conv_delta_orb_to_band_soc(gap,uni,invk,invs,slist)
     else:
         gapb=flibs.conv_delta_orb_to_band(gap,uni,invk)
     #gapb=gap[:,:,0,:]
