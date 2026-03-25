@@ -19,8 +19,8 @@ brav: choose primitive translation vector S,FC,BC etc
 else: monoclinic
 """
 
-fname,ftype,brav,sw_soc='inputs/Sr2RuO4nso',0,7,False
-#fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
+#fname,ftype,brav,sw_soc='inputs/Sr2RuO4nso',0,7,False
+fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
 #fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
@@ -70,7 +70,7 @@ abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 alpha_beta_gamma=[90.,90.,90]
 #temp=2.5e-2 #2.59e-2
 tempK=500 #Kelvin
-fill= 2.0 #1.0 #2.9375
+fill= 4.0 #2.9375
 #site_prof=[5]
 
 Emin,Emax=-3,3
@@ -78,13 +78,13 @@ delta=3.0e-2
 Ecut=1.0e-2
 tau_const=100
 #olist=[0,[1,2],3]
-olist=[0,1,2]
+olist=[[0,3],[1,4],[2,5]]
 #olist=[[0,4],[1,2,5,6],[3,7]]
 U,J= 0.8, 0.1
 #U,J=1.2,0.15
 #U,J=1.8,0.225
 #0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py
-gap_sym=2
+gap_sym=-1
 
 #mu0=9.85114560061123
 #k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
@@ -516,6 +516,20 @@ def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,oli
     if sw_out_self:
         np.savez('self_en',sigmak,mu_self)
 
+def calc_flex_soc():
+    klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
+    eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
+    ham_k=flibs.gen_ham(klist,ham_r,rvec)
+    if orb_dep:
+        Vmat=flibs.gen_Vmatrix_orb(chiolist,slist,site,invs,Umat,Jmat)
+    else:
+        Vmat=flibs.gen_Vmatrix(chiolist,slist,site,invs,U,J)
+        pp=0.5
+    eps=1.0e-4
+    sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,mu,fill,temp,
+                                Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,p=pp)
+    if sw_out_self:
+        np.savez('self_en',sigmak,mu_self)
 def output_gap_function(invk,kmap,gap,uni,soc=False,invs=None,slist=None):
     #f=open('gap_wdep.dat','w')
     #for i,gp in enumerate(gap[2,2,:,0]):
