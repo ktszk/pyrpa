@@ -352,13 +352,20 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,olist,Nkal
   complex(real64),intent(out),dimension(Nkall,Nw,Norb,Norb):: newdelta
   
   integer(int32) i,j,k,n,l,m
-  real(real64) sgn
+  real(real64) sgn,dprt
   complex(real64),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpVdelta,tmpfk,tmp
+  logical(1),parameter:: sw_odd_freq=.false.
 
   if(sw_pair)then
      sgn=1.0d0 !singlet Fk=F^T-k
+     dprt=1.0d0 !gap parity even freq singlet is even
   else
      sgn=-1.0d0 !triplet Fk=-F^T-k
+     dprt=-1.0d0 !gap parity even freq triplet is odd
+  end if
+
+  if(sw_odd_freq)then !consider odd frequency
+     dprt=-dprt
   end if
   !$omp parallel workshare
   newdelta(:,:,:,:)=0.0d0
@@ -395,10 +402,10 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,olist,Nkal
               do i=1,Nkall
                  if(invk(2,i)==0)then !k
                     tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),j)=delta(invk(1,i),j,olist(l,2),olist(m,1))
-                    tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgn*prt(olist(l,2))*prt(olist(m,1))*&
-                         conjg(delta(invk(1,i),j,olist(l,2),olist(m,1))) !F(k,-w)=sgn*p*p*F^*(k,w) (no soc only)
+                    tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgn*dprt*prt(olist(l,2))*prt(olist(m,1))*&
+                         conjg(delta(invk(1,i),j,olist(l,2),olist(m,1))) !F(k,-w)=sgn*dprt*p*p*F^*(k,w) (no soc only)
                  else if(invk(2,i)==1)then !-k
-                    tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),j)=prt(olist(l,2))*prt(olist(m,1))*delta(invk(1,i),j,olist(l,2),olist(m,1)) !F(-k,w)=p*p*F(k,w)
+                    tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),j)=prt(olist(l,2))*prt(olist(m,1))*dprt*delta(invk(1,i),j,olist(l,2),olist(m,1)) !F(-k,w)=p*p*dprt*F(k,w)
                     tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgn*delta(invk(1,i),j,olist(m,1),olist(l,2)) !F(-k,-w)=sgn*F(k,w)
                  end if
               end do

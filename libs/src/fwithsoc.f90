@@ -57,8 +57,6 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,ol
      count=0 !count too small eigenvalue
      iter_loop:do i_iter=1, itemax !iteration
         call mkfk_trs_soc(fk,Gk,delta,sgnsig,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym)
-        print *,fk(1,2,1,4)
-        print *,conjg(fk(invk(3,1),2,4,1))
         !something worng mkdelta_soc
         call mkdelta_soc(newdelta,fk,chi,Vmat,sgnsig,sgnsig2,kmap,invk,invs,invschi,olist,slist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,gap_sym)
         !$omp parallel workshare
