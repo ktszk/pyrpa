@@ -502,9 +502,9 @@ def get_chi0_sum(Gk: np.ndarray, invk: np.ndarray, klist: np.ndarray,
         np.ctypeslib.ndpointer(dtype=np.complex128),   # Gk
         np.ctypeslib.ndpointer(dtype=np.float64),      # klist
         np.ctypeslib.ndpointer(dtype=np.int64),        # olist
-        POINTER(c_double), POINTER(c_int64),            # temp, Nw
-        POINTER(c_int64), POINTER(c_int64),             # Nk, Nkall
-        POINTER(c_int64), POINTER(c_int64),             # Norb, Nchi
+        POINTER(c_double), POINTER(c_int64),           # temp, Nw
+        POINTER(c_int64), POINTER(c_int64),            # Nk, Nkall
+        POINTER(c_int64), POINTER(c_int64)             # Norb, Nchi
     ]
     flibs.get_chi0_sum.restype = c_void_p
     flibs.get_chi0_sum(chi, Gk, klist, olist, byref(c_double(temp)), byref(c_int64(Nw)),
@@ -524,7 +524,7 @@ def get_Vsigma_nosoc_flex(chi: np.ndarray, Smat: np.ndarray, Cmat: np.ndarray) -
         np.ctypeslib.ndpointer(dtype=np.complex128),
         np.ctypeslib.ndpointer(dtype=np.float64),
         np.ctypeslib.ndpointer(dtype=np.float64),
-        POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),
+        POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
     ]
     flibs.get_vsigma_flex_nosoc_.restype = c_void_p
     flibs.get_vsigma_flex_nosoc_(chi, Smat, Cmat, byref(c_int64(Nk)),
@@ -582,17 +582,51 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
         POINTER(c_int64), POINTER(c_int64),                    # Nk, Nw
         POINTER(c_int64), POINTER(c_int64),                    # Nchi, Norb
         POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),   # Nx, Ny, Nz
-        POINTER(c_bool), POINTER(c_bool), POINTER(c_bool),      # sw_sub_sigma, sw_out, sw_in
+        POINTER(c_bool), POINTER(c_bool), POINTER(c_bool)      # sw_sub_sigma, sw_out, sw_in
     ]
     flibs.mkself.restype = c_void_p
-    flibs.mkself(
-        sigmak, byref(mu_self), Smat, Cmat, kmap, invk, olist, hamk, eig, uni,
+    flibs.mkself(sigmak, byref(mu_self), Smat, Cmat, kmap, invk, olist, hamk, eig, uni,
         byref(c_double(mu)), byref(c_double(fill)), byref(c_double(temp)), byref(c_int64(scf_loop)),
-        byref(c_double(pp)), byref(c_double(eps)), byref(c_int64(Nkall)),
-        byref(c_int64(Nk)), byref(c_int64(Nw)), byref(c_int64(Norb)),
-        byref(c_int64(Nchi)), byref(c_int64(Nx)), byref(c_int64(Ny)), byref(c_int64(Nz)),
-        byref(c_bool(sw_sub_sigma)), byref(c_bool(sw_out)), byref(c_bool(sw_in)),
-    )
+        byref(c_double(pp)), byref(c_double(eps)), byref(c_int64(Nkall)), byref(c_int64(Nk)), 
+        byref(c_int64(Nw)), byref(c_int64(Norb)), byref(c_int64(Nchi)), byref(c_int64(Nx)), 
+        byref(c_int64(Ny)), byref(c_int64(Nz)), byref(c_bool(sw_sub_sigma)), byref(c_bool(sw_out)), byref(c_bool(sw_in)))
+    return sigmak, mu_self.value
+
+def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.ndarray,
+           olist: np.ndarray, slist: np.ndarray, hamk: np.ndarray, eig: np.ndarray, uni: np.ndarray, mu: float,
+           fill: float, temp: float, Nw: int, Nx: int, Ny: int, Nz: int, sw_out: bool,
+           sw_in: bool, sw_sub_sigma: bool = True, scf_loop: int = 300, eps: float = 1.0e-4,
+           pp: float = 0.3) -> tuple[np.ndarray, float]:
+    print("mixing rate: pp = %3.1f" % pp)
+    Nkall, Nk, Nchi = len(kmap), len(hamk), len(Vmat)
+    Norb = int(np.sqrt(hamk.size / Nk))
+    mu_self = c_double()
+    sigmak = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
+    flibs.mkself_soc.argtypes = [
+        np.ctypeslib.ndpointer(dtype=np.complex128),            # sigmak
+        POINTER(c_double),                                      # muself
+        np.ctypeslib.ndpointer(dtype=np.float64),               # Vmat
+        np.ctypeslib.ndpointer(dtype=np.int64),                 # kmap
+        np.ctypeslib.ndpointer(dtype=np.int64),                 # invk
+        np.ctypeslib.ndpointer(dtype=np.int64),                 # invs
+        np.ctypeslib.ndpointer(dtype=np.int64),                 # olist
+        np.ctypeslib.ndpointer(dtype=np.int64),                 # slist
+        np.ctypeslib.ndpointer(dtype=np.complex128),            # hamk
+        np.ctypeslib.ndpointer(dtype=np.float64),               # eig
+        np.ctypeslib.ndpointer(dtype=np.complex128),            # uni
+        POINTER(c_double), POINTER(c_double),                   # mu, fill
+        POINTER(c_double), POINTER(c_int64),                    # temp, scf_loop
+        POINTER(c_double), POINTER(c_double), POINTER(c_int64), # pp, eps, Nkall
+        POINTER(c_int64), POINTER(c_int64),                     # Nk, Nw
+        POINTER(c_int64), POINTER(c_int64),                     # Nchi, Norb
+        POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),   # Nx, Ny, Nz
+        POINTER(c_bool), POINTER(c_bool), POINTER(c_bool)       # sw_sub_sigma, sw_out, sw_in
+    ]
+    flibs.mkself_soc(sigmak,byref(mu_self),Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,
+               byref(c_double(mu)), byref(c_double(fill)), byref(c_double(temp)), byref(c_int64(scf_loop)),
+               byref(c_double(pp)), byref(c_double(eps)), byref(c_int64(Nkall)), byref(c_int64(Nk)), 
+               byref(c_int64(Nw)), byref(c_int64(Norb)), byref(c_int64(Nchi)), byref(c_int64(Nx)), 
+               byref(c_int64(Ny)), byref(c_int64(Nz)), byref(c_bool(sw_sub_sigma)), byref(c_bool(sw_out)), byref(c_bool(sw_in)))
     return sigmak, mu_self.value
 
 def get_qshift(klist: np.ndarray, qpoint: np.ndarray) -> np.ndarray:
