@@ -20,15 +20,15 @@ else: monoclinic
 """
 
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4nso',0,7,False
-fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
+#fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
 #fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2_soc.input',1,0,True
 #fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
-#fname,ftype,brav,sw_soc='inputs/square_soc.hop',1,0,True
+fname,ftype,brav,sw_soc='inputs/square_soc.hop',1,0,True
 
-sw_dec_axis=True
+sw_dec_axis=False
 
 """
 option defines calculation modes
@@ -56,7 +56,7 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=13
+option=12
 color_option=1
 
 Nx,Ny,Nz,Nw=32,32,1,512 #k and energy(or matsubara freq.) mesh size
@@ -70,7 +70,7 @@ abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 alpha_beta_gamma=[90.,90.,90]
 #temp=2.5e-2 #2.59e-2
 tempK=500 #Kelvin
-fill= 4.0 #2.9375
+fill= 1.0 #2.9375
 #site_prof=[5]
 
 Emin,Emax=-3,3
@@ -516,20 +516,21 @@ def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,oli
     if sw_out_self:
         np.savez('self_en',sigmak,mu_self)
 
-def calc_flex_soc():
+def calc_flex_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,olist,slist,invs,site):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     ham_k=flibs.gen_ham(klist,ham_r,rvec)
     if orb_dep:
-        Vmat=flibs.gen_Vmatrix_orb(chiolist,slist,site,invs,Umat,Jmat)
+        Vmat=flibs.gen_Vmatrix_orb(olist,slist,site,invs,Umat,Jmat)
     else:
-        Vmat=flibs.gen_Vmatrix(chiolist,slist,site,invs,U,J)
+        Vmat=flibs.gen_Vmatrix(olist,slist,site,invs,U,J)
         pp=0.5
     eps=1.0e-4
-    sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,mu,fill,temp,
-                                Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,p=pp)
+    sigmak,mu_self=flibs.mkself_soc(Vmat,kmap,invk,invs,olist,slist,ham_k,eig,uni,mu,fill,temp,
+                                    Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,pp=pp)
     if sw_out_self:
         np.savez('self_en',sigmak,mu_self)
+
 def output_gap_function(invk,kmap,gap,uni,soc=False,invs=None,slist=None):
     #f=open('gap_wdep.dat','w')
     #for i,gp in enumerate(gap[2,2,:,0]):
@@ -653,7 +654,8 @@ def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
             npz=np.load('self_en.npz')
             sigmak,mu_self=npz['arr_0'],npz['arr_1']
         else:
-            pass
+            sigmak,mu_self=flibs.mkself_soc(Vmat,kmap,invk,invs,olist,slist,ham_k,eig,uni,mu,fill,temp,
+                                    Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
         print(f'chem. pot. with self= {mu:.4f} eV',flush=True)
         Gk=flibs.gen_green(sigmak,ham_k,mu_self,temp)
     else:
@@ -899,7 +901,7 @@ def main():
             except NameError:
                 invs=np.concatenate([np.arange(int(Norb/2),Norb),np.arange(int(Norb/2))])+1
             if option==12:
-                pass
+                calc_flex_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,invs,site)
             elif option==13:
                 calc_lin_eliash_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,plist,invs,site)
             elif option==14:

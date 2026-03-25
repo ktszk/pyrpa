@@ -1375,8 +1375,8 @@ subroutine calc_sigma_soc(sigmak,Gk,Vsigma,Vmat,kmap,invk,invs,olist,slist,sgnsi
                  tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(m,2),olist(l,2)) !G42(iw)
                  tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(l,2),olist(m,2))) !G42(k,-iw)=G^*24(k,iw)
               else if(invk(2,i)==1)then
-                 tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),j)=sgnsig2(m,l)*Gk(invk(1,i),j,invs(olist(l,2)),invs(olist(m,2))) !G42(-k,iw)=G24(k,iw)
-                 tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgnsig2(m,l)*conjg(Gk(invk(1,i),j,invs(olist(m,2)),invs(olist(l,2)))) !G42(-k,-iw)=G^*42(k,iw)
+                 tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),j)=sgnsig(olist(l,2),olist(m,2))*Gk(invk(1,i),j,invs(olist(l,2)),invs(olist(m,2))) !G42(-k,iw)=G24(k,iw)
+                 tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgnsig(olist(l,2),olist(m,2))*conjg(Gk(invk(1,i),j,invs(olist(m,2)),invs(olist(l,2)))) !G42(-k,-iw)=G^*42(k,iw)
               end if
            end do
         end do
