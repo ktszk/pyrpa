@@ -288,7 +288,7 @@ subroutine get_V_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
   end do wloop
 end subroutine get_V_soc_flex
 
-subroutine mkfk_trs_soc(fk,Gk,delta,sgnsig,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym)
+subroutine mkfk_trs_soc(fk,Gk,delta,sgnsig,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym) bind(C,name="mkfk_trs_soc_")
   !
   !>calculate linearized anomalous green function Fk with TRS
   !>if we considder TRS,F_ab(k)=G_ac(k)Delta_cd(k)Gbd(-k)
