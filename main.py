@@ -56,21 +56,21 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=12
+option=14
 color_option=1
 
-Nx,Ny,Nz,Nw=32,32,1,512 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=32,32,1,1024 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
 #RotMat=[[0,0,1],[0,1,0],[1,0,0]]
 
-abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
+#abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
 #abc=[3.90,3.90,12.68]
-alpha_beta_gamma=[90.,90.,90]
+#alpha_beta_gamma=[90.,90.,90]
 #temp=2.5e-2 #2.59e-2
-tempK=500 #Kelvin
-fill= 1.0 #2.9375
+tempK=200 #Kelvin
+fill= 0.95 #2.9375
 #site_prof=[5]
 
 Emin,Emax=-3,3
@@ -80,11 +80,11 @@ tau_const=100
 #olist=[0,[1,2],3]
 olist=[[0,3],[1,4],[2,5]]
 #olist=[[0,4],[1,2,5,6],[3,7]]
-U,J= 0.8, 0.1
-#U,J=1.2,0.15
+#U,J= 0.8, 0.1
+U,J=1.2,0.15
 #U,J=1.8,0.225
 #0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py
-gap_sym=-1
+gap_sym=1
 
 #mu0=9.85114560061123
 #k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
@@ -95,7 +95,7 @@ sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 sw_omega=False #True: real freq, False: Matsubara freq.
 sw_self=False  #True: use calculated self energy for spectrum band plot
-sw_out_self=False
+sw_out_self=True
 sw_in_self=False
 sw_from_file=False
 #------------------------ initial parameters are above -------------------------------
@@ -106,8 +106,6 @@ import libs.flibs as flibs, libs.plibs as plibs
 import scipy.linalg as sclin, scipy.constants as scconst
 import matplotlib.pyplot as plt, matplotlib.cm as cm
 #----------------------------- initial settings --------------------------------------
-alatt=np.array(abc)
-deg=np.array(alpha_beta_gamma)
 sw_gen_sym=False
 try:
     kz
@@ -121,6 +119,16 @@ try:
     kscale
 except NameError:
     kscale=1.0
+try:
+    abc
+except NameError:
+    abc=[1.,1.,1.]
+try:
+    alpha_beta_gamma
+except NameError:
+    alpha_beta_gamma=[90.,90.,90]
+alatt=np.array(abc)
+deg=np.array(alpha_beta_gamma)
 if option in {0,4,7,12}:
     try:
         k_sets
@@ -502,7 +510,7 @@ def calc_phi_spectrum(mu:float,temp:float,klist,qlist,chiolist,eig,uni,spa_lengt
     f.close()
     return(w,sp,phiw)
 
-def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,olist,site):
+def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,olist,site,eps=1.0e-4,pp=0.5):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     ham_k=flibs.gen_ham(klist,ham_r,rvec)
@@ -510,13 +518,11 @@ def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,oli
         Smat,Cmat=flibs.gen_SCmatrix_orb(olist,site,Umat,Jmat)
     else:
         Smat,Cmat=flibs.gen_SCmatrix(olist,site,U,J)
-    pp=0.5
-    eps=1.0e-4
     sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,pp=pp)
     if sw_out_self:
         np.savez('self_en',sigmak,mu_self)
 
-def calc_flex_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,olist,slist,invs,site):
+def calc_flex_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,olist,slist,invs,site,eps=1.0e-4,pp=0.5):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     ham_k=flibs.gen_ham(klist,ham_r,rvec)
@@ -524,8 +530,6 @@ def calc_flex_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float
         Vmat=flibs.gen_Vmatrix_orb(olist,slist,site,invs,Umat,Jmat)
     else:
         Vmat=flibs.gen_Vmatrix(olist,slist,site,invs,U,J)
-        pp=0.5
-    eps=1.0e-4
     sigmak,mu_self=flibs.mkself_soc(Vmat,kmap,invk,invs,olist,slist,ham_k,eig,uni,mu,fill,temp,
                                     Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,pp=pp)
     if sw_out_self:
@@ -553,7 +557,7 @@ def output_gap_function(invk,kmap,gap,uni,soc=False,invs=None,slist=None):
         f.close()
     return(0)
 
-def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,sw_self:bool,sw_soc=False,invs=None,slist=None):
+def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,sw_self:bool,sw_soc=False,invs=None,slist=None,gap_sym=0):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     if sw_self:
@@ -565,23 +569,43 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,sw_
     else:
         Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
     gap=np.load('gap.npy')
-    Fk=flibs.gen_Fk(Gk,gap,invk)
+    if sw_soc:
+        Fk=flibs.gen_Fk_soc(Gk,gap,invk,invs,slist, gap_sym)
+        no=int(len(slist)/2)
+        print(no)
+        if gap_sym>=0:
+            Fks=Fk[:no,no:,0,:]-Fk[no:,:no,0,:]
+            print(Fks[:,:,:])
+            Fktr=np.array([f.diagonal().sum() for f in Fks.T])
+        else:
+            Fkt=Fk[:no,no:,0,:]+Fk[no:,:no,0,:]
+            Fktr=np.array([f.diagonal().sum() for f in Fkt.T])
+    else:
+        Fk=flibs.gen_Fk(Gk,gap,invk)
+        Fktr=np.array([f.diagonal().sum() for f in Fk[:,:,0,:].T])
     print('output anomalous green function')
     f=open(f'Fk_tr.dat','w')
-    Fktr=np.array([f.diagonal().sum() for f in Fk[:,:,0,:].T])
     iwlist=(2*np.arange(Nw)+1)*np.pi*temp
     #wlistg=np.linspace(0,10,10)
     #Fkw=flibs.pade_with_trace(Fk[:,:,:30,:],iwlist[:30]*1j,wlistg+3e-2*1j)
-    for i,km in enumerate(kmap):
-        if km[2]==0:
-            #f.write(f'{km[0]:3} {km[1]:3} {Fkw[i,0].real:12.8f} {Fkw[i,0].imag:12.8f}\n')
-            f.write(f'{km[0]:3} {km[1]:3} {Fktr[i].real:12.8f} {Fktr[i].imag:12.8f}\n')
-            if km[0]==Nx-1:
-                f.write('\n')
+    if sw_soc:
+        for i,km in enumerate(kmap):
+            if km[2]==0:
+                #f.write(f'{km[0]:3} {km[1]:3} {Fks[i,0].real:12.8f} {Fks[i,0].imag:12.8f}\n')
+                f.write(f'{km[0]:3} {km[1]:3} {Fktr[i].real:12.8f} {Fktr[i].imag:12.8f}\n')
+                if km[0]==Nx-1:
+                    f.write('\n')
+    else:
+        for i,km in enumerate(klist):
+            if km[2]==0:
+                #f.write(f'{km[0]:3} {km[1]:3} {Fkw[i,0].real:12.8f} {Fkw[i,0].imag:12.8f}\n')
+                f.write(f'{km[0]:3} {km[1]:3} {Fktr[i].real:12.8f} {Fktr[i].imag:12.8f}\n')
+                if km[0]==Nx-1:
+                    f.write('\n')
     f.close()
-    wlist=np.linspace(-3,3,100)
+    wlist=np.linspace(-5,5,500)
     fp=open(f'Gpade.dat','w')
-    idelta=3e-2
+    idelta=3e-1
     Gkw=flibs.pade_with_trace(Gk[:,:,:40,:],iwlist[:40]*1j,wlist+idelta*1j)
     for i,km in enumerate(klist):
         if km[1]==0.0 and km[2]==0.0:
@@ -589,9 +613,9 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,sw_
                 fp.write(f'{km[0]:3} {w.real:12.8f} {-Gkw[i,j].imag:12.8f}\n')
             fp.write('\n')
     fp.close()
-    maxgap=abs(gap).max()
-    print((abs(gap)<maxgap*1.0e-6).sum())
-    print((abs(gap)<maxgap*1.0e-6).sum()/gap.size*100)
+    #maxgap=abs(gap).max()
+    #print((abs(gap)<maxgap*1.0e-6).sum())
+    #print((abs(gap)<maxgap*1.0e-6).sum()/gap.size*100)
     #plt.plot(iwlist,gap[2,2,:,i].real)
     #plt.plot(iwlist,gap[2,2,:,100].imag)
     #plt.show()
@@ -607,7 +631,7 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,sw_
     info=output_gap_function(invk,kmap,gap,uni,sw_soc,invs,slist)
 
 def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,chiolist,site,plist,
-                           mu:float,temp:float,gap_sym:int,sw_self:bool):
+                           mu:float,temp:float,gap_sym:int,sw_self:bool,eps=1.0e-4,pp=0.5):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
     #weight=flibs.gen_kpoint_weight(invk,len(klist))
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
@@ -622,7 +646,7 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,chiolist,s
             sigmak,mu_self=npz['arr_0'],npz['arr_1']
         else:
             sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,chiolist,ham_k,eig,uni,
-                                        mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
+                                        mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,pp=pp)
         print(f'chem. pot. with self= {mu:.4f} eV',flush=True)
         Gk=flibs.gen_green(sigmak,ham_k,mu_self,temp)
     else:
@@ -641,7 +665,7 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,chiolist,s
     info=output_gap_function(invk,kmap,gap,uni)
 
 def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
-                        mu:float,temp:float,chiolist,slist,plist,invs,site):
+                        mu:float,temp:float,chiolist,slist,plist,invs,site,eps=1.0e-4,pp=0.5):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     if orb_dep:
@@ -654,8 +678,8 @@ def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
             npz=np.load('self_en.npz')
             sigmak,mu_self=npz['arr_0'],npz['arr_1']
         else:
-            sigmak,mu_self=flibs.mkself_soc(Vmat,kmap,invk,invs,olist,slist,ham_k,eig,uni,mu,fill,temp,
-                                    Nw,Nx,Ny,Nz,sw_out_self,sw_in_self)
+            sigmak,mu_self=flibs.mkself_soc(Vmat,kmap,invk,invs,chiolist,slist,ham_k,eig,uni,mu,fill,temp,
+                                            Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,pp=pp)
         print(f'chem. pot. with self= {mu:.4f} eV',flush=True)
         Gk=flibs.gen_green(sigmak,ham_k,mu_self,temp)
     else:
@@ -905,7 +929,7 @@ def main():
             elif option==13:
                 calc_lin_eliash_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,plist,invs,site)
             elif option==14:
-                output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,sw_self,sw_soc,invs,slist)
+                output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,sw_self,sw_soc,invs,slist,gap_sym)
         else: #without soc
             if option==12: #calc self-energy using flex
                 calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,site)

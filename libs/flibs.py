@@ -1592,7 +1592,7 @@ def gen_Fk(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray) -> np.ndarray:
     post‑processing of superconducting properties.
     """
     Nkall, Nk, Nw, Norb = len(invk), len(Gk[0, 0, 0]), len(delta[0, 0]), len(delta)
-    Fk = np.zeros((Norb, Norb, Nw, Nkall), dtype=np.complex128)
+    Fk = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
     flibs.mkfk_trs_nsoc_.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128), # Fk
         np.ctypeslib.ndpointer(dtype=np.complex128), # Gk
@@ -1605,6 +1605,30 @@ def gen_Fk(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray) -> np.ndarray:
     flibs.mkfk_trs_nsoc_(Fk, Gk, delta, invk, byref(c_int64(Nkall)), byref(c_int64(Nk)),
                          byref(c_int64(Nw)), byref(c_int64(Norb)))
 
+    return Fk
+
+def gen_Fk_soc(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray, invs: np.ndarray, slist: np.ndarray,gap_sym: int) -> np.ndarray:
+    """SOC-aware generation of Fk tensor from Green's function and gap function.
+    Same as :func:`gen_Fk` but includes additional spin indices for SOC case.
+    """
+    Nkall, Nk, Nw, Norb = len(invk), len(Gk[0, 0, 0]), len(delta[0, 0]), len(delta)
+    Fk = np.zeros((Norb, Norb, Nw, Nkall), dtype=np.complex128)
+    sgnsig=np.array([slist]).T.dot(np.array([slist])).astype(np.float64)
+    flibs.mkfk_trs_soc_.argtypes = [
+        np.ctypeslib.ndpointer(dtype=np.complex128), # Fk
+        np.ctypeslib.ndpointer(dtype=np.complex128), # Gk
+        np.ctypeslib.ndpointer(dtype=np.complex128), # delta
+        np.ctypeslib.ndpointer(dtype=np.float64),    # sgnsig
+        np.ctypeslib.ndpointer(dtype=np.int64),      # slist
+        np.ctypeslib.ndpointer(dtype=np.int64),      # invk
+        np.ctypeslib.ndpointer(dtype=np.int64),      # invs
+        POINTER(c_int64), POINTER(c_int64),          # Nkall, Nk
+        POINTER(c_int64), POINTER(c_int64),          # Nw, Norb
+        POINTER(c_int64)                             # gap_sym
+    ]
+    flibs.mkfk_trs_soc_.retype = c_void_p
+    flibs.mkfk_trs_soc_(Fk, Gk, delta, sgnsig, slist, invk, invs, byref(c_int64(Nkall)),
+                       byref(c_int64(Nk)), byref(c_int64(Nw)), byref(c_int64(Norb)), byref(c_int64(gap_sym)))
     return Fk
 
 def gen_irr_k_TRS(Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
