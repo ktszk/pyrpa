@@ -646,7 +646,7 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,chiolist,s
     else:
         Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
     init_delta=plibs.get_initial_gap(kmap,klist,len(eig.T),gap_sym)
-    sw_eig=False
+    sw_eig=True
     chi=flibs.get_chi0(Smat,Cmat,Gk,chiolist,kmap,invk,temp,Nx,Ny,Nz)
     chis,chic=flibs.get_chis_chic(chi,Smat,Cmat)
     chisq=flibs.get_eig_or_tr_chi(chis,invk,sw_eig)
@@ -655,8 +655,8 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,chiolist,s
     f2=open('chic.dat','w')
     for i,k in enumerate(kmap):
         if k[2]==0.0:
-            f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chisq[0,0,i].real:11.4e}\n')
-            f2.write(f'{k[0]:6.4f} {k[1]:6.4f} {chicq[0,0,i].real:11.4e}\n')
+            f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chisq[i].real:11.4e}\n')
+            f2.write(f'{k[0]:6.4f} {k[1]:6.4f} {chicq[i].real:11.4e}\n')
     f.close()
     f2.close()
     gap=flibs.linearized_eliashberg(chi,Gk,uni,init_delta,Smat,Cmat,chiolist,plist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
@@ -684,13 +684,20 @@ def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
         Gk=flibs.gen_green(sigmak,ham_k,mu_self,temp)
     else:
         Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
+    sw_eig=True
     chi,sgnsig,sgnsig2,invschi=flibs.get_chi0_soc(Vmat,Gk,chiolist,slist,kmap,invk,invs,temp,Nx,Ny,Nz)
     chic,chiszz,chispm=flibs.get_chis_chic_soc(chi,Vmat,chiolist,slist,invs)
-    f=open('chizz.dat','w')
-    for i,k in enumerate(klist):
+    chiszzq=flibs.get_eig_or_tr_chi(chiszz,invk,sw_eig)
+    chispmq=flibs.get_eig_or_tr_chi(chispm,invk,sw_eig)
+    chicq=flibs.get_eig_or_tr_chi(chic,invk,sw_eig)
+    f=open('chis.dat','w')
+    f2=open('chic.dat','w')
+    for i,k in enumerate(kmap):
         if k[2]==0.0:
-            f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chiszz[0,0,i].real:11.4e} {chispm[0,0,i].real:11.4e}\n')
+            f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chiszzq[i].real:11.4e} {chispmq[i].real:11.4e}\n')
+            f2.write(f'{k[0]:6.4f} {k[1]:6.4f} {chicq[i].real:11.4e}\n')
     f.close()
+    f2.close()
     init_delta=plibs.get_initial_gap(kmap,klist,len(slist),gap_sym)
     gap=flibs.linearized_eliashberg_soc(chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,plist,slist,chiolist,
                                         kmap,invk,invs,invschi,Nx,Ny,Nz,temp,gap_sym)
