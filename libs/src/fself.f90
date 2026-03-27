@@ -256,7 +256,6 @@ contains
   end subroutine ckchi
 end subroutine get_chi0
 
-
 subroutine get_chi_map(chi_map,irr_chi,olist,Nchi)
   !> This function generate index of exchange symmetry chi1234(q,iw)=chi*4321(q,iw).
   !> This symmetry can use system has no spin dependence and TRS.
@@ -1129,3 +1128,30 @@ subroutine get_chis_chic(chis,chic,chi,Smat,Cmat,Nk,Nw,Nchi) bind(C)
      !$omp end parallel
   end do qloop
 end subroutine get_chis_chic
+
+subroutine get_eig_or_tr_chi(chiqout,chi,invk,Nkall,Nk,Nchi,sw_eig) bind(C)
+   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+   implicit none
+   integer(int64),intent(in):: Nkall,Nk,Nchi
+   integer(int64),intent(in),dimension(3,Nkall):: invk
+   logical,intent(in):: sw_eig
+   complex(real64),intent(in),dimension(Nk,Nchi,Nchi):: chi
+   complex(real64),intent(out),dimension(Nkall):: chiqout
+
+   integer(int32) i,l,info
+   real(real64),dimension(2*Nchi):: rwork
+   complex(real64),dimension(Nchi*Nchi*4+1):: work
+   complex(real64),dimension(Nchi):: eig
+   complex(real64),dimension(Nchi,Nchi):: tmp1,tmp2
+
+   do i=1,Nkall
+      if(sw_eig)then
+         call zgeev('N','N',Nchi,chi,Nchi,eig,tmp1,Nchi,tmp2,Nchi,work,Nchi*Nchi*4+1,rwork,info)
+         chiqout(i)=maxval(dble(eig))
+      else
+         do l=1,Nchi
+            chiqout(i)=chiqout(i)+chi(invk(1,i),l,l)
+         end do
+      end if
+   end do
+end subroutine

@@ -59,7 +59,7 @@ color_option defines the meaning of color on Fermi surfaces
 option=13
 color_option=1
 
-Nx,Ny,Nz,Nw=32,32,2,512 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=32,32,1,512 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
@@ -70,15 +70,15 @@ kz=0.0
 #alpha_beta_gamma=[90.,90.,90]
 #temp=2.5e-2 #2.59e-2
 tempK=400 #Kelvin
-fill= 2.9375
+fill= 3.02
 #site_prof=[5]
 
 Emin,Emax=-3,3
 delta=3.0e-2
 Ecut=1.0e-2
 tau_const=100
-#olist=[0,[1,2],3]
-olist=[[0,3],[1,4],[2,5]]
+olist=[0,[1,2],3]
+#olist=[[0,3],[1,4],[2,5]]
 #olist=[[0,4],[1,2,5,6],[3,7]]
 #U,J= 0.8, 0.1
 U,J=1.2,0.15
@@ -599,7 +599,7 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,plist,mu:float,temp:flo
     emin=(eig.min()-(mu_self if sw_self else mu))*1.2
     wlist=np.linspace(emin,emax,500)
     fp=open(f'Gpade.dat','w')
-    idelta=3e-1
+    idelta=1e-2
     Gkw=flibs.pade_with_trace(Gk[:,:,:40,:],iwlist[:40]*1j,wlist+idelta*1j)
     for i,km in enumerate(klist):
         if km[1]==0.0 and km[2]==0.0:
@@ -646,13 +646,19 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,chiolist,s
     else:
         Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
     init_delta=plibs.get_initial_gap(kmap,klist,len(eig.T),gap_sym)
+    sw_eig=False
     chi=flibs.get_chi0(Smat,Cmat,Gk,chiolist,kmap,invk,temp,Nx,Ny,Nz)
     chis,chic=flibs.get_chis_chic(chi,Smat,Cmat)
-    f=open('chi.dat','w')
-    for i,k in enumerate(klist):
+    chisq=flibs.get_eig_or_tr_chi(chis,invk,sw_eig)
+    chicq=flibs.get_eig_or_tr_chi(chic,invk,sw_eig)
+    f=open('chis.dat','w')
+    f2=open('chic.dat','w')
+    for i,k in enumerate(kmap):
         if k[2]==0.0:
-            f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chis[0,0,i].real:11.4e}\n')
+            f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chisq[0,0,i].real:11.4e}\n')
+            f2.write(f'{k[0]:6.4f} {k[1]:6.4f} {chicq[0,0,i].real:11.4e}\n')
     f.close()
+    f2.close()
     gap=flibs.linearized_eliashberg(chi,Gk,uni,init_delta,Smat,Cmat,chiolist,plist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
     if sw_out_self:
         np.save('gap',gap)
@@ -680,7 +686,7 @@ def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
         Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
     chi,sgnsig,sgnsig2,invschi=flibs.get_chi0_soc(Vmat,Gk,chiolist,slist,kmap,invk,invs,temp,Nx,Ny,Nz)
     chic,chiszz,chispm=flibs.get_chis_chic_soc(chi,Vmat,chiolist,slist,invs)
-    f=open('chi.dat','w')
+    f=open('chizz.dat','w')
     for i,k in enumerate(klist):
         if k[2]==0.0:
             f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chiszz[0,0,i].real:11.4e} {chispm[0,0,i].real:11.4e}\n')
