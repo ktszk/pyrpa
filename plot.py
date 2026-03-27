@@ -25,9 +25,9 @@ else:
         mycolor=colors.LinearSegmentedColormap.from_list('custom_cmap',[(0.,'#FFFFFF'),(1.,'#FF0000')])
     elif max_col<0:
         mycolor=colors.LinearSegmentedColormap.from_list('custom_cmap',[(0.,'#FF0000'),(1.,'#FFFFFF')])
-#plt.contourf(x,y,z,200,cmap=mycolor)
-plt.contourf(x,y,z,200)
-plt.jet()
+plt.contourf(x,y,z,200,cmap=mycolor)
+#plt.contourf(x,y,z,200)
+#plt.jet()
 #plt.hot()
 plt.colorbar()
 plt.show()

@@ -1299,7 +1299,7 @@ def linearized_eliashberg(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init
     """
     Norb, Nchi = len(Gk), len(Smat)
     Nkall, Nk, Nw = len(kmap), len(Gk[0, 0, 0]), len(Gk[0, 0])
-    delta = np.zeros((Norb, Norb, Nw, Nkall), dtype=np.complex128)
+    delta = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
     flibs.lin_eliash.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128), # delta
         np.ctypeslib.ndpointer(dtype=np.complex128), # chi
@@ -1536,7 +1536,7 @@ def get_chis_chic(chi: np.ndarray, Smat: np.ndarray, Cmat: np.ndarray,) -> tuple
                         byref(c_int64(Nw)), byref(c_int64(Nchi)))
     return chis, chic
 
-def conv_delta_orb_to_band(delta: np.ndarray, uni: np.ndarray, invk: np.ndarray) -> np.ndarray:
+def conv_delta_orb_to_band(delta: np.ndarray, uni: np.ndarray, invk: np.ndarray, plist: np.ndarray,gap_sym) -> np.ndarray:
     """Convert orbital‑space gap function ``delta`` to band representation.
     Parameters
     ----------
@@ -1551,16 +1551,17 @@ def conv_delta_orb_to_band(delta: np.ndarray, uni: np.ndarray, invk: np.ndarray)
     Nkall, Nk, Nw, Norb = len(invk), len(uni), len(delta[0, 0]), len(delta)
     deltab = np.zeros((Norb, Norb, Nkall), dtype=np.complex128)
     flibs.conv_delta_orb_to_band.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128), # deltab
-        np.ctypeslib.ndpointer(dtype=np.complex128), # delta
-        np.ctypeslib.ndpointer(dtype=np.complex128), # uni
-        np.ctypeslib.ndpointer(dtype=np.int64),      # invk
-        POINTER(c_int64), POINTER(c_int64),           # Norb, Nkall
-        POINTER(c_int64), POINTER(c_int64)            # Nk, Nw
+        np.ctypeslib.ndpointer(dtype=np.complex128),         # deltab
+        np.ctypeslib.ndpointer(dtype=np.complex128),         # delta
+        np.ctypeslib.ndpointer(dtype=np.complex128),         # uni
+        np.ctypeslib.ndpointer(dtype=np.float64),            # plist
+        np.ctypeslib.ndpointer(dtype=np.int64),              # invk
+        POINTER(c_int64), POINTER(c_int64),                  # Norb, Nkall
+        POINTER(c_int64), POINTER(c_int64), POINTER(c_int64) # Nk, Nw, gap_sym
     ]
     flibs.conv_delta_orb_to_band.retype = c_void_p
-    flibs.conv_delta_orb_to_band(deltab, delta, uni, invk, byref(c_int64(Norb)),
-                                 byref(c_int64(Nkall)), byref(c_int64(Nk)), byref(c_int64(Nw)))
+    flibs.conv_delta_orb_to_band(deltab, delta, uni, plist, invk, byref(c_int64(Norb)),
+                                 byref(c_int64(Nkall)), byref(c_int64(Nk)), byref(c_int64(Nw)), byref(c_int64(gap_sym)))
     return deltab
 
 def conv_delta_orb_to_band_soc(delta: np.ndarray, uni: np.ndarray, invk: np.ndarray,
@@ -1594,20 +1595,18 @@ def gen_Fk(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray) -> np.ndarray:
     Nkall, Nk, Nw, Norb = len(invk), len(Gk[0, 0, 0]), len(delta[0, 0]), len(delta)
     Fk = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
     flibs.mkfk_trs_nsoc_.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128), # Fk
-        np.ctypeslib.ndpointer(dtype=np.complex128), # Gk
-        np.ctypeslib.ndpointer(dtype=np.complex128), # delta
-        np.ctypeslib.ndpointer(dtype=np.int64),      # invk
-        POINTER(c_int64), POINTER(c_int64),           # Nkall, Nk
-        POINTER(c_int64), POINTER(c_int64)            # Nw, Norb
+        np.ctypeslib.ndpointer(dtype=np.complex128),         # Fk
+        np.ctypeslib.ndpointer(dtype=np.complex128),         # Gk
+        np.ctypeslib.ndpointer(dtype=np.complex128),         # delta
+        POINTER(c_int64), POINTER(c_int64), POINTER(c_int64) # Nk, Nw, Norb
     ]
     flibs.mkfk_trs_nsoc_.retype = c_void_p
-    flibs.mkfk_trs_nsoc_(Fk, Gk, delta, invk, byref(c_int64(Nkall)), byref(c_int64(Nk)),
-                         byref(c_int64(Nw)), byref(c_int64(Norb)))
+    flibs.mkfk_trs_nsoc_(Fk, Gk, delta, byref(c_int64(Nk)), byref(c_int64(Nw)), byref(c_int64(Norb)))
 
     return Fk
 
-def gen_Fk_soc(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray, invs: np.ndarray, slist: np.ndarray,gap_sym: int) -> np.ndarray:
+def gen_Fk_soc(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray, invs: np.ndarray,
+               slist: np.ndarray,gap_sym: int) -> np.ndarray:
     """SOC-aware generation of Fk tensor from Green's function and gap function.
     Same as :func:`gen_Fk` but includes additional spin indices for SOC case.
     """
@@ -1628,8 +1627,26 @@ def gen_Fk_soc(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray, invs: np.nda
     ]
     flibs.mkfk_trs_soc_.retype = c_void_p
     flibs.mkfk_trs_soc_(Fk, Gk, delta, sgnsig, slist, invk, invs, byref(c_int64(Nkall)),
-                       byref(c_int64(Nk)), byref(c_int64(Nw)), byref(c_int64(Norb)), byref(c_int64(gap_sym)))
+                        byref(c_int64(Nk)), byref(c_int64(Nw)), byref(c_int64(Norb)), byref(c_int64(gap_sym)))
     return Fk
+
+def remap_gap(delta0,plist,invk,gap_sym):
+    Nkall,Nk,Norb=len(invk),len(delta0.T),len(plist)
+    Nw=int(delta0.size/(Nk*Norb*Norb))
+    delta=np.zeros((Norb, Norb, Nw, Nkall), dtype=np.complex128)
+    flibs.remap_delta_.argtypes = [
+        np.ctypeslib.ndpointer(dtype=np.complex128), # delta
+        np.ctypeslib.ndpointer(dtype=np.complex128), # delta0
+        np.ctypeslib.ndpointer(dtype=np.float64),    # plist
+        np.ctypeslib.ndpointer(dtype=np.int64),      # invk
+        POINTER(c_int64), POINTER(c_int64),          # Nkall, Nk
+        POINTER(c_int64), POINTER(c_int64),          # Nw, Norb
+        POINTER(c_int64)                             # gap_sym
+        ]
+    flibs.remap_delta_.retype = c_void_p
+    flibs.remap_delta_(delta, delta0, plist, invk, byref(c_int64(Nkall)), byref(c_int64(Nk)),
+                       byref(c_int64(Nw)), byref(c_int64(Norb)), byref(c_int64(gap_sym)))
+    return delta
 
 def gen_irr_k_TRS(Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Construct irreducible k‑point list for time‑reversal symmetric lattice.
