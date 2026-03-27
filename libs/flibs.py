@@ -1648,6 +1648,22 @@ def remap_gap(delta0,plist,invk,gap_sym):
                        byref(c_int64(Nw)), byref(c_int64(Norb)), byref(c_int64(gap_sym)))
     return delta
 
+def get_eig_or_tr_chi(chi: np.ndarray, invk: np.ndarray, sw_eig:bool) -> np.ndarray:
+    Nkall,Nk=len(invk),len(chi.T)
+    Nchi=int(np.sqrt(chi.size/Nk))
+    chiq=np.zeros((Nchi,Nchi,Nkall),dtype=np.complex128)
+    flibs.get_eig_or_tr_chi.argtypes = [
+        np.ctypeslib.ndpointer(dtype=np.complex128), # chiq
+        np.ctypeslib.ndpointer(dtype=np.complex128), # chi
+        np.ctypeslib.ndpointer(dtype=np.int64),      # invk
+        POINTER(c_int64), POINTER(c_int64),          # Nkall, Nk
+        POINTER(c_int64), POINTER(c_bool)            # Nchi, sw_eig
+    ]
+    flibs.get_eig_or_tr_chi.retype = c_void_p
+    flibs.get_eig_or_tr_chi(chiq,chi, invk, byref(c_int64(Nkall)), byref(c_int64(Nk)),
+                             byref(c_int64(Nchi)), byref(c_bool(sw_eig)))
+    return chiq
+
 def gen_irr_k_TRS(Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Construct irreducible k‑point list for time‑reversal symmetric lattice.
     A fairly convoluted set of rules determine ``Nk`` (the number of irreducible k‑points)

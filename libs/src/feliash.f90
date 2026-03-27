@@ -53,7 +53,6 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,kmap,invk,
   weight=temp/dble(Nkall)
   norm2=0.0d0
   normb=0.0d0
-  !call get_chi0(chi,Smat,Cmat,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
   call get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
