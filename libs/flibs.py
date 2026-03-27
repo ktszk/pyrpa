@@ -1651,7 +1651,7 @@ def remap_gap(delta0,plist,invk,gap_sym):
 def get_eig_or_tr_chi(chi: np.ndarray, invk: np.ndarray, sw_eig:bool) -> np.ndarray:
     Nkall,Nk=len(invk),len(chi.T)
     Nchi=int(np.sqrt(chi.size/Nk))
-    chiq=np.zeros((Nchi,Nchi,Nkall),dtype=np.complex128)
+    chiq=np.zeros(Nkall,dtype=np.complex128)
     flibs.get_eig_or_tr_chi.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128), # chiq
         np.ctypeslib.ndpointer(dtype=np.complex128), # chi

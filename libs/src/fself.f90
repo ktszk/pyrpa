@@ -1142,11 +1142,13 @@ subroutine get_eig_or_tr_chi(chiqout,chi,invk,Nkall,Nk,Nchi,sw_eig) bind(C)
    real(real64),dimension(2*Nchi):: rwork
    complex(real64),dimension(Nchi*Nchi*4+1):: work
    complex(real64),dimension(Nchi):: eig
-   complex(real64),dimension(Nchi,Nchi):: tmp1,tmp2
+   complex(real64),dimension(Nchi,Nchi):: tmp,tmp1,tmp2
 
+   !$omp parallel do private(tmp,tmp1,tmp2,rwork,work,eig,i,l,info)
    do i=1,Nkall
       if(sw_eig)then
-         call zgeev('N','N',Nchi,chi,Nchi,eig,tmp1,Nchi,tmp2,Nchi,work,Nchi*Nchi*4+1,rwork,info)
+         tmp(:,:)=chi(invk(1,i),:,:)
+         call zgeev('N','N',Nchi,tmp,Nchi,eig,tmp1,Nchi,tmp2,Nchi,work,Nchi*Nchi*4+1,rwork,info)
          chiqout(i)=maxval(dble(eig))
       else
          do l=1,Nchi
@@ -1154,4 +1156,5 @@ subroutine get_eig_or_tr_chi(chiqout,chi,invk,Nkall,Nk,Nchi,sw_eig) bind(C)
          end do
       end if
    end do
+   !$omp end parallel do
 end subroutine
