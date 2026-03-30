@@ -23,6 +23,7 @@ else: monoclinic
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
 fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
+#fname,ftype,brav,sw_soc='inputs/FeS',2,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2_soc.input',1,0,True
 #fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
@@ -56,21 +57,21 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=13
+option=16
 color_option=1
 
-Nx,Ny,Nz,Nw=32,32,1,512 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=50,32,4,512 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
 #RotMat=[[0,0,1],[0,1,0],[1,0,0]]
 
-#abc=[3.96*(2**.5),3.96*(2**.5),13.02*.5]
-#abc=[3.90,3.90,12.68]
+abc=[3.96*0.70711,3.96*0.70711,13.02*.5]
+#abc=[3.68,3.68,5.03]
 #alpha_beta_gamma=[90.,90.,90]
-#temp=2.5e-2 #2.59e-2
-tempK=400 #Kelvin
-fill= 3.02
+temp=2.0e-2 #2.59e-2
+#tempK=400 #Kelvin
+fill= 3.00
 #site_prof=[5]
 
 Emin,Emax=-3,3
@@ -165,7 +166,7 @@ try:
         temp=tempK*kb
 except NameError:
     pass
-if option==2:
+if option in {2,16}:
     try:
         RotMat
         RotMat=np.array(RotMat)
@@ -722,19 +723,96 @@ def get_mu(ham_r,S_r,rvec,Arot,temp:float,kmesh=40)->float:
     mu=plibs.calc_mu(eig,Nk,fill,temp)
     return mu
 
-def get_mass(mesh,rvec,ham_r,S_r,mu:float,de=3.e-4,meshkz=20):
-    import skimage.measure as sk
+def get_mass(mesh,rvec,ham_r,S_r,mu:float,de=3.e-6,meshkz=20):
+    """
+    calculate cyclotron mass m*_c=hbar^2/2pi (dS/dE) where S is the area of Fermi surface cross section
+    de: energy step for numerical derivative (eV)
+    meshkz: number of kz points for coarse scan of S(kz) in [0, pi]
+    Strategy: phase1: scan S(kz) with mu only (meshkz calls) -> find extremal kz brackets
+              phase2: refine extremal kz with minimize_scalar, then compute dS/dE (2 calls each)
+    """
+    from scipy.optimize import minimize_scalar
     al=alatt[:2]
     eV2J=scconst.physical_constants['electron volt-joule relationship'][0]
-    Nkh=mesh**2
-    ABZ=4.*np.pi**2/(al[0]*al[1])
+    ABZ=4.*np.pi**2/(al[0]*al[1]) #area of BZ in AA^-2
 
-    k0=np.linspace(-np.pi,np.pi,mesh,False)
-    kx,ky=np.meshgrid(k0,k0)
-    kz0=np.linspace(-np.pi,np.pi,meshkz,False)
-    sband=[]
-    sband2=[]
-    ham_k=flibs.gen_ham(klist,ham_r,rvec)
+    def shoelace_area(ct):
+        x,y=ct[:,0],ct[:,1]
+        return 0.5*np.abs(np.dot(x,np.roll(y,-1))-np.dot(y,np.roll(x,-1)))
+
+    def get_band_area(v2,blist,band_idx):
+        if band_idx not in blist:
+            return None
+        j=blist.index(band_idx)
+        return sum(shoelace_area(ct) for ct in v2[j])*ABZ
+
+    def S_at_kz(kz,band_idx):
+        """S(kz) for one band at mu (used in scan and refinement)"""
+        v2,blist=plibs.mk_kf(mesh,rvec,ham_r,S_r,RotMat,mu,kz)
+        s=get_band_area(v2,blist,band_idx)
+        return s if s is not None else 0.
+
+    def calc_mc(kz_ext,band_idx):
+        """Cyclotron mass at a single kz via central difference in E"""
+        v2_p,blist_p=plibs.mk_kf(mesh,rvec,ham_r,S_r,RotMat,mu+de,kz_ext)
+        v2_m,blist_m=plibs.mk_kf(mesh,rvec,ham_r,S_r,RotMat,mu-de,kz_ext)
+        Sp=get_band_area(v2_p,blist_p,band_idx)
+        Sm=get_band_area(v2_m,blist_m,band_idx)
+        if Sp is None or Sm is None:
+            return None
+        dSdE_SI=(Sp-Sm)/(2.*de)*1.e20   # m^-2/eV
+        return np.abs(dSdE_SI)*eV2J*hbar**2/(2*np.pi*emass)
+
+    # --- Phase 1: coarse scan S(kz) with mu only ---
+    print("Phase 1: scanning S(kz)...",flush=True)
+    kz0=np.linspace(0,.5,meshkz,True)
+    S_scan={}  # band_idx -> [(kz, S), ...]
+
+    for kz in kz0:
+        v2,blist=plibs.mk_kf(mesh,rvec,ham_r,S_r,RotMat,mu,kz)
+        for band_idx in blist:
+            S=get_band_area(v2,blist,band_idx)
+            S_scan.setdefault(band_idx,[]).append((kz,S))
+
+    # --- Phase 2: find extremal kz brackets, refine, compute m* ---
+    print("Phase 2: computing m* at extremal orbits...",flush=True)
+    print("="*50,flush=True)
+    for band_idx in sorted(S_scan.keys()):
+        data=np.array(S_scan[band_idx])
+        kz_arr,S_arr=data[:,0],data[:,1]
+        if len(kz_arr)<3:
+            continue
+
+        # find brackets where dS/dkz changes sign (local extrema)
+        dS=np.diff(S_arr)
+        cand_kz=[kz_arr[0],kz_arr[-1]]  # always include BZ boundary
+        for i in range(len(dS)-1):
+            if dS[i]*dS[i+1]<0:  # sign change -> extremum in [i, i+2]
+                sign=-1. if dS[i]>0 else 1.  # -1: maximize S, +1: minimize S
+                res=minimize_scalar(lambda kz,s=sign,b=band_idx: s*S_at_kz(kz,b),
+                                    bounds=(kz_arr[i],kz_arr[i+2]),method='bounded',
+                                    options={'xatol':1e-4,'maxiter':10})
+                cand_kz.append(res.x)
+
+        print(f"Band {band_idx+1}: extremal kz = {[f'{k:.4f}' for k in cand_kz]}",flush=True)
+
+        results=[]
+        for kz_ext in cand_kz:
+            S0=S_at_kz(kz_ext,band_idx)
+            if S0==0.:
+                continue
+            mc=calc_mc(kz_ext,band_idx)
+            if mc is None:
+                continue
+            results.append((kz_ext,S0,mc))
+            print(f"  kz={kz_ext:.4f}: S={S0:.4f} AA^-2, m*={mc:.4f} m_e",flush=True)
+
+        if results:
+            mc_vals=np.array([r[2] for r in results])
+            kz_vals=np.array([r[0] for r in results])
+            i_max,i_min=np.argmax(mc_vals),np.argmin(mc_vals)
+            print(f"  >> Max m* = {mc_vals[i_max]:.4f} m_e  at kz = {kz_vals[i_max]:.4f}",flush=True)
+            print(f"  >> Min m* = {mc_vals[i_min]:.4f} m_e  at kz = {kz_vals[i_min]:.4f}",flush=True)
 
 def main():
     omp_num,omp_check=flibs.omp_params()
@@ -868,7 +946,7 @@ def main():
         plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw,sw_self)
     elif option==5: #calc conductivity
         get_hall_coe(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,tau_const)
-        #calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,tau_const)
+        calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,tau_const)
     elif option==6: #calc_optical conductivity
         calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta)
     elif option in {7,8,9,10,11}: #calc_chis_spectrum
@@ -955,7 +1033,6 @@ def main():
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
         mass=flibs.get_mass(klist,ham_r,rvec,avec.T*ihbar,uni)*eC/emass
-        print(mass[:,3,:,:])
     elif option==18: #calc spectrum with impurity
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         rlist=plibs.gen_rlist(Nx,Ny,Nz)
