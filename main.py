@@ -22,8 +22,8 @@ else: monoclinic
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4nso',0,7,False
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
-fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
-#fname,ftype,brav,sw_soc='inputs/FeS',2,0,False
+#fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
+fname,ftype,brav,sw_soc='inputs/FeS',2,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2_soc.input',1,0,True
 #fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
@@ -49,15 +49,16 @@ option defines calculation modes
 13: solve linearized eliashberg equation
 14: post process of gap functions
 15: calc carrier num.
-16: calc cycrotron mass (not implement)
-17: mass calculation (not implement)
-18: spectrum with impurity (not implement)
+16: calc cycrotron mass
+17: plot dHvA frequency vs angle (not implement)
+18: mass calculation (not implement)
+19: spectrum with impurity (not implement)
 color_option defines the meaning of color on Fermi surfaces
  0: band or mono color
  1: orbital weight settled by olist
  2: velocity size
 """
-option=16
+option=17
 color_option=1
 
 Nx,Ny,Nz,Nw=50,32,4,512 #k and energy(or matsubara freq.) mesh size
@@ -71,7 +72,7 @@ abc=[3.96*0.70711,3.96*0.70711,13.02*.5]
 #alpha_beta_gamma=[90.,90.,90]
 temp=2.0e-2 #2.59e-2
 #tempK=400 #Kelvin
-fill= 3.00
+fill= 6.00
 #site_prof=[5]
 
 Emin,Emax=-3,3
@@ -348,6 +349,7 @@ def get_hall_coe(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
     nh=-1./(Rh*eC)/1e6
     print(Rh)
     print(nh)
+
 def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
                                fill:float,temp:float,tau_const,Nw=300,with_spin=False):
     '''
@@ -536,16 +538,17 @@ def calc_flex_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float
     if sw_out_self:
         np.savez('self_en',sigmak,mu_self)
 
-def output_gap_function(invk,kmap,gap,uni,plist,gap_sym,soc=False,invs=None,slist=None):
-    #f=open('gap_wdep.dat','w')
-    #for i,gp in enumerate(gap[2,2,:,0]):
-    #    f.write(f'{i} {gp.real:12.8f} {gp.imag:12.8f}\n')
-    #f.close()
-    if soc:
-        gapb=flibs.conv_delta_orb_to_band_soc(gap,uni,invk,invs,slist)
+def output_gap_function(invk,kmap,gap,uni,plist,gap_sym,soc=False,invs=None,slist=None,sw_orb=False):
+    if sw_orb:
+        if soc:
+            gapb=gap[:,:,0,:]
+        else:
+            gapb=flibs.remap_gap(gap[:,:,0,:],plist,invk,gap_sym)
     else:
-        gapb=flibs.conv_delta_orb_to_band(gap,uni,invk,plist,gap_sym)
-    #gapb=gap[:,:,0,:]
+        if soc:
+            gapb=flibs.conv_delta_orb_to_band_soc(gap,uni,invk,invs,slist)
+        else:
+            gapb=flibs.conv_delta_orb_to_band(gap,uni,invk,plist,gap_sym)
     print('output gap function')
     for iorb in range(len(gapb)):
         for jorb in range(len(gapb)):
@@ -727,9 +730,9 @@ def get_mass(mesh,rvec,ham_r,S_r,mu:float,de=3.e-6,meshkz=20):
     """
     calculate cyclotron mass m*_c=hbar^2/2pi (dS/dE) where S is the area of Fermi surface cross section
     de: energy step for numerical derivative (eV)
-    meshkz: number of kz points for coarse scan of S(kz) in [0, pi]
-    Strategy: phase1: scan S(kz) with mu only (meshkz calls) -> find extremal kz brackets
-              phase2: refine extremal kz with minimize_scalar, then compute dS/dE (2 calls each)
+    meshkz: number of kz points for coarse scan of S(kz) in [0, pi/2]
+    Strategy: phase1: get_eigs_2d once per kz -> get_kf_points at mu only
+              phase2: at extremal kz, get_eigs_2d once -> get_kf_points at mu+-de (no re-diagonalization)
     """
     from scipy.optimize import minimize_scalar
     al=alatt[:2]
@@ -746,16 +749,21 @@ def get_mass(mesh,rvec,ham_r,S_r,mu:float,de=3.e-6,meshkz=20):
         j=blist.index(band_idx)
         return sum(shoelace_area(ct) for ct in v2[j])*ABZ
 
-    def S_at_kz(kz,band_idx):
-        """S(kz) for one band at mu (used in scan and refinement)"""
-        v2,blist=plibs.mk_kf(mesh,rvec,ham_r,S_r,RotMat,mu,kz)
+    def S_from_eig(eig,kz,band_idx):
+        """Compute cross-section area from precomputed eig (no diagonalization)"""
+        v2,blist=plibs.get_kf_points(eig,mesh,mu,kz)
         s=get_band_area(v2,blist,band_idx)
         return s if s is not None else 0.
 
-    def calc_mc(kz_ext,band_idx):
-        """Cyclotron mass at a single kz via central difference in E"""
-        v2_p,blist_p=plibs.mk_kf(mesh,rvec,ham_r,S_r,RotMat,mu+de,kz_ext)
-        v2_m,blist_m=plibs.mk_kf(mesh,rvec,ham_r,S_r,RotMat,mu-de,kz_ext)
+    def S_at_kz(kz,band_idx):
+        """For minimize_scalar: diagonalize then get area"""
+        eig=plibs.get_eigs_2d(mesh,rvec,ham_r,S_r,RotMat,kz)
+        return S_from_eig(eig,kz,band_idx)
+
+    def calc_mc_from_eig(eig,kz,band_idx):
+        """Cyclotron mass from precomputed eig via central difference (zero extra diagonalizations)"""
+        v2_p,blist_p=plibs.get_kf_points(eig,mesh,mu+de,kz)
+        v2_m,blist_m=plibs.get_kf_points(eig,mesh,mu-de,kz)
         Sp=get_band_area(v2_p,blist_p,band_idx)
         Sm=get_band_area(v2_m,blist_m,band_idx)
         if Sp is None or Sm is None:
@@ -763,18 +771,22 @@ def get_mass(mesh,rvec,ham_r,S_r,mu:float,de=3.e-6,meshkz=20):
         dSdE_SI=(Sp-Sm)/(2.*de)*1.e20   # m^-2/eV
         return np.abs(dSdE_SI)*eV2J*hbar**2/(2*np.pi*emass)
 
-    # --- Phase 1: coarse scan S(kz) with mu only ---
+    # --- Phase 1: coarse scan S(kz) --- get_eigs_2d x meshkz calls ---
     print("Phase 1: scanning S(kz)...",flush=True)
     kz0=np.linspace(0,.5,meshkz,True)
-    S_scan={}  # band_idx -> [(kz, S), ...]
+    S_scan={}    # band_idx -> [(kz, S), ...]
+    eig_cache={}  # cache eig at Phase 1 kz points for reuse in Phase 2
 
     for kz in kz0:
-        v2,blist=plibs.mk_kf(mesh,rvec,ham_r,S_r,RotMat,mu,kz)
+        eig=plibs.get_eigs_2d(mesh,rvec,ham_r,S_r,RotMat,kz)
+        eig_cache[kz]=eig
+        v2,blist=plibs.get_kf_points(eig,mesh,mu,kz)
         for band_idx in blist:
             S=get_band_area(v2,blist,band_idx)
             S_scan.setdefault(band_idx,[]).append((kz,S))
 
-    # --- Phase 2: find extremal kz brackets, refine, compute m* ---
+    # --- Phase 2: refine extremal kz, compute m* ---
+    # get_eigs_2d called once per extremal kz; get_kf_points called for mu+-de
     print("Phase 2: computing m* at extremal orbits...",flush=True)
     print("="*50,flush=True)
     for band_idx in sorted(S_scan.keys()):
@@ -783,12 +795,11 @@ def get_mass(mesh,rvec,ham_r,S_r,mu:float,de=3.e-6,meshkz=20):
         if len(kz_arr)<3:
             continue
 
-        # find brackets where dS/dkz changes sign (local extrema)
         dS=np.diff(S_arr)
         cand_kz=[kz_arr[0],kz_arr[-1]]  # always include BZ boundary
         for i in range(len(dS)-1):
             if dS[i]*dS[i+1]<0:  # sign change -> extremum in [i, i+2]
-                sign=-1. if dS[i]>0 else 1.  # -1: maximize S, +1: minimize S
+                sign=-1. if dS[i]>0 else 1.  # -1: find max, +1: find min
                 res=minimize_scalar(lambda kz,s=sign,b=band_idx: s*S_at_kz(kz,b),
                                     bounds=(kz_arr[i],kz_arr[i+2]),method='bounded',
                                     options={'xatol':1e-4,'maxiter':10})
@@ -798,10 +809,14 @@ def get_mass(mesh,rvec,ham_r,S_r,mu:float,de=3.e-6,meshkz=20):
 
         results=[]
         for kz_ext in cand_kz:
-            S0=S_at_kz(kz_ext,band_idx)
+            # reuse cached eig from Phase 1 if available, else diagonalize once
+            eig=eig_cache.get(kz_ext)
+            if eig is None:
+                eig=plibs.get_eigs_2d(mesh,rvec,ham_r,S_r,RotMat,kz_ext)
+            S0=S_from_eig(eig,kz_ext,band_idx)
             if S0==0.:
                 continue
-            mc=calc_mc(kz_ext,band_idx)
+            mc=calc_mc_from_eig(eig,kz_ext,band_idx)
             if mc is None:
                 continue
             results.append((kz_ext,S0,mc))
@@ -813,6 +828,124 @@ def get_mass(mesh,rvec,ham_r,S_r,mu:float,de=3.e-6,meshkz=20):
             i_max,i_min=np.argmax(mc_vals),np.argmin(mc_vals)
             print(f"  >> Max m* = {mc_vals[i_max]:.4f} m_e  at kz = {kz_vals[i_max]:.4f}",flush=True)
             print(f"  >> Min m* = {mc_vals[i_min]:.4f} m_e  at kz = {kz_vals[i_min]:.4f}",flush=True)
+
+def get_dhva_band(mesh,rvec,ham_r,S_r,mu:float,theta_list,phi=0.,meshkz=20):
+    """
+    Calculate dHvA frequency F vs magnetic field polar angle theta.
+    F = hbar/(2*pi*e) * A_ext  (Onsager relation)
+    theta_list: array of polar angles from z-axis [deg]
+    phi       : azimuthal angle [deg] (fixes the rotation plane, default 0 = xz-plane)
+    meshkz    : number of kz scan points per angle for the coarse S(kz) scan
+    Returns   : dict  band_idx -> np.ndarray of shape (N, 2) columns=[theta, F[T]]
+    """
+    from scipy.optimize import minimize_scalar
+    import matplotlib.pyplot as plt
+    al=alatt[:2]
+    ABZ=4.*np.pi**2/(al[0]*al[1])                      # BZ area in AA^-2
+    F_factor=scconst.hbar/(2.*np.pi*scconst.e)*1.e20   # AA^-2 -> T (Onsager)
+
+    def make_rotmat(theta_deg,phi_deg):
+        """Rotation matrix R s.t. R @ B_hat = z_hat.
+        kz-slices in the rotated frame are then perpendicular to B.
+        R = Ry(-theta) @ Rz(-phi)"""
+        th,ph=np.deg2rad(theta_deg),np.deg2rad(phi_deg)
+        cp,sp=np.cos(ph),np.sin(ph)
+        ct,st=np.cos(th),np.sin(th)
+        Rz=np.array([[ cp, sp, 0.],[-sp, cp, 0.],[0., 0., 1.]])  # Rz(-phi)
+        Ry=np.array([[ ct, 0.,-st],[ 0., 1.,  0.],[ st, 0., ct]])  # Ry(-theta)
+        return Ry@Rz
+
+    def shoelace_area(ct):
+        x,y=ct[:,0],ct[:,1]
+        return 0.5*np.abs(np.dot(x,np.roll(y,-1))-np.dot(y,np.roll(x,-1)))
+
+    def get_band_area(v2,blist,band_idx):
+        if band_idx not in blist:
+            return None
+        j=blist.index(band_idx)
+        return sum(shoelace_area(c) for c in v2[j])*ABZ
+
+    def S_at_kz(kz,band_idx,rotmat):
+        """S(kz) for minimize_scalar: one diagonalization per call"""
+        eig=plibs.get_eigs_2d(mesh,rvec,ham_r,S_r,rotmat,kz)
+        v2,blist=plibs.get_kf_points(eig,mesh,mu,kz)
+        s=get_band_area(v2,blist,band_idx)
+        return s if s is not None else 0.
+
+    all_results={}  # band_idx -> [(theta, F), ...]
+
+    for theta in theta_list:
+        rotmat=make_rotmat(theta,phi)
+        kz0=np.linspace(0.,.5,meshkz,True)
+        S_scan={}
+        eig_cache={}
+
+        # --- Phase 1: scan S(kz) at mu ---
+        for kz in kz0:
+            eig=plibs.get_eigs_2d(mesh,rvec,ham_r,S_r,rotmat,kz)
+            eig_cache[kz]=eig
+            v2,blist=plibs.get_kf_points(eig,mesh,mu,kz)
+            for band_idx in blist:
+                S=get_band_area(v2,blist,band_idx)
+                S_scan.setdefault(band_idx,[]).append((kz,S))
+
+        # --- Phase 2: find extremal kz -> F ---
+        for band_idx in S_scan:
+            data=np.array(S_scan[band_idx])
+            kz_arr,S_arr=data[:,0],data[:,1]
+            if len(kz_arr)<3:
+                continue
+
+            dS=np.diff(S_arr)
+            cand_kz=[kz_arr[0],kz_arr[-1]]
+            for i in range(len(dS)-1):
+                if dS[i]*dS[i+1]<0:
+                    sign=-1. if dS[i]>0 else 1.
+                    res=minimize_scalar(
+                        lambda kz,s=sign,b=band_idx,rm=rotmat: s*S_at_kz(kz,b,rm),
+                        bounds=(kz_arr[i],kz_arr[i+2]),method='bounded',
+                        options={'xatol':1e-4,'maxiter':10})
+                    cand_kz.append(res.x)
+
+            for kz_ext in cand_kz:
+                eig=eig_cache.get(kz_ext)
+                if eig is None:
+                    eig=plibs.get_eigs_2d(mesh,rvec,ham_r,S_r,rotmat,kz_ext)
+                v2,blist_ext=plibs.get_kf_points(eig,mesh,mu,kz_ext)
+                S0=get_band_area(v2,blist_ext,band_idx)
+                if S0 is None or S0==0.:
+                    continue
+                all_results.setdefault(band_idx,[]).append((theta,S0*F_factor))
+
+        print(f"theta={theta:.1f} deg: FS bands={[b+1 for b in S_scan.keys()]}",flush=True)
+
+    # convert to arrays
+    all_results={k:np.array(v) for k,v in all_results.items()}
+
+    # split each band into orbit branches:
+    # at each theta there are multiple extremal F values (kz=0, kz=pi/2, interior).
+    # sort F ascending at each theta and connect same-rank points across theta -> branches.
+    fig,ax=plt.subplots()
+    prop_cycle=plt.rcParams['axes.prop_cycle'].by_key()['color']
+    for ci,band_idx in enumerate(sorted(all_results.keys())):
+        d=all_results[band_idx]
+        color=prop_cycle[ci % len(prop_cycle)]
+        thetas=np.unique(d[:,0])
+        theta_F={th:sorted(d[d[:,0]==th,1]) for th in thetas}
+        n_branches=max(len(v) for v in theta_F.values())
+        for i in range(n_branches):
+            pts=np.array([(th,flist[i])
+                          for th,flist in sorted(theta_F.items()) if i<len(flist)])
+            label=f'Band {band_idx+1}' if i==0 else '_nolegend_'
+            ax.plot(pts[:,0],pts[:,1],'-o',color=color,markersize=3,label=label)
+    ax.set_xlabel('theta (deg)')
+    ax.set_ylabel('F (T)')
+    ax.set_title(f'dHvA frequency vs field angle  phi={phi:.1f} deg')
+    ax.legend()
+    plt.tight_layout()
+    plt.savefig('dhva_band.png',dpi=150)
+    plt.show()
+    return all_results
 
 def main():
     omp_num,omp_check=flibs.omp_params()
@@ -1029,11 +1162,14 @@ def main():
         get_carrier_num(Nx,rvec,ham_r,S_r,mu,Arot)
     elif option==16: #calc cycrtron mass
         get_mass(Nx,rvec,ham_r,S_r,mu)
-    elif option==17: #mass calc
+    elif option==17: #plot dHvA frequency vs angle
+        theta_list=np.linspace(0.,90.,40)
+        get_dhva_band(Nx,rvec,ham_r,S_r,mu,theta_list)
+    elif option==18: #mass calc
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
         mass=flibs.get_mass(klist,ham_r,rvec,avec.T*ihbar,uni)*eC/emass
-    elif option==18: #calc spectrum with impurity
+    elif option==19: #calc spectrum with impurity
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         rlist=plibs.gen_rlist(Nx,Ny,Nz)
         wlist=np.linspace(Emin,Emax,Nw,True)

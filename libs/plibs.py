@@ -294,6 +294,44 @@ def mk_qlist(k_set: np.ndarray | list, Nx: int, Ny: int, Nz: int, bvec: np.ndarr
     xticks+=[splen[-1]]
     return np.array(qlist),np.array(splen),xticks
 
+def get_kf_points(eig: np.ndarray, mesh: int, mu: float, kz: float) -> tuple[list, list]:
+    """
+    @fn get_kf_points()
+    @brief This function obtains fermi wave-number points from precomputed eigenvalues
+    @param   eig: eigenvalues of Hamiltonian shape (Nk, Norb)
+    @param  mesh: k-mesh
+    @param    mu: chemical potential
+    @param    kz: kz value (used to tag contour coordinates)
+    """
+    import skimage.measure as sk
+    kf_points=[]
+    fsband=[]
+    for i,e in enumerate(eig.T-mu):
+        if(e.max()*e.min() < 0. ):
+            cont=sk.find_contours(e.reshape(mesh+1,mesh+1),0)
+            ct=[np.array([list(c)+[kz] for c in (cc-mesh/2)/mesh]) for cc in cont]
+            kf_points.append(ct)
+            fsband.append(i)
+    return kf_points,fsband
+
+def get_eigs_2d(mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray,
+                RotMat: np.ndarray, kz: float) -> np.ndarray:
+    """
+    @fn get_eigs_2d()
+    @brief Compute eigenvalues on 2D k-mesh at fixed kz (no contour finding)
+    @param   mesh: k-mesh
+    @param   rvec: r vector of hoppings
+    @param  ham_r: hopping parameters
+    @param    S_r: overlap integrals
+    @param RotMat: rotation matrix
+    @param     kz: kz value
+    @return   eig: eigenvalues shape (Nk, Norb)
+    """
+    Nk,klist=gen_klist(mesh+1,mesh+1,kz=kz)
+    rvec1=RotMat.dot(rvec.T).T.copy()
+    eig,_=get_eigs(klist,ham_r,S_r,rvec1)
+    return eig
+
 def mk_kf(mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, RotMat: np.ndarray, mu: float, kz: float) -> tuple[list, list]:
     """
     @fn mk_kf()
@@ -306,19 +344,8 @@ def mk_kf(mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, RotMa
     @param     mu: chemical potential
     @param     kz: kz value
     """
-    import skimage.measure as sk
-    Nk,klist=gen_klist(mesh+1,mesh+1,kz=kz)
-    rvec1=RotMat.dot(rvec.T).T.copy()
-    eig,uni=get_eigs(klist,ham_r,S_r,rvec1)
-    v2=[]
-    fsband=[]
-    for i,e in enumerate(eig.T-mu):
-        if(e.max()*e.min() < 0. ):
-            cont=sk.find_contours(e.reshape(mesh+1,mesh+1),0)
-            ct=[np.array([list(c)+[kz] for c in (cc-mesh/2)/mesh]) for cc in cont]
-            fsband.append(i)
-            v2.append(ct)
-    return v2,fsband
+    eig=get_eigs_2d(mesh,rvec,ham_r,S_r,RotMat,kz)
+    return get_kf_points(eig,mesh,mu,kz)
 
 def gen_3d_surf_points(mesh: int, rvec: np.ndarray, ham_r: np.ndarray,
                        S_r: np.ndarray, mu: float, kscale: float = 1.0) -> tuple[list, list, list]:
