@@ -109,7 +109,7 @@ subroutine get_tr_chi(trchis,trchi0,chis_orb,chis,chi0,olist,Nw,Nchi,Norb) bind(
   !!@param      chis,in: spin susceptibility
   !!@param      chi0,in: irreducible susceptibility
   !!@param     olist,in: the list of  properties of chis,chi0 footnote
-  !!@param        Nw,in: The number of freqency mesh
+  !!@param        Nw,in: The number of frequency mesh
   !!@param      Nchi,in: The number of footnote of chis,chi0
   !!@param      Norb,in: The number of orbitals
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
@@ -271,7 +271,7 @@ subroutine get_chis(chis,chi0,Smat,Nchi,Nw) bind(C)
   !!@param  chi0,in: irreducible susceptibility
   !!@param  Smat,in: S-matrix
   !!@param  Nchi,in: The footnote of chi
-  !!@param    Nw,in: The numb er of w mesh
+  !!@param    Nw,in: The number of w mesh
   use,intrinsic:: iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nchi,Nw

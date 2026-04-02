@@ -731,62 +731,15 @@ def get_mass(mesh,rvec,ham_r,S_r,mu:float,de=3.e-6,meshkz=20):
     calculate cyclotron mass m*_c=hbar^2/2pi (dS/dE) where S is the area of Fermi surface cross section
     de: energy step for numerical derivative (eV)
     meshkz: number of kz points for coarse scan of S(kz) in [0, pi/2]
-    Strategy: phase1: get_eigs_2d once per kz -> get_kf_points at mu only
-              phase2: at extremal kz, get_eigs_2d once -> get_kf_points at mu+-de (no re-diagonalization)
     """
-    from scipy.optimize import minimize_scalar
     al=alatt[:2]
-    eV2J=scconst.physical_constants['electron volt-joule relationship'][0]
-    ABZ=4.*np.pi**2/(al[0]*al[1]) #area of BZ in AA^-2
+    ABZ=4.*np.pi**2/(al[0]*al[1])
 
-    def shoelace_area(ct):
-        x,y=ct[:,0],ct[:,1]
-        return 0.5*np.abs(np.dot(x,np.roll(y,-1))-np.dot(y,np.roll(x,-1)))
-
-    def get_band_area(v2,blist,band_idx):
-        if band_idx not in blist:
-            return None
-        j=blist.index(band_idx)
-        return sum(shoelace_area(ct) for ct in v2[j])*ABZ
-
-    def S_from_eig(eig,kz,band_idx):
-        """Compute cross-section area from precomputed eig (no diagonalization)"""
-        v2,blist=plibs.get_kf_points(eig,mesh,mu,kz)
-        s=get_band_area(v2,blist,band_idx)
-        return s if s is not None else 0.
-
-    def S_at_kz(kz,band_idx):
-        """For minimize_scalar: diagonalize then get area"""
-        eig=plibs.get_eigs_2d(mesh,rvec,ham_r,S_r,RotMat,kz)
-        return S_from_eig(eig,kz,band_idx)
-
-    def calc_mc_from_eig(eig,kz,band_idx):
-        """Cyclotron mass from precomputed eig via central difference (zero extra diagonalizations)"""
-        v2_p,blist_p=plibs.get_kf_points(eig,mesh,mu+de,kz)
-        v2_m,blist_m=plibs.get_kf_points(eig,mesh,mu-de,kz)
-        Sp=get_band_area(v2_p,blist_p,band_idx)
-        Sm=get_band_area(v2_m,blist_m,band_idx)
-        if Sp is None or Sm is None:
-            return None
-        dSdE_SI=(Sp-Sm)/(2.*de)*1.e20   # m^-2/eV
-        return np.abs(dSdE_SI)*eV2J*hbar**2/(2*np.pi*emass)
-
-    # --- Phase 1: coarse scan S(kz) --- get_eigs_2d x meshkz calls ---
+    # --- Phase 1: coarse scan S(kz) ---
     print("Phase 1: scanning S(kz)...",flush=True)
-    kz0=np.linspace(0,.5,meshkz,True)
-    S_scan={}    # band_idx -> [(kz, S), ...]
-    eig_cache={}  # cache eig at Phase 1 kz points for reuse in Phase 2
-
-    for kz in kz0:
-        eig=plibs.get_eigs_2d(mesh,rvec,ham_r,S_r,RotMat,kz)
-        eig_cache[kz]=eig
-        v2,blist=plibs.get_kf_points(eig,mesh,mu,kz)
-        for band_idx in blist:
-            S=get_band_area(v2,blist,band_idx)
-            S_scan.setdefault(band_idx,[]).append((kz,S))
+    S_scan,eig_cache=plibs.scan_fs_area(mesh,rvec,ham_r,S_r,RotMat,mu,ABZ,meshkz)
 
     # --- Phase 2: refine extremal kz, compute m* ---
-    # get_eigs_2d called once per extremal kz; get_kf_points called for mu+-de
     print("Phase 2: computing m* at extremal orbits...",flush=True)
     print("="*50,flush=True)
     for band_idx in sorted(S_scan.keys()):
@@ -794,31 +747,26 @@ def get_mass(mesh,rvec,ham_r,S_r,mu:float,de=3.e-6,meshkz=20):
         kz_arr,S_arr=data[:,0],data[:,1]
         if len(kz_arr)<3:
             continue
-
-        dS=np.diff(S_arr)
-        cand_kz=[kz_arr[0],kz_arr[-1]]  # always include BZ boundary
-        for i in range(len(dS)-1):
-            if dS[i]*dS[i+1]<0:  # sign change -> extremum in [i, i+2]
-                sign=-1. if dS[i]>0 else 1.  # -1: find max, +1: find min
-                res=minimize_scalar(lambda kz,s=sign,b=band_idx: s*S_at_kz(kz,b),
-                                    bounds=(kz_arr[i],kz_arr[i+2]),method='bounded',
-                                    options={'xatol':1e-4,'maxiter':10})
-                cand_kz.append(res.x)
-
+        cand_kz=plibs.find_extremal_kz(kz_arr,S_arr,band_idx,mesh,rvec,ham_r,S_r,RotMat,mu,ABZ)
         print(f"Band {band_idx+1}: extremal kz = {[f'{k:.4f}' for k in cand_kz]}",flush=True)
 
         results=[]
         for kz_ext in cand_kz:
-            # reuse cached eig from Phase 1 if available, else diagonalize once
             eig=eig_cache.get(kz_ext)
             if eig is None:
                 eig=plibs.get_eigs_2d(mesh,rvec,ham_r,S_r,RotMat,kz_ext)
-            S0=S_from_eig(eig,kz_ext,band_idx)
-            if S0==0.:
+            v2,blist=plibs.get_kf_points(eig,mesh,mu,kz_ext)
+            S0=plibs.get_band_area(v2,blist,band_idx,ABZ)
+            if not S0:
                 continue
-            mc=calc_mc_from_eig(eig,kz_ext,band_idx)
-            if mc is None:
+            v2_p,blist_p=plibs.get_kf_points(eig,mesh,mu+de,kz_ext)
+            v2_m,blist_m=plibs.get_kf_points(eig,mesh,mu-de,kz_ext)
+            Sp=plibs.get_band_area(v2_p,blist_p,band_idx,ABZ)
+            Sm=plibs.get_band_area(v2_m,blist_m,band_idx,ABZ)
+            if Sp is None or Sm is None:
                 continue
+            dSdE_SI=(Sp-Sm)/(2.*de)*1.e20
+            mc=np.abs(dSdE_SI)*eC*hbar**2/(2*np.pi*emass)
             results.append((kz_ext,S0,mc))
             print(f"  kz={kz_ext:.4f}: S={S0:.4f} AA^-2, m*={mc:.4f} m_e",flush=True)
 
@@ -838,82 +786,31 @@ def get_dhva_band(mesh,rvec,ham_r,S_r,mu:float,theta_list,phi=0.,meshkz=20):
     meshkz    : number of kz scan points per angle for the coarse S(kz) scan
     Returns   : dict  band_idx -> np.ndarray of shape (N, 2) columns=[theta, F[T]]
     """
-    from scipy.optimize import minimize_scalar
     import matplotlib.pyplot as plt
     al=alatt[:2]
-    ABZ=4.*np.pi**2/(al[0]*al[1])                      # BZ area in AA^-2
-    F_factor=scconst.hbar/(2.*np.pi*scconst.e)*1.e20   # AA^-2 -> T (Onsager)
-
-    def make_rotmat(theta_deg,phi_deg):
-        """Rotation matrix R s.t. R @ B_hat = z_hat.
-        kz-slices in the rotated frame are then perpendicular to B.
-        R = Ry(-theta) @ Rz(-phi)"""
-        th,ph=np.deg2rad(theta_deg),np.deg2rad(phi_deg)
-        cp,sp=np.cos(ph),np.sin(ph)
-        ct,st=np.cos(th),np.sin(th)
-        Rz=np.array([[ cp, sp, 0.],[-sp, cp, 0.],[0., 0., 1.]])  # Rz(-phi)
-        Ry=np.array([[ ct, 0.,-st],[ 0., 1.,  0.],[ st, 0., ct]])  # Ry(-theta)
-        return Ry@Rz
-
-    def shoelace_area(ct):
-        x,y=ct[:,0],ct[:,1]
-        return 0.5*np.abs(np.dot(x,np.roll(y,-1))-np.dot(y,np.roll(x,-1)))
-
-    def get_band_area(v2,blist,band_idx):
-        if band_idx not in blist:
-            return None
-        j=blist.index(band_idx)
-        return sum(shoelace_area(c) for c in v2[j])*ABZ
-
-    def S_at_kz(kz,band_idx,rotmat):
-        """S(kz) for minimize_scalar: one diagonalization per call"""
-        eig=plibs.get_eigs_2d(mesh,rvec,ham_r,S_r,rotmat,kz)
-        v2,blist=plibs.get_kf_points(eig,mesh,mu,kz)
-        s=get_band_area(v2,blist,band_idx)
-        return s if s is not None else 0.
+    ABZ=4.*np.pi**2/(al[0]*al[1])
+    F_factor=hbar/(2.*np.pi)*1.e20   # AA^-2 -> T (Onsager): hbar[eV*s]/(2pi) * 1e20[AA^-2->m^-2]
 
     all_results={}  # band_idx -> [(theta, F), ...]
 
     for theta in theta_list:
-        rotmat=make_rotmat(theta,phi)
-        kz0=np.linspace(0.,.5,meshkz,True)
-        S_scan={}
-        eig_cache={}
+        rotmat=plibs.make_rotmat(theta,phi)
+        S_scan,eig_cache=plibs.scan_fs_area(mesh,rvec,ham_r,S_r,rotmat,mu,ABZ,meshkz)
 
-        # --- Phase 1: scan S(kz) at mu ---
-        for kz in kz0:
-            eig=plibs.get_eigs_2d(mesh,rvec,ham_r,S_r,rotmat,kz)
-            eig_cache[kz]=eig
-            v2,blist=plibs.get_kf_points(eig,mesh,mu,kz)
-            for band_idx in blist:
-                S=get_band_area(v2,blist,band_idx)
-                S_scan.setdefault(band_idx,[]).append((kz,S))
-
-        # --- Phase 2: find extremal kz -> F ---
         for band_idx in S_scan:
             data=np.array(S_scan[band_idx])
             kz_arr,S_arr=data[:,0],data[:,1]
             if len(kz_arr)<3:
                 continue
-
-            dS=np.diff(S_arr)
-            cand_kz=[kz_arr[0],kz_arr[-1]]
-            for i in range(len(dS)-1):
-                if dS[i]*dS[i+1]<0:
-                    sign=-1. if dS[i]>0 else 1.
-                    res=minimize_scalar(
-                        lambda kz,s=sign,b=band_idx,rm=rotmat: s*S_at_kz(kz,b,rm),
-                        bounds=(kz_arr[i],kz_arr[i+2]),method='bounded',
-                        options={'xatol':1e-4,'maxiter':10})
-                    cand_kz.append(res.x)
+            cand_kz=plibs.find_extremal_kz(kz_arr,S_arr,band_idx,mesh,rvec,ham_r,S_r,rotmat,mu,ABZ)
 
             for kz_ext in cand_kz:
                 eig=eig_cache.get(kz_ext)
                 if eig is None:
                     eig=plibs.get_eigs_2d(mesh,rvec,ham_r,S_r,rotmat,kz_ext)
                 v2,blist_ext=plibs.get_kf_points(eig,mesh,mu,kz_ext)
-                S0=get_band_area(v2,blist_ext,band_idx)
-                if S0 is None or S0==0.:
+                S0=plibs.get_band_area(v2,blist_ext,band_idx,ABZ)
+                if not S0:
                     continue
                 all_results.setdefault(band_idx,[]).append((theta,S0*F_factor))
 

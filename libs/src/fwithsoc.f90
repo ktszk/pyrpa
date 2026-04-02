@@ -57,7 +57,6 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,ol
      count=0 !count too small eigenvalue
      iter_loop:do i_iter=1, itemax !iteration
         call mkfk_trs_soc(fk,Gk,delta,sgnsig,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym)
-        !something worng mkdelta_soc
         call mkdelta_soc(newdelta,fk,chi,Vmat,sgnsig,sgnsig2,kmap,invk,invs,invschi,olist,slist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,gap_sym)
         !$omp parallel workshare
         newdelta(:,:,:,:)=newdelta(:,:,:,:)*weight-delta(:,:,:,:)*norm2
@@ -1310,7 +1309,7 @@ subroutine calc_sigma_soc(sigmak,Gk,Vsigma,Vmat,kmap,invk,invs,olist,slist,sgnsi
   !!@param    kmap,in: property of k-point
   !!@param    invk,in: list of reverse k-points
   !!@param   olist,in: property of chi footnote
-  !!@param    temp,in: Tempearature
+  !!@param    temp,in: Temperature
   !!@param   Nkall,in: Number of all k-points
   !!@param      Nk,in: Number of k-points
   !!@param      Nw,in: Number of Matsubara frequencies

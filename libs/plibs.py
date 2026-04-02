@@ -11,7 +11,7 @@ import numpy as np, scipy.optimize as scopt, scipy.linalg as sclin
 def import_hoppings(fname:str,ftype:int) -> tuple[np.ndarray,np.ndarray,int,int]:
     """
     @fn import_hoppings()
-    @brief this function import hopping parameters from files
+    @brief This function imports hopping parameters from files
     @param fname: Name of import files
     @param ftype: File format of import files
     @retval  rvec: the array of r-vector, size:(nr,3)
@@ -76,7 +76,7 @@ def import_hoppings(fname:str,ftype:int) -> tuple[np.ndarray,np.ndarray,int,int]
 def import_MLO_hoppings(name:str) -> tuple[np.ndarray,np.ndarray,np.ndarray,int,int]:
     """
     @fn import_MLO_hoppings()
-    @brief this function import MLO hopping parameters from files
+    @brief This function imports MLO hopping parameters from files
     @param name: File name
     @retval  rvec: the array of r-vector, size:(nr,3)
     @retval ham_r: the array of hopping integrals, size:(nr,no,no)
@@ -98,7 +98,7 @@ def import_MLO_hoppings(name:str) -> tuple[np.ndarray,np.ndarray,np.ndarray,int,
 def get_bvec(avec: np.ndarray) -> np.ndarray:
     """
     @fn get_bvec()
-    @brief THis function generate reciprocal lattice vector from primitive translation vector
+    @brief This function generates reciprocal lattice vector from primitive translation vector
     @param  avec: primitive translation vector
     @return bvec: reciprocal lattice vector
     """
@@ -109,7 +109,7 @@ def get_eigs(klist: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.nda
              sw_uni: bool = False, sw_std: bool = False) -> tuple[np.ndarray, np.ndarray] | np.ndarray:
     """
     @fn get_eigs
-    @brief This function generate eigenvalues of Hamiltonian
+    @brief This function generates eigenvalues of Hamiltonian
     @param  klist: list of k-points
     @param  ham_r: hopping parameters
     @param    S_r: overlap integrals
@@ -145,8 +145,8 @@ def calc_mu(eig,Nk,fill:float,temp:float)-> float:
     """
     @fn calc_mu()
     @brief This function obtains chemical potential mu
-    @param   eig: Eigenvales array
-    @param    Nk: Number of k-point
+    @param   eig: Eigenvalues array
+    @param    Nk: Number of k-points
     @param  fill: band filling
     @param  temp: Temperature
     @return   mu: chemical potential
@@ -161,6 +161,15 @@ def calc_mu(eig,Nk,fill:float,temp:float)-> float:
     return mu
 
 def calc_mu_imp(eigs,Nsite,fill:float,temp:float)-> float:
+    """
+    @fn calc_mu_imp
+    @brief Calculate the chemical potential for an impurity system using the bisection method (brentq).
+    @param   eigs: Eigenvalues array (all k-points and bands)
+    @param  Nsite: Number of sites in the unit cell
+    @param   fill: Target electron filling (electrons per site)
+    @param   temp: Temperature in eV
+    @return    mu: Chemical potential in eV
+    """
     itemp=1./temp
     def func(mu):
         return(fill*Nsite-0.5*(1.0-np.tanh(0.5*(eigs-mu)*itemp)).sum())
@@ -172,10 +181,10 @@ def calc_mu_imp(eigs,Nsite,fill:float,temp:float)-> float:
 def gen_rlist(Nx: int, Ny: int, Nz: int) -> np.ndarray:
     """
     @fn gen_rlist
-    @brief This function generate the list of r-vector
-    @param     Nx: Number of site of x-axis
-    @param     Ny: Number of site of y-axis
-    @param     Nz: Number of site of z-axis
+    @brief This function generates the list of r-vectors
+    @param     Nx: Number of sites along x-axis
+    @param     Ny: Number of sites along y-axis
+    @param     Nz: Number of sites along z-axis
     @return rlist: The array of r-vectors
     """
     x0=np.linspace(0,Nx,Nx,False)
@@ -189,7 +198,7 @@ def gen_rlist(Nx: int, Ny: int, Nz: int) -> np.ndarray:
 def gen_klist_with_kmap(Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, np.ndarray]:
     """
     @fn gen_klist_with_kmap
-    @brief This function generate the list of r-vector
+    @brief This function generates the list of k-vectors
     @param     Nx: Number of kx mesh
     @param     Ny: Number of ky mesh
     @param     Nz: Number of kz mesh
@@ -207,10 +216,10 @@ def gen_klist_with_kmap(Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, np.ndarr
 def gen_klist(Nx: int, Ny: int, Nz: int | None = None, sw_pp: bool = True, kz: float = 0.0) -> tuple[int, np.ndarray]:
     """
     @fn gen_klist()
-    @brief This function generate k-point list messhed Nx,Ny,Nz
+    @brief This function generates a k-point list meshed in Nx,Ny,Nz
     @param     Nx: Number of axis 1 mesh (usually kx mesh)
     @param     Ny: Number of axis 2 mesh (usually ky mesh)
-    @param     Nx: Number of axis 3 mesh (usually kz mesh)
+    @param     Nz: Number of axis 3 mesh (usually kz mesh)
     @param  sw_pp: switch output 2D mesh or 3D mesh
     @param     kz: value of axis 3 at 2D mesh (use only if sw_pp is True)
     @retval    Nk: number of k-points
@@ -234,7 +243,7 @@ def gen_klist(Nx: int, Ny: int, Nz: int | None = None, sw_pp: bool = True, kz: f
 def mk_klist(k_list: np.ndarray | list, N: int, bvec: np.ndarray) -> tuple[np.ndarray, np.ndarray, list]:
     """
     @fn mk_klist()
-    @brief This function generate k-point list for symmetry line
+    @brief This function generates k-point list for symmetry line
     @param  k_list: the list of symmetry points
     @param       N: Number of mesh between symmetry points
     @param    bvec: reciprocal lattice vector
@@ -263,7 +272,7 @@ def mk_klist(k_list: np.ndarray | list, N: int, bvec: np.ndarray) -> tuple[np.nd
 def mk_qlist(k_set: np.ndarray | list, Nx: int, Ny: int, Nz: int, bvec: np.ndarray) -> tuple[np.ndarray, np.ndarray, list]:
     """
     @fn mk_qlist()
-    @brief This function generate q-point list for symmetry line
+    @brief This function generates q-point list for symmetry line
     @param   k_set: the list of symmetry points
     @param      Nx: Number of x-mesh
     @param      Ny: Number of y-mesh
@@ -332,6 +341,114 @@ def get_eigs_2d(mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray,
     eig,_=get_eigs(klist,ham_r,S_r,rvec1)
     return eig
 
+def shoelace_area(ct: np.ndarray) -> float:
+    """
+    @fn shoelace_area()
+    @brief Compute area of a closed contour in normalized BZ coordinates via shoelace formula
+    @param    ct: contour point array shape (N, 3), columns [kx, ky, kz] in normalized coords
+    @return     : contour area in normalized BZ units
+    """
+    x,y=ct[:,0],ct[:,1]
+    return 0.5*np.abs(np.dot(x,np.roll(y,-1))-np.dot(y,np.roll(x,-1)))
+
+def get_band_area(v2: list, blist: list, band_idx: int, ABZ: float) -> float | None:
+    """
+    @fn get_band_area()
+    @brief Compute total Fermi surface cross-section area for one band in AA^-2
+           Sums over disconnected contour pieces. Returns None if band has no FS at this kz.
+    @param      v2: list of contour lists, one entry per FS band
+    @param   blist: list of band indices corresponding to entries in v2
+    @param band_idx: target band index
+    @param     ABZ: Brillouin zone area in AA^-2
+    @return       : total area in AA^-2, or None if band_idx not in blist
+    """
+    if band_idx not in blist:
+        return None
+    j=blist.index(band_idx)
+    return sum(shoelace_area(ct) for ct in v2[j])*ABZ
+
+def make_rotmat(theta_deg: float, phi_deg: float) -> np.ndarray:
+    """
+    @fn make_rotmat()
+    @brief Build rotation matrix R s.t. R @ B_hat = z_hat,
+           so that kz-slices in the rotated frame are perpendicular to B.
+           R = Ry(-theta) @ Rz(-phi)
+    @param theta_deg: polar angle of B from z-axis [deg]
+    @param  phi_deg: azimuthal angle of B [deg]
+    @return  rotmat: 3x3 rotation matrix
+    """
+    th,ph=np.deg2rad(theta_deg),np.deg2rad(phi_deg)
+    cp,sp=np.cos(ph),np.sin(ph)
+    ct,st=np.cos(th),np.sin(th)
+    Rz=np.array([[ cp, sp, 0.],[-sp, cp, 0.],[0., 0., 1.]])   # Rz(-phi)
+    Ry=np.array([[ ct, 0.,-st],[ 0., 1.,  0.],[ st, 0., ct]]) # Ry(-theta)
+    return Ry@Rz
+
+def scan_fs_area(mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray,
+                 rotmat: np.ndarray, mu: float, ABZ: float,
+                 meshkz: int=20) -> tuple[dict, dict]:
+    """
+    @fn scan_fs_area()
+    @brief Phase-1 scan: compute cross-section area S(kz) at mu for all FS bands
+    @param    mesh: k-mesh for 2D kx-ky grid
+    @param    rvec: r vector of hoppings
+    @param   ham_r: hopping parameters
+    @param     S_r: overlap integrals
+    @param  rotmat: rotation matrix mapping B_hat -> z_hat
+    @param      mu: chemical potential
+    @param     ABZ: Brillouin zone area in AA^-2
+    @param  meshkz: number of kz scan points in [0, 0.5]
+    @return S_scan: dict band_idx -> [(kz, S[AA^-2]), ...]
+    @return eig_cache: dict kz -> eig array, reusable in Phase 2
+    """
+    kz0=np.linspace(0.,.5,meshkz,True)
+    S_scan={}
+    eig_cache={}
+    for kz in kz0:
+        eig=get_eigs_2d(mesh,rvec,ham_r,S_r,rotmat,kz)
+        eig_cache[kz]=eig
+        v2,blist=get_kf_points(eig,mesh,mu,kz)
+        for band_idx in blist:
+            S=get_band_area(v2,blist,band_idx,ABZ)
+            S_scan.setdefault(band_idx,[]).append((kz,S))
+    return S_scan,eig_cache
+
+def find_extremal_kz(kz_arr: np.ndarray, S_arr: np.ndarray, band_idx: int,
+                     mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray,
+                     rotmat: np.ndarray, mu: float, ABZ: float) -> list:
+    """
+    @fn find_extremal_kz()
+    @brief Phase-2 extremal search: find kz where dS/dkz=0 by sign-change detection,
+           then refine each bracket with minimize_scalar. BZ boundaries always included.
+    @param  kz_arr: kz values from Phase-1 scan
+    @param   S_arr: S(kz) values from Phase-1 scan
+    @param band_idx: target band index
+    @param    mesh: k-mesh for 2D kx-ky grid
+    @param    rvec: r vector of hoppings
+    @param   ham_r: hopping parameters
+    @param     S_r: overlap integrals
+    @param  rotmat: rotation matrix mapping B_hat -> z_hat
+    @param      mu: chemical potential
+    @param     ABZ: Brillouin zone area in AA^-2
+    @return cand_kz: list of extremal kz values
+    """
+    from scipy.optimize import minimize_scalar
+    def S_at_kz(kz):
+        eig=get_eigs_2d(mesh,rvec,ham_r,S_r,rotmat,kz)
+        v2,blist=get_kf_points(eig,mesh,mu,kz)
+        s=get_band_area(v2,blist,band_idx,ABZ)
+        return s if s is not None else 0.
+    dS=np.diff(S_arr)
+    cand_kz=[kz_arr[0],kz_arr[-1]]
+    for i in range(len(dS)-1):
+        if dS[i]*dS[i+1]<0:
+            sign=-1. if dS[i]>0 else 1.
+            res=minimize_scalar(lambda kz,s=sign: s*S_at_kz(kz),
+                                bounds=(kz_arr[i],kz_arr[i+2]),method='bounded',
+                                options={'xatol':1e-4,'maxiter':10})
+            cand_kz.append(res.x)
+    return cand_kz
+
 def mk_kf(mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, RotMat: np.ndarray, mu: float, kz: float) -> tuple[list, list]:
     """
     @fn mk_kf()
@@ -383,6 +500,20 @@ def gen_3d_surf_points(mesh: int, rvec: np.ndarray, ham_r: np.ndarray,
 
 def get_colors(klist: np.ndarray, blist, mrot, rvec: np.ndarray, ham_r: np.ndarray,
                S_r: np.ndarray, ol, color_option: int, sw_2d: bool = False):
+    """
+    @fn get_colors
+    @brief Compute color weights for Fermi surface visualization (orbital weight or velocity magnitude).
+    @param        klist: List of k-points on the Fermi surface contours
+    @param        blist: List of band indices corresponding to each contour in klist
+    @param         mrot: Rotation matrix for velocity projection
+    @param         rvec: Real-space lattice vectors (Wannier R-vectors)
+    @param        ham_r: Hamiltonian in real space (Wannier representation)
+    @param          S_r: Overlap matrix in real space
+    @param           ol: Orbital index or list of orbital indices for weight coloring
+    @param color_option: 0 = no color, 1 = orbital weight, 2 = velocity magnitude
+    @param        sw_2d: If True, treat klist as a nested list (2D Fermi surface mode)
+    @return       clist: List of color arrays for each contour segment, or [] if color_option==0
+    """
     def get_col(cl,ol):
         col=(np.abs(cl[:,ol])**2 if isinstance(ol,int)
              else (np.abs(cl[:,ol])**2).sum(axis=1)).round(4)
@@ -412,6 +543,21 @@ def get_colors(klist: np.ndarray, blist, mrot, rvec: np.ndarray, ham_r: np.ndarr
 
 def get_emesh(Nx: int, Ny: int, Nz: int, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray,
               avec: np.ndarray, sw_uni: bool = False, sw_veloc: bool = False, sw_mass: bool = False):
+    """
+    @fn get_emesh
+    @brief Generate the band energy mesh on a full 3D k-grid with optional eigenvectors, velocities, and inverse mass.
+    @param     Nx: Number of k-points along kx
+    @param     Ny: Number of k-points along ky
+    @param     Nz: Number of k-points along kz
+    @param  ham_r: Hamiltonian in real space (Wannier representation)
+    @param    S_r: Overlap matrix in real space
+    @param   rvec: Real-space lattice vectors (Wannier R-vectors)
+    @param   avec: Lattice vectors (used for velocity/mass calculation)
+    @param sw_uni: If True, also return eigenvectors and k-point list
+    @param sw_veloc: If True, compute and return group velocities
+    @param sw_mass: If True (requires sw_veloc=True), also compute and return inverse effective mass tensor
+    @return (Nk, eig, [vk], [imass], kweight): Tuple of k-point count, eigenvalues, and optionally velocities/mass
+    """
     Nk, klist = gen_klist(Nx, Ny, Nz, sw_pp=False)
     eig, uni = get_eigs(klist, ham_r, S_r, rvec)
     kweight = np.ones(len(eig), dtype=np.float64)
@@ -433,6 +579,16 @@ def get_emesh(Nx: int, Ny: int, Nz: int, ham_r: np.ndarray, S_r: np.ndarray, rve
             return Nk,eig,kweight
 
 def get_ptv(alatt: np.ndarray, deg: np.ndarray, brav: int) -> tuple[np.ndarray, np.ndarray]:
+    """
+    @fn get_ptv
+    @brief Generate primitive translation vectors (avec) and rotation matrix (Arot) for a given Bravais lattice type.
+    @param  alatt: Lattice constants [a, b, c] in Angstrom
+    @param    deg: Lattice angles [alpha, beta, gamma] in degrees (used for brav>=8)
+    @param   brav: Bravais lattice type index (0=simple cubic, 1=FCC, 2=BCC, 3=hexagonal,
+                   4=trigonal, 5=base-centered, 6=FCC2, 7=BCC2, >=8=general triclinic)
+    @retval  avec: Primitive translation vectors as rows (shape [3,3])
+    @retval  Arot: Rotation matrix defining the primitive cell in terms of conventional cell
+    """
     if brav==0: #simple
         Arot=np.array([[ 1., 0., 0.],[ 0., 1., 0.],[ 0.,0., 1.]])
     elif brav==1: #face center
@@ -468,6 +624,13 @@ def get_ptv(alatt: np.ndarray, deg: np.ndarray, brav: int) -> tuple[np.ndarray, 
     return avec,Arot
 
 def get_symm_line(brav:int)->tuple[list,list]:
+    """
+    @fn get_symm_line
+    @brief Return the high-symmetry k-point path and corresponding axis labels for a given Bravais lattice.
+    @param    brav: Bravais lattice type index (same convention as get_ptv)
+    @retval k_list: List of high-symmetry k-points in fractional coordinates
+    @retval xlabel: List of label strings (LaTeX) for each high-symmetry point
+    """
     if brav==0: #simple
         k_list=[[0.,0.,.5],[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.],[0.,0.,0.]]
         xlabel=['Z',r'$\Gamma$','X','M',r'$\Gamma$']
@@ -491,10 +654,31 @@ def get_symm_line(brav:int)->tuple[list,list]:
     return k_list,xlabel
 
 def BZedge(brav: int) -> None:
+    """
+    @fn BZedge
+    @brief Placeholder function for Brillouin zone edge drawing (not yet implemented).
+    @param brav: Bravais lattice type index
+    @return None
+    """
     pass
 
 def get_conductivity(mu: float, temp: float, eig: np.ndarray, vk: np.ndarray, Nw: int, Emax: float,
                      idelta: float = 1.e-3) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    @fn get_conductivity
+    @brief Compute transport coefficients L11, L12, L22 as a function of frequency using the Kubo formula.
+    @param      mu: Chemical potential in eV
+    @param    temp: Temperature in eV
+    @param     eig: Eigenvalues array [Nk, Nband]
+    @param      vk: Group velocities array [Nk, Nband, 3]
+    @param      Nw: Number of frequency points
+    @param    Emax: Maximum frequency in eV
+    @param  idelta: Broadening parameter (Lorentzian width) in eV
+    @retval    L11: Charge conductivity spectrum array [Nw, 3, 3]
+    @retval    L12: Thermoelectric coefficient spectrum array [Nw, 3, 3]
+    @retval    L22: Thermal conductivity spectrum array [Nw, 3, 3]
+    @retval  wlist: Frequency mesh array [Nw]
+    """
     wlist=np.linspace(0,Emax,Nw)
     ffermi=flibs.get_ffermi(eig,mu,temp)
     L11=[]
@@ -513,6 +697,24 @@ def get_conductivity(mu: float, temp: float, eig: np.ndarray, vk: np.ndarray, Nw
 def chis_spectrum(mu: float, temp: float, Smat: np.ndarray, klist: np.ndarray, qlist: np.ndarray,
                   olist: np.ndarray, eig: np.ndarray, uni: np.ndarray, Nw: int, Emax: float,
                   idelta: float = 1.e-3) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    @fn chis_spectrum
+    @brief Compute the spin susceptibility chi_s spectrum along a q-path and write results to 'chi0.dat'.
+    @param      mu: Chemical potential in eV
+    @param    temp: Temperature in eV
+    @param    Smat: Stoner interaction matrix [Norb, Norb]
+    @param   klist: k-point list [Nk, 3]
+    @param   qlist: q-point path list [Nq, 3]
+    @param   olist: Orbital index list for susceptibility calculation
+    @param     eig: Eigenvalues array [Nk, Nband]
+    @param     uni: Eigenvectors array [Nk, Norb, Nband]
+    @param      Nw: Number of frequency points
+    @param    Emax: Maximum frequency in eV
+    @param  idelta: Broadening parameter (Lorentzian width) in eV
+    @retval   chisq: Spin susceptibility trace at each q-point [Nq, Nw]
+    @retval chis_orbq: Orbital-resolved spin susceptibility [Nq, ...]
+    @retval   wlist: Frequency mesh array [Nw]
+    """
     ffermi=flibs.get_ffermi(eig,mu,temp)
     wlist=np.linspace(0,Emax,Nw)
     chisq=[]
@@ -539,6 +741,24 @@ def chis_spectrum(mu: float, temp: float, Smat: np.ndarray, klist: np.ndarray, q
 def chis_q_point(q: np.ndarray, eig: np.ndarray, uni: np.ndarray, Emax: float,
                  Nw: int, mu: float, temp: float, Smat: np.ndarray, klist: np.ndarray,
                  olist: np.ndarray, idelta: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    @fn chis_q_point
+    @brief Compute the spin susceptibility chi_s at a single q-point across a frequency mesh.
+    @param       q: Single q-vector in fractional coordinates [3]
+    @param     eig: Eigenvalues array [Nk, Nband]
+    @param     uni: Eigenvectors array [Nk, Norb, Nband]
+    @param    Emax: Maximum frequency in eV
+    @param      Nw: Number of frequency points
+    @param      mu: Chemical potential in eV
+    @param    temp: Temperature in eV
+    @param    Smat: Stoner interaction matrix [Norb, Norb]
+    @param   klist: k-point list [Nk, 3]
+    @param   olist: Orbital index list for susceptibility calculation
+    @param  idelta: Broadening parameter (Lorentzian width) in eV
+    @retval  trchis: Trace of spin susceptibility chi_s [Nw]
+    @retval chis_orb: Orbital-resolved spin susceptibility
+    @retval   wlist: Frequency mesh array [Nw]
+    """
     ffermi=flibs.get_ffermi(eig,mu,temp)
     wlist=np.linspace(0,Emax,Nw)
     qshift=flibs.get_qshift(klist,q)
@@ -550,6 +770,25 @@ def chis_q_point(q: np.ndarray, eig: np.ndarray, uni: np.ndarray, Emax: float,
 def chis_qmap(Nx: int, Ny: int, Ecut: float, mu: float, temp: float, Smat: np.ndarray,
               klist: np.ndarray, olist: np.ndarray, eig: np.ndarray, uni: np.ndarray,
               idelta: float = 1.e-3) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    @fn chis_qmap
+    @brief Compute the spin susceptibility chi_s map on the qx-qy plane at a fixed energy cutoff.
+    @param     Nx: Number of q-points along qx
+    @param     Ny: Number of q-points along qy
+    @param   Ecut: Energy cutoff for the susceptibility integration in eV
+    @param     mu: Chemical potential in eV
+    @param   temp: Temperature in eV
+    @param   Smat: Stoner interaction matrix [Norb, Norb]
+    @param  klist: k-point list [Nk, 3]
+    @param  olist: Orbital index list for susceptibility calculation
+    @param    eig: Eigenvalues array [Nk, Nband]
+    @param    uni: Eigenvectors array [Nk, Norb, Nband]
+    @param idelta: Broadening parameter (Lorentzian width) in eV
+    @retval  chis: Spin susceptibility map [Ny, Nx]
+    @retval  chi0: Bare susceptibility map [Ny, Nx]
+    @retval    qx: qx coordinate mesh [Ny, Nx]
+    @retval    qy: qy coordinate mesh [Ny, Nx]
+    """
     ffermi=flibs.get_ffermi(eig,mu,temp)
     chis,chi0=flibs.chis_qmap(uni,eig,ffermi,klist,Smat,olist,Nx,Ny,temp,Ecut,idelta)
     x0=np.linspace(0,1,Nx,False)
@@ -560,6 +799,23 @@ def chis_qmap(Nx: int, Ny: int, Ecut: float, mu: float, temp: float, Smat: np.nd
 def phi_spectrum(mu: float, temp: float, klist: np.ndarray, qlist: np.ndarray, olist: np.ndarray,
                  eig: np.ndarray,   uni: np.ndarray, Nw: int, Emax: float,
                  idelta: float = 1.e-3) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    @fn phi_spectrum
+    @brief Compute the pairing susceptibility phi spectrum along a q-path (anomalous susceptibility).
+    @param      mu: Chemical potential in eV
+    @param    temp: Temperature in eV
+    @param   klist: k-point list [Nk, 3]
+    @param   qlist: q-point path list [Nq, 3]
+    @param   olist: Orbital index list for phi calculation
+    @param     eig: Eigenvalues array [Nk, Nband]
+    @param     uni: Eigenvectors array [Nk, Norb, Nband]
+    @param      Nw: Number of frequency points
+    @param    Emax: Maximum frequency in eV
+    @param  idelta: Broadening parameter (Lorentzian width) in eV
+    @retval    phiq: Pairing susceptibility trace at each q-point [Nq, Nw]
+    @retval phi_orbq: Orbital-resolved pairing susceptibility [Nq, ...]
+    @retval   wlist: Frequency mesh array [Nw]
+    """
     ffermi=flibs.get_ffermi(eig,mu,temp)
     wlist=np.linspace(0,Emax,Nw)
     phiq=[]
@@ -579,6 +835,24 @@ def phi_spectrum(mu: float, temp: float, klist: np.ndarray, qlist: np.ndarray, o
 def phi_qmap(Nx: int, Ny: int, Ecut: float, mu: float, temp: float, klist: np.ndarray,
              olist: np.ndarray, eig: np.ndarray, uni: np.ndarray, idelta: float = 1.e-3,
              sw_omega: bool = True) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    @fn phi_qmap
+    @brief Compute the pairing susceptibility phi map on the qx-qy plane at a fixed energy cutoff.
+    @param      Nx: Number of q-points along qx
+    @param      Ny: Number of q-points along qy
+    @param    Ecut: Energy cutoff for the susceptibility integration in eV
+    @param      mu: Chemical potential in eV
+    @param    temp: Temperature in eV
+    @param   klist: k-point list [Nk, 3]
+    @param   olist: Orbital index list for phi calculation
+    @param     eig: Eigenvalues array [Nk, Nband]
+    @param     uni: Eigenvectors array [Nk, Norb, Nband]
+    @param  idelta: Broadening parameter (Lorentzian width) in eV
+    @param sw_omega: If True, integrate over Matsubara frequencies; if False, use static limit
+    @retval    phi: Pairing susceptibility map [Ny, Nx]
+    @retval     qx: qx coordinate mesh [Ny, Nx]
+    @retval     qy: qy coordinate mesh [Ny, Nx]
+    """
     ffermi=flibs.get_ffermi(eig,mu,temp)
     phi=flibs.phi_qmap(uni,eig,ffermi,klist,olist,Nx,Ny,mu,temp,Ecut,idelta,sw_omega)
     x0=np.linspace(0,1,Nx,False)
@@ -587,6 +861,14 @@ def phi_qmap(Nx: int, Ny: int, Ecut: float, mu: float, temp: float, klist: np.nd
     return phi,qx,qy
 
 def get_chi_orb_list(Norb: int, site_prof: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """
+    @fn get_chi_orb_list
+    @brief Generate the orbital index pair list for susceptibility calculation from site profile.
+    @param    Norb: Total number of orbitals in the Hamiltonian
+    @param site_prof: Array of orbital counts per site (e.g. [3, 3] for two 3-orbital sites)
+    @retval chiolist: Array of orbital index pairs (1-based) [Npairs, 2]
+    @retval    site: Array of site indices corresponding to each orbital pair [Npairs]
+    """
     if(len(site_prof)==1):
         tmp=np.arange(Norb)+1
         o1,o2=np.meshgrid(tmp,tmp)
@@ -610,6 +892,15 @@ def get_chi_orb_list(Norb: int, site_prof: np.ndarray) -> tuple[np.ndarray, np.n
     return chiolist,site
 
 def get_initial_gap(kmap: np.ndarray, klist: np.ndarray, Norb: int, gap_sym: int) -> np.ndarray:
+    """
+    @fn get_initial_gap
+    @brief Generate an initial gap function with the specified pairing symmetry for gap equation iteration.
+    @param    kmap: k-point index map [Nk, 3] (integer grid indices)
+    @param   klist: k-point list in fractional coordinates [Nk, 3]
+    @param    Norb: Number of orbitals in the Hamiltonian
+    @param gap_sym: Symmetry index: 0=s, 1=dx2-y2, 2=s+-, 3=dxy, -1=px, -2=py
+    @return init_gap: Initial gap function array [Norb, Nk]
+    """
     if gap_sym>=0:
         gapsym=['s','dx2-y2','spm','dxy']
         print('gap symmetry is '+gapsym[gap_sym])
@@ -636,6 +927,21 @@ def get_initial_gap(kmap: np.ndarray, klist: np.ndarray, Norb: int, gap_sym: int
 
 def calc_carrier(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray,
                  Nx: int, Ny: int, Nz: int, fill: float, temp: float, with_spin: bool = False) -> np.ndarray:
+    """
+    @fn calc_carrier
+    @brief Calculate the carrier density (electrons/cm³) from the Fermi-Dirac distribution derivative.
+    @param      rvec: Real-space lattice vectors (Wannier R-vectors)
+    @param     ham_r: Hamiltonian in real space (Wannier representation)
+    @param       S_r: Overlap matrix in real space
+    @param      avec: Lattice vectors (rows are primitive vectors) in Angstrom
+    @param        Nx: Number of k-points along kx
+    @param        Ny: Number of k-points along ky
+    @param        Nz: Number of k-points along kz
+    @param      fill: Target electron filling (electrons per unit cell)
+    @param      temp: Temperature in eV
+    @param with_spin: If True, include spin degeneracy factor (not yet used)
+    @return   n_carr: Carrier density array [Nband] in cm⁻³
+    """
     Nk,eig,kweight=get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec.T)
     Vuc=sclin.det(avec)*1e-24
     mu=calc_mu(eig,Nk,fill,temp)

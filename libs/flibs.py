@@ -5,10 +5,11 @@ flibs=np.ctypeslib.load_library("libs/libfmod.so",".")
 #interface for fmod subroutines
 
 def omp_params() ->tuple[int,bool]:
-    """Query the underlying library for OpenMP configuration.
-    Returns a tuple (num_threads, valid_flag).  `num_threads` is the
-    maximum number of threads the Fortran code will use; `valid_flag`
-    indicates whether OpenMP was initialized correctly.
+    """
+    @fn omp_params
+    @brief Query the underlying Fortran library for OpenMP configuration.
+    @retval num_threads: Maximum number of OpenMP threads the Fortran code will use
+    @retval  valid_flag: True if OpenMP was initialized correctly
     """
     omp_num=c_int64()
     omp_check=c_bool()
@@ -19,18 +20,15 @@ def omp_params() ->tuple[int,bool]:
 
 def gen_ham(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
             Ovl_r: np.ndarray | None = None) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
-    """Compute k‑space Hamiltonian from real‑space hopping blocks.
-    Parameters
-    ----------
-    klist : (Nk,3) float64 list of reciprocal vectors.
-    ham_r : (Nr, Norb, Norb) complex128 real‑space Hamiltonian blocks.
-    rvec : (Nr,3) float64 corresponding real‑space vectors.
-    Ovl_r : same as ``ham_r``, optional overlap blocks; if provided the function returns a tuple ``(hamk,Ovlk)``.
-
-    Returns
-    -------
-    hamk : (Nk, Norb, Norb) complex128 Hamiltonian in k space.
-    Ovlk : (Nk, Norb, Norb) complex128, optional Overlap matrix, only returned when ``Ovl_r`` is given.
+    """
+    @fn gen_ham
+    @brief Compute the k-space Hamiltonian by Fourier-transforming real-space hopping blocks.
+    @param  klist: k-point list in fractional coordinates [Nk, 3]
+    @param  ham_r: Real-space Hamiltonian blocks [Nr, Norb, Norb] complex128
+    @param   rvec: Real-space displacement vectors [Nr, 3]
+    @param  Ovl_r: Optional overlap matrix blocks [Nr, Norb, Norb]; if given, also returns Ovlk
+    @retval  hamk: k-space Hamiltonian [Nk, Norb, Norb] complex128
+    @retval  Ovlk: k-space overlap matrix [Nk, Norb, Norb] complex128 (only when Ovl_r is given)
     """
     Nk, Nr = len(klist), len(rvec)
     assert ham_r.ndim == 3, "ham_r must be a 3‑D array"
@@ -56,17 +54,14 @@ def gen_ham(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
 
 def get_eig(hamk: np.ndarray, Ovlk: np.ndarray | None = None,
             sw: bool = True) -> tuple[np.ndarray, np.ndarray] | np.ndarray:
-    """Diagonalize Hamiltonian (and overlap if provided).
-    Parameters
-    ----------
-    hamk : (Nk, Norb, Norb) complex128 k‑space Hamiltonian.
-    Ovlk : same shape as ``hamk`` or ``None`` overlap matrices; if supplied the generalized eigenvalue problem is solved.
-    sw : bool if ``True`` return both eigenvalues and eigenvectors, otherwise just eigenvalues.
-
-    Returns
-    -------
-    eig : (Nk, Norb) float64 eigenvalues for each k point.
-    uni : (Nk, Norb, Norb) complex128 eigenvectors (only returned when ``sw`` is ``True``).
+    """
+    @fn get_eig
+    @brief Diagonalize the k-space Hamiltonian, optionally solving the generalized eigenvalue problem.
+    @param  hamk: k-space Hamiltonian [Nk, Norb, Norb] complex128
+    @param  Ovlk: Overlap matrices [Nk, Norb, Norb] complex128; if given, solves generalized EVP
+    @param    sw: If True, return both eigenvalues and eigenvectors; if False, return only eigenvalues
+    @retval  eig: Eigenvalues [Nk, Norb] float64
+    @retval  uni: Eigenvectors [Nk, Norb, Norb] complex128 (only returned when sw=True)
     """
     Nk = len(hamk)
     Norb = int(np.sqrt(hamk.size / Nk))
@@ -99,17 +94,13 @@ def get_eig(hamk: np.ndarray, Ovlk: np.ndarray | None = None,
         return eig
 
 def get_ffermi(eig: np.ndarray, mu: float, temp: float) -> np.ndarray:
-    """Compute Fermi–Dirac occupations from eigenvalues.
-    Parameters
-    ----------
-    eig : (Nk, Norb) float64 eigenvalues for each k point.
-    mu : float chemical potential.
-    temp : float temperature (same units as eigenvalues).
-
-    Returns
-    -------
-    ffermi : (Nk, Norb) float64
-        occupation numbers, one per state.
+    """
+    @fn get_ffermi
+    @brief Compute Fermi-Dirac occupation numbers from eigenvalues.
+    @param    eig: Eigenvalues [Nk, Norb] float64
+    @param     mu: Chemical potential in eV
+    @param   temp: Temperature in eV
+    @return ffermi: Fermi-Dirac occupation numbers [Nk, Norb] float64
     """
     Nk = len(eig)
     Norb = int(eig.size / Nk)
@@ -127,15 +118,13 @@ def get_ffermi(eig: np.ndarray, mu: float, temp: float) -> np.ndarray:
     return ffermi
 
 def get_vlm0(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray) -> np.ndarray:
-    """Compute band velocity matrices (unrotated) from real‑space data.
-    Parameters
-    ----------
-    klist : (Nk,3) float64 list of k points.
-    ham_r : (Nr, Norb, Norb) complex128 real‑space Hamiltonian blocks.
-    rvec : (Nr,3) float64 real‑space displacement vectors.
-    Returns
-    -------
-    vk : (Nk, Norb, Norb, 3) complex128 velocity matrix elements for each k point and Cartesian direction.
+    """
+    @fn get_vlm0
+    @brief Compute unrotated band velocity matrices in orbital basis from real-space Hamiltonian.
+    @param  klist: k-point list [Nk, 3] float64
+    @param  ham_r: Real-space Hamiltonian blocks [Nr, Norb, Norb] complex128
+    @param   rvec: Real-space displacement vectors [Nr, 3] float64
+    @return   vk0: Velocity matrix elements [Nk, Norb, Norb, 3] complex128
     """
     Nk, Nr = len(klist), len(rvec)
     Norb = int(np.sqrt(ham_r.size / Nr))
@@ -153,16 +142,13 @@ def get_vlm0(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray) -> np.ndarr
     return vk
 
 def get_vk(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray) -> np.ndarray:
-    """Transform orbital basis velocity data to band basis using rotation matrices.
-    Parameters
-    ----------
-    vk0 : (Nk, Norb, Norb, 3) complex128 raw velocity matrices.
-    mrot : (Nk, Norb, Norb) float64 rotation matrices for each k point.
-    uni : (Nk, Norb, Norb) complex128 eigenvector matrices.
-
-    Returns
-    -------
-    vk : (Nk, Norb, 3) float64 velocities along each Cartesian direction.
+    """
+    @fn get_vk
+    @brief Transform orbital-basis velocity matrices to band-basis velocity expectation values.
+    @param   vk0: Unrotated velocity matrices [Nk, Norb, Norb, 3] complex128
+    @param  mrot: Rotation matrix (lattice-to-Cartesian) [3, 3] float64
+    @param   uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @return   vk: Band velocities [Nk, Norb, 3] float64
     """
     Nk = len(uni)
     Norb = int(np.sqrt(uni.size / Nk))
@@ -179,10 +165,13 @@ def get_vk(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray) -> np.ndarray:
     return vk
 
 def get_vnm(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray) -> np.ndarray:
-    """Compute velocity matrix elements with band indices.
-    Produces a four‑dimensional array containing velocity
-    elements between bands n and m for the three Cartesian
-    directions.
+    """
+    @fn get_vnm
+    @brief Compute inter-band velocity matrix elements v_{nm}(k) for all band pairs and Cartesian directions.
+    @param   vk0: Unrotated velocity matrices [Nk, Norb, Norb, 3] complex128
+    @param  mrot: Rotation matrix (lattice-to-Cartesian) [3, 3] float64
+    @param   uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @return   vnm: Inter-band velocity matrix elements [Nk, Norb, Norb, 3] complex128
     """
     Nk = len(uni)
     Norb = int(np.sqrt(uni.size / Nk))
@@ -200,8 +189,15 @@ def get_vnm(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray) -> np.ndarray:
 
 def get_vnmk(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
              mrot: np.ndarray, uni: np.ndarray) -> np.ndarray:
-    """Convenience wrapper returning band‑indexed velocities.
-    This composes :func:`get_vlm0` and :func:`get_vnm` for a single call.
+    """
+    @fn get_vnmk
+    @brief Convenience wrapper: compute inter-band velocity matrix elements by composing get_vlm0 and get_vnm.
+    @param  klist: k-point list [Nk, 3] float64
+    @param  ham_r: Real-space Hamiltonian blocks [Nr, Norb, Norb] complex128
+    @param   rvec: Real-space displacement vectors [Nr, 3] float64
+    @param   mrot: Rotation matrix (lattice-to-Cartesian) [3, 3] float64
+    @param    uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @return   vnm: Inter-band velocity matrix elements [Nk, Norb, Norb, 3] complex128
     """
     vk0 = get_vlm0(klist, ham_r, rvec)
     vk = get_vnm(vk0, mrot, uni)
@@ -209,24 +205,28 @@ def get_vnmk(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
 
 def get_veloc(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
               mrot: np.ndarray, uni: np.ndarray) -> np.ndarray:
-    """Compute velocity expectation values in rotated band basis.
-    Shortcut for :func:`get_vlm0` followed by :func:`get_vk`.
+    """
+    @fn get_veloc
+    @brief Convenience wrapper: compute band-diagonal velocity expectation values by composing get_vlm0 and get_vk.
+    @param  klist: k-point list [Nk, 3] float64
+    @param  ham_r: Real-space Hamiltonian blocks [Nr, Norb, Norb] complex128
+    @param   rvec: Real-space displacement vectors [Nr, 3] float64
+    @param   mrot: Rotation matrix (lattice-to-Cartesian) [3, 3] float64
+    @param    uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @return    vk: Band velocities [Nk, Norb, 3] float64
     """
     vk0 = get_vlm0(klist, ham_r, rvec)
     vk = get_vk(vk0, mrot, uni)
     return vk
 
 def get_imass0(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray) -> np.ndarray:
-    """Calculate the unrotated inverse of mass tensor at k points.
-    Parameters
-    ----------
-    klist : (Nk,3) float64
-    ham_r : (Nr, Norb, Norb) complex128
-    rvec : (Nr,3) float64
-
-    Returns
-    -------
-    imass0 : (Nk, Norb, Norb, 3, 3) complex128 Inverse of mass tensor before band rotation.
+    """
+    @fn get_imass0
+    @brief Compute the unrotated inverse effective mass tensor in orbital basis.
+    @param   klist: k-point list [Nk, 3] float64
+    @param   ham_r: Real-space Hamiltonian blocks [Nr, Norb, Norb] complex128
+    @param    rvec: Real-space displacement vectors [Nr, 3] float64
+    @return imass0: Inverse mass tensor before band rotation [Nk, Norb, Norb, 3, 3] complex128
     """
     Nk, Nr = len(klist), len(rvec)
     Norb = int(np.sqrt(ham_r.size / Nr))
@@ -247,8 +247,13 @@ def get_imass0(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray) -> np.nda
     return imass0
 
 def get_imassk(imass0: np.ndarray, mrot: np.ndarray, uni: np.ndarray) -> np.ndarray:
-    """Rotate the inverse of mass tensor into band basis.
-    Parameters are the output of :func:`get_imass0`, the rotation matrix ``mrot`` and eigenvectors ``uni``.
+    """
+    @fn get_imassk
+    @brief Rotate the inverse effective mass tensor from orbital basis into band basis.
+    @param  imass0: Unrotated inverse mass tensor [Nk, Norb, Norb, 3, 3] complex128 (output of get_imass0)
+    @param    mrot: Rotation matrix (lattice-to-Cartesian) [3, 3] float64
+    @param     uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @return  imass: Band-basis inverse effective mass tensor [Nk, Norb, 3, 3] float64
     """
     Nk = len(uni)
     Norb = int(np.sqrt(uni.size / Nk))
@@ -266,10 +271,16 @@ def get_imassk(imass0: np.ndarray, mrot: np.ndarray, uni: np.ndarray) -> np.ndar
 
 def get_mass(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray, mrot: np.ndarray,
              uni: np.ndarray, sw_imass: bool = False) -> np.ndarray:
-    """Return either the imaginary mass tensor or its inverse (mass).
-    Parameters
-    ----------
-    sw_imass : bool if ``True`` return the rotated imaginary mass; otherwise return its matrix inverse using ``scipy.linalg.inv``.
+    """
+    @fn get_mass
+    @brief Compute the effective mass tensor or its inverse for all bands at each k-point.
+    @param    klist: k-point list [Nk, 3] float64
+    @param    ham_r: Real-space Hamiltonian blocks [Nr, Norb, Norb] complex128
+    @param     rvec: Real-space displacement vectors [Nr, 3] float64
+    @param     mrot: Rotation matrix (lattice-to-Cartesian) [3, 3] float64
+    @param      uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param sw_imass: If True, return inverse mass (imass) [Nk, Norb, 3, 3]; if False, return mass [Nk, Norb, 3, 3]
+    @return   mass: Effective mass or inverse mass tensor [Nk, Norb, 3, 3]
     """
     import scipy.linalg as sclin
 
@@ -283,21 +294,15 @@ def get_mass(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray, mrot: np.nd
 
 def gen_Green0(eig: np.ndarray, uni: np.ndarray,
                mu: float, temp: float, Nw: int) -> np.ndarray:
-    """Construct non‑interacting Green's function array G(k,iω)
-    This routine wraps the Fortran subroutine ``gen_green0_`` which
-    builds the frequency‑dependent Green's function from eigenvalues
-    and eigenvectors of the Hamiltonian.  The output shape is
-    ``(Norb, Norb, Nw, Nk)`` with complex entries.
-    Parameters
-    ----------
-    eig : (Nk, Norb) float64 eigenvalues at each k‑point
-    uni : (Nk, Norb, Norb) complex128 corresponding eigenvectors
-    mu : float chemical potential
-    temp : float temperature (same units as eigenvalues)
-    Nw : int number of Matsubara frequencies (imaginary axis points)
-    Returns
-    -------
-    Gk : ndarray[complex128] non‑interacting Green's function tensor
+    """
+    @fn gen_Green0
+    @brief Construct the non-interacting Matsubara Green's function G0(k, iω_n).
+    @param   eig: Eigenvalues [Nk, Norb] float64
+    @param   uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param    mu: Chemical potential in eV
+    @param  temp: Temperature in eV
+    @param    Nw: Number of Matsubara frequency points
+    @return   Gk: Non-interacting Green's function [Norb, Norb, Nw, Nk] complex128
     """
     Nk = len(eig)
     Norb = int(eig.size / Nk)
@@ -316,16 +321,14 @@ def gen_Green0(eig: np.ndarray, uni: np.ndarray,
 
 def gen_green(selfen: np.ndarray, hamk: np.ndarray,
               mu: float, temp: float) -> np.ndarray:
-    """Generate interacting Green's function including self‑energy.
-    Parameters
-    ----------
-    selfen : (Norb,Norb,Nw,Nk) complex128 self‑energy tensor in band basis
-    hamk : (Nk, Norb, Norb) complex128 k‑space Hamiltonian
-    mu : float chemical potential
-    temp : float temperature
-    Returns
-    -------
-    Gk : ndarray[complex128] full (interacting) Green's function array of shape ``(Norb,Norb,Nw,Nk)``
+    """
+    @fn gen_green
+    @brief Construct the interacting Matsubara Green's function G(k, iω_n) = [iω_n + mu - H(k) - Sigma(k,iω_n)]^-1.
+    @param  selfen: Self-energy tensor [Norb, Norb, Nw, Nk] complex128
+    @param    hamk: k-space Hamiltonian [Nk, Norb, Norb] complex128
+    @param      mu: Chemical potential in eV
+    @param    temp: Temperature in eV
+    @return     Gk: Interacting Green's function [Norb, Norb, Nw, Nk] complex128
     """
     Nk = len(hamk)
     Norb = int(np.sqrt(hamk.size / Nk))
@@ -351,12 +354,15 @@ def gen_green(selfen: np.ndarray, hamk: np.ndarray,
 
 def gen_green_from_eig(selfen: np.ndarray, eig: np.ndarray,
                        uni: np.ndarray, mu: float, temp: float) -> np.ndarray:
-    """Build Green's function using eigvalues.
-    This variant is similar to :func:`gen_green` but accepts the
-    eigenvalues ``eig`` and eigenvectors ``uni`` separately.  It can
-    be convenient when those quantities are already available and
-    avoids recalculating them inside the Fortran routine.
-    Parameters and return value are identical to :func:`gen_green`.
+    """
+    @fn gen_green_from_eig
+    @brief Construct the interacting Green's function using pre-computed eigenvalues and eigenvectors.
+    @param  selfen: Self-energy tensor [Norb, Norb, Nw, Nk] complex128
+    @param     eig: Eigenvalues [Nk, Norb] float64
+    @param     uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param      mu: Chemical potential in eV
+    @param    temp: Temperature in eV
+    @return     Gk: Interacting Green's function [Norb, Norb, Nw, Nk] complex128
     """
     Nk = len(eig)
     Norb = int(eig.size / Nk)
@@ -383,18 +389,14 @@ def gen_green_from_eig(selfen: np.ndarray, eig: np.ndarray,
 
 def gen_tr_Greenw_0(eig: np.ndarray, mu: float,
                     wlist: np.ndarray, delta: float) -> np.ndarray:
-    """Compute imaginary part of trace of Green's function (corresponding to pDos).
-    Parameters
-    ----------
-    eig : (Nk, Norb) float64 band energies
-    mu : float chemical potential
-    wlist : (Nw,) float64 frequency mesh on real axis
-    delta : float small broadening parameter
-
-    Returns
-    -------
-    trG : (Nk, Nw) complex128 imaginary part of the k‑resolved trace of the Green's function,
-    returned with a negative sign to match physics conventions.
+    """
+    @fn gen_tr_Greenw_0
+    @brief Compute the k-resolved spectral function (imaginary part of trace of G0) on the real-frequency axis.
+    @param    eig: Eigenvalues [Nk, Norb] float64
+    @param     mu: Chemical potential in eV
+    @param  wlist: Real-frequency mesh [Nw] float64
+    @param  delta: Lorentzian broadening parameter in eV
+    @return  trGk: -Im[Tr G0(k,w+i*delta)] [Nk, Nw] float64
     """
     Nk, Nw = len(eig), len(wlist)
     Norb = int(eig.size / Nk)
@@ -413,11 +415,15 @@ def gen_tr_Greenw_0(eig: np.ndarray, mu: float,
 
 def gen_dos(eig: np.ndarray, uni: np.ndarray, mu: float,
             wlist: np.ndarray, delta: float) -> np.ndarray:
-    """Partial density of states generated from Green's function.
-    The Fortran routine ``gen_dos`` evaluates the k‑dependent density
-    of states using eigenvectors ``uni`` and eigenvalues ``eig``.  The
-    returned array has shape ``(Norb, Nw)`` and is complex; the
-    physical DOS is the negative imaginary part.
+    """
+    @fn gen_dos
+    @brief Compute the orbital-resolved partial density of states (pDOS) on the real-frequency axis.
+    @param    eig: Eigenvalues [Nk, Norb] float64
+    @param    uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param     mu: Chemical potential in eV
+    @param  wlist: Real-frequency mesh [Nw] float64
+    @param  delta: Lorentzian broadening parameter in eV
+    @return  pDos: Orbital-resolved pDOS -Im[G(orb,w)] [Norb, Nw] float64
     """
     Nk, Nw = len(eig), len(wlist)
     Norb = int(eig.size / Nk)
@@ -437,23 +443,18 @@ def gen_dos(eig: np.ndarray, uni: np.ndarray, mu: float,
 
 def get_chi0_conv(Gk: np.ndarray, kmap: np.ndarray, invk: np.ndarray, olist: np.ndarray,
                   temp: float, Nx: int, Ny: int, Nz: int) -> np.ndarray:
-    """Obtain the irreducible susceptibility chi0 using convolution over the full BZ.
-    This wrapper calls the Fortran subroutine ``get_chi0_conv_`` which
-    performs a convolution of the Green's functions stored in ``Gk``
-    using the provided k‑point mapping arrays.
-
-    Parameters
-    ----------
-    Gk : (Norb, Norb, Nw, Nk) complex128 Green's function tensor.
-    kmap : (Nkall,) int64 Mapping from the full mesh to the reduced mesh.
-    invk : (Nk,) int64 Inverse k‑point mapping for interpolation.
-    olist : (Nchi,) int64 Orbital indices used in the susceptibility.
-    temp : float temperature.
-    Nx, Ny, Nz : int grid dimensions for real‑space convolution.
-
-    Returns
-    -------
-    chi : (Nchi, Nchi, Nw, Nk) complex128 The computed susceptibility tensor.
+    """
+    @fn get_chi0_conv
+    @brief Compute the irreducible susceptibility chi0 by convolution of Green's functions over the full BZ.
+    @param     Gk: Green's function tensor [Norb, Norb, Nw, Nk] complex128
+    @param   kmap: Mapping from full k-mesh indices to reduced mesh [Nkall] int64
+    @param   invk: Inverse k-point mapping [Nk] int64
+    @param  olist: Orbital indices for susceptibility calculation [Nchi] int64
+    @param   temp: Temperature in eV
+    @param     Nx: Number of k-points along kx
+    @param     Ny: Number of k-points along ky
+    @param     Nz: Number of k-points along kz
+    @return   chi: Irreducible susceptibility tensor [Nchi, Nchi, Nw, Nk] complex128
     """
     Nkall, Nk = len(kmap), len(Gk[0, 0, 0])
     Norb, Nchi = len(Gk), len(olist)
@@ -477,21 +478,15 @@ def get_chi0_conv(Gk: np.ndarray, kmap: np.ndarray, invk: np.ndarray, olist: np.
 
 def get_chi0_sum(Gk: np.ndarray, invk: np.ndarray, klist: np.ndarray,
                  olist: np.ndarray, temp: float) -> np.ndarray:
-    """Obtain irreducible susceptibility by summing over k‑points.
-    The Fortran routine ``get_chi0_sum`` performs a simpler BZ
-    summation compared to ``get_chi0_conv`` and is useful when
-    convolution maps are not required.
-    Parameters
-    ----------
-    Gk : (Norb, Norb, Nw, Nk) complex128 Green's function tensor.
-    invk : (Nkall,) int64 inverse k mapping.
-    klist : (Nk,3) float64 list of k‑points.
-    olist : (Nchi,) int64 orbital indices.
-    temp : float temperature.
-
-    Returns
-    -------
-    chi : (Nchi, Nchi, Nw, Nk) complex128 irreducible susceptibility tensor.
+    """
+    @fn get_chi0_sum
+    @brief Compute the irreducible susceptibility chi0 by direct BZ summation (alternative to convolution).
+    @param     Gk: Green's function tensor [Norb, Norb, Nw, Nk] complex128
+    @param   invk: Inverse k-point mapping [Nkall] int64
+    @param  klist: k-point list [Nk, 3] float64
+    @param  olist: Orbital indices for susceptibility calculation [Nchi] int64
+    @param   temp: Temperature in eV
+    @return   chi: Irreducible susceptibility tensor [Nchi, Nchi, Nw, Nk] complex128
     """
     Nkall, Nk = len(invk), len(klist)
     Norb, Nchi = len(Gk), len(olist)
@@ -513,11 +508,13 @@ def get_chi0_sum(Gk: np.ndarray, invk: np.ndarray, klist: np.ndarray,
     return chi
 
 def get_Vsigma_nosoc_flex(chi: np.ndarray, Smat: np.ndarray, Cmat: np.ndarray) -> np.ndarray:
-    """Apply a flexible vertex correction without spin–orbit coupling.
-    `chi` is modified in place by the Fortran routine but the
-    original array is preserved by returning a copy.  The output is
-    commonly used as an intermediate quantity in susceptibility
-    calculations.
+    """
+    @fn get_Vsigma_nosoc_flex
+    @brief Apply vertex corrections for FLEX (without SOC) to the susceptibility using spin and charge matrices.
+    @param   chi: Susceptibility tensor [Nk, Nw, Nchi, Nchi] complex128 (modified in-place internally)
+    @param  Smat: Spin interaction matrix [Nchi, Nchi] float64
+    @param  Cmat: Charge interaction matrix [Nchi, Nchi] float64
+    @return  chi: Copy of the vertex-corrected susceptibility tensor
     """
     Nk, Nw, Nchi = len(chi), len(chi[0]), len(Smat)
     flibs.get_vsigma_flex_nosoc_.argtypes = [
@@ -536,29 +533,30 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
            fill: float, temp: float, Nw: int, Nx: int, Ny: int, Nz: int, sw_out: bool,
            sw_in: bool, sw_sub_sigma: bool = True, scf_loop: int = 300, eps: float = 1.0e-4,
            pp: float = 0.3) -> tuple[np.ndarray, float]:
-    """Iteratively mix and compute the self‑energy sigma(k,ω).
-    A high‑level wrapper around the Fortran ``mkself`` routine.  The
-    mixing parameter ``pp`` is printed at the start to remind the user
-    of its value.
-
-    Parameters
-    ----------
-    Smat, Cmat : float64 matrices used for susceptibility corrections.
-    kmap, invk : int64 k‑point mapping arrays.
-    olist : int64 orbital list.
-    hamk : complex128 k‑space Hamiltonian.
-    eig, uni : eigenvalues and eigenvectors used in the calculation.
-    mu, fill, temp : float chemical potential, filling, and temperature.
-    Nw : int number of frequency points.
-    Nx, Ny, Nz : int grid dimensions.
-    sw_out, sw_in, sw_sub_sigma : bool switches controlling output, input, and sigma subspace.
-    scf_loop : int maximum self‑consistency iterations.
-    eps : float convergence tolerance.
-    pp : float mixing rate (0<pp<1).
-    Returns
-    -------
-    sigmak : ndarray[complex128] resulting self‑energy.
-    mu_self : float final chemical potential computed by the routine.
+    """
+    @fn mkself
+    @brief Iteratively compute the self-energy Sigma(k, iw_n) via FLEX self-consistency loop (without SOC).
+    @param         Smat: Spin interaction matrix [Nchi, Nchi] float64
+    @param         Cmat: Charge interaction matrix [Nchi, Nchi] float64
+    @param         kmap: Full-to-reduced k-point mapping [Nkall] int64
+    @param         invk: Inverse k-point mapping [Nkall] int64
+    @param        olist: Orbital index list [Nchi] int64
+    @param         hamk: k-space Hamiltonian [Nk, Norb, Norb] complex128
+    @param          eig: Eigenvalues [Nk, Norb] float64
+    @param          uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param           mu: Chemical potential in eV
+    @param         fill: Target electron filling
+    @param         temp: Temperature in eV
+    @param           Nw: Number of Matsubara frequency points
+    @param     Nx,Ny,Nz: k-grid dimensions
+    @param       sw_out: If True, write intermediate sigma to file
+    @param        sw_in: If True, read initial sigma from file
+    @param sw_sub_sigma: If True, restrict sigma to subspace
+    @param     scf_loop: Maximum number of self-consistency iterations
+    @param          eps: Convergence tolerance
+    @param           pp: Linear mixing rate (0 < pp < 1)
+    @retval      sigmak: Converged self-energy [Norb, Norb, Nw, Nk] complex128
+    @retval     mu_self: Final chemical potential in eV
     """
     print("mixing rate: pp = %3.1f" % pp)
     Nkall, Nk, Nchi = len(kmap), len(hamk), len(Smat)
@@ -597,6 +595,32 @@ def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.nd
            fill: float, temp: float, Nw: int, Nx: int, Ny: int, Nz: int, sw_out: bool,
            sw_in: bool, sw_sub_sigma: bool = True, scf_loop: int = 300, eps: float = 1.0e-4,
            pp: float = 0.3) -> tuple[np.ndarray, float]:
+    """
+    @fn mkself_soc
+    @brief Iteratively compute the self-energy Sigma(k, iw_n) via FLEX self-consistency loop with SOC.
+    @param         Vmat: SOC interaction matrix [Nchi, Nchi] float64
+    @param         kmap: Full-to-reduced k-point mapping [Nkall] int64
+    @param         invk: Inverse k-point mapping [Nkall] int64
+    @param         invs: Inverse spin index mapping [Norb] int64
+    @param        olist: Orbital index list [Nchi] int64
+    @param        slist: Spin label list for each orbital [Norb] int64
+    @param         hamk: k-space Hamiltonian [Nk, Norb, Norb] complex128
+    @param          eig: Eigenvalues [Nk, Norb] float64
+    @param          uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param           mu: Chemical potential in eV
+    @param         fill: Target electron filling
+    @param         temp: Temperature in eV
+    @param           Nw: Number of Matsubara frequency points
+    @param     Nx,Ny,Nz: k-grid dimensions
+    @param       sw_out: If True, write intermediate sigma to file
+    @param        sw_in: If True, read initial sigma from file
+    @param sw_sub_sigma: If True, restrict sigma to subspace
+    @param     scf_loop: Maximum number of self-consistency iterations
+    @param          eps: Convergence tolerance
+    @param           pp: Linear mixing rate (0 < pp < 1)
+    @retval      sigmak: Converged self-energy [Norb, Norb, Nw, Nk] complex128
+    @retval     mu_self: Final chemical potential in eV
+    """
     print("mixing rate: pp = %3.1f" % pp)
     Nkall, Nk, Nchi = len(kmap), len(hamk), len(Vmat)
     Norb = int(np.sqrt(hamk.size / Nk))
@@ -630,10 +654,12 @@ def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.nd
     return sigmak, mu_self.value
 
 def get_qshift(klist: np.ndarray, qpoint: np.ndarray) -> np.ndarray:
-    """Determine integer shifts of k‑mesh induced by a momentum transfer.
-    The returned array has length ``Nk`` and indicates, for each k, the
-    index of k+q within the mesh.  Useful for evaluating susceptibility
-    sums with finite momentum transfer.
+    """
+    @fn get_qshift
+    @brief For each k-point, find the index of k+q within the k-mesh (forward momentum shift).
+    @param   klist: k-point list [Nk, 3] float64
+    @param  qpoint: Momentum transfer vector [3] float64
+    @return qshift: Index of k+q for each k-point [Nk] int64
     """
     Nk = len(klist)
     qshift = np.zeros(Nk, dtype=np.int64)
@@ -648,9 +674,12 @@ def get_qshift(klist: np.ndarray, qpoint: np.ndarray) -> np.ndarray:
     return qshift
 
 def get_iqshift(klist: np.ndarray, qpoint: np.ndarray) -> np.ndarray:
-    """Compute the inverse of :func:`get_qshift`.
-    For each k the returned value is the index of k-q; this is useful
-    when working with backward momentum transfers.
+    """
+    @fn get_iqshift
+    @brief For each k-point, find the index of k-q within the k-mesh (backward momentum shift).
+    @param   klist: k-point list [Nk, 3] float64
+    @param  qpoint: Momentum transfer vector [3] float64
+    @return qshift: Index of k-q for each k-point [Nk] int64
     """
     Nk = len(klist)
     qshift = np.zeros(Nk, dtype=np.int64)
@@ -666,10 +695,18 @@ def get_iqshift(klist: np.ndarray, qpoint: np.ndarray) -> np.ndarray:
 
 def get_chi_irr(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, qshift: np.ndarray,
                 olist: np.ndarray, wlist: np.ndarray, idelta: float, temp: float) -> np.ndarray:
-    """Calculate irreducible susceptibility chi0 for given q‑shift.
-    This routine wraps the Fortran ``get_chi_irr`` which computes the
-    bubble diagram contribution at each Matsubara frequency.  The
-    returned array has shape ``(Nw, Nchi, Nchi)``.
+    """
+    @fn get_chi_irr
+    @brief Compute the irreducible (bare bubble) susceptibility chi0(q, w) for a given momentum shift.
+    @param     uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param     eig: Eigenvalues [Nk, Norb] float64
+    @param  ffermi: Fermi-Dirac occupations [Nk, Norb] float64
+    @param  qshift: Index of k+q for each k-point [Nk] int64 (from get_qshift)
+    @param   olist: Orbital index list [Nchi] int64
+    @param   wlist: Real-frequency mesh [Nw] float64
+    @param  idelta: Lorentzian broadening parameter in eV
+    @param    temp: Temperature in eV
+    @return   chi0: Irreducible susceptibility [Nw, Nchi, Nchi] complex128
     """
     Nk, Nw = len(eig), len(wlist)
     Norb, Nchi = int(eig.size / Nk), len(olist)
@@ -697,25 +734,22 @@ def get_chi_irr(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, qshift: np
 def chis_qmap(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, klist: np.ndarray,
               Smat: np.ndarray, olist: np.ndarray, Nx: int, Ny: int, temp: float,
               ecut: float, idelta: float) -> tuple[np.ndarray, np.ndarray]:
-    """Generate q‑mapped susceptibility and its intermediate array.
-    This helper wraps ``chiq_map`` which fills two arrays: ``chis``
-    (final susceptibility on a q‑mesh) and ``chi`` (an intermediate storage used internally).
-    Both have shape ``(Nx,Ny)``.
-    Parameters
-    ----------
-    uni, eig, ffermi : arrays of eigenvectors, eigenvalues, and occupations used in the calculation.
-    klist : (Nk,3) float64 list of k‑points.
-    Smat : float64 matrix used in vertex corrections.
-    olist : int64 orbital list.
-    Nx, Ny : int dimensions of the q‑mesh.
-    temp : float temperature.
-    ecut : float energy cutoff used in the sum.
-    idelta : float broadening parameter.
-
-    Returns
-    -------
-    chis : (Nx,Ny) complex128 spin susceptibility on q‑mesh.
-    chi  : (Nx,Ny) complex128 irreducible susceptibility on q-mesh.
+    """
+    @fn chis_qmap
+    @brief Compute spin susceptibility and bare susceptibility maps on the qx-qy plane.
+    @param     uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param     eig: Eigenvalues [Nk, Norb] float64
+    @param  ffermi: Fermi-Dirac occupations [Nk, Norb] float64
+    @param   klist: k-point list [Nk, 3] float64
+    @param    Smat: Spin interaction matrix [Nchi, Nchi] float64
+    @param   olist: Orbital index list [Nchi] int64
+    @param      Nx: Number of q-points along qx
+    @param      Ny: Number of q-points along qy
+    @param    temp: Temperature in eV
+    @param    ecut: Energy cutoff for the BZ summation in eV
+    @param  idelta: Lorentzian broadening parameter in eV
+    @retval   chis: Spin susceptibility map [Nx, Ny] complex128
+    @retval    chi: Irreducible susceptibility map [Nx, Ny] complex128
     """
     Nk = len(eig)
     Norb, Nchi = int(eig.size / Nk), len(olist)
@@ -745,9 +779,15 @@ def chis_qmap(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, klist: np.nd
 
 def get_tr_chi(chis: np.ndarray, chi0: np.ndarray,
                olist: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Compute orbital‑resolved traces of susceptibilities.
-    Returns three arrays: ``trchis`` (trace of interacting chi),
-    ``trchi0`` (trace of irreducible chi0), and ``chis_orb`` which is an orbital‑indexed version with padding.
+    """
+    @fn get_tr_chi
+    @brief Compute orbital-resolved traces of the interacting and bare susceptibilities.
+    @param    chis: Interacting spin susceptibility [Nw, Nchi, Nchi] complex128
+    @param    chi0: Irreducible susceptibility [Nw, Nchi, Nchi] complex128
+    @param   olist: Orbital index list [Nchi] int64
+    @retval trchis: Trace of interacting chi_s [Nw] complex128
+    @retval trchi0: Trace of bare chi0 [Nw] complex128
+    @retval chis_orb: Orbital-indexed chi_s [Nw, Norb+2] complex128
     """
     Nchi, Nw, Norb = len(olist), len(chi0), olist.max()
     trchis = np.zeros(Nw, dtype=np.complex128)
@@ -771,9 +811,19 @@ def get_tr_chi(chis: np.ndarray, chi0: np.ndarray,
 def get_phi_irr(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, qshift: np.ndarray,
                 olist: np.ndarray, wlist: np.ndarray, idelta: float, mu: float,
                 temp: float) -> np.ndarray:
-    """Evaluate irreducible pairing susceptibility (phi) for given q‑shift.
-    Returns an array shape ``(Nw, Nchi, Nchi)`` similar to
-    :func:`get_chi_irr` but for the particle–particle channel.
+    """
+    @fn get_phi_irr
+    @brief Compute the irreducible pairing susceptibility phi0(q, w) in the particle-particle channel.
+    @param     uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param     eig: Eigenvalues [Nk, Norb] float64
+    @param  ffermi: Fermi-Dirac occupations [Nk, Norb] float64
+    @param  qshift: Index of k+q for each k-point [Nk] int64 (from get_qshift)
+    @param   olist: Orbital index list [Nchi] int64
+    @param   wlist: Frequency mesh [Nw] float64
+    @param  idelta: Lorentzian broadening parameter in eV
+    @param      mu: Chemical potential in eV
+    @param    temp: Temperature in eV
+    @return   phi0: Irreducible pairing susceptibility [Nw, Nchi, Nchi] complex128
     """
     Nk, Nw = len(eig), len(wlist)
     Norb, Nchi = int(eig.size / Nk), len(olist)
@@ -802,10 +852,22 @@ def get_phi_irr(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, qshift: np
 def phi_qmap(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, klist: np.ndarray,
              olist: np.ndarray, Nx: int, Ny: int, mu: float, temp: float, ecut: float,
              idelta: float, sw_omega: bool) -> np.ndarray:
-    """Map pairing susceptibility onto a q‑grid using frequency cutoff.
-    This is the counterpart to ``chis_qmap`` but for the pairing channel;
-    the returned matrix ``phi`` has dimension ``(Nx,Ny)``.
-    The boolean ``sw_omega`` selects whether to include frequency dependence in the calculation.
+    """
+    @fn phi_qmap
+    @brief Compute the pairing susceptibility map on the qx-qy plane at a given energy cutoff.
+    @param      uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param      eig: Eigenvalues [Nk, Norb] float64
+    @param   ffermi: Fermi-Dirac occupations [Nk, Norb] float64
+    @param    klist: k-point list [Nk, 3] float64
+    @param    olist: Orbital index list [Nchi] int64
+    @param       Nx: Number of q-points along qx
+    @param       Ny: Number of q-points along qy
+    @param       mu: Chemical potential in eV
+    @param     temp: Temperature in eV
+    @param     ecut: Energy cutoff for the BZ summation in eV
+    @param   idelta: Lorentzian broadening parameter in eV
+    @param sw_omega: If True, include Matsubara frequency summation; if False, use static limit
+    @return     phi: Pairing susceptibility map [Nx, Ny] complex128
     """
     Nk = len(eig)
     Norb, Nchi = int(eig.size / Nk), len(olist)
@@ -833,10 +895,13 @@ def phi_qmap(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, klist: np.nda
     return phi
 
 def get_tr_phi(phi: np.ndarray, olist: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Trace pairing susceptibility and produce orbital representation.
-    Similar to :func:`get_tr_chi` but for the pairing channel.  The
-    returned tuple is ``(trphi, phi_orb)`` where ``phi_orb`` has two
-    extra columns of padding.
+    """
+    @fn get_tr_phi
+    @brief Compute orbital-resolved trace of the pairing susceptibility phi.
+    @param     phi: Pairing susceptibility [Nw, Nchi, Nchi] complex128
+    @param   olist: Orbital index list [Nchi] int64
+    @retval  trphi: Trace of phi [Nw] complex128
+    @retval phi_orb: Orbital-indexed phi [Nw, Norb+2] complex128
     """
     Nchi, Nw, Norb = len(olist), len(phi), olist.max()
     trphi = np.zeros(Nw, dtype=np.complex128)
@@ -855,10 +920,12 @@ def get_tr_phi(phi: np.ndarray, olist: np.ndarray) -> tuple[np.ndarray, np.ndarr
     return trphi, phi_orb
 
 def get_chis(chi0: np.ndarray, Smat: np.ndarray) -> np.ndarray:
-    """Compute corrected susceptibility matrix chis from chi0 and Smat.
-    This wraps the Fortran ``get_chis`` which applies interaction
-    corrections represented by ``Smat`` to the bare susceptibility
-    ``chi0``.  The result has shape ``(Nw, Nchi, Nchi)``.
+    """
+    @fn get_chis
+    @brief Compute the RPA-corrected spin susceptibility chi_s from chi0 and the Stoner matrix.
+    @param  chi0: Irreducible susceptibility [Nw, Nchi, Nchi] complex128
+    @param  Smat: Spin interaction matrix [Nchi, Nchi] float64
+    @return chis: Interacting spin susceptibility [Nw, Nchi, Nchi] complex128
     """
     Nchi, Nw = len(Smat), len(chi0)
     chis = np.zeros((Nw, Nchi, Nchi), dtype=np.complex128)
@@ -873,22 +940,15 @@ def get_chis(chi0: np.ndarray, Smat: np.ndarray) -> np.ndarray:
     return chis
 
 def gen_SCmatrix(olist: np.ndarray, site: np.ndarray, U: float, J: float) -> tuple[np.ndarray, np.ndarray]:
-    """Generate spin and charge vertex interaction matrices.
-    The underlying Fortran routine ``get_scmat`` fills two real
-    matrices ``Smat`` and ``Cmat`` of dimension ``(Nchi, Nchi)`` using
-    the orbital index list ``olist`` and site information.  The
-    parameters ``U`` and ``J`` control the interaction strengths.
-
-    Parameters
-    ----------
-    olist : (Nchi,) int64 orbital indices of chi.
-    site : (Nchi,) int64 site indices corresponding to each orbital.
-    U : float Coulomb repulsion parameter.
-    J : float Hund's coupling parameter.
-
-    Returns
-    -------
-    Smat, Cmat : (Nchi, Nchi) float64 spin and charge interaction matrices.
+    """
+    @fn gen_SCmatrix
+    @brief Generate spin (Smat) and charge (Cmat) vertex interaction matrices from uniform U and J parameters.
+    @param  olist: Orbital index list [Nchi] int64
+    @param   site: Site indices for each orbital pair [Nchi] int64
+    @param      U: Hubbard Coulomb repulsion in eV
+    @param      J: Hund's coupling in eV
+    @retval  Smat: Spin interaction matrix [Nchi, Nchi] float64
+    @retval  Cmat: Charge interaction matrix [Nchi, Nchi] float64
     """
     Nchi = len(olist)
     Smat = np.zeros((Nchi, Nchi), dtype=np.float64)
@@ -905,10 +965,15 @@ def gen_SCmatrix(olist: np.ndarray, site: np.ndarray, U: float, J: float) -> tup
     return Smat, Cmat
 
 def gen_SCmatrix_orb(olist: np.ndarray, site: np.ndarray, Umat: np.ndarray, Jmat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Construct spin/charge vertex interaction matrices using orbital‑resolved parameters.
-    Each element of the input matrices ``Umat`` and ``Jmat`` corresponds
-    to a pair of orbitals; this allows for orbital-dependent interactions.
-    The result has the same shape as in :func:`gen_SCmatrix`.
+    """
+    @fn gen_SCmatrix_orb
+    @brief Generate spin (Smat) and charge (Cmat) interaction matrices using orbital-resolved U and J.
+    @param  olist: Orbital index list [Nchi] int64
+    @param   site: Site indices for each orbital pair [Nchi] int64
+    @param   Umat: Orbital-resolved Coulomb matrix [Norb, Norb] float64
+    @param   Jmat: Orbital-resolved Hund's coupling matrix [Norb, Norb] float64
+    @retval  Smat: Spin interaction matrix [Nchi, Nchi] float64
+    @retval  Cmat: Charge interaction matrix [Nchi, Nchi] float64
     """
     Nchi = len(olist)
     Norb = len(Umat)
@@ -929,23 +994,19 @@ def gen_SCmatrix_orb(olist: np.ndarray, site: np.ndarray, Umat: np.ndarray, Jmat
 
 def calc_Lij(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float, w: float,
              idelta: float, temp: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Evaluate the generalized thermoelectric tensors L11, L12 and L22.
-    These tensors appear in linear response formulas and are computed by
-    the Fortran routine ``calc_lij`` using band energies, velocities, and Fermi occupations.
-
-    Parameters
-    ----------
-    eig : (Nk, Norb) float64 eigenvalues.
-    vk : (Nk, Norb, 3) complex128 velocities.
-    ffermi : (Nk, Norb) float64 occupations.
-    mu : float chemical potential.
-    w : float frequency.
-    idelta : float broadening parameter.
-    temp : float temperature.
-
-    Returns
-    -------
-    L11, L12, L22 : (3,3) complex128 response tensors.
+    """
+    @fn calc_Lij
+    @brief Evaluate the generalized thermoelectric transport tensors L11, L12, L22 at a given frequency.
+    @param    eig: Eigenvalues [Nk, Norb] float64
+    @param     vk: Group velocities [Nk, Norb, 3] complex128
+    @param ffermi: Fermi-Dirac occupations [Nk, Norb] float64
+    @param     mu: Chemical potential in eV
+    @param      w: Frequency in eV
+    @param idelta: Lorentzian broadening parameter in eV
+    @param   temp: Temperature in eV
+    @retval   L11: Charge conductivity tensor [3, 3] complex128
+    @retval   L12: Thermoelectric tensor [3, 3] complex128
+    @retval   L22: Thermal conductivity tensor [3, 3] complex128
     """
     Nk = len(eig)
     Norb = int(eig.size / Nk)
@@ -973,10 +1034,18 @@ def calc_Lij(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float, w: 
 
 def calc_Kn(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray, temp: float,
             mu: float, tau: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Compute Kn transport coefficients K0, K1, and K2.
-    Parameters mirror those of :func:`calc_Lij` but the outputs are
-    real 3×3 matrices (float64) used in thermal and electrical
-    conductivity formulae.
+    """
+    @fn calc_Kn
+    @brief Compute Boltzmann transport coefficients K0, K1, K2 for conductivity and thermopower.
+    @param    eig: Eigenvalues [Nk, Norb] float64
+    @param  veloc: Group velocities [Nk, Norb, 3] float64
+    @param kweight: k-point weights [Nk] float64
+    @param   temp: Temperature in eV
+    @param     mu: Chemical potential in eV
+    @param    tau: Relaxation time [Nk, Norb] float64
+    @retval    K0: Charge transport tensor [3, 3] float64
+    @retval    K1: Thermoelectric transport tensor [3, 3] float64
+    @retval    K2: Thermal transport tensor [3, 3] float64
     """
     Nk = len(eig)
     Norb = int(eig.size / Nk)
@@ -1001,7 +1070,18 @@ def calc_Kn(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray, temp: float
 
 def calc_sigmahall(eig: np.ndarray, veloc: np.ndarray, imass: np.ndarray,
     kweight: np.ndarray, tau: np.ndarray, temp: float, mu: float) -> float:
-    """Compute the Hall coeeficient via band integrals."""
+    """
+    @fn calc_sigmahall
+    @brief Compute the Hall conductivity sigma_Hall via band integrals using velocity and inverse mass.
+    @param     eig: Eigenvalues [Nk, Norb] float64
+    @param   veloc: Group velocities [Nk, Norb, 3] float64
+    @param   imass: Inverse effective mass tensor [Nk, Norb, 3, 3] float64
+    @param kweight: k-point weights [Nk] float64
+    @param     tau: Relaxation time [Nk, Norb] float64
+    @param    temp: Temperature in eV
+    @param      mu: Chemical potential in eV
+    @return sigma_hall: Hall conductivity (scalar) float64
+    """
     Nk = len(eig)
     Norb = int(eig.size / Nk)
     sigma_hall = c_double(0.0)
@@ -1022,8 +1102,16 @@ def calc_sigmahall(eig: np.ndarray, veloc: np.ndarray, imass: np.ndarray,
 
 def calc_tdf(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray,
              tau: np.ndarray, Nw: int) -> np.ndarray:
-    """Compute transverse diffusion coefficient tensor `tdf`.
-    Output shape is ``(Nw,3,3)`` and the values are real."""
+    """
+    @fn calc_tdf
+    @brief Compute the transport distribution function (TDF) tensor as a function of energy.
+    @param    eig: Eigenvalues [Nk, Norb] float64
+    @param  veloc: Group velocities [Nk, Norb, 3] float64
+    @param kweight: k-point weights [Nk] float64
+    @param    tau: Relaxation time [Nk, Norb] float64
+    @param     Nw: Number of energy points
+    @return   tdf: Transport distribution function [Nw, 3, 3] float64
+    """
     Nk = len(eig)
     Norb = int(eig.size / Nk)
     tdf = np.zeros((Nw, 3, 3), dtype=np.float64)
@@ -1042,22 +1130,15 @@ def calc_tdf(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray,
     return tdf
 
 def get_tau(tauw: np.ndarray, eig: np.ndarray, tau_max: float, tau_mode: int, eps: float = 1.0e-4) -> np.ndarray:
-    """Estimate relaxation time tau(k) from frequency‑dependent weights.
-    The Fortran routine ``get_tau`` solves a simple integral equation
-    to produce a k‑dependent relaxation time given input weights
-    ``tauw``.  The output has shape ``(Nk, Norb)``.
-
-    Parameters
-    ----------
-    tauw : (Nw,) float64 frequency‑dependent scattering weights.
-    eig : (Nk, Norb) float64 eigenvalues used to determine Nk and Norb.
-    tau_max : float upper bound for returned tau values.
-    tau_mode : int mode selector passed to the Fortran routine.
-    eps : float convergence tolerance.
-
-    Returns
-    -------
-    tau : (Nk, Norb) float64 obtained relaxation times.
+    """
+    @fn get_tau
+    @brief Estimate k-resolved relaxation time tau(k) from frequency-dependent scattering weights.
+    @param    tauw: Frequency-dependent scattering weight [Nw] float64
+    @param     eig: Eigenvalues [Nk, Norb] float64
+    @param tau_max: Upper bound for relaxation time values
+    @param tau_mode: Mode selector for the Fortran tau integral equation
+    @param     eps: Convergence tolerance
+    @return    tau: k-resolved relaxation time [Nk, Norb] float64
     """
     Nk, Nw = len(eig), len(tauw)
     Norb = int(eig.size / Nk)
@@ -1078,19 +1159,16 @@ def get_tau(tauw: np.ndarray, eig: np.ndarray, tau_max: float, tau_mode: int, ep
 
 def gen_imp_ham(rvec: np.ndarray, ham_r: np.ndarray, ham_i: np.ndarray,
                 rlist: np.ndarray, imp_list: np.ndarray,eps: float = 1.0e-5) -> np.ndarray:
-    """Construct impurity Hamiltonian from real/imaginary components.
-    Parameters
-    ----------
-    rvec : (Nr,3) float64 real‑space displacement vectors.
-    ham_r : (Nr, Norb, Norb) complex128 real‑part hopping blocks.
-    ham_i : (Nr, Norb, Norb) complex128 imaginary‑part blocks.
-    rlist : (Nsite,) float64 list of impurity positions.
-    imp_list : (Nimp,) int64 indices of impurity orbitals.
-    eps : float small tolerance used in assembly.
-
-    Returns
-    -------
-    ham_imp : (Norb*Nsite, Norb*Nsite) complex128 resulting impurity Hamiltonian matrix.
+    """
+    @fn gen_imp_ham
+    @brief Construct the real-space impurity Hamiltonian from bulk hopping blocks and impurity positions.
+    @param     rvec: Real-space displacement vectors [Nr, 3] float64
+    @param    ham_r: Real-part hopping blocks [Nr, Norb, Norb] complex128
+    @param    ham_i: Imaginary-part hopping blocks [Nr, Norb, Norb] complex128
+    @param    rlist: Impurity site positions [Nsite] float64
+    @param imp_list: Impurity orbital indices [Nimp] int64
+    @param      eps: Small tolerance for assembly
+    @return ham_imp: Impurity Hamiltonian [Norb*Nsite, Norb*Nsite] complex128
     """
     Nr, Nimp, Nsite = len(rvec), len(imp_list), len(rlist)
     Norb = int(np.sqrt(ham_r.size / Nr))
@@ -1112,16 +1190,13 @@ def gen_imp_ham(rvec: np.ndarray, ham_r: np.ndarray, ham_i: np.ndarray,
     return ham_imp
 
 def dft_imp_ham(ham_imp: np.ndarray, klist: np.ndarray, rlist: np.ndarray) -> np.ndarray:
-    """Perform Fourier transform of impurity Hamiltonian to k‑space.
-    Parameters
-    ----------
-    ham_imp : (Norb*Nsite, Norb*Nsite) complex128 impurity Hamiltonian constructed by :func:`gen_imp_ham`.
-    klist : (Nk,3) float64 list of k‑points.
-    rlist : (Nsite,) float64 impurity positions.
-
-    Returns
-    -------
-    ham_k : (Norb*Nk, Norb*Nk) complex128 k‑space representation of the impurity Hamiltonian.
+    """
+    @fn dft_imp_ham
+    @brief Fourier-transform the real-space impurity Hamiltonian to k-space.
+    @param  ham_imp: Real-space impurity Hamiltonian [Norb*Nsite, Norb*Nsite] complex128
+    @param    klist: k-point list [Nk, 3] float64
+    @param    rlist: Impurity site positions [Nsite] float64
+    @return   ham_k: k-space impurity Hamiltonian [Norb*Nk, Norb*Nk] complex128
     """
     Nk, Nsite = len(klist), len(rlist)
     Norb = int(len(ham_imp) / Nsite)
@@ -1141,9 +1216,17 @@ def dft_imp_ham(ham_imp: np.ndarray, klist: np.ndarray, rlist: np.ndarray) -> np
 
 def get_imp_spectrum(uni: np.ndarray, eigs: np.ndarray, mu: float, wlist: np.ndarray,
                      klist: np.ndarray, rlist: np.ndarray, eta: float = 1.0e-3) -> np.ndarray:
-    """Compute impurity spectral function over k and ω.
-    The returned `spectrum` array has dimensions ``(Nk, Nw)`` and is
-    complex; its imaginary part typically carries the physical signal.
+    """
+    @fn get_imp_spectrum
+    @brief Compute the k- and frequency-resolved impurity spectral function A(k, w).
+    @param     uni: Eigenvectors of the impurity Hamiltonian [Norb*Nsite, Norb*Nsite] complex128
+    @param    eigs: Eigenvalues of the impurity Hamiltonian [Norb*Nsite] float64
+    @param      mu: Chemical potential in eV
+    @param   wlist: Real-frequency mesh [Nw] float64
+    @param   klist: k-point list [Nk, 3] float64
+    @param   rlist: Impurity site positions [Nsite] float64
+    @param     eta: Lorentzian broadening parameter in eV
+    @return spectrum: Impurity spectral function [Nk, Nw] complex128
     """
     Nw, Nk, Nsite = len(wlist), len(klist), len(rlist)
     Norb = int(len(eigs) / Nsite)
@@ -1165,8 +1248,12 @@ def get_imp_spectrum(uni: np.ndarray, eigs: np.ndarray, mu: float, wlist: np.nda
     return spectrum
 
 def get_a(inp_data: np.ndarray, xlist: np.ndarray) -> np.ndarray:
-    """Compute auxiliary array `a` from input data and grid points.
-    A small utility wrapper around the Fortran ``get_a_`` routine.
+    """
+    @fn get_a
+    @brief Compute Pade continued-fraction coefficients from input data on Matsubara grid.
+    @param inp_data: Input data (e.g. Green's function) at Matsubara points [Np] complex128
+    @param    xlist: Matsubara frequency points [Np] complex128
+    @return       a: Pade coefficient array [Np] complex128
     """
     Np = len(inp_data)
     a = np.zeros(Np, dtype=np.complex128)
@@ -1181,9 +1268,14 @@ def get_a(inp_data: np.ndarray, xlist: np.ndarray) -> np.ndarray:
     return a
 
 def get_QP(a: np.ndarray, xlist: np.ndarray, wlist: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Compute P and Q arrays from input `a`, grid `xlist`, and frequencies.
-    This routine is another small helper wrapping a Fortran call;
-    both returned arrays have length ``Nw``.
+    """
+    @fn get_QP
+    @brief Evaluate Pade numerator Q and denominator P on the real-frequency axis from continued-fraction coefficients.
+    @param      a: Pade coefficient array [Np] complex128 (from get_a)
+    @param  xlist: Matsubara frequency points [Np] complex128
+    @param  wlist: Real-frequency mesh [Nw] complex128
+    @retval     Q: Pade numerator evaluated on real axis [Nw] complex128
+    @retval     P: Pade denominator evaluated on real axis [Nw] complex128
     """
     Nw, Np = len(wlist), len(a)
     Q = np.zeros(Nw, dtype=np.complex128)
@@ -1201,10 +1293,13 @@ def get_QP(a: np.ndarray, xlist: np.ndarray, wlist: np.ndarray) -> tuple[np.ndar
     return Q, P
 
 def pade_with_trace(A: np.ndarray, iwlist: np.ndarray, wlist: np.ndarray) -> np.ndarray:
-    """Perform Padé analytic continuation with trace operation.
-    The input matrix ``A`` is transformed to produce output ``B`` of
-    shape ``(Nk, Nw)``.  This is often used when continuing
-    frequency‑dependent quantities from imaginary to real axis.
+    """
+    @fn pade_with_trace
+    @brief Perform Pade analytic continuation and trace over orbital indices to obtain the real-axis spectrum.
+    @param      A: Matrix on Matsubara axis [Norb, Norb, Niw, Nk] complex128
+    @param iwlist: Matsubara frequency points [Niw] complex128
+    @param  wlist: Real-frequency mesh [Nw] complex128
+    @return     B: Analytically-continued trace [Nk, Nw] complex128
     """
     Nk, Nw, Niw = len(A.T), len(wlist), len(iwlist)
     Norb = int(np.sqrt(A.size / (Nk * Niw)))
@@ -1224,26 +1319,20 @@ def pade_with_trace(A: np.ndarray, iwlist: np.ndarray, wlist: np.ndarray) -> np.
 
 def get_chi0(Smat: np.ndarray, Cmat: np.ndarray, Gk: np.ndarray, olist: np.ndarray,
              kmap: np.ndarray, invk: np.ndarray, temp: float, Nx: int, Ny: int, Nz: int) -> np.ndarray:
-    """Evaluate the irreducible susceptibility tensor ``chi0`` on an irreducible q-grid.
-    This thin wrapper calls the Fortran ``get_chi0`` routine, which assembles
-    a four‑dimensional array of shape ``(Nchi, Nchi, Nw, Nk)``
-    representing orbital correlations at each frequency and irreducible k‑point.
-    The input spin/charge matrices ``Smat`` and ``Cmat`` are forwarded unchanged
-    and are useful for consistency with other routines that take these objects.
-
-    Parameters
-    ----------
-    Smat, Cmat : (Nchi, Nchi) float64 Spin and charge interaction matrices.
-    Gk : (Norb, Norb, Nw, Nkall) complex128 Green's function defined on the full (Nx×Ny×Nz) k grid.
-    olist : (Nchi,) int64 Orbital index list for the susceptibility.
-    kmap : (Nkall,3) int64 Mapping from full to irreducible k‑points.
-    invk : (Nkall,3) int64 Inverse k‑point indices used for Fourier transforms.
-    temp : float Temperature (energy units).
-    Nx, Ny, Nz : int Dimensions of the full k grid.
-
-    Returns
-    -------
-    chi : (Nchi, Nchi, Nw, Nk) complex128 Irreducible susceptibility on the reduced q-grid.
+    """
+    @fn get_chi0
+    @brief Compute the irreducible susceptibility chi0 on the irreducible q-grid using the full BZ Green's function.
+    @param   Smat: Spin interaction matrix [Nchi, Nchi] float64 (forwarded to Fortran for consistency)
+    @param   Cmat: Charge interaction matrix [Nchi, Nchi] float64 (forwarded to Fortran for consistency)
+    @param     Gk: Green's function on full k-grid [Norb, Norb, Nw, Nkall] complex128
+    @param  olist: Orbital index list [Nchi] int64
+    @param   kmap: Full-to-reduced k-point mapping [Nkall] int64
+    @param   invk: Inverse k-point mapping [Nkall] int64
+    @param   temp: Temperature in eV
+    @param     Nx: Number of k-points along kx
+    @param     Ny: Number of k-points along ky
+    @param     Nz: Number of k-points along kz
+    @return   chi: Irreducible susceptibility [Nchi, Nchi, Nw, Nk] complex128
     """
     Norb, Nchi = len(Gk), len(olist)
     Nkall, Nk, Nw = len(kmap), len(Gk[0, 0, 0]), len(Gk[0, 0])
@@ -1273,29 +1362,25 @@ def linearized_eliashberg(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init
                           Smat: np.ndarray, Cmat: np.ndarray, olist: np.ndarray, plist: np.ndarray,
                           kmap: np.ndarray,invk: np.ndarray, Nx: int, Ny: int, Nz: int,
                           temp: float, gap_sym: int, eps: float = 1.0e-5, itemax: int = 300) -> np.ndarray:
-    """Solve the linearized Eliashberg equation without SOC.
-    The output ``delta`` is the superconducting gap function in orbital representation.
-    It has shape (``Norb, Norb, Nw, Nkall``), where ``Nkall`` is the full number of k‑points.
-    Convergence is attempted up to ``itemax`` iterations with tolerance ``eps``.
-
-    Parameters
-    ----------
-    chi : (Nchi, Nchi, Nw, Nk) complex128 Irreducible susceptibility obtained from :func:`get_chi0`.
-    Gk : (Norb, Norb, Nw, Nkall) complex128 Green's function on full k grid.
-    uni : (Norb, Norb, Nk) complex128 Unitary transformation matrices.
-    init_delta : (Norb, Norb, Nw, Nkall) float64 Initial guess for the gap function.
-    Smat, Cmat : (Nchi, Nchi) float64 Interaction matrices.
-    olist : (Nchi,) int64 Orbital indices.
-    kmap, invk : arrays k‑point mapping information.
-    Nx, Ny, Nz : int Grid dimensions for kmap/invk.
-    temp : float Temperature.
-    gap_sym : int Symmetry index for the gap function.
-    eps : float Convergence tolerance.
-    itemax : int Maximum iteration count.
-
-    Returns
-    -------
-    delta : (Norb, Norb, Nw, Nkall) complex128 Linearized gap function solution.
+    """
+    @fn linearized_eliashberg
+    @brief Solve the linearized Eliashberg gap equation (without SOC) to obtain the superconducting gap function.
+    @param       chi: Irreducible susceptibility [Nchi, Nchi, Nw, Nk] complex128
+    @param        Gk: Green's function on full k-grid [Norb, Norb, Nw, Nkall] complex128
+    @param       uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param init_delta: Initial gap function [Norb, Norb, Nw, Nkall] float64
+    @param      Smat: Spin interaction matrix [Nchi, Nchi] float64
+    @param      Cmat: Charge interaction matrix [Nchi, Nchi] float64
+    @param     olist: Orbital index list [Nchi] int64
+    @param     plist: Parity list for gap symmetry [Norb] float64
+    @param      kmap: Full-to-reduced k-point mapping [Nkall] int64
+    @param      invk: Inverse k-point mapping [Nkall] int64
+    @param    Nx,Ny,Nz: k-grid dimensions
+    @param      temp: Temperature in eV
+    @param   gap_sym: Gap symmetry index (0=s, 1=dx2-y2, etc.)
+    @param       eps: Convergence tolerance
+    @param    itemax: Maximum number of iterations
+    @return    delta: Linearized gap function [Norb, Norb, Nw, Nkall] complex128
     """
     Norb, Nchi = len(Gk), len(Smat)
     Nkall, Nk, Nw = len(kmap), len(Gk[0, 0, 0]), len(Gk[0, 0])
@@ -1332,10 +1417,29 @@ def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, 
                               slist: np.ndarray, olist: np.ndarray, kmap: np.ndarray, invk: np.ndarray,
                               invs: np.ndarray, invschi: np.ndarray, Nx: int, Ny: int, Nz: int, temp: float,
                               gap_sym: int, eps: float = 1.0e-4, itemax: int = 300) -> np.ndarray:
-    """Linearized Eliashberg solver including spin–orbit coupling effects.
-    This more general version accepts additional sign and orbital mapping arrays associated 
-    with SOC (`sgnsig`, `sgnsig2`, `invs`, `invschi`).
-    The output ``delta`` has the same shape as in:func:`linearized_eliashberg`.
+    """
+    @fn linearized_eliashberg_soc
+    @brief Solve the linearized Eliashberg gap equation with spin-orbit coupling (SOC).
+    @param        chi: Irreducible susceptibility [Nchi, Nchi, Nw, Nk] complex128
+    @param         Gk: Green's function on full k-grid [Norb, Norb, Nw, Nkall] complex128
+    @param        uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param init_delta: Initial gap function [Norb, Norb, Nw, Nkall] float64
+    @param       Vmat: SOC interaction matrix [Nchi, Nchi] float64
+    @param     sgnsig: Sign matrix for spin-spin product [Norb, Norb] float64
+    @param    sgnsig2: Sign matrix for chi orbital mapping [Nchi, Nchi] float64
+    @param      plist: Parity list for gap symmetry [Norb] float64
+    @param      slist: Spin label list [Norb] int64
+    @param      olist: Orbital index list [Nchi] int64
+    @param       kmap: Full-to-reduced k-point mapping [Nkall] int64
+    @param       invk: Inverse k-point mapping [Nkall] int64
+    @param       invs: Inverse spin index mapping [Norb] int64
+    @param    invschi: Inverse chi orbital mapping [Nchi] int64
+    @param   Nx,Ny,Nz: k-grid dimensions
+    @param       temp: Temperature in eV
+    @param    gap_sym: Gap symmetry index
+    @param        eps: Convergence tolerance
+    @param     itemax: Maximum number of iterations
+    @return     delta: Linearized gap function [Norb, Norb, Nw, Nkall] complex128
     """
     Norb, Nchi = len(slist), len(Vmat)
     Nkall, Nk, Nw = len(kmap), len(Gk[0, 0, 0]), len(Gk[0, 0])
@@ -1374,23 +1478,16 @@ def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, 
 
 def gen_Vmatrix(olist: np.ndarray, slist: np.ndarray, site: np.ndarray, invs: np.ndarray,
                 U: float, J: float) -> np.ndarray:
-    """Generate spin–orbit coupling interaction matrix Vmat in SOC calculation.
-    The returned matrix has shape ``(Nchi, Nchi)`` and is constructed by the Fortran routine 
-    ``get_vmat_soc`` using orbital lists and site/sign information.
-
-    Parameters
-    ----------
-    olist : (Nchi,) int64 Orbital indices.
-    slist : (Norb,) int64 Spin‑orbit label for each orbital.
-    site : (Nchi,) int64 Site indices corresponding to each orbital pair.
-    invs : (Norb,) int64 Inverse mapping for spin indices.
-    U : float Hubbard interaction parameter.
-    J : float Hund's coupling.
-
-    Returns
-    -------
-    Vmat : (Nchi, Nchi) float64
-        Interaction matrix suitable for SOC calculations.
+    """
+    @fn gen_Vmatrix
+    @brief Generate the SOC interaction matrix Vmat from uniform U and J parameters.
+    @param  olist: Orbital index list [Nchi] int64
+    @param  slist: Spin-orbit label for each orbital [Norb] int64
+    @param   site: Site indices for each orbital pair [Nchi] int64
+    @param   invs: Inverse spin index mapping [Norb] int64
+    @param      U: Hubbard Coulomb repulsion in eV
+    @param      J: Hund's coupling in eV
+    @return  Vmat: SOC interaction matrix [Nchi, Nchi] float64
     """
     Nchi, Norb = len(olist), len(slist)
     Vmat = np.zeros((Nchi, Nchi), dtype=np.float64)
@@ -1410,10 +1507,16 @@ def gen_Vmatrix(olist: np.ndarray, slist: np.ndarray, site: np.ndarray, invs: np
 
 def gen_Vmatrix_orb(olist: np.ndarray, slist: np.ndarray, site: np.ndarray, invs: np.ndarray,
                     Umat: np.ndarray, Jmat: np.ndarray,) -> np.ndarray:
-    """Construct SOC interaction `Vmat` using orbital‑resolved parameters.
-    Each entry of ``Umat`` and ``Jmat`` corresponds to a pair of orbitals,
-    allowing for orbital‑dependent interactions.
-    The resulting matrix has the same shape as generated by:func:`gen_Vmatrix`.
+    """
+    @fn gen_Vmatrix_orb
+    @brief Generate the SOC interaction matrix Vmat using orbital-resolved U and J parameters.
+    @param  olist: Orbital index list [Nchi] int64
+    @param  slist: Spin-orbit label for each orbital [Norb] int64
+    @param   site: Site indices for each orbital pair [Nchi] int64
+    @param   invs: Inverse spin index mapping [Norb] int64
+    @param   Umat: Orbital-resolved Coulomb matrix [Norb, Norb] float64
+    @param   Jmat: Orbital-resolved Hund's coupling matrix [Norb, Norb] float64
+    @return  Vmat: SOC interaction matrix [Nchi, Nchi] float64
     """
     Nchi, Norb = len(olist), len(Umat)
     Vmat = np.zeros((Nchi, Nchi), dtype=np.float64)
@@ -1435,10 +1538,24 @@ def gen_Vmatrix_orb(olist: np.ndarray, slist: np.ndarray, site: np.ndarray, invs
 def get_chi0_soc(Vmat: np.ndarray, Gk: np.ndarray, olist: np.ndarray, slist: np.ndarray,
                  kmap: np.ndarray, invk: np.ndarray, invs: np.ndarray, temp: float,
                  Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Calculate SOC irreducible susceptibility and auxiliary sign matrices.
-    The routine returns a tuple ``(chi, sgnsig, sgnsig2, invschi)`` where
-    ``chi`` has shape ``(Nchi, Nchi, Nw, Nk)`` and the others are
-    auxiliary arrays needed for later SOC-specific operations.
+    """
+    @fn get_chi0_soc
+    @brief Compute the SOC-aware irreducible susceptibility chi0 and auxiliary spin-sign matrices.
+    @param   Vmat: SOC interaction matrix [Nchi, Nchi] float64
+    @param     Gk: Green's function on full k-grid [Norb, Norb, Nw, Nkall] complex128
+    @param  olist: Orbital index list [Nchi] int64
+    @param  slist: Spin-orbit label for each orbital [Norb] int64
+    @param   kmap: Full-to-reduced k-point mapping [Nkall] int64
+    @param   invk: Inverse k-point mapping [Nkall] int64
+    @param   invs: Inverse spin index mapping [Norb] int64
+    @param   temp: Temperature in eV
+    @param     Nx: Number of k-points along kx
+    @param     Ny: Number of k-points along ky
+    @param     Nz: Number of k-points along kz
+    @retval    chi: Irreducible susceptibility [Nchi, Nchi, Nw, Nk] complex128
+    @retval sgnsig: Sign matrix [Norb, Norb] float64
+    @retval sgnsig2: Sign matrix for chi orbital mapping [Nchi, Nchi] float64
+    @retval invschi: Inverse chi orbital mapping [Nchi] int64
     """
     Norb, Nchi = len(slist), len(olist)
     Nkall, Nk, Nw = len(kmap), len(Gk[0, 0, 0]), len(Gk[0, 0])
@@ -1473,10 +1590,17 @@ def get_chi0_soc(Vmat: np.ndarray, Gk: np.ndarray, olist: np.ndarray, slist: np.
 
 def get_chis_chic_soc(chi: np.ndarray, Vmat: np.ndarray, olist: np.ndarray, slist: np.ndarray,
                       invs: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Transform susceptibility to charge/chi channels in SOC case.
-    The helper ``get_orb_list`` builds a mapping from orbital pairs to
-    chi indices; the function then calls the Fortran routine to produce
-    three reduced tensors ``chic``, ``chiszz`` and ``chispm``.
+    """
+    @fn get_chis_chic_soc
+    @brief Decompose the SOC susceptibility into charge (chic), longitudinal spin (chiszz), and transverse (chispm) channels.
+    @param    chi: Full susceptibility [Nchi, Nchi, Nk, Nw] complex128
+    @param   Vmat: SOC interaction matrix [Nchi, Nchi] float64
+    @param  olist: Orbital index list [Nchi] int64
+    @param  slist: Spin-orbit label for each orbital [Norb] int64
+    @param   invs: Inverse spin index mapping [Norb] int64
+    @retval  chic: Charge susceptibility [Nchi/4, Nchi/4, Nk] complex128
+    @retval chiszz: Longitudinal spin susceptibility [Nchi/4, Nchi/4, Nk] complex128
+    @retval chispm: Transverse spin susceptibility [Nchi/4, Nchi/4, Nk] complex128
     """
     def get_orb_list(olist, slist, invs):
         orb_list = np.zeros(Nchi, dtype=np.int64)
@@ -1516,9 +1640,14 @@ def get_chis_chic_soc(chi: np.ndarray, Vmat: np.ndarray, olist: np.ndarray, slis
     return chic, chiszz, chispm
 
 def get_chis_chic(chi: np.ndarray, Smat: np.ndarray, Cmat: np.ndarray,) -> tuple[np.ndarray, np.ndarray]:
-    """Compute corrected susceptibilities ``chis`` and ``chic`` from ``chi``.
-    The routine applies spin/charge vertex matrices ``Smat`` and ``Cmat`` to
-    the irreducible susceptibility ``chi`` to produce two new tensors with dimensions ``(Nchi, Nchi, Nk)``.
+    """
+    @fn get_chis_chic
+    @brief Compute RPA-corrected spin susceptibility chis and charge susceptibility chic from chi0.
+    @param   chi: Irreducible susceptibility [Nchi, Nchi, Nk, Nw] complex128
+    @param  Smat: Spin interaction matrix [Nchi, Nchi] float64
+    @param  Cmat: Charge interaction matrix [Nchi, Nchi] float64
+    @retval chis: Interacting spin susceptibility [Nchi, Nchi, Nk] complex128
+    @retval chic: Interacting charge susceptibility [Nchi, Nchi, Nk] complex128
     """
     Nk, Nw, Nchi = len(chi[0, 0, 0]), len(chi[0, 0]), len(Smat)
     chis = np.zeros((Nchi, Nchi, Nk), dtype=np.complex128)
@@ -1537,16 +1666,15 @@ def get_chis_chic(chi: np.ndarray, Smat: np.ndarray, Cmat: np.ndarray,) -> tuple
     return chis, chic
 
 def conv_delta_orb_to_band(delta: np.ndarray, uni: np.ndarray, invk: np.ndarray, plist: np.ndarray,gap_sym) -> np.ndarray:
-    """Convert orbital‑space gap function ``delta`` to band representation.
-    Parameters
-    ----------
-    delta : (Norb, Norb, Nw, Nkall) complex128 Gap function in orbital basis.
-    uni : (Norb, Norb, Nk) complex128 Unitary transformation matrices.
-    invk : (Nkall,3) int64 Inverse k‑point mapping.
-
-    Returns
-    -------
-    deltab : (Norb, Norb, Nkall) complex128 Gap function in band basis.
+    """
+    @fn conv_delta_orb_to_band
+    @brief Convert the superconducting gap function from orbital basis to band basis (without SOC).
+    @param   delta: Gap function in orbital basis [Norb, Norb, Nw, Nkall] complex128
+    @param     uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param    invk: Inverse k-point mapping [Nkall] int64
+    @param   plist: Parity list for gap symmetry [Norb] float64
+    @param gap_sym: Gap symmetry index
+    @return deltab: Gap function in band basis [Norb, Norb, Nkall] complex128
     """
     Nkall, Nk, Nw, Norb = len(invk), len(uni), len(delta[0, 0]), len(delta)
     deltab = np.zeros((Norb, Norb, Nkall), dtype=np.complex128)
@@ -1566,9 +1694,15 @@ def conv_delta_orb_to_band(delta: np.ndarray, uni: np.ndarray, invk: np.ndarray,
 
 def conv_delta_orb_to_band_soc(delta: np.ndarray, uni: np.ndarray, invk: np.ndarray,
                                invs: np.ndarray,slist: np.ndarray) -> np.ndarray:
-    """SOC-aware conversion of orbital gap to band representation.
-    Same as :func:`conv_delta_orb_to_band` but includes additional
-    spin indices ``invs`` and ``slist`` required by the SOC routine.
+    """
+    @fn conv_delta_orb_to_band_soc
+    @brief Convert the superconducting gap function from orbital basis to band basis with SOC.
+    @param   delta: Gap function in orbital basis [Norb, Norb, Nw, Nkall] complex128
+    @param     uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param    invk: Inverse k-point mapping [Nkall] int64
+    @param    invs: Inverse spin index mapping [Norb] int64
+    @param   slist: Spin-orbit label for each orbital [Norb] int64
+    @return deltab: Gap function in band basis [Norb, Norb, Nkall] complex128
     """
     Nkall, Nk, Nw, Norb = len(invk), len(uni), len(delta[0, 0]), len(delta)
     deltab = np.zeros((Norb, Norb, Nkall), dtype=np.complex128)
@@ -1588,9 +1722,13 @@ def conv_delta_orb_to_band_soc(delta: np.ndarray, uni: np.ndarray, invk: np.ndar
     return deltab
 
 def gen_Fk(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray) -> np.ndarray:
-    """Generate Fk tensor from Green's function and gap function.
-    The result Fk has same dimensions as ``delta`` and is used in
-    post‑processing of superconducting properties.
+    """
+    @fn gen_Fk
+    @brief Generate the anomalous Green's function Fk from G and delta (without SOC).
+    @param     Gk: Normal Green's function [Norb, Norb, Nw, Nk] complex128
+    @param  delta: Anomalous self-energy [Norb, Norb, Nw, Nkall] complex128
+    @param   invk: Inverse k-point mapping [Nkall] int64
+    @return    Fk: Anomalous Green's function [Norb, Norb, Nw, Nk] complex128
     """
     Nkall, Nk, Nw, Norb = len(invk), len(Gk[0, 0, 0]), len(delta[0, 0]), len(delta)
     Fk = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
@@ -1607,8 +1745,16 @@ def gen_Fk(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray) -> np.ndarray:
 
 def gen_Fk_soc(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray, invs: np.ndarray,
                slist: np.ndarray,gap_sym: int) -> np.ndarray:
-    """SOC-aware generation of Fk tensor from Green's function and gap function.
-    Same as :func:`gen_Fk` but includes additional spin indices for SOC case.
+    """
+    @fn gen_Fk_soc
+    @brief Generate the anomalous Green's function Fk from G and delta with SOC.
+    @param     Gk: Normal Green's function [Norb, Norb, Nw, Nk] complex128
+    @param  delta: Anomalous self-energy [Norb, Norb, Nw, Nkall] complex128
+    @param   invk: Inverse k-point mapping [Nkall] int64
+    @param   invs: Inverse spin index mapping [Norb] int64
+    @param  slist: Spin-orbit label for each orbital [Norb] int64
+    @param gap_sym: Gap symmetry index
+    @return    Fk: Anomalous Green's function [Norb, Norb, Nw, Nkall] complex128
     """
     Nkall, Nk, Nw, Norb = len(invk), len(Gk[0, 0, 0]), len(delta[0, 0]), len(delta)
     Fk = np.zeros((Norb, Norb, Nw, Nkall), dtype=np.complex128)
@@ -1631,6 +1777,15 @@ def gen_Fk_soc(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray, invs: np.nda
     return Fk
 
 def remap_gap(delta0,plist,invk,gap_sym):
+    """
+    @fn remap_gap
+    @brief Remap the anomalous self-energy from the reduced k-grid to the full k-grid applying gap symmetry.
+    @param  delta0: Anomalous self-energy on reduced k-grid [Norb, Norb, Nw, Nk] complex128
+    @param   plist: Parity list for gap symmetry [Norb] float64
+    @param    invk: Inverse k-point mapping [Nkall] int64
+    @param gap_sym: Gap symmetry index
+    @return  delta: Anomalous self-energy on full k-grid [Norb, Norb, Nw, Nkall] complex128
+    """
     Nkall,Nk,Norb=len(invk),len(delta0.T),len(plist)
     Nw=int(delta0.size/(Nk*Norb*Norb))
     delta=np.zeros((Norb, Norb, Nw, Nkall), dtype=np.complex128)
@@ -1649,6 +1804,14 @@ def remap_gap(delta0,plist,invk,gap_sym):
     return delta
 
 def get_eig_or_tr_chi(chi: np.ndarray, invk: np.ndarray, sw_eig:bool) -> np.ndarray:
+    """
+    @fn get_eig_or_tr_chi
+    @brief Compute either the leading eigenvalue or the trace of the susceptibility on the full k-grid.
+    @param    chi: Susceptibility [Nchi, Nchi, Nk] complex128
+    @param   invk: Inverse k-point mapping [Nkall] int64
+    @param sw_eig: If True, return leading eigenvalue; if False, return trace
+    @return  chiq: Eigenvalue or trace on the full k-grid [Nkall] complex128
+    """
     Nkall,Nk=len(invk),len(chi.T)
     Nchi=int(np.sqrt(chi.size/Nk))
     chiq=np.zeros(Nkall,dtype=np.complex128)
@@ -1665,11 +1828,15 @@ def get_eig_or_tr_chi(chi: np.ndarray, invk: np.ndarray, sw_eig:bool) -> np.ndar
     return chiq
 
 def gen_irr_k_TRS(Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Construct irreducible k‑point list for time‑reversal symmetric lattice.
-    A fairly convoluted set of rules determine ``Nk`` (the number of irreducible k‑points)
-    based on even/odd parity of the grid dimensions.
-    The routine returns the k‑point coordinates, a full grid mapping ``kmap``,
-    and an inverse list ``invk_ft_list`` used by Fortran routines.
+    """
+    @fn gen_irr_k_TRS
+    @brief Generate the irreducible k-point list for a time-reversal symmetric lattice.
+    @param     Nx: Number of k-points along kx
+    @param     Ny: Number of k-points along ky
+    @param     Nz: Number of k-points along kz
+    @retval  klist: Irreducible k-point coordinates [Nk, 3] float64
+    @retval   kmap: Full k-grid to irreducible mapping [Nkall, 3] int64
+    @retval invk_ft_list: Inverse k-point list for Fortran FFT routines [Nkall, 3] int64
     """
     Nkall = Nx * Ny * Nz
     if Nkall % 2 == 0:
@@ -1697,6 +1864,13 @@ def gen_irr_k_TRS(Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, np.ndarray, np
     return klist, kmap, invk_ft_list
 
 def gen_kpoint_weight(invk,Nk):
+    """
+    @fn gen_kpoint_weight
+    @brief Compute k-point weights for the irreducible BZ by counting degeneracy from the full k-grid mapping.
+    @param  invk: Inverse k-point mapping [Nkall] int64
+    @param    Nk: Number of irreducible k-points
+    @return weight: k-point weights [Nk] float64
+    """
     Nkall=len(invk)
     weight=np.zeros(Nk,dtype=np.float64)
     flibs.get_kweight.argtypes = [
@@ -1709,6 +1883,13 @@ def gen_kpoint_weight(invk,Nk):
     return weight
 
 def get_plist(rvec,ham_r):
+    """
+    @fn get_plist
+    @brief Determine the parity eigenvalues of each orbital from the Hamiltonian's inversion symmetry properties.
+    @param  rvec: Real-space displacement vectors [Nr, 3] float64
+    @param ham_r: Real-space Hamiltonian blocks [Nr, Norb, Norb] complex128
+    @return plist: Parity sign (+1 or -1) for each orbital [Norb] float64
+    """
     Nr=len(rvec)
     Norb=int(np.sqrt(ham_r.size/Nr))
     Pmn=np.zeros((Norb,Norb),dtype=np.float64)

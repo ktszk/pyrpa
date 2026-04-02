@@ -600,7 +600,7 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
   !!@param    kmap,in: property of k-point
   !!@param    invk,in: list of reverse k-points
   !!@param   olist,in: property of chi footnote
-  !!@param    temp,in: Tempearature
+  !!@param    temp,in: Temperature
   !!@param   Nkall,in: Number of all k-points
   !!@param      Nk,in: Number of k-points
   !!@param      Nw,in: Number of Matsubara frequencies

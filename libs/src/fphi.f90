@@ -145,7 +145,7 @@ subroutine get_tr_phi(trphi,phi_orb,phi,olist,Nw,Nchi,Norb) bind(C)
   !!@param phi_orb,out: The array of phi values at orbital diagonal elements
   !!@param      phi,in: sc susceptibility
   !!@param    olist,in: the list of  properties of chis,chi0 footnote
-  !!@param       Nw,in: The number of freqency mesh
+  !!@param       Nw,in: The number of frequency mesh
   !!@param     Nchi,in: The number of footnote of chis,chi0
   !!@param     Norb,in: The number of orbitals
   use,intrinsic:: iso_fortran_env, only:int32,int64,real64
@@ -196,7 +196,7 @@ subroutine phiq_map(trphi,uni,eig,ffermi,klist,ol,mu,temp,ecut,idelta,eps,Nx,Ny,
   !!@param       Nk,in: The number of k-points
   !!@param     Norb,in: The number of orbitals
   !!@param     Nchi,in: The footnote of chi
-  !!@param sw_omega,in: switch matsubara or real freuency
+  !!@param sw_omega,in: switch matsubara or real frequency
   use calc_irr_phi
   implicit none
   integer(int64),intent(in):: Nx,Ny,Nk,Norb,Nchi

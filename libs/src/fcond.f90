@@ -6,7 +6,7 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
   !!@param      vk,in: group velocity:
   !!@param     eig,in: energy of bands
   !!@param  ffermi,in: fermi distribute function
-  !!@param    Norb,in: The numbrer of orbitals
+  !!@param    Norb,in: The number of orbitals
   !!@param      Nk,in: The number of k-points
   !!@param      mu,in: chemical potential
   !!@param       w,in: frequency (energy)
@@ -76,7 +76,7 @@ subroutine calc_kn(K0,K1,K2,eig,veloc,kweight,tau,temp,mu,Nk,Norb) bind(C)
   !!@param    temp,in: Temperature
   !!@param      mu,in: chemical potential
   !!@param      Nk,in: The number of k-points
-  !!@param    Norb,in: The numbrer of orbitals
+  !!@param    Norb,in: The number of orbitals
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nk,Norb
@@ -133,7 +133,7 @@ subroutine calc_sigma_hall(eig,veloc,imass,kweight,tau,temp,mu,Nk,Norb,sigma_hal
   !!@param       temp,in: Temperature
   !!@param         mu,in: chemical potential
   !!@param         Nk,in: The number of k-points
-  !!@param       Norb,in: The numbrer of orbitals
+  !!@param       Norb,in: The number of orbitals
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nk,Norb
@@ -178,7 +178,7 @@ subroutine calc_tdf(tdf,eig,veloc,kweight,tau,Nw,Nk,Norb) bind(C)
   !!@param     tau,in: relaxation time
   !!@param      Nw,in: The number of energy mesh
   !!@param      Nk,in: The number of k-points
-  !!@param    Norb,in: The numbrer of orbitals
+  !!@param    Norb,in: The number of orbitals
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nk,Norb,Nw
