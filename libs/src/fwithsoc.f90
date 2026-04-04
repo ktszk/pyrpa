@@ -43,12 +43,11 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,ol
 
   integer(int32) i_iter,i_eig,count,i
   integer(int32),parameter:: eig_max=2
-  real(real64) norm,normb,inorm,norm2,weight
+  real(real64) norm,inorm,norm2,weight,lambda_rq,vec_err
   complex(real64),dimension(Nkall,Nw,Norb,Norb):: newdelta,fk
 
   weight=temp/dble(Nkall)
   norm2=0.0d0
-  normb=0.0d0
   call get_V_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
@@ -63,32 +62,39 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,ol
         !$omp end parallel workshare
         call get_norm(norm,newdelta)
         inorm=1.0d0/norm
-        if(abs(norm-norm2)>=1.0d2 .or. abs(norm-norm2)<1.0d-6)then
-           print'(I3,A13,2E16.8)',i_iter,' lambda_elsh=',norm-norm2
+        ! Rayleigh quotient: lambda_rq = Re(<delta, newdelta>) assuming ||delta||=1
+        ! shift is -norm2, so true eigenvalue = lambda_rq + norm2
+        call get_rayleigh(lambda_rq,delta,newdelta)
+        ! Vector convergence: ||newdelta/norm - delta||
+        call get_vec_err(vec_err,newdelta,delta,inorm)
+        if(abs(lambda_rq+norm2)>=1.0d2 .or. abs(lambda_rq+norm2)<1.0d-6)then
+           print'(I3,A13,2E16.8)',i_iter,' lambda_elsh=',lambda_rq+norm2
         else
-           print'(I3,A13,2F12.8)',i_iter,' lambda_elsh=',norm-norm2
+           print'(I3,A13,2F12.8)',i_iter,' lambda_elsh=',lambda_rq+norm2
         end if
-        if(abs(norm-normb)*inorm<eps)then
-           if(norm-norm2>1.0d-1)then !do not finish until eig>0.1
+        if(vec_err<eps)then
+           if(lambda_rq+norm2>1.0d-1)then !do not finish until eig>0.1
               exit
            else if(.true.)then !consider small eig
-              if((norm-norm2)>0.0 .and. abs((norm-normb)*inorm)<eps*1.0d-2)then
+              if((lambda_rq+norm2)>0.0d0 .and. vec_err<eps*1.0d-2)then
                  count=count+1
               end if
               if(count>30)exit !if eigenvalue <0.1  until 30 count exit
            end if
         end if
-        normb=norm
         !$omp parallel workshare
         delta(:,:,:,:)=newdelta(:,:,:,:)*inorm
         !$omp end parallel workshare
      end do iter_loop
-     if(i_eig==2)then
-        print*,'eliash=',norm-norm2
+     print*,'eliash=',lambda_rq+norm2
+     if(i_eig==1 .and. (lambda_rq+norm2)>0.0d0)then
+        print*,'1st eigenvalue is positive: skipping 2nd loop'
+        exit
      end if
      norm2=norm
   end do eigenval_loop
   call get_norm(norm,newdelta)
+  inorm=1.0d0/norm
   !$omp parallel workshare
   delta(:,:,:,:)=newdelta(:,:,:,:)*inorm
   !$omp end parallel workshare
@@ -116,6 +122,60 @@ contains
     !$omp end parallel
     norm=sqrt(2.0d0*tmp)
   end subroutine get_norm
+
+  subroutine get_rayleigh(rq,del,newdel)
+    !> Rayleigh quotient: rq = Re(<del, newdel>) assuming ||del||=1
+    complex(real64),intent(in),dimension(Nkall,Nw,Norb,Norb):: del,newdel
+    real(real64),intent(out):: rq
+
+    integer(int32) i,j,l,m
+    real(real64) tmp
+
+    tmp=0.0d0
+    !$omp parallel
+    do l=1,Norb
+       do m=1,Norb
+          !$omp do private(i,j),reduction(+:tmp)
+          do j=1,Nw
+             do i=1,Nkall
+                tmp=tmp+dble(conjg(del(i,j,m,l))*newdel(i,j,m,l))
+             end do
+          end do
+          !$omp end do
+       end do
+    end do
+    !$omp end parallel
+    rq=2.0d0*tmp
+  end subroutine get_rayleigh
+
+  subroutine get_vec_err(verr,newdel,del,inrm)
+    !> Vector convergence: min(||newdel*inrm - del||, ||newdel*inrm + del||)
+    !> Taking the minimum handles sign-flipping convergence for negative eigenvalues
+    complex(real64),intent(in),dimension(Nkall,Nw,Norb,Norb):: newdel,del
+    real(real64),intent(in):: inrm
+    real(real64),intent(out):: verr
+
+    integer(int32) i,j,l,m
+    real(real64) tmp_pos,tmp_neg
+
+    tmp_pos=0.0d0
+    tmp_neg=0.0d0
+    !$omp parallel
+    do l=1,Norb
+       do m=1,Norb
+          !$omp do private(i,j),reduction(+:tmp_pos,tmp_neg)
+          do j=1,Nw
+             do i=1,Nkall
+                tmp_pos=tmp_pos+abs(newdel(i,j,m,l)*inrm-del(i,j,m,l))**2
+                tmp_neg=tmp_neg+abs(newdel(i,j,m,l)*inrm+del(i,j,m,l))**2
+             end do
+          end do
+          !$omp end do
+       end do
+    end do
+    !$omp end parallel
+    verr=sqrt(2.0d0*min(tmp_pos,tmp_neg))
+  end subroutine get_vec_err
 end subroutine lin_eliash_soc
 
 subroutine get_chi0_soc(chi,sgnsig,sgnsig2,invschi,Vmat,Gk,kmap,invk,invs,olist,slist,temp,&
@@ -920,10 +980,10 @@ end subroutine conv_delta_orb_to_band_soc
 
 subroutine mkself_soc(sigmak,mu,Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,mu_init,&
      rfill,temp,scf_loop,pp,eps,Nkall,Nk,Nw,Norb,Nchi,Nx,Ny,Nz,sw_sub_sigma,sw_out,&
-     sw_in) bind(C)
+     sw_in,m_diis) bind(C)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
-  integer(int64),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz,scf_loop
+  integer(int64),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz,scf_loop,m_diis
   integer(int64),intent(in),dimension(Nchi,2):: olist
   integer(int64),intent(in),dimension(Norb):: slist,invs
   integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
@@ -944,6 +1004,11 @@ subroutine mkself_soc(sigmak,mu,Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,mu_
   real(real64),dimension(Nchi,Nchi):: sgnsig2
   complex(real64),dimension(Nk,Nw,Norb,Norb):: Gk,sigmak0
   complex(real64),dimension(Nk,Nw,Nchi,Nchi):: chi
+  ! DIIS
+  integer(int32):: n_hist,i_hist
+  complex(real64),allocatable:: xout_hist(:,:,:,:,:),res_hist(:,:,:,:,:)
+  real(real64),allocatable:: B_diis(:,:),rhs_diis(:)
+  integer(int32),allocatable:: ipiv_diis(:)
 
   eps_sgm=1.0d-10
   mu=mu_init
@@ -968,6 +1033,13 @@ subroutine mkself_soc(sigmak,mu,Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,mu_
   call get_invschi()
   call get_sgnsig()
   call get_chi_map_soc(chi_map,irr_chi,olist,invs,Nchi,Norb)
+  allocate(xout_hist(Nk,Nw,Norb,Norb,m_diis))
+  allocate(res_hist (Nk,Nw,Norb,Norb,m_diis))
+  allocate(B_diis(m_diis+1,m_diis+1))
+  allocate(rhs_diis(m_diis+1))
+  allocate(ipiv_diis(m_diis+1))
+  n_hist=0
+  i_hist=0
   iter_loop: do scf_i=1,scf_loop
      print'(A5,I5)','iter=',scf_i
      call get_chi0_conv_soc(chi,Gk,kmap,invk,invs,irr_chi,chi_map,olist,sgnsig,&
@@ -1010,6 +1082,7 @@ subroutine mkself_soc(sigmak,mu,Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,mu_
      !$omp end workshare
      !$omp end parallel
   end do iter_loop
+  deallocate(xout_hist,res_hist,B_diis,rhs_diis,ipiv_diis)
   if(sw_out)then
      call io_sigma(.true.)
   end if
@@ -1089,17 +1162,61 @@ contains
   end subroutine ckchi
 
   subroutine compair_sigma()
-    integer(int32) i,j,l,m, kerr,iwerr,lerr,merr
+    integer(int32) i,j,l,m,kerr,iwerr,lerr,merr,ih,jh,idx_i,idx_j,info,n_cur
     real(real64) est
     complex(real64) cksigm
+    complex(real64),dimension(Nk,Nw,Norb,Norb):: sigma_diis
 
+    ! --- Store current output and residual in circular buffer ---
+    i_hist=mod(i_hist,int(m_diis,int32))+1
+    n_hist=min(n_hist+1,int(m_diis,int32))
+    xout_hist(:,:,:,:,i_hist)=sigmak(:,:,:,:)
+    res_hist(:,:,:,:,i_hist)=sigmak(:,:,:,:)-sigmak0(:,:,:,:)
+    n_cur=n_hist
+
+    ! --- Build Pulay matrix B of size (n_cur+1 x n_cur+1) ---
+    B_diis(1:n_cur+1,1:n_cur+1)=0.0d0
+    do ih=1,n_cur
+       idx_i=modulo(i_hist-n_cur+ih-1,int(m_diis,int32))+1
+       do jh=1,n_cur
+          idx_j=modulo(i_hist-n_cur+jh-1,int(m_diis,int32))+1
+          B_diis(ih,jh)=dble(sum(conjg(res_hist(:,:,:,:,idx_i))*res_hist(:,:,:,:,idx_j)))
+       end do
+       B_diis(ih,n_cur+1)=1.0d0
+       B_diis(n_cur+1,ih)=1.0d0
+    end do
+
+    ! --- Right-hand side vector (Lagrange constraint: sum c_i = 1) ---
+    rhs_diis(1:n_cur)=0.0d0
+    rhs_diis(n_cur+1)=1.0d0
+
+    ! --- Solve B*c = rhs via LAPACK dgesv ---
+    call dgesv(n_cur+1,1,B_diis(1:n_cur+1,1:n_cur+1),n_cur+1, &
+               ipiv_diis(1:n_cur+1),rhs_diis(1:n_cur+1),n_cur+1,info)
+    ! If dgesv fails (singular matrix), fall back to linear mixing
+    if(info/=0)then
+       print*,'DIIS: dgesv failed (info=',info,'), fallback to linear mixing'
+       rhs_diis(1:n_cur)=0.0d0
+       rhs_diis(i_hist)=1.0d0
+    end if
+
+    ! --- DIIS extrapolation: sigma_diis = sum_i c_i * xout_hist_i ---
+    sigma_diis(:,:,:,:)=0.0d0
+    do ih=1,n_cur
+       idx_i=modulo(i_hist-n_cur+ih-1,int(m_diis,int32))+1
+       sigma_diis=sigma_diis+rhs_diis(ih)*xout_hist(:,:,:,:,idx_i)
+    end do
+
+    ! --- Convergence check and mixing ---
+    ! n_cur=1 (first step or m_diis=1): fall back to linear mixing
+    ! n_cur>=2 (DIIS active): use sigma_diis directly to preserve optimal extrapolation
     esterr=0.0d0
-    est=100
+    est=100.0d0
     do l=1,Norb
        do m=1,Norb
           do j=1,Nw
              do i=1,Nk
-                cksigm=sigmak(i,j,m,l)
+                cksigm=sigma_diis(i,j,m,l)
                 if(abs(cksigm)>eps_sgm)then
                    est=abs((sigmak0(i,j,m,l)-cksigm)/cksigm)
                    if(est>esterr)then
@@ -1110,7 +1227,11 @@ contains
                       merr=m
                    end if
                 end if
-                sigmak(i,j,m,l)=pp*cksigm+(1.0d0-pp)*sigmak0(i,j,m,l)
+                if(n_cur>=2)then
+                   sigmak(i,j,m,l)=cksigm
+                else
+                   sigmak(i,j,m,l)=pp*cksigm+(1.0d0-pp)*sigmak0(i,j,m,l)
+                end if
              end do
           end do
        end do

@@ -532,7 +532,7 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
            olist: np.ndarray, hamk: np.ndarray, eig: np.ndarray, uni: np.ndarray, mu: float,
            fill: float, temp: float, Nw: int, Nx: int, Ny: int, Nz: int, sw_out: bool,
            sw_in: bool, sw_sub_sigma: bool = True, scf_loop: int = 300, eps: float = 1.0e-4,
-           pp: float = 0.3) -> tuple[np.ndarray, float]:
+           pp: float = 0.3, m_diis: int = 5, sw_rescale: bool = False) -> tuple[np.ndarray, float]:
     """
     @fn mkself
     @brief Iteratively compute the self-energy Sigma(k, iw_n) via FLEX self-consistency loop (without SOC).
@@ -555,10 +555,12 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
     @param     scf_loop: Maximum number of self-consistency iterations
     @param          eps: Convergence tolerance
     @param           pp: Linear mixing rate (0 < pp < 1)
+    @param       m_diis: DIIS history length (m_diis=1: equivalent to linear mixing)
+    @param   sw_rescale: If True, rescale chi0 when Stoner factor >= 1
     @retval      sigmak: Converged self-energy [Norb, Norb, Nw, Nk] complex128
     @retval     mu_self: Final chemical potential in eV
     """
-    print("mixing rate: pp = %3.1f" % pp)
+    print("mixing rate: pp = %3.1f, DIIS m = %d" % (pp, m_diis))
     Nkall, Nk, Nchi = len(kmap), len(hamk), len(Smat)
     Norb = int(np.sqrt(hamk.size / Nk))
     mu_self = c_double()
@@ -580,21 +582,24 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
         POINTER(c_int64), POINTER(c_int64),                    # Nk, Nw
         POINTER(c_int64), POINTER(c_int64),                    # Nchi, Norb
         POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),   # Nx, Ny, Nz
-        POINTER(c_bool), POINTER(c_bool), POINTER(c_bool)      # sw_sub_sigma, sw_out, sw_in
+        POINTER(c_bool), POINTER(c_bool), POINTER(c_bool),      # sw_sub_sigma, sw_out, sw_in
+        POINTER(c_int64),                                        # m_diis
+        POINTER(c_bool)                                          # sw_rescale
     ]
     flibs.mkself.restype = c_void_p
     flibs.mkself(sigmak, byref(mu_self), Smat, Cmat, kmap, invk, olist, hamk, eig, uni,
         byref(c_double(mu)), byref(c_double(fill)), byref(c_double(temp)), byref(c_int64(scf_loop)),
-        byref(c_double(pp)), byref(c_double(eps)), byref(c_int64(Nkall)), byref(c_int64(Nk)), 
-        byref(c_int64(Nw)), byref(c_int64(Norb)), byref(c_int64(Nchi)), byref(c_int64(Nx)), 
-        byref(c_int64(Ny)), byref(c_int64(Nz)), byref(c_bool(sw_sub_sigma)), byref(c_bool(sw_out)), byref(c_bool(sw_in)))
+        byref(c_double(pp)), byref(c_double(eps)), byref(c_int64(Nkall)), byref(c_int64(Nk)),
+        byref(c_int64(Nw)), byref(c_int64(Norb)), byref(c_int64(Nchi)), byref(c_int64(Nx)),
+        byref(c_int64(Ny)), byref(c_int64(Nz)), byref(c_bool(sw_sub_sigma)), byref(c_bool(sw_out)),
+        byref(c_bool(sw_in)), byref(c_int64(m_diis)), byref(c_bool(sw_rescale)))
     return sigmak, mu_self.value
 
 def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.ndarray,
            olist: np.ndarray, slist: np.ndarray, hamk: np.ndarray, eig: np.ndarray, uni: np.ndarray, mu: float,
            fill: float, temp: float, Nw: int, Nx: int, Ny: int, Nz: int, sw_out: bool,
            sw_in: bool, sw_sub_sigma: bool = True, scf_loop: int = 300, eps: float = 1.0e-4,
-           pp: float = 0.3) -> tuple[np.ndarray, float]:
+           pp: float = 0.3, m_diis: int = 5) -> tuple[np.ndarray, float]:
     """
     @fn mkself_soc
     @brief Iteratively compute the self-energy Sigma(k, iw_n) via FLEX self-consistency loop with SOC.
@@ -618,10 +623,11 @@ def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.nd
     @param     scf_loop: Maximum number of self-consistency iterations
     @param          eps: Convergence tolerance
     @param           pp: Linear mixing rate (0 < pp < 1)
+    @param       m_diis: DIIS history length (m_diis=1: equivalent to linear mixing)
     @retval      sigmak: Converged self-energy [Norb, Norb, Nw, Nk] complex128
     @retval     mu_self: Final chemical potential in eV
     """
-    print("mixing rate: pp = %3.1f" % pp)
+    print("mixing rate: pp = %3.1f, DIIS m = %d" % (pp, m_diis))
     Nkall, Nk, Nchi = len(kmap), len(hamk), len(Vmat)
     Norb = int(np.sqrt(hamk.size / Nk))
     mu_self = c_double()
@@ -644,13 +650,14 @@ def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.nd
         POINTER(c_int64), POINTER(c_int64),                     # Nk, Nw
         POINTER(c_int64), POINTER(c_int64),                     # Nchi, Norb
         POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),   # Nx, Ny, Nz
-        POINTER(c_bool), POINTER(c_bool), POINTER(c_bool)       # sw_sub_sigma, sw_out, sw_in
+        POINTER(c_bool), POINTER(c_bool), POINTER(c_bool),       # sw_sub_sigma, sw_out, sw_in
+        POINTER(c_int64)                                         # m_diis
     ]
     flibs.mkself_soc(sigmak,byref(mu_self),Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,
                byref(c_double(mu)), byref(c_double(fill)), byref(c_double(temp)), byref(c_int64(scf_loop)),
                byref(c_double(pp)), byref(c_double(eps)), byref(c_int64(Nkall)), byref(c_int64(Nk)), 
                byref(c_int64(Nw)), byref(c_int64(Norb)), byref(c_int64(Nchi)), byref(c_int64(Nx)), 
-               byref(c_int64(Ny)), byref(c_int64(Nz)), byref(c_bool(sw_sub_sigma)), byref(c_bool(sw_out)), byref(c_bool(sw_in)))
+               byref(c_int64(Ny)), byref(c_int64(Nz)), byref(c_bool(sw_sub_sigma)), byref(c_bool(sw_out)), byref(c_bool(sw_in)), byref(c_int64(m_diis)))
     return sigmak, mu_self.value
 
 def get_qshift(klist: np.ndarray, qpoint: np.ndarray) -> np.ndarray:

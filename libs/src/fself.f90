@@ -717,13 +717,13 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
 end subroutine calc_sigma
 
 subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill,temp,&
-     scf_loop,pp,eps,Nkall,Nk,Nw,Norb,Nchi,Nx,Ny,Nz,sw_sub_sigma,sw_out,sw_in) bind(C)
+     scf_loop,pp,eps,Nkall,Nk,Nw,Norb,Nchi,Nx,Ny,Nz,sw_sub_sigma,sw_out,sw_in,m_diis,sw_rescale) bind(C)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
-  integer(int64),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz,scf_loop
+  integer(int64),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz,scf_loop,m_diis
   integer(int64),intent(in),dimension(Nchi,2):: olist
   integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
-  logical(1),intent(in):: sw_in,sw_out,sw_sub_sigma
+  logical(1),intent(in):: sw_in,sw_out,sw_sub_sigma,sw_rescale
   real(real64),intent(in):: temp,eps,pp,rfill,mu_init
   real(real64),intent(in),dimension(Norb,Nk):: eig
   real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
@@ -734,9 +734,14 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   integer(int32) scf_i
   integer(int32),dimension(Nchi,Nchi,2)::chi_map
   integer(int32),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
-  real(real64)esterr,mu_OLD,eps_sgm
+  real(real64)esterr,mu_OLD,eps_sgm,maxchi0s_global
   complex(real64),dimension(Nk,Nw,Norb,Norb):: Gk,sigmak0
   complex(real64),dimension(Nk,Nw,Nchi,Nchi):: chi
+  ! DIIS
+  integer(int32):: n_hist,i_hist
+  complex(real64),allocatable:: xout_hist(:,:,:,:,:),res_hist(:,:,:,:,:)
+  real(real64),allocatable:: B_diis(:,:),rhs_diis(:)
+  integer(int32),allocatable:: ipiv_diis(:)
 
   eps_sgm=1.0d-10
   mu=mu_init
@@ -759,10 +764,21 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
      call gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb)
   end if
   call get_chi_map(chi_map,irr_chi,olist,Nchi)
+  allocate(xout_hist(Nk,Nw,Norb,Norb,m_diis))
+  allocate(res_hist (Nk,Nw,Norb,Norb,m_diis))
+  allocate(B_diis(m_diis+1,m_diis+1))
+  allocate(rhs_diis(m_diis+1))
+  allocate(ipiv_diis(m_diis+1))
+  n_hist=0
+  i_hist=0
   iter_loop: do scf_i=1,scf_loop
      print'(A5,I5)','iter=',scf_i
      call get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
      call ckchi()
+     if(sw_rescale .and. maxchi0s_global>=1.0d0)then
+        print'(A,F10.6,A)','[FLEX] Stoner factor=',maxchi0s_global,'>= 1: rescaling chi0'
+        chi(:,:,:,:)=chi(:,:,:,:)*(1.0d0-1.0d-4)/maxchi0s_global
+     end if
      call get_Vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi)
      print'(A16,E12.4,A5,E12.4)','Re V_sigma: max:',maxval(dble(chi)),' min:',minval(dble(chi))
      call calc_sigma(sigmak,Gk,chi,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
@@ -800,6 +816,7 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
      !$omp end workshare
      !$omp end parallel
   end do iter_loop
+  deallocate(xout_hist,res_hist,B_diis,rhs_diis,ipiv_diis)
   if(sw_out)then
      call io_sigma(.true.)
   end if
@@ -853,20 +870,65 @@ contains
     end do
     print'(A3,3I4,F12.8)','SDW',kmap(:,chiskall),maxchi0s2
     print'(A3,3I4,F12.8)','CDW',kmap(:,chickall),maxchi0c2
+    maxchi0s_global=maxchi0s2
   end subroutine ckchi
 
   subroutine compair_sigma()
-    integer(int32) i,j,l,m, kerr,iwerr,lerr,merr
+    integer(int32) i,j,l,m,kerr,iwerr,lerr,merr,ih,jh,idx_i,idx_j,info,n_cur
     real(real64) est
     complex(real64) cksigm
+    complex(real64),dimension(Nk,Nw,Norb,Norb):: sigma_diis
 
+    ! --- Store current output and residual in circular buffer ---
+    i_hist=mod(i_hist,int(m_diis,int32))+1
+    n_hist=min(n_hist+1,int(m_diis,int32))
+    xout_hist(:,:,:,:,i_hist)=sigmak(:,:,:,:)
+    res_hist(:,:,:,:,i_hist)=sigmak(:,:,:,:)-sigmak0(:,:,:,:)
+    n_cur=n_hist
+
+    ! --- Build Pulay matrix B of size (n_cur+1 x n_cur+1) ---
+    B_diis(1:n_cur+1,1:n_cur+1)=0.0d0
+    do ih=1,n_cur
+       idx_i=modulo(i_hist-n_cur+ih-1,int(m_diis,int32))+1
+       do jh=1,n_cur
+          idx_j=modulo(i_hist-n_cur+jh-1,int(m_diis,int32))+1
+          B_diis(ih,jh)=dble(sum(conjg(res_hist(:,:,:,:,idx_i))*res_hist(:,:,:,:,idx_j)))
+       end do
+       B_diis(ih,n_cur+1)=1.0d0
+       B_diis(n_cur+1,ih)=1.0d0
+    end do
+
+    ! --- Right-hand side vector (Lagrange constraint: sum c_i = 1) ---
+    rhs_diis(1:n_cur)=0.0d0
+    rhs_diis(n_cur+1)=1.0d0
+
+    ! --- Solve B*c = rhs via LAPACK dgesv ---
+    call dgesv(n_cur+1,1,B_diis(1:n_cur+1,1:n_cur+1),n_cur+1, &
+               ipiv_diis(1:n_cur+1),rhs_diis(1:n_cur+1),n_cur+1,info)
+    ! If dgesv fails (singular matrix), fall back to linear mixing
+    if(info/=0)then
+       print*,'DIIS: dgesv failed (info=',info,'), fallback to linear mixing'
+       rhs_diis(1:n_cur)=0.0d0
+       rhs_diis(i_hist)=1.0d0
+    end if
+
+    ! --- DIIS extrapolation: sigma_diis = sum_i c_i * xout_hist_i ---
+    sigma_diis(:,:,:,:)=0.0d0
+    do ih=1,n_cur
+       idx_i=modulo(i_hist-n_cur+ih-1,int(m_diis,int32))+1
+       sigma_diis=sigma_diis+rhs_diis(ih)*xout_hist(:,:,:,:,idx_i)
+    end do
+
+    ! --- Convergence check and mixing ---
+    ! n_cur=1 (first step or m_diis=1): fall back to linear mixing
+    ! n_cur>=2 (DIIS active): use sigma_diis directly to preserve optimal extrapolation
     esterr=0.0d0
-    est=100
+    est=100.0d0
     do l=1,Norb
        do m=1,Norb
           do j=1,Nw
              do i=1,Nk
-                cksigm=sigmak(i,j,m,l)
+                cksigm=sigma_diis(i,j,m,l)
                 if(abs(cksigm)>eps_sgm)then
                    est=abs((sigmak0(i,j,m,l)-cksigm)/cksigm)
                    if(est>esterr)then
@@ -877,7 +939,11 @@ contains
                       merr=m
                    end if
                 end if
-                sigmak(i,j,m,l)=pp*cksigm+(1.0d0-pp)*sigmak0(i,j,m,l)
+                if(n_cur>=2)then
+                   sigmak(i,j,m,l)=cksigm
+                else
+                   sigmak(i,j,m,l)=pp*cksigm+(1.0d0-pp)*sigmak0(i,j,m,l)
+                end if
              end do
           end do
        end do

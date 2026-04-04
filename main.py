@@ -23,10 +23,10 @@ else: monoclinic
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
 #fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
-fname,ftype,brav,sw_soc='inputs/FeS',2,0,False
+#fname,ftype,brav,sw_soc='inputs/FeS',2,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2_soc.input',1,0,True
-#fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
+fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
 #fname,ftype,brav,sw_soc='inputs/square_soc.hop',1,0,True
 
 sw_dec_axis=False
@@ -58,10 +58,10 @@ color_option defines the meaning of color on Fermi surfaces
  1: orbital weight settled by olist
  2: velocity size
 """
-option=17
+option=13
 color_option=1
 
-Nx,Ny,Nz,Nw=50,32,4,512 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=32,32,1,512 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
@@ -70,9 +70,9 @@ kz=0.0
 abc=[3.96*0.70711,3.96*0.70711,13.02*.5]
 #abc=[3.68,3.68,5.03]
 #alpha_beta_gamma=[90.,90.,90]
-temp=2.0e-2 #2.59e-2
-#tempK=400 #Kelvin
-fill= 6.00
+#temp=2.0e-2 #2.59e-2
+tempK=500 #Kelvin
+fill= .49
 #site_prof=[5]
 
 Emin,Emax=-3,3
@@ -86,7 +86,7 @@ olist=[0,[1,2],3]
 U,J=1.2,0.15
 #U,J=1.8,0.225
 #0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py
-gap_sym=2
+gap_sym=1
 
 #mu0=9.85114560061123
 #k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
@@ -98,7 +98,7 @@ sw_tdf=False
 sw_omega=False #True: real freq, False: Matsubara freq.
 sw_self=False  #True: use calculated self energy for spectrum band plot
 sw_out_self=True
-sw_in_self=False
+sw_in_self=True
 sw_from_file=False
 #------------------------ initial parameters are above -------------------------------
 #----------------------------------main functions-------------------------------------
@@ -513,7 +513,7 @@ def calc_phi_spectrum(mu:float,temp:float,klist,qlist,chiolist,eig,uni,spa_lengt
     f.close()
     return(w,sp,phiw)
 
-def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,olist,site,eps=1.0e-4,pp=0.5):
+def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,olist,site,eps=1.0e-4,pp=0.5,sw_rescale:bool=True):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     ham_k=flibs.gen_ham(klist,ham_r,rvec)
@@ -521,7 +521,7 @@ def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,oli
         Smat,Cmat=flibs.gen_SCmatrix_orb(olist,site,Umat,Jmat)
     else:
         Smat,Cmat=flibs.gen_SCmatrix(olist,site,U,J)
-    sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,pp=pp)
+    sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,pp=pp,sw_rescale=sw_rescale)
     if sw_out_self:
         np.savez('self_en',sigmak,mu_self)
 
@@ -629,7 +629,7 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,plist,mu:float,temp:flo
     info=output_gap_function(invk,kmap,gap,uni,plist,gap_sym,sw_soc,invs,slist)
 
 def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,chiolist,site,plist,
-                           mu:float,temp:float,gap_sym:int,sw_self:bool,eps=1.0e-4,pp=0.5):
+                           mu:float,temp:float,gap_sym:int,sw_self:bool,eps=1.0e-4,pp=0.5,sw_rescale:bool=True):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
     #weight=flibs.gen_kpoint_weight(invk,len(klist))
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
@@ -644,7 +644,7 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,chiolist,s
             sigmak,mu_self=npz['arr_0'],npz['arr_1']
         else:
             sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,chiolist,ham_k,eig,uni,
-                                        mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,pp=pp)
+                                        mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,pp=pp,sw_rescale=sw_rescale)
         print(f'chem. pot. with self= {mu:.4f} eV',flush=True)
         Gk=flibs.gen_green(sigmak,ham_k,mu_self,temp)
     else:

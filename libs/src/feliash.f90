@@ -39,9 +39,8 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,kmap,invk,
   integer(int32) i_iter,i_eig,count,i
   integer(int32),parameter:: eig_max=2
   logical(1) sw_pair
-  real(real64) norm,normb,inorm,norm2,weight
-  complex(real64),dimension(Nk,Nw,Norb,Norb):: newdelta
-  complex(real64),dimension(Nk,Nw,Norb,Norb):: fk
+  real(real64) norm,inorm,norm2,weight,lambda_rq,vec_err
+  complex(real64),dimension(Nk,Nw,Norb,Norb):: newdelta,fk
 
   if(gap_sym>=0)then
      sw_pair=.true.
@@ -52,7 +51,6 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,kmap,invk,
   end if
   weight=temp/dble(Nkall)
   norm2=0.0d0
-  normb=0.0d0
   call get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
@@ -67,32 +65,41 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,kmap,invk,
         !$omp end parallel workshare
         call get_norm(norm,newdelta)
         inorm=1.0d0/norm
-        if(abs(norm-norm2)>=1.0d2 .or. abs(norm-norm2)<1.0d-6)then
-           print'(I3,A13,2E16.8)',i_iter,' lambda_elsh=',norm-norm2
+        ! Rayleigh quotient: lambda_L = Re(<delta, newdelta>) / ||delta||^2
+        ! Since delta is normalized (||delta||=1), lambda_rq = Re(<delta, newdelta>)
+        call get_rayleigh(lambda_rq,delta,newdelta)
+        ! Vector convergence: ||newdelta/norm - delta|| (delta is normalized so this is relative)
+        call get_vec_err(vec_err,newdelta,delta,inorm)
+        if(abs(lambda_rq-norm2)>=1.0d2 .or. abs(lambda_rq-norm2)<1.0d-6)then
+           print'(I3,A13,2E16.8)',i_iter,' lambda_elsh=',lambda_rq-norm2
         else
-           print'(I3,A13,2F12.8)',i_iter,' lambda_elsh=',norm-norm2
+           print'(I3,A13,2F12.8)',i_iter,' lambda_elsh=',lambda_rq-norm2
         end if
-        if(abs(norm-normb)*inorm<eps)then
-           if((norm-norm2)>1.0d-1)then !do not finish until eig>0.1
+        if(vec_err<eps)then
+           if((lambda_rq-norm2)>1.0d-1)then !do not finish until eig>0.1
               exit
-           else if(.true.)then !consider small eig
-              if(abs((norm-normb)*inorm)<eps*1.0d-2)then
+           else if((lambda_rq-norm2)<0.0d0)then !negative eigenvalue: exit immediately
+              exit
+           else !consider small positive eig
+              if(vec_err<eps*1.0d-2)then
                  count=count+1
               end if
               if(count>30)exit !if eigenvalue <0.1  until 30 count exit
            end if
         end if
-        normb=norm
         !$omp parallel workshare
         delta(:,:,:,:)=newdelta(:,:,:,:)*inorm
         !$omp end parallel workshare
      end do iter_loop
-     if(i_eig==2)then
-        print*,'eliash=',norm-norm2
+     print*,'eliash=',lambda_rq-norm2
+     if(i_eig==1 .and. (lambda_rq-norm2)>0.0d0)then
+        print*,'1st eigenvalue is positive: skipping 2nd loop'
+        exit
      end if
      norm2=norm
   end do eigenval_loop
   call get_norm(norm,newdelta)
+  inorm=1.0d0/norm
   !$omp parallel workshare
   delta(:,:,:,:)=newdelta(:,:,:,:)*inorm
   !$omp end parallel workshare
@@ -120,6 +127,60 @@ contains
     !$omp end parallel
     norm=sqrt(2.0d0*tmp)
   end subroutine get_norm
+
+  subroutine get_rayleigh(rq,del,newdel)
+    !> Rayleigh quotient: rq = Re(<del, newdel>) assuming ||del||=1
+    complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: del,newdel
+    real(real64),intent(out):: rq
+
+    integer(int32) i,j,l,m
+    real(real64) tmp
+
+    tmp=0.0d0
+    !$omp parallel
+    do l=1,Norb
+       do m=1,Norb
+          !$omp do private(i,j),reduction(+:tmp)
+          do j=1,Nw
+             do i=1,Nkall
+                tmp=tmp+dble(conjg(del(invk(1,i),j,m,l))*newdel(invk(1,i),j,m,l))
+             end do
+          end do
+          !$omp end do
+       end do
+    end do
+    !$omp end parallel
+    rq=2.0d0*tmp
+  end subroutine get_rayleigh
+
+  subroutine get_vec_err(verr,newdel,del,inrm)
+    !> Vector convergence: min(||newdel*inrm - del||, ||newdel*inrm + del||)
+    !> Taking the minimum handles sign-flipping convergence for negative eigenvalues
+    complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: newdel,del
+    real(real64),intent(in):: inrm
+    real(real64),intent(out):: verr
+
+    integer(int32) i,j,l,m
+    real(real64) tmp_pos,tmp_neg
+
+    tmp_pos=0.0d0
+    tmp_neg=0.0d0
+    !$omp parallel
+    do l=1,Norb
+       do m=1,Norb
+          !$omp do private(i,j),reduction(+:tmp_pos,tmp_neg)
+          do j=1,Nw
+             do i=1,Nkall
+                tmp_pos=tmp_pos+abs(newdel(invk(1,i),j,m,l)*inrm-del(invk(1,i),j,m,l))**2
+                tmp_neg=tmp_neg+abs(newdel(invk(1,i),j,m,l)*inrm+del(invk(1,i),j,m,l))**2
+             end do
+          end do
+          !$omp end do
+       end do
+    end do
+    !$omp end parallel
+    verr=sqrt(2.0d0*min(tmp_pos,tmp_neg))
+  end subroutine get_vec_err
 end subroutine lin_eliash
 
 subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
