@@ -58,25 +58,27 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,ol
         call mkfk_trs_soc(fk,Gk,delta,sgnsig,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym)
         call mkdelta_soc(newdelta,fk,chi,Vmat,sgnsig,sgnsig2,kmap,invk,invs,invschi,olist,slist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,gap_sym)
         !$omp parallel workshare
-        newdelta(:,:,:,:)=newdelta(:,:,:,:)*weight-delta(:,:,:,:)*norm2
+        newdelta(:,:,:,:)=-newdelta(:,:,:,:)*weight+delta(:,:,:,:)*norm2
         !$omp end parallel workshare
         call get_norm(norm,newdelta)
         inorm=1.0d0/norm
         ! Rayleigh quotient: lambda_rq = Re(<delta, newdelta>) assuming ||delta||=1
-        ! shift is -norm2, so true eigenvalue = lambda_rq + norm2
+        ! shift is +norm2, so true eigenvalue = lambda_rq - norm2
         call get_rayleigh(lambda_rq,delta,newdelta)
         ! Vector convergence: ||newdelta/norm - delta||
         call get_vec_err(vec_err,newdelta,delta,inorm)
-        if(abs(lambda_rq+norm2)>=1.0d2 .or. abs(lambda_rq+norm2)<1.0d-6)then
-           print'(I3,A13,2E16.8)',i_iter,' lambda_elsh=',lambda_rq+norm2
+        if(abs(lambda_rq-norm2)>=1.0d2 .or. abs(lambda_rq-norm2)<1.0d-6)then
+           print'(I3,A13,2E16.8)',i_iter,' lambda_elsh=',lambda_rq-norm2
         else
-           print'(I3,A13,2F12.8)',i_iter,' lambda_elsh=',lambda_rq+norm2
+           print'(I3,A13,2F12.8)',i_iter,' lambda_elsh=',lambda_rq-norm2
         end if
         if(vec_err<eps)then
-           if(lambda_rq+norm2>1.0d-1)then !do not finish until eig>0.1
+           if((lambda_rq-norm2)>1.0d-1)then !do not finish until eig>0.1
               exit
-           else if(.true.)then !consider small eig
-              if((lambda_rq+norm2)>0.0d0 .and. vec_err<eps*1.0d-2)then
+           else if((lambda_rq-norm2)<0.0d0)then !negative eigenvalue: exit immediately
+              exit
+           else !consider small positive eig
+              if(vec_err<eps*1.0d-2)then
                  count=count+1
               end if
               if(count>30)exit !if eigenvalue <0.1  until 30 count exit
@@ -86,8 +88,8 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,ol
         delta(:,:,:,:)=newdelta(:,:,:,:)*inorm
         !$omp end parallel workshare
      end do iter_loop
-     print*,'eliash=',lambda_rq+norm2
-     if(i_eig==1 .and. (lambda_rq+norm2)>0.0d0)then
+     print*,'eliash=',lambda_rq-norm2
+     if(i_eig==1 .and. (lambda_rq-norm2)>0.0d0)then
         print*,'1st eigenvalue is positive: skipping 2nd loop'
         exit
      end if
@@ -980,14 +982,14 @@ end subroutine conv_delta_orb_to_band_soc
 
 subroutine mkself_soc(sigmak,mu,Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,mu_init,&
      rfill,temp,scf_loop,pp,eps,Nkall,Nk,Nw,Norb,Nchi,Nx,Ny,Nz,sw_sub_sigma,sw_out,&
-     sw_in,m_diis) bind(C)
+     sw_in,m_diis,sw_rescale) bind(C)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz,scf_loop,m_diis
   integer(int64),intent(in),dimension(Nchi,2):: olist
   integer(int64),intent(in),dimension(Norb):: slist,invs
   integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
-  logical(1),intent(in):: sw_in,sw_out,sw_sub_sigma
+  logical(1),intent(in):: sw_in,sw_out,sw_sub_sigma,sw_rescale
   real(real64),intent(in):: temp,eps,pp,rfill,mu_init
   real(real64),intent(in),dimension(Norb,Nk):: eig
   real(real64),intent(in),dimension(Nchi,Nchi):: Vmat
@@ -999,7 +1001,7 @@ subroutine mkself_soc(sigmak,mu,Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,mu_
   integer(int32),dimension(Nchi,Nchi,2)::chi_map
   integer(int32),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
   integer(int64),dimension(Nchi):: invschi
-  real(real64)esterr,mu_OLD,eps_sgm
+  real(real64)esterr,mu_OLD,eps_sgm,maxchi0_global
   real(real64),dimension(Norb,Norb):: sgnsig
   real(real64),dimension(Nchi,Nchi):: sgnsig2
   complex(real64),dimension(Nk,Nw,Norb,Norb):: Gk,sigmak0
@@ -1045,6 +1047,10 @@ subroutine mkself_soc(sigmak,mu,Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,mu_
      call get_chi0_conv_soc(chi,Gk,kmap,invk,invs,irr_chi,chi_map,olist,sgnsig,&
           sgnsig2,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
      call ckchi()
+     if(sw_rescale .and. maxchi0_global>=1.0d0)then
+        print'(A,F10.6,A)','[FLEX] Stoner factor=',maxchi0_global,'>= 1: rescaling chi0'
+        chi(:,:,:,:)=chi(:,:,:,:)*(1.0d0-1.0d-4)/maxchi0_global
+     end if
      call get_V_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
      print'(A16,E12.4,A5,E12.4)','Re V_sigma: max:',maxval(dble(chi)),' min:',minval(dble(chi))
      call calc_sigma_soc(sigmak,Gk,chi,Vmat,kmap,invk,invs,olist,slist,sgnsig,sgnsig2,temp,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
@@ -1159,6 +1165,7 @@ contains
        end if
     end do
     print'(A7,3I4,F12.8)','SDW/CDW',kmap(:,chikall),maxchi02
+    maxchi0_global=maxchi02
   end subroutine ckchi
 
   subroutine compair_sigma()
@@ -1472,7 +1479,7 @@ subroutine calc_sigma_soc(sigmak,Gk,Vsigma,Vmat,kmap,invk,invs,olist,slist,sgnsi
            else if(invk(2,i)==1)then
               tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vsigma(invk(1,i),1,l,m) !Vsigma(-k,iw)
            end if
-           tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=Vmat(m,l)
+           tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=-Vmat(m,l)
         end do
         !$omp end do
         !$omp do private(i)
