@@ -1,9 +1,5 @@
 subroutine get_qshift(qpoint,klist,qshift,Nk) bind(C,name="get_qshift_")
-  !> shift k to k+q
-  !!@param  qpoint,in: q-vector
-  !!@param   klist,in: list of all k-point
-  !!@param qshift,out: list of footnote of klist that correspond to k+q shift
-  !!@param      Nk,in: number of k-points
+  !> shift k to k+q (hash-based O(Nk) mapping)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nk
@@ -11,41 +7,76 @@ subroutine get_qshift(qpoint,klist,qshift,Nk) bind(C,name="get_qshift_")
   real(real64),intent(in),dimension(3):: qpoint
   integer(int64),intent(out),dimension(Nk):: qshift
 
-  integer(int32) i,j
-  real(real64) tmp
-  real(real64),dimension(3,Nk):: kqlist
+  integer(int32) :: i,j
+  integer(int64) :: jj
+  integer(int64) :: scale_int, m, h, step
+  integer(int64) :: i1, i2, i3, j1, j2, j3
+  integer(int64), allocatable :: ht_key(:), ht_val(:)
+  integer(int64) :: key, key_t
+  real(real64) :: tmpf(3)
 
-  !$omp parallel
-  !$omp workshare
-  kqlist(:,:)=0.0d0
-  !$omp end workshare
-  !$omp do private(j)
-  kloop:do i=1,Nk
-     kqlist(:,i)=klist(:,i)+qpoint(:)
-     do j=1,3
-        if(kqlist(j,i)>=1.0d0)then
-           kqlist(j,i)=kqlist(j,i)-1.0d0
-        else if(kqlist(j,i)<0.0d0)then
-           kqlist(j,i)=kqlist(j,i)+1.0d0
+  ! parameters for integerized grid
+  scale_int = 1048576_int64  ! 2^20 resolution
+  m = max(3_int64, 2_int64*Nk + 3_int64)
+
+  allocate(ht_key(m))
+  allocate(ht_val(m))
+  ht_key(:) = -1_int64
+  ht_val(:) = -1_int64
+
+  ! Build hash table from klist (single-threaded)
+  do jj = 1, int(Nk)
+     i1 = int(klist(1,jj)*dble(scale_int)+0.5d0, int64)
+     i2 = int(klist(2,jj)*dble(scale_int)+0.5d0, int64)
+     i3 = int(klist(3,jj)*dble(scale_int)+0.5d0, int64)
+     i1 = mod(i1, scale_int)
+     i2 = mod(i2, scale_int)
+     i3 = mod(i3, scale_int)
+     key = i1 + i2*scale_int + i3*scale_int*scale_int
+     h = mod(abs(key), m) + 1_int64
+     step = 1_int64
+     do while(ht_key(h) /= -1_int64 .and. ht_key(h) /= key)
+        h = h + step
+        if(h > m) h = h - m
+     end do
+     ht_key(h) = key
+     ht_val(h) = jj
+  end do
+
+  ! Lookup for shifted k = k + qpoint (periodic mod 1)
+  !$omp parallel do private(i1,i2,i3,key_t,h,step,tmpf,j1,j2,j3)
+  do i = 1, Nk
+     tmpf(:) = klist(:,i) + qpoint(:)
+     do j = 1, 3
+        if(tmpf(j) >= 1.0d0) then
+           tmpf(j) = tmpf(j) - 1.0d0
+        else if(tmpf(j) < 0.0d0) then
+           tmpf(j) = tmpf(j) + 1.0d0
         end if
      end do
-  end do kloop
-  !$omp end do
-  !$omp workshare
-  qshift(:)=1
-  !$omp end workshare
-  !$omp do private(j,tmp)
-  kq_loop: do i=1,Nk
-     k_loop: do j=1,Nk
-        tmp=sum(abs(klist(:,j)-kqlist(:,i)))
-        if(tmp<1.0d-9)then !may be Nk=O(10^9) calc is too difficult
-           qshift(i)=j
+     j1 = int(tmpf(1)*dble(scale_int)+0.5d0, int64)
+     j2 = int(tmpf(2)*dble(scale_int)+0.5d0, int64)
+     j3 = int(tmpf(3)*dble(scale_int)+0.5d0, int64)
+     j1 = mod(j1, scale_int)
+     j2 = mod(j2, scale_int)
+     j3 = mod(j3, scale_int)
+     key_t = j1 + j2*scale_int + j3*scale_int*scale_int
+     h = mod(abs(key_t), m) + 1_int64
+     step = 1_int64
+     qshift(i) = 1
+     do while(ht_key(h) /= -1_int64)
+        if(ht_key(h) == key_t) then
+           qshift(i) = ht_val(h)
            exit
         end if
-     end do k_loop
-  end do kq_loop
-  !$omp end do
-  !$omp end parallel
+        h = h + step
+        if(h > m) h = h - m
+     end do
+  end do
+  !$omp end parallel do
+
+  deallocate(ht_key)
+  deallocate(ht_val)
 end subroutine get_qshift
 
 module calc_irr_chi
@@ -58,7 +89,8 @@ contains
     !!@param      Norb: The number of orbitals
     !!@param      Nchi: The footnote of chi
     !!@param       uni: unitary matrix
-    !!@param       eig: energies of bands
+
+      !!@param       eig: energies of bands
     !!@param    ffermi: fermi distribute function
     !!@param        ol: the list of the properties of orbitals at footnote of chi
     !!@param      temp: temperature
@@ -239,7 +271,9 @@ subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,e
            tmp(l,l)=tmp(l,l)+1.0d0
         end do
         call zgetrf(Nchi,Nchi,tmp,Nchi,ipiv,info)
+        if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
         call zgetri(Nchi,tmp,Nchi,ipiv,work,2*Nchi,info)
+        if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
         tmp2(:,:)=0.0d0
         do l=1,Nchi
            do m=1,Nchi
@@ -282,7 +316,7 @@ subroutine get_chis(chis,chi0,Smat,Nchi,Nw) bind(C)
   integer(int32) i,l,m,n
   integer(int32) info
   integer(int32),dimension(Nchi):: ipiv
-  complex(real64),dimension(Nchi):: work
+  complex(real64),dimension(2*Nchi):: work
   complex(real64),dimension(Nchi,Nchi):: tmp
 
   !$omp parallel do private(tmp,l,m,n,work,ipiv,info)
@@ -299,7 +333,9 @@ subroutine get_chis(chis,chi0,Smat,Nchi,Nw) bind(C)
         tmp(l,l)=tmp(l,l)+1.0d0
      end do
      call zgetrf(Nchi,Nchi,tmp,Nchi,ipiv,info)
-     call zgetri(Nchi,tmp,Nchi,ipiv,work,Nchi,info)
+     if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
+     call zgetri(Nchi,tmp,Nchi,ipiv,work,2*Nchi,info)
+     if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
      do l=1,Nchi
         do n=1,Nchi
            !$omp simd

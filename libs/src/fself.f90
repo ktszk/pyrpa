@@ -17,7 +17,7 @@ subroutine FFT(cmat,tmp,Nx,Ny,Nz,Nw,SW)
   integer(int32) Inv
   integer(int32),dimension(4):: Nlist
 
-  Nlist=(/Nx,Ny,Nz,Nw/)
+  Nlist=(/int(Nx,int32),int(Ny,int32),int(Nz,int32),int(Nw,int32)/)
   if(SW)then
      Inv=-1
   else
@@ -180,7 +180,9 @@ subroutine getinv(Gk,Nk,Nw,Norb) bind(C,name="getinv_")
      do j=1,Nk
         tmp(:,:)=Gk(j,i,:,:)
         call zgetrf(Norb,Norb,tmp,Norb,ipiv,info)
+        if(info/=0)then; print*,'zgetrf failed in getinv: info=',info; stop; end if
         call zgetri(Norb,tmp,Norb,ipiv,work,2*Norb,info)
+        if(info/=0)then; print*,'zgetri failed in getinv: info=',info; stop; end if
         Gk(j,i,:,:)=tmp(:,:)
      end do
   end do
@@ -442,6 +444,10 @@ subroutine get_chi0_sum(chi,Gk,klist,invk,irr_chi,chi_map,olist,temp,Nw,Nk,Nkall
   real(real64) weight
   complex(real64),dimension(Nkall,2*Nw):: tmpgk13,tmpgk42
 
+  !$omp parallel workshare
+  chi(:,:,:,:)=0.0d0
+  !$omp end parallel workshare
+
   weight=temp/dble(Nkall)
   orb_loop:do iorb=1,Nchi*(Nchi+1)/2
      l=irr_chi(iorb,1)
@@ -477,7 +483,7 @@ subroutine get_chi0_sum(chi,Gk,klist,invk,irr_chi,chi_map,olist,temp,Nw,Nk,Nkall
               wloop2: do j=1,2*Nw
                  !$omp simd
                  kloop: do i=1,Nkall
-                    chi(invk(1,iq),iw,m,l)=chi(iq,iw,m,l)-tmpgk13(i,j)*tmpgk42(qshift(i),wshift(j))
+                    chi(invk(1,iq),iw,m,l)=chi(invk(1,iq),iw,m,l)-tmpgk13(i,j)*tmpgk42(qshift(i),wshift(j))
                  end do kloop
                  !$omp end simd
               end do wloop2
@@ -538,9 +544,13 @@ subroutine get_vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi) bind(C,name='get_vsig
         !$omp end do
         !$omp end parallel
         call zgetrf(Nchi,Nchi,cmat1,Nchi,ipiv,info)
+        if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
         call zgetri(Nchi,cmat1,Nchi,ipiv,work,2*Nchi,info)
+        if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
         call zgetrf(Nchi,Nchi,cmat2,Nchi,ipiv,info)
+        if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
         call zgetri(Nchi,cmat2,Nchi,ipiv,work,2*Nchi,info)
+        if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
         !$omp parallel
         !$omp workshare
         cmat5(:,:)=0.0d0
@@ -562,7 +572,7 @@ subroutine get_vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi) bind(C,name='get_vsig
         do l=1,Nchi
            do m=1,Nchi
               do n=1,Nchi
-                 cmat5(m,l)=cmat5(m,l)+cmat2(m,n)*cmat4(n,l) !(1-chi0S)^-1chi0S
+                 cmat5(m,l)=cmat5(m,l)+cmat2(m,n)*cmat4(n,l) !(1+chi0C)^-1chi0C
               end do
            end do
         end do
@@ -803,7 +813,7 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
           !$omp end parallel
         end block sub_self
      end if
-     call compair_sigma()
+     call compare_sigma()
      if(esterr<eps)then
         exit
      end if
@@ -873,9 +883,9 @@ contains
     maxchi0s_global=maxchi0s2
   end subroutine ckchi
 
-  subroutine compair_sigma()
+  subroutine compare_sigma()
     integer(int32) i,j,l,m,kerr,iwerr,lerr,merr,ih,jh,idx_i,idx_j,info,n_cur
-    real(real64) est
+   real(real64) est, eps_reg
     complex(real64) cksigm
     complex(real64),dimension(Nk,Nw,Norb,Norb):: sigma_diis
 
@@ -892,11 +902,19 @@ contains
        idx_i=modulo(i_hist-n_cur+ih-1,int(m_diis,int32))+1
        do jh=1,n_cur
           idx_j=modulo(i_hist-n_cur+jh-1,int(m_diis,int32))+1
-          B_diis(ih,jh)=dble(sum(conjg(res_hist(:,:,:,:,idx_i))*res_hist(:,:,:,:,idx_j)))
+          B_diis(ih,jh)=real(sum(conjg(res_hist(:,:,:,:,idx_i))*res_hist(:,:,:,:,idx_j)),kind=real64)
        end do
        B_diis(ih,n_cur+1)=1.0d0
        B_diis(n_cur+1,ih)=1.0d0
     end do
+
+    ! Regularize diagonal to improve numerical stability
+    eps_reg=1.0d-12
+    if(n_cur>0)then
+       do ih=1,n_cur
+          B_diis(ih,ih)=B_diis(ih,ih)+eps_reg
+       end do
+    end if
 
     ! --- Right-hand side vector (Lagrange constraint: sum c_i = 1) ---
     rhs_diis(1:n_cur)=0.0d0
@@ -905,11 +923,13 @@ contains
     ! --- Solve B*c = rhs via LAPACK dgesv ---
     call dgesv(n_cur+1,1,B_diis(1:n_cur+1,1:n_cur+1),n_cur+1, &
                ipiv_diis(1:n_cur+1),rhs_diis(1:n_cur+1),n_cur+1,info)
-    ! If dgesv fails (singular matrix), fall back to linear mixing
+    ! If dgesv fails (singular matrix), fall back to using most-recent vector
     if(info/=0)then
-       print*,'DIIS: dgesv failed (info=',info,'), fallback to linear mixing'
+       print*,'DIIS: dgesv failed (info=',info,'), fallback to most-recent entry'
        rhs_diis(1:n_cur)=0.0d0
-       rhs_diis(i_hist)=1.0d0
+       if(n_cur>=1) then
+          rhs_diis(n_cur)=1.0d0
+       end if
     end if
 
     ! --- DIIS extrapolation: sigma_diis = sum_i c_i * xout_hist_i ---
@@ -955,7 +975,7 @@ contains
           exit
        end if
     end do
-  end subroutine compair_sigma
+  end subroutine compare_sigma
 
   subroutine renew_mu()
     integer(int32) i_iter
@@ -975,7 +995,7 @@ contains
     muS= mu-dmu
     upper_lim: do i_iter=1,itemax
        mu=muL
-       rnL=00d0
+       rnL=0.0d0
        call get_rn(rnL,mu)
        if(rnL<rfill)then
           if(abs(rfill-rnL)>0.5d0)then
@@ -1091,7 +1111,7 @@ contains
     deltagk=0.0d0
     do l=1,Norb
        do j=1,Nw
-          iw=cmplx(mu,dble(2*(j-1)+1)*pi*temp)          
+          iw=cmplx(rmu,dble(2*(j-1)+1)*pi*temp)
           do i=1,Nk
              Gk0=0.0d0
              do n=1,Norb
@@ -1169,9 +1189,13 @@ subroutine get_chis_chic(chis,chic,chi,Smat,Cmat,Nk,Nw,Nchi) bind(C)
      !$omp end do
      !$omp end parallel
      call zgetrf(Nchi,Nchi,cmat1,Nchi,ipiv,info)
+     if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
      call zgetri(Nchi,cmat1,Nchi,ipiv,work,2*Nchi,info)
+     if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
      call zgetrf(Nchi,Nchi,cmat2,Nchi,ipiv,info)
+     if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
      call zgetri(Nchi,cmat2,Nchi,ipiv,work,2*Nchi,info)
+     if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
      !$omp parallel
      !$omp workshare
      cmat3(:,:)=0.0d0
@@ -1210,7 +1234,11 @@ subroutine get_eig_or_tr_chi(chiqout,chi,invk,Nkall,Nk,Nchi,sw_eig) bind(C)
    complex(real64),dimension(Nchi):: eig
    complex(real64),dimension(Nchi,Nchi):: tmp,tmp1,tmp2
 
-   !$omp parallel do private(tmp,tmp1,tmp2,rwork,work,eig,i,l,info)
+   !$omp parallel
+   !$omp workshare
+   chiqout(:)=0.0d0
+   !$omp end workshare
+   !$omp do private(tmp,tmp1,tmp2,rwork,work,eig,i,l,info)
    do i=1,Nkall
       if(sw_eig)then
          tmp(:,:)=chi(invk(1,i),:,:)
@@ -1222,5 +1250,6 @@ subroutine get_eig_or_tr_chi(chiqout,chi,invk,Nkall,Nk,Nchi,sw_eig) bind(C)
          end do
       end if
    end do
-   !$omp end parallel do
+   !$omp end do
+   !$omp end parallel
 end subroutine

@@ -15,37 +15,71 @@ subroutine get_iqshift(qpoint,klist,qshift,Nk) bind(C,name="get_iqshift_")
   real(real64) tmp
   real(real64),dimension(3,Nk):: kqlist
   
-  !$omp parallel
-  !$omp workshare
-  kqlist(:,:)=0.0d0
-  !$omp end workshare
-  !$omp do private(j)
-  kloop:do i=1,Nk
-     kqlist(:,i)=1.0d0-klist(:,i)+qpoint(:)
+  integer(int64) :: scale_int, i1, i2, i3, j1, j2, j3
+  integer(int64), allocatable :: ht_key(:), ht_val(:)
+  integer(int64) :: m, h, step
+  integer(int64) :: jj
+  integer(int64) :: key, key_t
+  real(real64) :: tmpf(3)
+
+  scale_int=1048576_int64
+  m = max(3_int64, 2_int64*Nk + 3_int64)
+  allocate(ht_key(m))
+  allocate(ht_val(m))
+  ht_key(:) = -1_int64
+  ht_val(:) = -1_int64
+
+  ! build hash table from klist (single-threaded)
+  do jj=1,int(Nk)
+     i1 = int(klist(1,jj)*dble(scale_int)+0.5d0, int64)
+     i2 = int(klist(2,jj)*dble(scale_int)+0.5d0, int64)
+     i3 = int(klist(3,jj)*dble(scale_int)+0.5d0, int64)
+     i1 = mod(i1, scale_int)
+     i2 = mod(i2, scale_int)
+     i3 = mod(i3, scale_int)
+     key = i1 + i2*scale_int + i3*scale_int*scale_int
+     h = mod(abs(key), m) + 1_int64
+     step = 1_int64
+     do while(ht_key(h) /= -1_int64 .and. ht_key(h) /= key)
+        h = h + step
+        if(h>m) h = h - m
+     end do
+     ht_key(h) = key
+     ht_val(h) = jj
+  end do
+
+  !$omp parallel do private(i1,i2,i3,key_t,h,step,tmpf,j1,j2,j3)
+  do i=1,Nk
+     tmpf(:)=1.0d0-klist(:,i)+qpoint(:)
      do j=1,3
-        if(kqlist(j,i)>=1.0d0)then
-           kqlist(j,i)=kqlist(j,i)-1.0d0
-        else if(kqlist(j,i)<0.0d0)then
-           kqlist(j,i)=kqlist(j,i)+1.0d0
+        if(tmpf(j)>=1.0d0) then
+           tmpf(j)=tmpf(j)-1.0d0
+        else if(tmpf(j)<0.0d0) then
+           tmpf(j)=tmpf(j)+1.0d0
         end if
      end do
-  end do kloop
-  !$omp end do
-  !$omp workshare
-  qshift(:)=1
-  !$omp end workshare
-  !$omp do private(j,tmp)
-  kq_loop: do i=1,Nk
-     k_loop: do j=1,Nk
-        tmp=sum(abs(klist(:,j)-kqlist(:,i)))
-        if(tmp<1.0d-9)then
-           qshift(i)=j
+     j1 = int(tmpf(1)*dble(scale_int)+0.5d0, int64)
+     j2 = int(tmpf(2)*dble(scale_int)+0.5d0, int64)
+     j3 = int(tmpf(3)*dble(scale_int)+0.5d0, int64)
+     j1 = mod(j1, scale_int)
+     j2 = mod(j2, scale_int)
+     j3 = mod(j3, scale_int)
+     key_t = j1 + j2*scale_int + j3*scale_int*scale_int
+     h = mod(abs(key_t), m) + 1_int64
+     step = 1_int64
+     qshift(i) = 1
+     do while(ht_key(h) /= -1_int64)
+        if(ht_key(h) == key_t) then
+           qshift(i) = ht_val(h)
            exit
         end if
-     end do k_loop
-  end do kq_loop
-  !$omp end do
-  !$omp end parallel
+        h = h + step
+        if(h>m) h = h - m
+     end do
+  end do
+
+  deallocate(ht_key)
+  deallocate(ht_val)
 end subroutine get_iqshift
 
 module calc_irr_phi

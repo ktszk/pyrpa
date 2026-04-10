@@ -7,6 +7,10 @@ __pycache__/
 *.so
 *.mod
 *.o
+# Fortran/gfortran dependency files
+# gfortran generates .d dependency files (e.g. obj/*.d)
+*.d
+libs/obj/*.d
 
 # output files
 Fk*

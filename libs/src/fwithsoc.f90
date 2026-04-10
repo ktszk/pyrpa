@@ -248,6 +248,7 @@ contains
        !$omp end do
        !$omp end parallel
        call zgeev('N','N',Nchi,chi0,Nchi,eigc,tmp1,Nchi,tmp,Nchi,work,Nchi*Nchi*4+1,rwork,info)
+       if(info/=0)then; print*,'zgeev failed: info=',info; stop; end if
        maxchi0=maxval(dble(eigc))
        if(maxchi0>maxchi02)then
           chik=i
@@ -317,7 +318,9 @@ subroutine get_V_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
         !$omp end do
         !$omp end parallel
         call zgetrf(Nchi,Nchi,cmat1,Nchi,ipiv,info)
+        if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
         call zgetri(Nchi,cmat1,Nchi,ipiv,work,2*Nchi,info)
+        if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
         !$omp parallel
         !$omp workshare
         cmat3(:,:)=0.0d0
@@ -882,7 +885,9 @@ subroutine get_chis_chic_soc(chic,chiszz,chispm,chi,Vmat,orb_list,olist,slist,in
      !$omp end do
      !$omp end parallel
      call zgetrf(Nchi,Nchi,cmat1,Nchi,ipiv,info)
+     if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
      call zgetri(Nchi,cmat1,Nchi,ipiv,work,2*Nchi,info)
+     if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
      !$omp parallel
      !$omp workshare
      cmat2(:,:)=0.0d0
@@ -1152,6 +1157,7 @@ contains
        !$omp end do
        !$omp end parallel
        call zgeev('N','N',Nchi,chi0,Nchi,eigc,tmp1,Nchi,tmp,Nchi,work,Nchi*Nchi*4+1,rwork,info)
+       if(info/=0)then; print*,'zgeev failed: info=',info; stop; end if
        maxchi0=maxval(dble(eigc))
        if(maxchi0>maxchi02)then
           chik=i
@@ -1169,19 +1175,22 @@ contains
   end subroutine ckchi
 
   subroutine compair_sigma()
-    integer(int32) i,j,l,m,kerr,iwerr,lerr,merr,ih,jh,idx_i,idx_j,info,n_cur
-    real(real64) est
-    complex(real64) cksigm
-    complex(real64),dimension(Nk,Nw,Norb,Norb):: sigma_diis
+      integer(int32) i,j,l,m,kerr,iwerr,lerr,merr,ih,jh,idx_i,idx_j,info,n_cur
+      real(real64) est
+      real(real64) eps_reg
+      complex(real64) cksigm
+      complex(real64),dimension(Nk,Nw,Norb,Norb):: sigma_diis
 
     ! --- Store current output and residual in circular buffer ---
     i_hist=mod(i_hist,int(m_diis,int32))+1
     n_hist=min(n_hist+1,int(m_diis,int32))
     xout_hist(:,:,:,:,i_hist)=sigmak(:,:,:,:)
     res_hist(:,:,:,:,i_hist)=sigmak(:,:,:,:)-sigmak0(:,:,:,:)
-    n_cur=n_hist
+    n_hist=n_hist
 
-    ! --- Build Pulay matrix B of size (n_cur+1 x n_cur+1) ---
+    ! determine current DIIS dimension
+    n_cur = n_hist
+
     B_diis(1:n_cur+1,1:n_cur+1)=0.0d0
     do ih=1,n_cur
        idx_i=modulo(i_hist-n_cur+ih-1,int(m_diis,int32))+1
@@ -1192,6 +1201,13 @@ contains
        B_diis(ih,n_cur+1)=1.0d0
        B_diis(n_cur+1,ih)=1.0d0
     end do
+    ! regularize diagonal slightly to avoid exact singularity
+    eps_reg=1.0d-12
+    if(n_cur>0) then
+       do ih=1,n_cur
+          B_diis(ih,ih)=B_diis(ih,ih)+eps_reg
+       end do
+    end if
 
     ! --- Right-hand side vector (Lagrange constraint: sum c_i = 1) ---
     rhs_diis(1:n_cur)=0.0d0
@@ -1200,11 +1216,12 @@ contains
     ! --- Solve B*c = rhs via LAPACK dgesv ---
     call dgesv(n_cur+1,1,B_diis(1:n_cur+1,1:n_cur+1),n_cur+1, &
                ipiv_diis(1:n_cur+1),rhs_diis(1:n_cur+1),n_cur+1,info)
-    ! If dgesv fails (singular matrix), fall back to linear mixing
+    ! If dgesv fails (singular matrix), fall back to linear mixing.
+    ! Set weight 1 on the most recent entry (index n_cur in the compacted rhs).
     if(info/=0)then
        print*,'DIIS: dgesv failed (info=',info,'), fallback to linear mixing'
        rhs_diis(1:n_cur)=0.0d0
-       rhs_diis(i_hist)=1.0d0
+       rhs_diis(n_cur)=1.0d0
     end if
 
     ! --- DIIS extrapolation: sigma_diis = sum_i c_i * xout_hist_i ---

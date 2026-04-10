@@ -233,9 +233,13 @@ subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
         !$omp end do
         !$omp end parallel
         call zgetrf(Nchi,Nchi,cmat1,Nchi,ipiv,info)
+        if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
         call zgetri(Nchi,cmat1,Nchi,ipiv,work,2*Nchi,info)
+        if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
         call zgetrf(Nchi,Nchi,cmat2,Nchi,ipiv,info)
+        if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
         call zgetri(Nchi,cmat2,Nchi,ipiv,work,2*Nchi,info)
+        if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
         !$omp parallel
         !$omp workshare
         cmat5(:,:)=0.0d0

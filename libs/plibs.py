@@ -290,7 +290,8 @@ def mk_qlist(k_set: np.ndarray | list, Nx: int, Ny: int, Nz: int, bvec: np.ndarr
     for ks,ke in zip(k_set,k_set[1:]):
         dk=np.array(ke)-np.array(ks)
         dk_length=abs(dk.dot(bvec)).sum()
-        dN=np.asarray(abs(dk)*Narray,dtype=int)
+        # ensure at least one division along non-zero component; use ceil to avoid zero due to truncation
+        dN=np.asarray(np.ceil(abs(dk)*Narray),dtype=int)
         N=dN[dN>0].min()
         tmp=np.linspace(ks,ke,N,False)
         tmp2=np.linspace(0,dk_length,N,False)+maxsplen
