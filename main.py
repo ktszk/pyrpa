@@ -22,11 +22,11 @@ else: monoclinic
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4nso',0,7,False
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
-#fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
+fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/FeS',2,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2_soc.input',1,0,True
-fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
+#fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
 #fname,ftype,brav,sw_soc='inputs/square_soc.hop',1,0,True
 
 sw_dec_axis=False
@@ -53,15 +53,16 @@ option defines calculation modes
 17: plot dHvA frequency vs angle (not implement)
 18: mass calculation (not implement)
 19: spectrum with impurity (not implement)
+20: calc sigma_cpa (not implement)
 color_option defines the meaning of color on Fermi surfaces
  0: band or mono color
  1: orbital weight settled by olist
  2: velocity size
 """
-option=7
+option=20
 color_option=1
 
-Nx,Ny,Nz,Nw=200,200,4,512 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=32,32,1,512 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
@@ -72,10 +73,10 @@ abc=[3.96*0.70711,3.96*0.70711,13.02*.5]
 #alpha_beta_gamma=[90.,90.,90]
 #temp=2.0e-2 #2.59e-2
 tempK=500 #Kelvin
-fill= .5 #*2
+fill= 3.0
 #site_prof=[5]
 
-Emin,Emax=-3,3
+Emin,Emax=-5,5
 delta=3.0e-2
 Ecut=1.0e-2
 tau_const=100
@@ -133,7 +134,7 @@ except NameError:
     alpha_beta_gamma=[90.,90.,90]
 alatt=np.array(abc)
 deg=np.array(alpha_beta_gamma)
-if option in {0,4,7,12}:
+if option in {0,4,7,12,20}:
     try:
         k_sets
         xlabel
@@ -884,7 +885,8 @@ def main():
            "calc phi spectrum with symmetry line","calc phi on xy plane at Ecut",
            "calc self energy","solve linearized eliashberg equation",
            "gap_function","calculate carrier number","calculate cycrtron mass",
-           "calculate electron mass","spectrum with impurity"]
+           "plot dHvA frequency","calculate electron mass","spectrum with impurity",
+           "calculate sigma_cpa"]
     cstr=["no color",'orbital weight','velocity size']
     if omp_check: #OMP properties
         print("OpenMP mode",flush=True)
@@ -922,7 +924,7 @@ def main():
     print("Reciprocal Lattice Vector (Angstrom^-1)",flush=True)
     for i,b in enumerate(bvec):
         print(f"b{i+1}: %7.4f %7.4f %7.4f"%tuple(b),flush=True)
-    if option in {5,6,18}: #conductivity (5,6) and impurity (18) functions calc or set mu themself
+    if option in {5,6,19,20}: #conductivity (5,6) and impurity (18) functions calc or set mu themself
         pass
     else:
         if sw_calc_mu:
@@ -1087,6 +1089,52 @@ def main():
         spectrum=flibs.get_imp_spectrum(uni,eigs,mu,wlist,klist,rlist)
         w,k=np.meshgrid(wlist,spa_length)
         plt.contourf(k,w,abs(spectrum.imag),100)
+        plt.show()
+    elif option==20:
+        # --- CPA calculation ---
+        mu=get_mu(ham_r,S_r,rvec,Arot,temp)
+        print(f'Temperature = {temp:10.3e} eV ({temp/kb:.2f} K)',flush=True)
+        print(f'chem. pot. = {mu:.4f} eV',flush=True)
+        # VA, VB are the onsite perturbation RELATIVE to the reference onsite in hamk
+        # Species A (host): no perturbation -> VA = 0
+        # Species B (impurity): diagonal shift
+        VA = np.zeros((no, no), dtype=np.complex128)
+        VB = 2.0 * np.eye(no, dtype=np.complex128)
+        x_cpa = 0.
+        Nk, klist = plibs.gen_klist(Nx, Ny, Nz)
+        hamk = flibs.gen_ham(klist, ham_r, rvec)
+        # shift onsite by -mu so that w=0 corresponds to the Fermi level
+        hamk[:, range(no), range(no)] -= mu
+        # CPA on real axis for spectrum
+        wlist = np.linspace(Emin, Emax, Nw)
+        zlist_real = wlist + 1j*delta
+        print(f"CPA: Norb={no}, Nk={Nk}, Nw={Nw}, x={x_cpa}",flush=True)
+        sigma_cpa = flibs.solve_cpa(hamk, VA, VB, x_cpa, zlist_real, pp=0.5)
+        print("CPA converged",flush=True)
+        # --- spectrum along symmetry line ---
+        klist_s, spa_length, xticks = plibs.mk_klist(k_sets, kmesh, bvec)
+        hamk_s = flibs.gen_ham(klist_s, ham_r, rvec)
+        hamk_s[:, range(no), range(no)] -= mu
+        Nks = len(klist_s)
+        Akw = np.zeros((Nks, Nw))
+        for iw in range(Nw):
+            zI = np.eye(no) * zlist_real[iw]
+            sig = sigma_cpa[iw]
+            for ik in range(Nks):
+                Gk = np.linalg.inv(zI - hamk_s[ik] - sig)
+                Akw[ik, iw] = -np.trace(Gk).imag / np.pi
+        w, x = np.meshgrid(wlist, spa_length)
+        plt.contourf(x, w, Akw, 100, cmap=plt.get_cmap('hot'))
+        for xt in xticks[1:-1]:
+            plt.axvline(xt, ls='-', lw=0.25, color='white')
+        plt.xlim(0, spa_length.max())
+        plt.axhline(0., ls='--', lw=0.25, color='white')
+        plt.xticks(xticks, xlabel)
+        plt.ylabel('Energy (eV)')
+        plt.title('CPA spectrum')
+        plt.colorbar(label=r'$A(\mathbf{k},\omega)$')
+        plt.tight_layout()
+        plt.savefig('cpa_spectrum.png', dpi=150)
         plt.show()
 if __name__=="__main__":
     main()

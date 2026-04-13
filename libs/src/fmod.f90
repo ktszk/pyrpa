@@ -110,33 +110,16 @@ subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,Norb) bind(C)
   kloop: do i=1,Nk
      tmp(:,:)=Ovlk(:,:,i)
      call zheev('V','U',norb,tmp,norb,eq,work,2*norb-1,rwork,info)
-     !$omp simd
      do j=1,Norb
         tmp2(:,j)=tmp(:,j)/sqrt(cmplx(eq(j)))
      end do
-     !$omp end simd
-     tmp(:,:)=0.0d0
-     !$omp simd
-     do j=1,Norb
-        do k=1,Norb
-           do l=1,Norb
-              do m=1,Norb
-                 tmp(k,j)=tmp(k,j)+conjg(tmp2(m,k))*ham_k(m,l,i)*tmp2(l,j)
-              end do
-           end do
-        end do
-     end do
-     !$omp end simd
+     ! tmp = tmp2^H * ham_k(:,:,i) * tmp2
+     call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),ham_k(:,:,i),Norb,tmp2,Norb,(0.0d0,0.0d0),tmp3,Norb)
+     call zgemm('C','N',Norb,Norb,Norb,(1.0d0,0.0d0),tmp2,Norb,tmp3,Norb,(0.0d0,0.0d0),tmp,Norb)
      call zheev('V','U',norb,tmp,norb,eq,work,2*norb-1,rwork,info)
      eig(:,i)=eq(:)
-     tmp3(:,:)=0.0d0
-     do j=1,Norb
-        do k=1,Norb
-           do l=1,Norb
-              tmp3(k,j)=tmp3(k,j)+tmp2(k,l)*tmp(l,j)
-           end do
-        end do
-     end do
+     ! uni = tmp2 * tmp  (compose transformations)
+     call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),tmp2,Norb,tmp,Norb,(0.0d0,0.0d0),tmp3,Norb)
      uni(:,:,i)=tmp3(:,:)
   end do kloop
   !$omp end parallel do
@@ -412,6 +395,8 @@ subroutine gen_tr_greenw_0(trGk,wl,eig,mu,delta,Nk,Nw,Norb) bind(C)
   complex(real64),intent(out),dimension(Nw,Nk):: trGk
 
   integer(int32) i,j,n
+
+  trGk(:,:) = (0.0d0, 0.0d0)
 
   !$omp parallel do private(i,n)
   kloop: do j=1,Nk

@@ -1164,6 +1164,51 @@ def get_tau(tauw: np.ndarray, eig: np.ndarray, tau_max: float, tau_mode: int, ep
                   byref(c_int64(Norb)))
     return tau
 
+def calc_tau_epa(eig: np.ndarray, gavg: np.ndarray, wavg: np.ndarray,
+                 edge: np.ndarray, step: np.ndarray, nbin: np.ndarray,
+                 mu: float, temp: float) -> np.ndarray:
+    """
+    @fn calc_tau_epa
+    @brief Compute EPA relaxation time from epa.x (job='egrid') output.
+    @param   eig: Eigenvalues [Nk, Norb] float64 (eV)
+    @param  gavg: EPA averaged |g|^2 [ngrid, nbin_max, nbin_max, nmodes] float64 (eV^2)
+    @param  wavg: Averaged phonon frequencies per mode [nmodes] float64 (eV)
+    @param  edge: Grid edges [ngrid] float64 (eV)
+    @param  step: Grid steps [ngrid] float64 (eV)
+    @param  nbin: Number of bins per grid [ngrid] int64
+    @param    mu: Chemical potential (eV)
+    @param  temp: Temperature kB*T (eV)
+    @return  tau: Relaxation time [Nk, Norb] float64
+    """
+    Nk = len(eig)
+    Norb = int(eig.size / Nk)
+    ngrid = len(edge)
+    nmodes = len(wavg)
+    nbin_max = int(np.max(nbin))
+    # Fortran expects (Norb,Nk) layout, (nmodes,nbin_max,nbin_max,ngrid) for gavg
+    tau = np.zeros((Nk, Norb), dtype=np.float64)
+    nbin_i64 = np.ascontiguousarray(nbin, dtype=np.int64)
+    flibs.calc_tau_epa.argtypes = [
+        np.ctypeslib.ndpointer(dtype=np.float64),  # tau
+        np.ctypeslib.ndpointer(dtype=np.float64),  # gavg
+        np.ctypeslib.ndpointer(dtype=np.float64),  # wavg
+        np.ctypeslib.ndpointer(dtype=np.float64),  # eig
+        np.ctypeslib.ndpointer(dtype=np.float64),  # edge
+        np.ctypeslib.ndpointer(dtype=np.float64),  # step
+        POINTER(c_double), POINTER(c_double),       # mu, temp
+        POINTER(c_int64), POINTER(c_int64),         # Nk, Norb
+        POINTER(c_int64),                           # nmodes
+        np.ctypeslib.ndpointer(dtype=np.int64),     # nbin
+        POINTER(c_int64), POINTER(c_int64)          # ngrid, nbin_max
+    ]
+    flibs.calc_tau_epa.restype = c_void_p
+    flibs.calc_tau_epa(tau, gavg, wavg, eig, edge, step,
+                       byref(c_double(mu)), byref(c_double(temp)),
+                       byref(c_int64(Nk)), byref(c_int64(Norb)),
+                       byref(c_int64(nmodes)), nbin_i64,
+                       byref(c_int64(ngrid)), byref(c_int64(nbin_max)))
+    return tau
+
 def gen_imp_ham(rvec: np.ndarray, ham_r: np.ndarray, ham_i: np.ndarray,
                 rlist: np.ndarray, imp_list: np.ndarray,eps: float = 1.0e-5) -> np.ndarray:
     """
@@ -1909,3 +1954,58 @@ def get_plist(rvec,ham_r):
     flibs.get_parity_prop.retype = c_void_p
     flibs.get_parity_prop(Pmn,rvec,ham_r,byref(c_int64(Norb)),byref(c_int64(Nr)))
     return np.sign(Pmn[0,:])
+
+def solve_cpa(hamk: np.ndarray, VA: np.ndarray, VB: np.ndarray,
+              x: float, zlist: np.ndarray, pp: float = 0.5,
+              maxiter: int = 500, tol: float = 1.0e-10,
+              sigma_init: np.ndarray | None = None) -> np.ndarray:
+    """
+    @fn solve_cpa
+    @brief Run CPA self-consistent loop over an array of complex frequencies.
+    @param   hamk: k-space Hamiltonian [Nk, Norb, Norb] complex128
+    @param     VA: Onsite potential of species A [Norb, Norb] complex128
+    @param     VB: Onsite potential of species B [Norb, Norb] complex128
+    @param      x: Concentration of species A (0 < x < 1)
+    @param  zlist: Complex frequency array [Nw] complex128 (松原 iω_n or 実軸 ω+iδ)
+    @param     pp: Linear mixing parameter (default 0.5)
+    @param maxiter: Maximum CPA iterations per frequency (default 500)
+    @param    tol: Convergence tolerance (default 1e-10)
+    @param sigma_init: Initial guess [Nw, Norb, Norb] complex128 (default: VCA = x*VA + (1-x)*VB)
+    @return sigma_cpa: Converged CPA self-energy [Nw, Norb, Norb] complex128
+    """
+    Nk = len(hamk)
+    Norb = hamk.shape[1]
+    Nw = len(zlist)
+    VA_c = np.ascontiguousarray(VA, dtype=np.complex128)
+    VB_c = np.ascontiguousarray(VB, dtype=np.complex128)
+    zlist_c = np.ascontiguousarray(zlist, dtype=np.complex128)
+
+    # initial guess: VCA
+    if sigma_init is not None:
+        sigma_cpa = np.ascontiguousarray(sigma_init, dtype=np.complex128)
+    else:
+        sigma_cpa = np.zeros((Nw, Norb, Norb), dtype=np.complex128)
+        vca = x * VA_c + (1.0 - x) * VB_c
+        for iw in range(Nw):
+            sigma_cpa[iw, :, :] = vca
+
+    flibs.solve_cpa_array.argtypes = [
+        np.ctypeslib.ndpointer(dtype=np.complex128),  # sigma_cpa_w
+        np.ctypeslib.ndpointer(dtype=np.complex128),  # hamk
+        np.ctypeslib.ndpointer(dtype=np.complex128),  # VA
+        np.ctypeslib.ndpointer(dtype=np.complex128),  # VB
+        POINTER(c_double),                             # x
+        np.ctypeslib.ndpointer(dtype=np.complex128),  # zlist
+        POINTER(c_double),                             # pp
+        POINTER(c_int64), POINTER(c_int64),            # Nk, Norb
+        POINTER(c_int64), POINTER(c_int64),            # Nw, maxiter
+        POINTER(c_double)                              # tol
+    ]
+    flibs.solve_cpa_array.restype = c_void_p
+    flibs.solve_cpa_array(sigma_cpa, hamk, VA_c, VB_c,
+                          byref(c_double(x)), zlist_c,
+                          byref(c_double(pp)),
+                          byref(c_int64(Nk)), byref(c_int64(Norb)),
+                          byref(c_int64(Nw)), byref(c_int64(maxiter)),
+                          byref(c_double(tol)))
+    return sigma_cpa

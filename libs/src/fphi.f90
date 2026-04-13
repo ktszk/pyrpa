@@ -109,7 +109,7 @@ contains
     real(real64),intent(in),dimension(Norb,Nk):: eig,ffermi
     complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
   
-    integer(int64) i,j,k,l,m
+    integer(int32) i,j,k,l,m
     complex(real64) unitmp
     complex(real64),dimension(Nchi,Nchi):: phi,calc_phi
   
@@ -191,7 +191,10 @@ subroutine get_tr_phi(trphi,phi_orb,phi,olist,Nw,Nchi,Norb) bind(C)
   complex(real64),intent(out),dimension(Norb+2,Nw):: phi_orb
   
   integer(int64) i,j,k
-  
+
+  trphi(:)     = (0.0d0, 0.0d0)
+  phi_orb(:,:) = (0.0d0, 0.0d0)
+
   !$omp parallel do private(j,k)
   wloop:do i=1,Nw
      orb_lop1:do j=1,Nchi

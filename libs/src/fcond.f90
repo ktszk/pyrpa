@@ -165,7 +165,6 @@ subroutine calc_sigma_hall(eig,veloc,imass,kweight,tau,temp,mu,Nk,Norb,sigma_hal
   end do get_Kn
   !$omp end do
   !$omp end parallel
-  print*,sigma_hall
 end subroutine calc_sigma_hall
 
 subroutine calc_tdf(tdf,eig,veloc,kweight,tau,Nw,Nk,Norb) bind(C)
@@ -192,7 +191,7 @@ subroutine calc_tdf(tdf,eig,veloc,kweight,tau,Nw,Nk,Norb) bind(C)
   id=1.0d-3
   emax=maxval(eig)
   emin=minval(eig)
-  dw=(emax-emin)/Nw
+  dw=(emax-emin)/dble(Nw)
   !$omp parallel
   !$omp workshare
   tdf(:,:,:)=0.0d0
@@ -234,7 +233,12 @@ subroutine get_tau(tau,tauw,eig,tau_max,eps,tau_mode,Nk,Nw,Norb) bind(C)
   !$omp parallel do private(i,j,iter_w)
   do i=1,Nk
      do j=1,Norb
-        iter_w=int(Nw*(eig(j,i)-Emin)/Elength)+1
+        if (Elength<1.0d-30) then
+           iter_w=1
+        else
+           iter_w=int(Nw*(eig(j,i)-Emin)/Elength)+1
+           iter_w=max(1,min(iter_w,int(Nw)))
+        end if
         if(tau_mode==1)then
            if(tauw(iter_w)<eps)then
               tau(j,i)=tau_max
@@ -248,3 +252,103 @@ subroutine get_tau(tau,tauw,eig,tau_max,eps,tau_mode,Nk,Nw,Norb) bind(C)
   end do
   !$omp end parallel do
 end subroutine get_tau
+
+subroutine calc_tau_epa(tau,gavg,wavg,eig,edge,step,mu,temp,&
+     Nk,Norb,nmodes,nbin,ngrid,nbin_max) bind(C)
+  !> calc_tau_epa
+  !> Compute EPA relaxation time from epa.x output (job='egrid').
+  !> Scattering rate: Gamma = 2*pi * sum_nu sum_j <|g_nu(ei,ej)|^2> *
+  !>   [(nB(w_nu)+1-f(ej)) + (nB(w_nu)+f(ej))] * |dE|
+  !!@param        tau,out: relaxation time [Norb,Nk]
+  !!@param       gavg, in: EPA averaged |g|^2 [nmodes,nbin_max,nbin_max,ngrid] (eV^2)
+  !!@param       wavg, in: averaged phonon freq per mode [nmodes] (eV)
+  !!@param        eig, in: electronic eigenvalues [Norb,Nk] (eV)
+  !!@param       edge, in: grid edges [ngrid] (eV)
+  !!@param       step, in: grid steps [ngrid] (eV)
+  !!@param         mu, in: chemical potential (eV)
+  !!@param       temp, in: temperature kB*T (eV)
+  !!@param         Nk, in: number of k-points
+  !!@param       Norb, in: number of orbitals
+  !!@param     nmodes, in: number of phonon modes
+  !!@param       nbin, in: number of bins per grid [ngrid]
+  !!@param      ngrid, in: number of energy grids (typically 2)
+  !!@param   nbin_max, in: max(nbin) — leading dimension for gavg
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  implicit none
+  integer(int64),intent(in):: Nk,Norb,nmodes,ngrid,nbin_max
+  integer(int64),intent(in),dimension(ngrid):: nbin
+  real(real64),intent(in):: mu,temp
+  real(real64),intent(in),dimension(ngrid):: edge,step
+  real(real64),intent(in),dimension(nmodes):: wavg
+  real(real64),intent(in),dimension(nmodes,nbin_max,nbin_max,ngrid):: gavg
+  real(real64),intent(in),dimension(Norb,Nk):: eig
+  real(real64),intent(out),dimension(Norb,Nk):: tau
+
+  integer(int32) ik,ib,ig,ig_found,jbin,kk,nu
+  real(real64) eps,gamma,w,nB,ff,xb,xf,g2,de
+  real(real64),parameter:: pi=acos(-1.0d0)
+  real(real64),parameter:: tau_max=1.0d+15
+  real(real64),parameter:: xcut=500.0d0
+  real(real64) ecenter
+
+  !$omp parallel do private(ik,ib,ig,ig_found,jbin,kk,nu,eps,gamma,w,nB,ff,xb,xf,g2,de,ecenter)
+  do ik=1,Nk
+     do ib=1,Norb
+        eps=eig(ib,ik)
+        ! find which grid & bin this state belongs to
+        jbin=-1
+        ig_found=-1
+        do ig=1,ngrid
+           jbin=int((eps-edge(ig))/step(ig))+1
+           if(jbin>=1 .and. jbin<=int(nbin(ig)))then
+              ig_found=ig
+              exit
+           end if
+           jbin=-1
+        end do
+        if(jbin<1)then
+           tau(ib,ik)=tau_max
+           cycle
+        end if
+
+        gamma=0.0d0
+        ! sum over final-state bins within same grid
+        do kk=1,int(nbin(ig_found))
+           ! center energy of final bin
+           ecenter=edge(ig_found)+step(ig_found)*(dble(kk)-0.5d0)
+           de=abs(step(ig_found))
+
+           do nu=1,nmodes
+              w=wavg(nu)
+              if(w<1.0d-8) cycle
+              g2=gavg(nu,kk,jbin,ig_found)
+              if(abs(g2)<1.0d-30) cycle
+
+              ! Bose distribution
+              xb=w/temp
+              if(xb>xcut)then; nB=0.0d0
+              else;            nB=1.0d0/(exp(xb)-1.0d0)
+              end if
+
+              ! Fermi distribution f(ecenter)
+              xf=(ecenter-mu)/temp
+              if(xf>xcut)then;      ff=0.0d0
+              else if(xf<-xcut)then; ff=1.0d0
+              else;                  ff=1.0d0/(exp(xf)+1.0d0)
+              end if
+
+              ! emission + absorption
+              gamma=gamma+g2*((nB+1.0d0-ff)+(nB+ff))*de
+           end do
+        end do
+
+        gamma=2.0d0*pi*gamma
+        if(gamma>1.0d-30)then
+           tau(ib,ik)=1.0d0/gamma
+        else
+           tau(ib,ik)=tau_max
+        end if
+     end do
+  end do
+  !$omp end parallel do
+end subroutine calc_tau_epa

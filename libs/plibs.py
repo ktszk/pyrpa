@@ -949,3 +949,42 @@ def calc_carrier(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.
     dfermi=0.25*(1.-np.tanh(0.5*(eig-mu)/temp)**2)/temp
     n_carr=2*dfermi.sum(axis=0)/(Vuc*Nk)
     return n_carr
+
+def read_epa_output(filename: str) -> tuple[int,int,np.ndarray,np.ndarray,np.ndarray,np.ndarray,np.ndarray]:
+    """
+    @fn read_epa_output
+    @brief Read epa.x (job='egrid') output file and return EPA data arrays.
+    @param filename: Path to the epa.x output file
+    @retval   ngrid: Number of energy grids (typically 2: valence, conduction)
+    @retval  nmodes: Number of phonon modes
+    @retval    edge: Grid edges [ngrid] (eV)
+    @retval    step: Grid steps [ngrid] (eV)
+    @retval    nbin: Number of bins per grid [ngrid] int64
+    @retval    wavg: Averaged phonon frequencies [nmodes] (eV)
+    @retval    gavg: EPA averaged |g|^2 [ngrid, nbin_max, nbin_max, nmodes] (eV^2)
+    """
+    cm2ev = 1.23981e-4
+    with open(filename) as f:
+        ngrid, nmodes = map(int, f.readline().split())
+        edge = np.zeros(ngrid)
+        step = np.zeros(ngrid)
+        nbin = np.zeros(ngrid, dtype=np.int64)
+        for ii in range(ngrid):
+            tokens = f.readline().split()
+            edge[ii] = float(tokens[0])
+            step[ii] = float(tokens[1])
+            nbin[ii] = int(tokens[2])
+        wavg_cm = np.array(f.readline().split(), dtype=np.float64)
+        wavg = wavg_cm * cm2ev  # cm^-1 -> eV
+        nbin_max = int(np.max(nbin))
+        gavg = np.zeros((ngrid, nbin_max, nbin_max, nmodes), dtype=np.float64)
+        for line in f:
+            tokens = line.split()
+            if len(tokens) < 3 + nmodes:
+                continue
+            ii = int(tokens[0]) - 1   # 0-based
+            jj = int(tokens[1]) - 1
+            kk = int(tokens[2]) - 1
+            g2 = np.array(tokens[3:3+nmodes], dtype=np.float64)
+            gavg[ii, kk, jj, :] = g2  # eV^2
+    return ngrid, nmodes, edge, step, nbin, wavg, gavg

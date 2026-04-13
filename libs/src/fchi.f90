@@ -153,7 +153,11 @@ subroutine get_tr_chi(trchis,trchi0,chis_orb,chis,chi0,olist,Nw,Nchi,Norb) bind(
   complex(real64),intent(out),dimension(Norb+2,Nw):: chis_orb
 
   integer(int32) i,j,k
- 
+
+  trchis(:)    = (0.0d0, 0.0d0)
+  trchi0(:)    = (0.0d0, 0.0d0)
+  chis_orb(:,:)= (0.0d0, 0.0d0)
+
   !$omp parallel do private(j,k)
   wloop:do i=1,Nw
      orb_lop1:do j=1,Nchi
