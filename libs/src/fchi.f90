@@ -245,19 +245,21 @@ subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,e
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(real64),intent(out),dimension(Ny,Nx):: trchis,trchi
 
-  integer(int32) i,j,l,m,n,info
+  integer(int32) i,j,l,m,info
   integer(int64),dimension(Nk):: qshift
   integer(int32),dimension(Nchi):: ipiv
   real(real64),dimension(3):: qpoint
-  complex(real64),dimension(Nchi,Nchi):: chi,tmp,tmp2
+  complex(real64),dimension(Nchi,Nchi):: chi,tmp,tmp2,Smat_c
   complex(real64),dimension(2*Nchi):: work
+
+  Smat_c = Smat
 
   !$omp parallel
   !$omp workshare
   trchi(:,:)=0.0d0
   trchis(:,:)=0.0d0
   !$omp end workshare
-  !$omp do private(j,l,m,n,chi,tmp,tmp2,qpoint,qshift,ipiv,work,info)
+  !$omp do private(j,l,chi,tmp,tmp2,qpoint,qshift,ipiv,work,info)
   do i=1,Nx
      do j=1,Ny
         qpoint(1)=dble(i-1)/Nx
@@ -265,27 +267,17 @@ subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,e
         qpoint(3)=0.0d0
         call get_qshift(qpoint,klist,qshift,Nk)
         chi(:,:)=calc_chi(Nk,Norb,Nchi,uni,eig,ffermi,ol,temp,qshift,ecut,idelta,eps)
-        tmp(:,:)=0.0d0
+        ! tmp = I - chi * Smat
+        call zgemm('N','N',Nchi,Nchi,Nchi,(-1.0d0,0.0d0),chi,Nchi,Smat_c,Nchi,(0.0d0,0.0d0),tmp,Nchi)
         do l=1,Nchi
-           do m=1,Nchi
-              do n=1,Nchi
-                 tmp(m,l)=tmp(m,l)-chi(m,n)*Smat(n,l)
-              end do
-           end do
-           tmp(l,l)=tmp(l,l)+1.0d0
+           tmp(l,l)=tmp(l,l)+(1.0d0,0.0d0)
         end do
         call zgetrf(Nchi,Nchi,tmp,Nchi,ipiv,info)
         if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
         call zgetri(Nchi,tmp,Nchi,ipiv,work,2*Nchi,info)
         if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
-        tmp2(:,:)=0.0d0
-        do l=1,Nchi
-           do m=1,Nchi
-              do n=1,Nchi
-                 tmp2(m,l)=tmp2(m,l)+tmp(m,n)*chi(n,l)
-              end do
-           end do
-        end do
+        ! tmp2 = tmp * chi
+        call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),tmp,Nchi,chi,Nchi,(0.0d0,0.0d0),tmp2,Nchi)
         !take chis_llmm
         do l=1,Nchi
            if(ol(l,1)==ol(l,2))then
@@ -317,38 +309,26 @@ subroutine get_chis(chis,chi0,Smat,Nchi,Nw) bind(C)
   complex(real64),intent(in),dimension(Nchi,Nchi,Nw):: chi0
   complex(real64),intent(out),dimension(Nchi,Nchi,Nw):: chis
 
-  integer(int32) i,l,m,n
-  integer(int32) info
+  integer(int32) i,l,info
   integer(int32),dimension(Nchi):: ipiv
   complex(real64),dimension(2*Nchi):: work
-  complex(real64),dimension(Nchi,Nchi):: tmp
+  complex(real64),dimension(Nchi,Nchi):: tmp,Smat_c
 
-  !$omp parallel do private(tmp,l,m,n,work,ipiv,info)
+  Smat_c = Smat
+
+  !$omp parallel do private(tmp,l,work,ipiv,info)
   do i=1,Nw
-     tmp(:,:)=0.0d0
+     ! tmp = I - chi0(:,:,i) * Smat
+     call zgemm('N','N',Nchi,Nchi,Nchi,(-1.0d0,0.0d0),chi0(:,:,i),Nchi,Smat_c,Nchi,(0.0d0,0.0d0),tmp,Nchi)
      do l=1,Nchi
-        do n=1,Nchi
-           !$omp simd
-           do m=1,Nchi
-              tmp(m,l)=tmp(m,l)-chi0(m,n,i)*Smat(n,l)
-           end do
-           !$omp end simd
-        end do
-        tmp(l,l)=tmp(l,l)+1.0d0
+        tmp(l,l)=tmp(l,l)+(1.0d0,0.0d0)
      end do
      call zgetrf(Nchi,Nchi,tmp,Nchi,ipiv,info)
      if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
      call zgetri(Nchi,tmp,Nchi,ipiv,work,2*Nchi,info)
      if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
-     do l=1,Nchi
-        do n=1,Nchi
-           !$omp simd
-           do m=1,Nchi !chis is initialized in flibs.py
-              chis(m,l,i)=chis(m,l,i)+tmp(m,n)*chi0(n,l,i)
-           end do
-           !$omp end simd
-        end do
-     end do
+     ! chis(:,:,i) = tmp * chi0(:,:,i)
+     call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),tmp,Nchi,chi0(:,:,i),Nchi,(0.0d0,0.0d0),chis(:,:,i),Nchi)
   end do
   !$omp end parallel do
 end subroutine get_chis

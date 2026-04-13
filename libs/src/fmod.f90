@@ -339,28 +339,23 @@ subroutine get_vnm(vk,vk0,mrot,uni,Nk,Norb) bind(C)
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(real64),intent(out),dimension(3,Norb,Norb,Nk):: vk
 
-  integer(int32) i,j,l,m,n,k
+  integer(int32) i,j_dir,l,m,n,k
   complex(real64) tmp(3,Norb,Norb)
+  complex(real64),dimension(Norb,Norb):: vtmp,Wtmp,tmp_j
 
   !$omp parallel
   !$omp workshare
   vk(:,:,:,:)=0.0d0
   !$omp end workshare
-  !$omp do private(tmp,l,m,n,j,k)
+  !$omp do private(tmp,vtmp,Wtmp,tmp_j,j_dir,l,m,n,k)
   kloop: do i=1,Nk
-     !rotate orb to band
-     tmp(:,:,:)=0.0d0
-     orb_loop: do l=1,Norb
-        orb_loop2: do m=1,Norb
-           band_loop: do n=1,Norb
-              band_loop2: do k=1,Norb
-                 do j=1,3
-                    tmp(j,k,n)=tmp(j,k,n)+conjg(uni(m,k,i))*vk0(j,m,l,i)*uni(l,n,i)
-                 end do
-              end do band_loop2
-           end do band_loop
-        end do orb_loop2
-     end do orb_loop
+     ! tmp(j,:,:) = uni^H * vk0(j,:,:,i) * uni  for j=1..3
+     do j_dir=1,3
+        vtmp(:,:)=vk0(j_dir,:,:,i)
+        call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),vtmp,Norb,uni(:,:,i),Norb,(0.0d0,0.0d0),Wtmp,Norb)
+        call zgemm('C','N',Norb,Norb,Norb,(1.0d0,0.0d0),uni(:,:,i),Norb,Wtmp,Norb,(0.0d0,0.0d0),tmp_j,Norb)
+        tmp(j_dir,:,:)=tmp_j(:,:)
+     end do
      !rotate axis
      band_loop3: do n=1,Norb
         do k=1,Norb
