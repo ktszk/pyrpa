@@ -62,13 +62,13 @@ color_option defines the meaning of color on Fermi surfaces
 option=13
 color_option=2
 
-Nx,Ny,Nz,Nw=32,32,4,512 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=32,32,2,512 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
 #RotMat=[[0,0,1],[0,1,0],[1,0,0]]
 
-abc=[3.96*0.70711,3.96*0.70711,13.02*.5]
+abc=[3.96/np.sqrt(2),3.96/np.sqrt(2),13.02*.5]
 #abc=[3.68,3.68,5.03]
 #alpha_beta_gamma=[90.,90.,90]
 #temp=2.0e-2 #2.59e-2
@@ -106,6 +106,7 @@ sw_from_file=False
 #------------------------ initial parameters are above -------------------------------
 #----------------------------------main functions-------------------------------------
 #-------------------------------- import packages ------------------------------------
+import os
 import numpy as np
 import libs.flibs as flibs, libs.plibs as plibs
 import scipy.linalg as sclin, scipy.constants as scconst
@@ -118,6 +119,7 @@ except NameError:
     kz=0.0
 try:
     mu0
+    sw_calc_mu=False
 except NameError:
     sw_calc_mu=True
 try:
@@ -187,11 +189,19 @@ def plot_band(eig,spl,xlabel,xticks,uni,ol,color):
         col=(np.abs(cl[ol])**2 if isinstance(ol,int)
              else (np.abs(cl[ol])**2).sum(axis=0)).round(4)
         return col
+    # Check if olist has required 3 elements
+    if len(ol) < 3:
+        print(f"Warning: plot_band olist requires 3 elements (current: {len(ol)}). Color display disabled",flush=True)
+        color=False
     fig=plt.figure()
     ax=plt.axes()
     for e,cl in zip(eig,uni): #band loop
         if color:
             norm=np.sqrt((abs(cl)**2).sum(axis=0))
+            # Check for norm close to zero (use tolerance for floating-point comparison)
+            if np.any(norm < 1e-14):
+                print("Warning: plot_band found norm close to zero. Skipping",flush=True)
+                continue
             cls=cl/norm
             c1=get_col(cls,ol[0])
             c2=get_col(cls,ol[1])
@@ -230,8 +240,12 @@ def plot_FS(fscolors,klist,color_option:int):
             k=np.array(k)
             vmax=v.max()
             vmin=v.min()
+            # Check for vmax=vmin case
+            if vmax == vmin:
+                print(f"Warning: plot_FS has vmax=vmin={vmax}. Color map disabled",flush=True)
+                vmax = vmin + 1.0  # Set default value
         for kl,fscol,cb in zip(klist,fscolors,col):
-            for kk,fcol,in zip(kl,fscol):
+            for kk,fcol in zip(kl,fscol):
                 if color_option==2:
                     clist=cm.jet((fcol-vmin)/(vmax-vmin))
                 else:
@@ -268,7 +282,12 @@ def plot_3d_surf(fspolys,fscenters,fscolors,surface_opt,kscale):
         else:
             clmax=fscolors.max()
             clmin=fscolors.min()
-            nor_cols=(fscolors-clmin)/(clmax-clmin)
+            # Check for clmax=clmin case
+            if clmax == clmin:
+                print(f"Warning: plot_3d_surf has clmax=clmin={clmax}. Using default colors",flush=True)
+                nor_cols=np.ones_like(fscolors)*0.5
+            else:
+                nor_cols=(fscolors-clmin)/(clmax-clmin)
             tri=Poly3DCollection(fspolys,facecolors=cm.jet(nor_cols),lw=0)
             fs=ax.scatter(fscenters[:,0],fscenters[:,1],fscenters[:,2],
                           c=fscolors,cmap=cm.jet,s=0.1)
@@ -331,8 +350,19 @@ def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu:float,ham_r,S_r,rvec,Emin:float,Em
 
 def get_hall_coe(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
                                fill:float,temp:float,tau_const,Nw=300,with_spin=False):
+    # Parameter validation
+    if temp <= 0:
+        print("Error: Temperature (temp) is non-positive",flush=True)
+        return
+    if tau_const <= 0:
+        print("Error: Relaxation time (tau_const) is non-positive",flush=True)
+        return
+
     Nk,eig,vk,imass,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec.T*ihbar,sw_veloc=True,sw_mass=True)
     Vuc=sclin.det(avec)*1e-30
+    if Vuc <= 0:
+        print("Error: Unit cell volume (Vuc) is non-positive",flush=True)
+        return
     gsp=(1.0 if with_spin else 2.0) #spin weight
     mu=plibs.calc_mu(eig,Nk,fill,temp)
     tau_mode=0
@@ -351,11 +381,16 @@ def get_hall_coe(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
         print(f"max tau = {tau.max()} "+('fs' if sw_unit else ''),flush=True)
     sigma_hall=flibs.calc_sigmahall(eig,vk,imass/eC,kweight,tau,temp,mu)
     K0,K1,K2=flibs.calc_Kn(eig,vk,kweight,temp,mu,tau)
-    print(sigma_hall,K0[0,0],K0[1,1])
+    print(f"sigma_hall={sigma_hall:.6e}, K0[0,0]={K0[0,0]:.6e}, K0[1,1]={K0[1,1]:.6e}")
+    # Check if K0 diagonal elements are non-zero (use tolerance for floating-point comparison)
+    tol=1e-14
+    if abs(K0[0,0]) < tol or abs(K0[1,1]) < tol:
+        print("Error: K0 diagonal elements are too small. Cannot compute Hall coefficient",flush=True)
+        return
     Rh=-Vuc*Nk*sigma_hall/(gsp*K0[0,0]*K0[1,1])
     nh=-1./(Rh*eC)/1e6
-    print(Rh)
-    print(nh)
+    print(f"Hall coefficient Rh = {Rh:.6e}",flush=True)
+    print(f"Hole carrier density nh = {nh:.6e}",flush=True)
 
 def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
                                fill:float,temp:float,tau_const,Nw=300,with_spin=False):
@@ -363,8 +398,19 @@ def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
     calculate conductivities using Boltzmann equations
     '''
     #no dep. T and mu or filling
+    # Parameter validation
+    if temp <= 0:
+        print("Error: Temperature (temp) is non-positive",flush=True)
+        return
+    if tau_const <= 0:
+        print("Error: Relaxation time (tau_const) is non-positive",flush=True)
+        return
+
     Nk,eig,vk,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec.T*ihbar,sw_veloc=True)
     Vuc=sclin.det(avec)*1e-30
+    if Vuc <= 0:
+        print("Error: Unit cell volume (Vuc) is non-positive",flush=True)
+        return
     gsp=(1.0 if with_spin else 2.0) #spin weight
     iNV=1./(Nk*Vuc)
     itemp=1./temp
@@ -395,14 +441,29 @@ def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
         plt.show()
     else:
         K0,K1,K2=flibs.calc_Kn(eig,vk,kweight,temp,mu,tau)
-    sigma=gsp*tau_unit*eC*K0*iNV #a e is canceled effect of eV2J 
+    sigma=gsp*tau_unit*eC*K0*iNV #a e is canceled effect of eV2J
     kappa=gsp*tau_unit*eC*kb*K2*iNV*itemp
-    kappa2=gsp*tau_unit*eC*kb*(K2-K1.dot(sclin.inv(K0).dot(K1)))*iNV*itemp
-    Seebeck=-kb*sclin.inv(K0).dot(K1)*itemp
 
-    Lorenz=kb*kappa*sclin.inv(sigma*temp)
-    Lorenz2=kb*kappa2*sclin.inv(sigma*temp)
-    Pertier=K1.dot(sclin.inv(K0))
+    # Handle sclin.inv() failures
+    try:
+        K0_inv = sclin.inv(K0)
+        kappa2=gsp*tau_unit*eC*kb*(K2-K1.dot(K0_inv.dot(K1)))*iNV*itemp
+        Seebeck=-kb*K0_inv.dot(K1)*itemp
+        Pertier=K1.dot(K0_inv)
+    except np.linalg.LinAlgError:
+        print("Error: K0 is a singular matrix. Cannot compute Seebeck coefficient and Pertier",flush=True)
+        kappa2=kappa.copy()
+        Seebeck=np.zeros_like(K0)
+        Pertier=np.zeros_like(K0)
+
+    try:
+        sigma_inv = sclin.inv(sigma*temp)
+        Lorenz=kb*kappa*sigma_inv
+        Lorenz2=kb*kappa2*sigma_inv
+    except np.linalg.LinAlgError:
+        print("Warning: sigma*temp is a singular matrix. Cannot compute Lorenz coefficient",flush=True)
+        Lorenz=np.zeros_like(sigma)
+        Lorenz2=np.zeros_like(sigma)
     sigmaS=gsp*tau_unit*kb*eC*K1*iNV*itemp
     PF=sigma*Seebeck**2
     print('sigma matrix (S/m)',flush=True)
@@ -440,11 +501,21 @@ def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
     electric conductivity of LRT correponds to Boltzmann then delta~O(10-1) (tau~1fs) at 300K
     thermal conductivity and L12 of LRT correspond to Boltzmann then delta~O(10-3) (tau~100fs) at 300K
     '''
+    # Parameter validation
+    if temp <= 0:
+        print("Error: Temperature (temp) is non-positive",flush=True)
+        return
+    if delta <= 0:
+        print("Error: Broadening (delta) is non-positive",flush=True)
+        return
+
     Nk,eig,vk,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec.T*ihbar,True,True)
     Vuc=sclin.det(avec)
+    if Vuc <= 0:
+        print("Error: Unit cell volume (Vuc) is non-positive",flush=True)
+        return
     gsp=(1.0 if with_spin else 2.0) #spin weight
     mu=plibs.calc_mu(eig,Nk,fill,temp)
-    delta=hbar*1.e15/100
     print(f'chemical potential = {mu:.4f} eV',flush=True)
     print(f'tempreture = {temp/kb:.3f} K',flush=True)
     print(f'about tau = {1.e15*hbar/delta:.3f} fs',flush=True)
@@ -455,7 +526,12 @@ def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
     sigma=sigmaconst*L11
     kappa=kappaSconst*L22
     sigmaS=kappaSconst*L12
-    Seebeck=np.array([-sclin.inv(s).dot(sS) for s,sS in zip(sigma,sigmaS)])
+    # Handle sclin.inv() failures
+    try:
+        Seebeck=np.array([-sclin.inv(s).dot(sS) for s,sS in zip(sigma,sigmaS)])
+    except np.linalg.LinAlgError:
+        print("Warning: sigma is a singular matrix. Cannot compute Seebeck coefficient",flush=True)
+        Seebeck=np.zeros_like(sigma)
     print('sigma matrix (S/m)',flush=True)
     for sig in sigma[0].real.round(10):
         print(f" {sig[0]:10.3e} {sig[1]:10.3e} {sig[2]:10.3e}",flush=True)
@@ -466,8 +542,12 @@ def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
     for sig in sigmaS[0].real.round(10):
         print(f" {sig[0]:10.3e} {sig[1]:10.3e} {sig[2]:10.3e}",flush=True)
     print('Lorenz number (Wohm/K^2) (fe 2.44e-8)',flush=True)
-    for lor in (kb*kappa[0]*sclin.inv(sigma[0]*temp)).real.round(10):
-        print(f" {lor[0]:9.2e} {lor[1]:9.2e} {lor[2]:9.2e}",flush=True)
+    try:
+        Lorenz_matrix=(kb*kappa[0]*sclin.inv(sigma[0]*temp)).real.round(10)
+        for lor in Lorenz_matrix:
+            print(f" {lor[0]:9.2e} {lor[1]:9.2e} {lor[2]:9.2e}",flush=True)
+    except np.linalg.LinAlgError:
+        print("Warning: Failed to compute Lorenz coefficient (singular matrix)",flush=True)
     print('Seebeck coefficient matrix (V/K)',flush=True)
     for seeb in Seebeck[0].real.round(10):
         print(f" {seeb[0]:10.3e} {seeb[1]:10.3e} {seeb[2]:10.3e}",flush=True)
@@ -493,31 +573,38 @@ def calc_chis_spectrum(mu:float,temp:float,Smat,klist,qlist,chiolist,eig,uni,spa
     print("calculate spn susceptibility",flush=True)
     chisw,chisw_orb,wlist=plibs.chis_spectrum(mu,temp,Smat,klist,qlist,chiolist,eig,uni,Nw,Emax,delta)
     w,sp=np.meshgrid(wlist,spa_length)
-    f=open('chis.dat','w')
-    for ww,ssp,chis in zip(w,sp,chisw):
-        for www,sssp,chi in zip(ww,ssp,chis):
-            f.write(f'{sssp:8.4f} {www:8.4f} {chi.imag:9.4f}\n')
-        f.write('\n')
-    f.close()
+    try:
+        with open('chis.dat','w') as f:
+            for ww,ssp,chis in zip(w,sp,chisw):
+                for www,sssp,chi in zip(ww,ssp,chis):
+                    f.write(f'{sssp:8.4f} {www:8.4f} {chi.imag:9.4f}\n')
+                f.write('\n')
+    except IOError as e:
+        print(f"Error: Failed to write 'chis.dat': {e}",flush=True)
     for i,chiso in enumerate(chisw_orb.T):
-        f=open(f'chis_{i}.dat','w')
-        for ww,ssp,chis in zip(w,sp,chiso.T):
-            for www,sssp,chi in zip(ww,ssp,chis):
-                f.write(f'{sssp:8.4f} {www:8.4f} {chi.imag:9.4f}\n')
-            f.write('\n')
-        f.close()
+        try:
+            with open(f'chis_{i}.dat','w') as f:
+                for ww,ssp,chis in zip(w,sp,chiso.T):
+                    for www,sssp,chi in zip(ww,ssp,chis):
+                        f.write(f'{sssp:8.4f} {www:8.4f} {chi.imag:9.4f}\n')
+                    f.write('\n')
+        except IOError as e:
+            print(f"Error: Failed to write 'chis_{i}.dat': {e}",flush=True)
+            continue
     return(w,sp,chisw)
 
 def calc_phi_spectrum(mu:float,temp:float,klist,qlist,chiolist,eig,uni,spa_length,Nw:int,Emax:float,delta:float):
     print("calculate sc susceptibility",flush=True)
     phiw,phiw_orb,wlist=plibs.phi_spectrum(mu,temp,klist,qlist,chiolist,eig,uni,Nw,Emax,delta)
     w,sp=np.meshgrid(wlist,spa_length)
-    f=open('phi.dat','w')
-    for ww,ssp,phi in zip(w,sp,phiw):
-        for www,sssp,ph in zip(ww,ssp,phi):
-            f.write(f'{sssp:8.4f} {www:8.4f} {ph.imag:9.4f}\n')
-        f.write('\n')
-    f.close()
+    try:
+        with open('phi.dat','w') as f:
+            for ww,ssp,phi in zip(w,sp,phiw):
+                for www,sssp,ph in zip(ww,ssp,phi):
+                    f.write(f'{sssp:8.4f} {www:8.4f} {ph.imag:9.4f}\n')
+                f.write('\n')
+    except IOError as e:
+        print(f"Error: Failed to write 'phi.dat': {e}",flush=True)
     return(w,sp,phiw)
 
 def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,olist,site,eps=1.0e-4,pp=0.5,m_diis=5,sw_rescale:bool=True):
@@ -559,13 +646,16 @@ def output_gap_function(invk,kmap,gap,uni,plist,gap_sym,soc=False,invs=None,slis
     print('output gap function')
     for iorb in range(len(gapb)):
         for jorb in range(len(gapb)):
-            f=open(f'gap_{iorb+1}{jorb+1}.dat','w')
-            for i,km in enumerate(kmap):
-                if km[2]==0:
-                    f.write(f'{km[0]:3} {km[1]:3} {gapb[iorb,jorb,i].real:12.8f} {gapb[iorb,jorb,i].imag:12.8f}\n')
-                    if km[0]==Nx-1:
-                        f.write('\n')
-        f.close()
+            try:
+                with open(f'gap_{iorb+1}{jorb+1}.dat','w') as f:
+                    for i,km in enumerate(kmap):
+                        if km[2]==0:
+                            f.write(f'{km[0]:3} {km[1]:3} {gapb[iorb,jorb,i].real:12.8f} {gapb[iorb,jorb,i].imag:12.8f}\n')
+                            if km[0]==Nx-1:
+                                f.write('\n')
+            except IOError as e:
+                print(f"Error: Failed to write 'gap_{iorb+1}{jorb+1}.dat': {e}",flush=True)
+                continue
     return(0)
 
 def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,plist,mu:float,temp:float,sw_self:bool,
@@ -580,7 +670,11 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,plist,mu:float,temp:flo
         Gk=flibs.gen_green(sigmak,ham_k,mu_self,temp)
     else:
         Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
-    gap=np.load('gap.npy')
+    try:
+        gap=np.load('gap.npy')
+    except FileNotFoundError:
+        print("Error: 'gap.npy' not found",flush=True)
+        return
     if sw_soc:
         Fk=flibs.gen_Fk_soc(Gk,gap,invk,invs,slist, gap_sym)
         no=int(len(slist)/2)
@@ -595,29 +689,33 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,plist,mu:float,temp:flo
         Fk=flibs.remap_gap(Fk0[:,:,0,:],plist,invk,gap_sym)
         Fktr=np.array([f.diagonal().sum() for f in Fk.T])
     print('output anomalous green function')
-    f=open(f'Fk_tr.dat','w')
-    iwlist=(2*np.arange(Nw)+1)*np.pi*temp
-    #wlistg=np.linspace(0,10,10)
-    #Fkw=flibs.pade_with_trace(Fk[:,:,:30,:],iwlist[:30]*1j,wlistg+3e-2*1j)
-    for i,km in enumerate(kmap):
-        if km[2]==0:
-            #f.write(f'{km[0]:3} {km[1]:3} {Fks[i,0].real:12.8f} {Fks[i,0].imag:12.8f}\n')
-            f.write(f'{km[0]:3} {km[1]:3} {Fktr[i].real:12.8f} {Fktr[i].imag:12.8f}\n')
-            if km[0]==Nx-1:
-                f.write('\n')
-    f.close()
+    try:
+        with open(f'Fk_tr.dat','w') as f:
+            iwlist=(2*np.arange(Nw)+1)*np.pi*temp
+            #wlistg=np.linspace(0,10,10)
+            #Fkw=flibs.pade_with_trace(Fk[:,:,:30,:],iwlist[:30]*1j,wlistg+3e-2*1j)
+            for i,km in enumerate(kmap):
+                if km[2]==0:
+                    #f.write(f'{km[0]:3} {km[1]:3} {Fks[i,0].real:12.8f} {Fks[i,0].imag:12.8f}\n')
+                    f.write(f'{km[0]:3} {km[1]:3} {Fktr[i].real:12.8f} {Fktr[i].imag:12.8f}\n')
+                    if km[0]==Nx-1:
+                        f.write('\n')
+    except IOError as e:
+        print(f"Error: Failed to write 'Fk_tr.dat': {e}",flush=True)
     emax=(eig.max()-(mu_self if sw_self else mu))*1.2
     emin=(eig.min()-(mu_self if sw_self else mu))*1.2
     wlist=np.linspace(emin,emax,500)
-    fp=open(f'Gpade.dat','w')
-    idelta=1e-2
-    Gkw=flibs.pade_with_trace(Gk[:,:,:40,:],iwlist[:40]*1j,wlist+idelta*1j)
-    for i,km in enumerate(klist):
-        if km[1]==0.0 and km[2]==0.0:
-            for j,w in enumerate(wlist):
-                fp.write(f'{km[0]:3} {w.real:12.8f} {-Gkw[i,j].imag:12.8f}\n')
-            fp.write('\n')
-    fp.close()
+    try:
+        with open(f'Gpade.dat','w') as fp:
+            idelta=1e-2
+            Gkw=flibs.pade_with_trace(Gk[:,:,:40,:],iwlist[:40]*1j,wlist+idelta*1j)
+            for i,km in enumerate(klist):
+                if km[1]==0.0 and km[2]==0.0:
+                    for j,w in enumerate(wlist):
+                        fp.write(f'{km[0]:3} {w.real:12.8f} {-Gkw[i,j].imag:12.8f}\n')
+                    fp.write('\n')
+    except IOError as e:
+        print(f"Error: Failed to write 'Gpade.dat': {e}",flush=True)
     #maxgap=abs(gap).max()
     #print((abs(gap)<maxgap*1.0e-6).sum())
     #print((abs(gap)<maxgap*1.0e-6).sum()/gap.size*100)
@@ -647,8 +745,12 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,chiolist,s
     if sw_self:
         ham_k=flibs.gen_ham(klist,ham_r,rvec)
         if sw_from_file:
-            npz=np.load('self_en.npz')
-            sigmak,mu_self=npz['arr_0'],npz['arr_1']
+            try:
+                npz=np.load('self_en.npz')
+                sigmak,mu_self=npz['arr_0'],npz['arr_1']
+            except FileNotFoundError:
+                print("Error: 'self_en.npz' not found",flush=True)
+                return
         else:
             sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,chiolist,ham_k,eig,uni,
                                         mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,pp=pp,m_diis=m_diis,sw_rescale=sw_rescale)
@@ -662,14 +764,14 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,chiolist,s
     chis,chic=flibs.get_chis_chic(chi,Smat,Cmat)
     chisq=flibs.get_eig_or_tr_chi(chis,invk,sw_eig)
     chicq=flibs.get_eig_or_tr_chi(chic,invk,sw_eig)
-    f=open('chis.dat','w')
-    f2=open('chic.dat','w')
-    for i,k in enumerate(kmap):
-        if k[2]==0.0:
-            f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chisq[i].real:11.4e}\n')
-            f2.write(f'{k[0]:6.4f} {k[1]:6.4f} {chicq[i].real:11.4e}\n')
-    f.close()
-    f2.close()
+    try:
+        with open('chis.dat','w') as f, open('chic.dat','w') as f2:
+            for i,k in enumerate(kmap):
+                if k[2]==0.0:
+                    f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chisq[i].real:11.4e}\n')
+                    f2.write(f'{k[0]:6.4f} {k[1]:6.4f} {chicq[i].real:11.4e}\n')
+    except IOError as e:
+        print(f"Error: Failed to write 'chis.dat' or 'chic.dat': {e}",flush=True)
     gap=flibs.linearized_eliashberg(chi,Gk,uni,init_delta,Smat,Cmat,chiolist,plist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
     if sw_out_self:
         np.save('gap',gap)
@@ -686,8 +788,12 @@ def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
     if sw_self:
         ham_k=flibs.gen_ham(klist,ham_r,rvec)
         if sw_from_file:
-            npz=np.load('self_en.npz')
-            sigmak,mu_self=npz['arr_0'],npz['arr_1']
+            try:
+                npz=np.load('self_en.npz')
+                sigmak,mu_self=npz['arr_0'],npz['arr_1']
+            except FileNotFoundError:
+                print("Error: 'self_en.npz' not found",flush=True)
+                return
         else:
             sigmak,mu_self=flibs.mkself_soc(Vmat,kmap,invk,invs,chiolist,slist,ham_k,eig,uni,mu,fill,temp,
                                             Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,pp=pp,m_diis=m_diis,sw_rescale=sw_rescale)
@@ -701,14 +807,14 @@ def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
     chiszzq=flibs.get_eig_or_tr_chi(chiszz,invk,sw_eig)
     chispmq=flibs.get_eig_or_tr_chi(chispm,invk,sw_eig)
     chicq=flibs.get_eig_or_tr_chi(chic,invk,sw_eig)
-    f=open('chis.dat','w')
-    f2=open('chic.dat','w')
-    for i,k in enumerate(kmap):
-        if k[2]==0.0:
-            f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chiszzq[i].real:11.4e} {chispmq[i].real:11.4e}\n')
-            f2.write(f'{k[0]:6.4f} {k[1]:6.4f} {chicq[i].real:11.4e}\n')
-    f.close()
-    f2.close()
+    try:
+        with open('chis.dat','w') as f, open('chic.dat','w') as f2:
+            for i,k in enumerate(kmap):
+                if k[2]==0.0:
+                    f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chiszzq[i].real:11.4e} {chispmq[i].real:11.4e}\n')
+                    f2.write(f'{k[0]:6.4f} {k[1]:6.4f} {chicq[i].real:11.4e}\n')
+    except IOError as e:
+        print(f"Error: Failed to write 'chis.dat' or 'chic.dat': {e}",flush=True)
     init_delta=plibs.get_initial_gap(kmap,klist,len(slist),gap_sym)
     gap=flibs.linearized_eliashberg_soc(chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,plist,slist,chiolist,
                                         kmap,invk,invs,invschi,Nx,Ny,Nz,temp,gap_sym)
@@ -718,6 +824,9 @@ def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
 
 def get_carrier_num(kmesh,rvec,ham_r,S_r,mu:float,Arot):
     Nk,eig,kwieght=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,S_r,rvec,Arot)
+    if Nk <= 0:
+        print("Error: Number of k-points (Nk) is non-positive",flush=True)
+        return
     fill=0.0
     for i,en in enumerate(eig.T-mu):
         num_hole=float(np.where(en>0)[0].size)/Nk
@@ -727,6 +836,14 @@ def get_carrier_num(kmesh,rvec,ham_r,S_r,mu:float,Arot):
     print(f'sum of electrons is {fill:.4f}',flush=True)
 
 def get_mu(ham_r,S_r,rvec,Arot,temp:float,kmesh=40)->float:
+    # Parameter validation
+    if temp < 0:
+        print("Error: Temperature (temp) is negative",flush=True)
+        return None
+    if kmesh <= 0:
+        print("Error: k-mesh size (kmesh) is non-positive",flush=True)
+        return None
+
     print("calc chem. pot.",flush=True)
     print(f"band filling = {fill:.4f}",flush=True)
     Nk,eig,kweight=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,S_r,rvec,Arot)
@@ -739,7 +856,18 @@ def get_mass(mesh,rvec,ham_r,S_r,mu:float,de=3.e-6,meshkz=20):
     de: energy step for numerical derivative (eV)
     meshkz: number of kz points for coarse scan of S(kz) in [0, pi/2]
     """
+    # Parameter validation
+    if de <= 0:
+        print("Error: Energy step (de) is non-positive",flush=True)
+        return
+    if meshkz <= 0:
+        print("Error: kz mesh size (meshkz) is non-positive",flush=True)
+        return
+
     al=alatt[:2]
+    if al[0] <= 0 or al[1] <= 0:
+        print("Error: Lattice constant (al) is non-positive",flush=True)
+        return
     ABZ=4.*np.pi**2/(al[0]*al[1])
 
     # --- Phase 1: coarse scan S(kz) ---
@@ -853,6 +981,52 @@ def get_dhva_band(mesh,rvec,ham_r,S_r,mu:float,theta_list,phi=0.,meshkz=20):
 
 def main():
     omp_num,omp_check=flibs.omp_params()
+
+    # ===== Input file and parameter validation =====
+    # Check if Hamiltonian file exists
+    if not os.path.exists(fname):
+        print(f"Error: Hamiltonian file '{fname}' not found",flush=True)
+        return
+    # Validate ftype (any integer outside {0,1,2,3} uses the Hopping.dat branch)
+    if not isinstance(ftype, int):
+        print(f"Error: ftype={ftype!r} must be an integer",flush=True)
+        return
+    # Validate brav (any integer outside {0..7} uses the monoclinic branch)
+    if not isinstance(brav, int):
+        print(f"Error: brav={brav!r} must be an integer",flush=True)
+        return
+
+    # ===== Computational parameter validation =====
+    # Mesh size check
+    if Nx <= 0 or Ny <= 0 or Nz <= 0 or Nw <= 0:
+        print(f"Error: Invalid mesh size (Nx={Nx}, Ny={Ny}, Nz={Nz}, Nw={Nw})",flush=True)
+        return
+    # Temperature check
+    if tempK < 0:
+        print(f"Error: Temperature (tempK) is negative ({tempK} K)",flush=True)
+        return
+    # U, J check
+    if U < 0 or J < 0:
+        print(f"Error: U, J are negative (U={U}, J={J})",flush=True)
+        return
+    # delta check
+    if delta <= 0:
+        print(f"Error: Broadening (delta) is non-positive ({delta})",flush=True)
+        return
+    # fill check
+    if fill < 0:
+        print(f"Error: Filling (fill) is negative ({fill})",flush=True)
+        return
+    # Emin, Emax check
+    if Emin >= Emax:
+        print(f"Error: Emin >= Emax ({Emin} >= {Emax})",flush=True)
+        return
+    # tau_const check
+    if tau_const <= 0:
+        print(f"Error: Relaxation time (tau_const) is non-positive ({tau_const})",flush=True)
+        return
+    # =========================================
+
     #import hamiltonian
     if ftype==3:
         rvec,ham_r,S_r,no,Nr=plibs.import_MLO_hoppings(fname)
@@ -861,6 +1035,28 @@ def main():
         S_r=[]
     plist=flibs.get_plist(rvec,ham_r)
     print("Effective parity of wanier functions:", plist)
+
+    # ===== Parameter checks dependent on number of orbitals =====
+    print(f"Number of orbital = {no}",flush=True)
+
+    # Validate olist
+    for i, ol in enumerate(olist):
+        if isinstance(ol, int):
+            if ol < 0 or ol >= no:
+                print(f"Error: olist[{i}]={ol} is invalid. Valid range: 0-{no-1}",flush=True)
+                return
+        elif isinstance(ol, list):
+            for j, olj in enumerate(ol):
+                if olj < 0 or olj >= no:
+                    print(f"Error: olist[{i}][{j}]={olj} is invalid. Valid range: 0-{no-1}",flush=True)
+                    return
+
+    # Check fill does not exceed number of bands
+    if fill > no:
+        print(f"Error: filling={fill} exceeds number of bands={no}. Valid range: 0 < fill <= {no}",flush=True)
+        return
+    # =============================================
+
     #set lattice vector
     avec,Arot=plibs.get_ptv(alatt,deg,brav)
     #rotation axis
@@ -892,6 +1088,25 @@ def main():
         print("OpenMP mode",flush=True)
         print(f"Number of OpenMP threads = {omp_num}",flush=True)
     print(f"calc mode {option}: "+opstr[option],flush=True)
+
+    # ===== Additional input validation (lower priority) =====
+    # J > U warning
+    if J > U:
+        print(f"Warning: J={J} > U={U} is physically unusual. Please verify",flush=True)
+
+    # Validate gap_sym during eliashberg/flex calculations
+    if option in {12, 13, 14}:  # eliashberg/flex calculations
+        if gap_sym not in {-1, 0, 1, 2, 3}:
+            print(f"Warning: gap_sym={gap_sym} is non-standard. Common values: -1,0,1,2,3",flush=True)
+
+    # Validate at_point for chis at q-point calculation
+    if option in {8}:  # chis at q-point
+        if len(at_point) != 3:
+            print(f"Error: at_point has {len(at_point)} elements. Required: 3 elements",flush=True)
+            return
+        if any(p < 0 or p > 1 for p in at_point):
+            print(f"Warning: at_point={at_point} values outside [0,1] range. May not be normalized by reciprocal lattice",flush=True)
+    # ==========================================
     if option in {0,2,3}:
         print("color mode: "+cstr[color_option],flush=True)
     print("Hamiltonian name is "+fname,flush=True)
@@ -1041,12 +1256,14 @@ def main():
                 slist
             except NameError: #default, up(~norb/2-1)>down(norb/2~)
                 Norb=len(ham_r[0])
+                # Correctly split even if Norb is odd (up-spin majority)
                 slist=np.ones(Norb,dtype=np.int64)
-                slist[int(Norb/2):]=-1
+                slist[(Norb+1)//2:]=-1  # Correct split: for odd case [+1,+1,+1,-1,-1] (Norb=5)
             try:
                 invs
             except NameError:
-                invs=np.concatenate([np.arange(int(Norb/2),Norb),np.arange(int(Norb/2))])+1
+                # Also fixed reverse index of split spins
+                invs=np.concatenate([np.arange((Norb+1)//2,Norb),np.arange((Norb+1)//2)])+1
             if option==12:
                 calc_flex_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,invs,site,m_diis=m_diis_num,sw_rescale=sw_rescale_flex)
             elif option==13:
@@ -1121,8 +1338,12 @@ def main():
             zI = np.eye(no) * zlist_real[iw]
             sig = sigma_cpa[iw]
             for ik in range(Nks):
-                Gk = np.linalg.inv(zI - hamk_s[ik] - sig)
-                Akw[ik, iw] = -np.trace(Gk).imag / np.pi
+                try:
+                    Gk = np.linalg.inv(zI - hamk_s[ik] - sig)
+                    Akw[ik, iw] = -np.trace(Gk).imag / np.pi
+                except np.linalg.LinAlgError:
+                    print(f"Warning: Matrix inversion failed at k-point {ik}, frequency index {iw}. Setting to zero.",flush=True)
+                    Akw[ik, iw] = 0.0
         w, x = np.meshgrid(wlist, spa_length)
         plt.contourf(x, w, Akw, 100, cmap=plt.get_cmap('hot'))
         for xt in xticks[1:-1]:

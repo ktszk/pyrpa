@@ -846,7 +846,7 @@ def get_phi_irr(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, qshift: np
         np.ctypeslib.ndpointer(dtype=np.float64),    # wlist
         POINTER(c_int64), POINTER(c_int64),           # Nchi, Norb
         POINTER(c_int64), POINTER(c_int64),           # Nk, Nw
-        POINTER(c_double), POINTER(c_double),         # eps, idelta
+        POINTER(c_double), POINTER(c_double),         # idelta, eps
         POINTER(c_double), POINTER(c_double),         # mu, temp
     ]
     flibs.get_phi_irr.restype = c_void_p
@@ -989,10 +989,10 @@ def gen_SCmatrix_orb(olist: np.ndarray, site: np.ndarray, Umat: np.ndarray, Jmat
     flibs.get_scmat_orb.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.float64), # Smat
         np.ctypeslib.ndpointer(dtype=np.float64), # Cmat
-        np.ctypeslib.ndpointer(dtype=np.float64), # Umat
-        np.ctypeslib.ndpointer(dtype=np.float64), # Jmat
         np.ctypeslib.ndpointer(dtype=np.int64),   # olist
         np.ctypeslib.ndpointer(dtype=np.int64),   # site
+        np.ctypeslib.ndpointer(dtype=np.float64), # Umat
+        np.ctypeslib.ndpointer(dtype=np.float64), # Jmat
         POINTER(c_int64), POINTER(c_int64)        # Nchi, Norb
     ]
     flibs.get_scmat_orb.restype = c_void_p
@@ -1023,8 +1023,8 @@ def calc_Lij(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float, w: 
     eps = idelta * 1e-3
     flibs.calc_lij.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128), # L11
-        np.ctypeslib.ndpointer(dtype=np.complex128), # L12
         np.ctypeslib.ndpointer(dtype=np.complex128), # L22
+        np.ctypeslib.ndpointer(dtype=np.complex128), # L12
         np.ctypeslib.ndpointer(dtype=np.complex128), # vk
         np.ctypeslib.ndpointer(dtype=np.float64),    # eig
         np.ctypeslib.ndpointer(dtype=np.float64),    # ffermi
@@ -1283,7 +1283,7 @@ def get_imp_spectrum(uni: np.ndarray, eigs: np.ndarray, mu: float, wlist: np.nda
     Nw, Nk, Nsite = len(wlist), len(klist), len(rlist)
     Norb = int(len(eigs) / Nsite)
     spectrum = np.zeros((Nk, Nw), dtype=np.complex128)
-    flibs.get_spectrum_spagehtti.argtypes = [
+    flibs.get_spectrum_spaghetti.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128), # spectrum
         np.ctypeslib.ndpointer(dtype=np.complex128), # uni
         np.ctypeslib.ndpointer(dtype=np.float64),    # eigs
@@ -1294,8 +1294,8 @@ def get_imp_spectrum(uni: np.ndarray, eigs: np.ndarray, mu: float, wlist: np.nda
         POINTER(c_int64), POINTER(c_int64),           # Nsite, Norb
         POINTER(c_double), POINTER(c_double)          # mu, eta
     ]
-    flibs.get_spectrum_spagehtti.retype = c_void_p
-    flibs.get_spectrum_spagehtti(spectrum, uni, eigs, klist, rlist, wlist, byref(c_int64(Nw)), byref(c_int64(Nk)),
+    flibs.get_spectrum_spaghetti.restype = c_void_p
+    flibs.get_spectrum_spaghetti(spectrum, uni, eigs, klist, rlist, wlist, byref(c_int64(Nw)), byref(c_int64(Nk)),
                                  byref(c_int64(Nsite)), byref(c_int64(Norb)), byref(c_double(mu)), byref(c_double(eta)))
     return spectrum
 
@@ -1966,7 +1966,7 @@ def solve_cpa(hamk: np.ndarray, VA: np.ndarray, VB: np.ndarray,
     @param     VA: Onsite potential of species A [Norb, Norb] complex128
     @param     VB: Onsite potential of species B [Norb, Norb] complex128
     @param      x: Concentration of species A (0 < x < 1)
-    @param  zlist: Complex frequency array [Nw] complex128 (松原 iω_n or 実軸 ω+iδ)
+    @param  zlist: Complex frequency array [Nw] complex128 (Matsubara iω_n or real frequency ω+iδ)
     @param     pp: Linear mixing parameter (default 0.5)
     @param maxiter: Maximum CPA iterations per frequency (default 500)
     @param    tol: Convergence tolerance (default 1e-10)

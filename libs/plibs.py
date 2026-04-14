@@ -92,7 +92,7 @@ def import_MLO_hoppings(name:str) -> tuple[np.ndarray,np.ndarray,np.ndarray,int,
     tmpS=np.array([complex(tp[7],tp[8]) for tp in tmp1])
     rvec=np.array([tmp1[i][2:5] for i in range(nr)])
     ham_r=tmp.reshape((no*no,nr)).T.reshape((nr,no,no)).round(6).copy()*13.6
-    S_r=tmpS.reshape((no*no,nr)).T.reshape((nr,no,no)).round(6).copy()*13.6
+    S_r=tmpS.reshape((no*no,nr)).T.reshape((nr,no,no)).round(6).copy()
     return rvec,ham_r,S_r,no,nr
 
 def get_bvec(avec: np.ndarray) -> np.ndarray:
@@ -134,7 +134,7 @@ def get_eigs(klist: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.nda
             if sw_uni:
                 return np.array([[u/nm for u,nm in zip(un,nor)] for un,nor in zip(uni,norm)])
             else:
-                return eig,np.array([[u/nor for u,nm in zip(un,nor)] for un,nor in zip(uni,norm)])
+                return eig,np.array([[u/nm for u,nm in zip(un,nor)] for un,nor in zip(uni,norm)])
         else:
             if sw_uni:
                 return uni
@@ -157,7 +157,15 @@ def calc_mu(eig,Nk,fill:float,temp:float)-> float:
         return(fill*Nk-sum_fermi)
     emax=eig.max()
     emin=eig.min()
-    mu=scopt.brentq(func,emin,emax)
+    try:
+        mu=scopt.brentq(func,emin,emax)
+    except ValueError:
+        # filling is outside the computed band range; clamp to the closer boundary
+        if func(emin)*func(emax) > 0:
+            mu=emin if abs(func(emin)) < abs(func(emax)) else emax
+            print(f"Warning: calc_mu could not bracket the chemical potential. Clamped to mu={mu:.4f} eV",flush=True)
+        else:
+            raise
     return mu
 
 def calc_mu_imp(eigs,Nsite,fill:float,temp:float)-> float:
@@ -228,7 +236,7 @@ def gen_klist(Nx: int, Ny: int, Nz: int | None = None, sw_pp: bool = True, kz: f
     if sw_pp:
         kx=np.linspace(-0.5,0.5,Nx,True)
         ky=np.linspace(-0.5,0.5,Ny,True)
-        if Nz==None:
+        if Nz is None:
             kz=np.array([kz])
         else:
             kz=np.linspace(-0.5,0.5,Nz,True)
@@ -292,7 +300,10 @@ def mk_qlist(k_set: np.ndarray | list, Nx: int, Ny: int, Nz: int, bvec: np.ndarr
         dk_length=abs(dk.dot(bvec)).sum()
         # ensure at least one division along non-zero component; use ceil to avoid zero due to truncation
         dN=np.asarray(np.ceil(abs(dk)*Narray),dtype=int)
-        N=dN[dN>0].min()
+        nonzero=dN[dN>0]
+        if len(nonzero)==0:
+            continue  # identical consecutive k-points; skip this segment
+        N=nonzero.min()
         tmp=np.linspace(ks,ke,N,False)
         tmp2=np.linspace(0,dk_length,N,False)+maxsplen
         maxsplen+=dk_length
@@ -647,11 +658,18 @@ def get_symm_line(brav:int)->tuple[list,list]:
     elif brav==4: #trigonal
         k_list=[[0.,0.,0.],[.5,0.,.5],[.5,0.,0.],[0.,0.,0.],[.5,.5,.5]]
         xlabel=[r'$\Gamma$','K','M',r'$\Gamma$','Z']
+    elif brav==5: #base center
+        k_list=[[0.,0.,0.],[.5,0.,0.],[.5,.5,0.],[0.,0.,0.],[0.,0.,.5]]
+        xlabel=[r'$\Gamma$','X','S',r'$\Gamma$','Z']
     elif brav==6:
         k_list=[[0.,0.,0.],[0., .5, .5],[.5, .5, .5],[.25,.75,.5],[0.,0.,0.]]
         xlabel=[r'$\Gamma$','X','L','W',r'$\Gamma$']
+    elif brav==7: #body center (common)
+        k_list=[[.5,.5,.5],[0., 0., 0.],[.5, 0., 0.],[.5, .5,-.5],[0.,0.,0.]]
+        xlabel=['Z',r'$\Gamma$','X','M',r'$\Gamma$']
     else:
-        pass
+        k_list=[[0.,0.,0.],[.5,0.,0.],[.5,.5,0.],[0.,0.,0.]]
+        xlabel=[r'$\Gamma$','X','M',r'$\Gamma$']
     return k_list,xlabel
 
 def BZedge(brav: int) -> None:
@@ -720,23 +738,20 @@ def chis_spectrum(mu: float, temp: float, Smat: np.ndarray, klist: np.ndarray, q
     wlist=np.linspace(0,Emax,Nw)
     chisq=[]
     chis_orbq=[]
-    f=open('chi0.dat','w')
-    fq=open('writeq.dat','w')
-    for i,q in enumerate(qlist):
-        fq.write(f'{i:d} {q[0]:5.3f} {q[1]:5.3f} {q[2]:5.3f}\n')
-        fq.flush()
-        qshift=flibs.get_qshift(klist,q)
-        chi0=flibs.get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp)
-        chis=flibs.get_chis(chi0,Smat)
-        trchis,trchi0,chis_orb=flibs.get_tr_chi(chis,chi0,olist)
-        chisq.append(trchis)
-        chis_orbq.append(chis_orb)
-        for w,trchi in zip(wlist,trchi0):
-            f.write(f'{i:8.4f} {w:8.4f} {trchi.imag:9.4f} {trchi.real:9.4f}\n')
-        f.write('\n')
-        f.flush()
-    f.close()
-    fq.close()
+    with open('chi0.dat','w') as f, open('writeq.dat','w') as fq:
+        for i,q in enumerate(qlist):
+            fq.write(f'{i:d} {q[0]:5.3f} {q[1]:5.3f} {q[2]:5.3f}\n')
+            fq.flush()
+            qshift=flibs.get_qshift(klist,q)
+            chi0=flibs.get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp)
+            chis=flibs.get_chis(chi0,Smat)
+            trchis,trchi0,chis_orb=flibs.get_tr_chi(chis,chi0,olist)
+            chisq.append(trchis)
+            chis_orbq.append(chis_orb)
+            for w,trchi in zip(wlist,trchi0):
+                f.write(f'{i:8.4f} {w:8.4f} {trchi.imag:9.4f} {trchi.real:9.4f}\n')
+            f.write('\n')
+            f.flush()
     return np.array(chisq),np.array(chis_orbq),wlist
 
 def chis_q_point(q: np.ndarray, eig: np.ndarray, uni: np.ndarray, Emax: float,
@@ -763,7 +778,7 @@ def chis_q_point(q: np.ndarray, eig: np.ndarray, uni: np.ndarray, Emax: float,
     ffermi=flibs.get_ffermi(eig,mu,temp)
     wlist=np.linspace(0,Emax,Nw)
     qshift=flibs.get_qshift(klist,q)
-    chi0=flibs.get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp,0)
+    chi0=flibs.get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp)
     chis=flibs.get_chis(chi0,Smat)
     trchis,trchi0,chis_orb=flibs.get_tr_chi(chis,chi0,olist)
     return trchis,chis_orb,wlist
@@ -821,16 +836,15 @@ def phi_spectrum(mu: float, temp: float, klist: np.ndarray, qlist: np.ndarray, o
     wlist=np.linspace(0,Emax,Nw)
     phiq=[]
     phi_orbq=[]
-    fq=open('writeq.dat','w')
-    for i,q in enumerate(qlist):
-        fq.write(f'{i:d} {q[0]:5.3f} {q[1]:5.3f} {q[2]:5.3f}\n')
-        fq.flush()
-        qshift=flibs.get_iqshift(klist,q)
-        phi=flibs.get_phi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,mu,temp)
-        trphi,phi_orb=flibs.get_tr_phi(phi,olist)
-        phiq.append(trphi)
-        phi_orbq.append(phi_orb)
-    fq.close()
+    with open('writeq.dat','w') as fq:
+        for i,q in enumerate(qlist):
+            fq.write(f'{i:d} {q[0]:5.3f} {q[1]:5.3f} {q[2]:5.3f}\n')
+            fq.flush()
+            qshift=flibs.get_iqshift(klist,q)
+            phi=flibs.get_phi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,mu,temp)
+            trphi,phi_orb=flibs.get_tr_phi(phi,olist)
+            phiq.append(trphi)
+            phi_orbq.append(phi_orb)
     return np.array(phiq),np.array(phi_orbq),wlist
 
 def phi_qmap(Nx: int, Ny: int, Ecut: float, mu: float, temp: float, klist: np.ndarray,
@@ -878,6 +892,7 @@ def get_chi_orb_list(Norb: int, site_prof: np.ndarray) -> tuple[np.ndarray, np.n
     else:
         if(Norb==sum(site_prof)):
             chiolist=[]
+            site=[]
             N0=1
             for i_site in site_prof:
                 tmp=np.arange(i_site)+N0

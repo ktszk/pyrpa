@@ -17,12 +17,17 @@ subroutine gen_imp_ham(ham_imp,ham_r,rvec,ham_i,imp_list,rlist,eps,Nimp,Nsite,Nr
   Nry=maxval(rlist(2,:))+1
   Nrz=maxval(rlist(3,:))+1
   !detect onsite_rvec
+  k_onsite=0
   do k=1,Nr
      if(sum(abs(rvec(:,k)))<eps)then
         k_onsite=k
         exit
      end if
   end do
+  if(k_onsite==0)then
+     print*,'Error: no onsite R-vector (R=0) found in gen_imp_ham'
+     stop
+  end if
 
   !$omp parallel do private(j,k,l,m,n,sw_imp1,sw_imp2,tmpr)
   site_loop1:do i=1,Nsite
@@ -53,7 +58,7 @@ subroutine gen_imp_ham(ham_imp,ham_r,rvec,ham_i,imp_list,rlist,eps,Nimp,Nsite,Nr
      site_loop2: do j=i+1,Nsite
         sw_imp2=.false.
         do n=1,Nimp
-           if(j==imp_list(n))then
+           if(j==imp_list(n)+1)then
               sw_imp2=.true.
               exit
            end if
@@ -104,7 +109,7 @@ subroutine get_dft_imp_ham(ham_k,ham_imp,klist,rlist,Nk,Nsite,Norb) bind(C)
               phase=2*pi*(sum(klist(:,j)*rlist(:,l))-sum(klist(:,i)*rlist(:,k)))
               orb_loop1: do m=1,Norb
                  orb_loop2: do n=1,Norb
-                    ham_k(n+Nk*(j-1),m+Nk*(i-1))=ham_k(n+Nk*(j-1),m+Nk*(i-1))&
+                    ham_k(n+Norb*(j-1),m+Norb*(i-1))=ham_k(n+Norb*(j-1),m+Norb*(i-1))&
                          +ham_imp(n+Nsite*(l-1),m+Nsite*(k-1))*cmplx(cos(phase),-sin(phase))
                  end do orb_loop2
               end do orb_loop1
@@ -112,7 +117,7 @@ subroutine get_dft_imp_ham(ham_k,ham_imp,klist,rlist,Nk,Nsite,Norb) bind(C)
         end do site_loop1
         orbk_loop: do m=1,Norb !orb_loop for hermite setting for Hamiltonian
            orbk_loop2: do n=1,Norb
-              ham_k(m+Nk*(i-1),n+Nk*(j-1))=conjg(ham_k(n+Nk*(j-1),m+Nk*(i-1)))
+              ham_k(m+Norb*(i-1),n+Norb*(j-1))=conjg(ham_k(n+Norb*(j-1),m+Norb*(i-1)))
            end do orbk_loop2
         end do orbk_loop
      end do k_loop2
@@ -120,7 +125,7 @@ subroutine get_dft_imp_ham(ham_k,ham_imp,klist,rlist,Nk,Nsite,Norb) bind(C)
   !$omp end parallel do
 end subroutine get_dft_imp_ham
 
-subroutine get_spectrum_spagehtti(spa,uni,eigs,klist,rlist,wlist,Nw,Nk,Nsite,Norb,mu,eta) bind(C)
+subroutine get_spectrum_spaghetti(spa,uni,eigs,klist,rlist,wlist,Nw,Nk,Nsite,Norb,mu,eta) bind(C)
   use constant
   implicit none
   integer(int64),intent(in):: Nw,Nk,Nsite,Norb
@@ -355,7 +360,7 @@ end subroutine solve_cpa
 
 subroutine solve_cpa_array(sigma_cpa_w,hamk,VA,VB,x,zlist,pp,Nk,Norb,Nw,maxiter,tol) bind(C)
   !> solve_cpa_array
-  !> Run CPA self-consistent loop for an array of frequencies (松原 or 実軸).
+  !> Run CPA self-consistent loop for an array of frequencies (Matsubara or real frequency).
   !> Each frequency is solved independently — parallelized over ω.
   !!@param sigma_cpa_w,inout: CPA self-energy [Norb,Norb,Nw] — initial guess in, converged out
   !!@param        hamk,   in: k-space Hamiltonian [Norb,Norb,Nk]

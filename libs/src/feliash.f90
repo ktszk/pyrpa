@@ -3,6 +3,9 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,kmap,invk,
   !> calculate linearized eliashberg equations with TRS without soc
   !!@param     delta,out: gap function
   !!@param         Gk,in: normal green function
+  !!@note: invk(:,i) index validity check:
+  !!        - invk(1,i) must be in range [1, Nk]
+  !!        - Enable bounds checking: ifx -check=bounds or gfortran -fbounds-check
   !!@param        uni,in: unitary matrix
   !!@param init_delta,in: band basis initial gap function
   !!@param       Smat,in: S-matrix
@@ -64,6 +67,10 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,kmap,invk,
         newdelta(:,:,:,:)=newdelta(:,:,:,:)*weight+delta(:,:,:,:)*norm2
         !$omp end parallel workshare
         call get_norm(norm,newdelta)
+        if(norm <= 0.0d0)then
+           print*,'Error: norm <= 0 in iter_loop'
+           stop
+        end if
         inorm=1.0d0/norm
         ! Rayleigh quotient: lambda_L = Re(<delta, newdelta>) / ||delta||^2
         ! Since delta is normalized (||delta||=1), lambda_rq = Re(<delta, newdelta>)
@@ -91,14 +98,18 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,kmap,invk,
         delta(:,:,:,:)=newdelta(:,:,:,:)*inorm
         !$omp end parallel workshare
      end do iter_loop
-     print*,'eliash=',lambda_rq-norm2
      if(i_eig==1 .and. (lambda_rq-norm2)>0.0d0)then
         print*,'1st eigenvalue is positive: skipping 2nd loop'
         exit
      end if
      norm2=norm
   end do eigenval_loop
+  print*,'eliash=',lambda_rq-norm2
   call get_norm(norm,newdelta)
+  if(norm <= 0.0d0)then
+     print*,'Error: final norm <= 0'
+     stop
+  end if
   inorm=1.0d0/norm
   !$omp parallel workshare
   delta(:,:,:,:)=newdelta(:,:,:,:)*inorm
@@ -156,6 +167,7 @@ contains
   subroutine get_vec_err(verr,newdel,del,inrm)
     !> Vector convergence: min(||newdel*inrm - del||, ||newdel*inrm + del||)
     !> Taking the minimum handles sign-flipping convergence for negative eigenvalues
+    !> Note: if both tmp_pos and tmp_neg are 0, verr becomes 0, indicating convergence
     complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: newdel,del
     real(real64),intent(in):: inrm
     real(real64),intent(out):: verr
@@ -296,9 +308,9 @@ subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
            end do
            !$omp end do
         end if
-        !!$omp workshare
+        !$omp single
         chi(i,j,:,:)=cmat4(:,:)
-        !!$omp end workshare
+        !$omp end single
         !$omp end parallel
      end do qloop
   end do wloop
@@ -625,6 +637,13 @@ subroutine get_initial_delta(delta,init_delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,gap
         !$omp end do
      end do
   end do
+  !$omp end parallel
+  ! norm=0 check
+  if(norm <= 0.0d0)then
+     print*,'Error: get_initial_delta norm <= 0'
+     stop
+  end if
+  !$omp parallel
   !$omp workshare
   delta(:,:,:,:)=delta(:,:,:,:)/sqrt(2.0d0*norm)
   !$omp end workshare
