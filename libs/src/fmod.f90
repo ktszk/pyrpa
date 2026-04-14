@@ -105,13 +105,18 @@ subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,Norb) bind(C)
   real(real64) rwork(3*Norb-2),eq(Norb),norm
   complex(real64) work(2*Norb-1)
   complex(real64),dimension(Norb,Norb):: tmp,tmp2,tmp3
+  real(real64),parameter:: ovl_thresh=1.0d-8
 
   !$omp parallel do private(tmp,tmp2,tmp3,norm,eq,work,rwork,info)
   kloop: do i=1,Nk
      tmp(:,:)=Ovlk(:,:,i)
      call zheev('V','U',norb,tmp,norb,eq,work,2*norb-1,rwork,info)
      do j=1,Norb
-        tmp2(:,j)=tmp(:,j)/sqrt(cmplx(eq(j)))
+        if(eq(j)>ovl_thresh)then
+           tmp2(:,j)=tmp(:,j)/sqrt(cmplx(eq(j)))
+        else
+           tmp2(:,j)=(0.0d0,0.0d0) !discard near-null basis vector (canonical orthogonalization)
+        end if
      end do
      ! tmp = tmp2^H * ham_k(:,:,i) * tmp2
      call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),ham_k(:,:,i),Norb,tmp2,Norb,(0.0d0,0.0d0),tmp3,Norb)

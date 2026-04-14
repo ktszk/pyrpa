@@ -162,7 +162,7 @@ subroutine get_spectrum_spaghetti(spa,uni,eigs,klist,rlist,wlist,Nw,Nk,Nsite,Nor
   end do k_loop
   !$omp end do
   !$omp end parallel
-end subroutine get_spectrum_spagehtti
+end subroutine get_spectrum_spaghetti
 
 subroutine calc_gloc(Gloc,hamk,sigma,z,Nk,Norb) bind(C)
   !> calc_gloc

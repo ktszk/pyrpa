@@ -183,7 +183,14 @@ def calc_mu_imp(eigs,Nsite,fill:float,temp:float)-> float:
         return(fill*Nsite-0.5*(1.0-np.tanh(0.5*(eigs-mu)*itemp)).sum())
     emax=eigs.max()
     emin=eigs.min()
-    mu=scopt.brentq(func,emin,emax)
+    try:
+        mu=scopt.brentq(func,emin,emax)
+    except ValueError:
+        if func(emin)*func(emax) > 0:
+            mu=emin if abs(func(emin)) < abs(func(emax)) else emax
+            print(f"Warning: calc_mu_imp could not bracket the chemical potential. Clamped to mu={mu:.4f} eV",flush=True)
+        else:
+            raise
     return mu
 
 def gen_rlist(Nx: int, Ny: int, Nz: int) -> np.ndarray:
@@ -295,6 +302,8 @@ def mk_qlist(k_set: np.ndarray | list, Nx: int, Ny: int, Nz: int, bvec: np.ndarr
     xticks=[]
     maxsplen=0
     Narray=np.array([Nx,Ny,Nz])
+    dk_length=0.0
+    N=1
     for ks,ke in zip(k_set,k_set[1:]):
         dk=np.array(ke)-np.array(ks)
         dk_length=abs(dk.dot(bvec)).sum()
@@ -302,7 +311,8 @@ def mk_qlist(k_set: np.ndarray | list, Nx: int, Ny: int, Nz: int, bvec: np.ndarr
         dN=np.asarray(np.ceil(abs(dk)*Narray),dtype=int)
         nonzero=dN[dN>0]
         if len(nonzero)==0:
-            continue  # identical consecutive k-points; skip this segment
+            dk_length=0.0  # identical consecutive k-points; skip this segment
+            continue
         N=nonzero.min()
         tmp=np.linspace(ks,ke,N,False)
         tmp2=np.linspace(0,dk_length,N,False)+maxsplen

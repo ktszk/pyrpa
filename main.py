@@ -60,7 +60,7 @@ color_option defines the meaning of color on Fermi surfaces
  2: velocity size
 """
 option=13
-color_option=2
+color_option=1
 
 Nx,Ny,Nz,Nw=32,32,2,512 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
@@ -68,7 +68,7 @@ kscale=[1.0,1.0,1.0]
 kz=0.0
 #RotMat=[[0,0,1],[0,1,0],[1,0,0]]
 
-abc=[3.96/np.sqrt(2),3.96/np.sqrt(2),13.02*.5]
+abc=[3.96*0.70711,3.96*0.70711,13.02*.5]
 #abc=[3.68,3.68,5.03]
 #alpha_beta_gamma=[90.,90.,90]
 #temp=2.0e-2 #2.59e-2
@@ -310,6 +310,7 @@ def set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist
         fspolys=polys
         fscenters=[]
         fscolors=[]
+        return fspolys,fscenters,fscolors
     else:
         colors=plibs.get_colors(centers,blist,ihbar*avec.T,rvec,ham_r,S_r,olist,color_option)
         fspolys=[]
