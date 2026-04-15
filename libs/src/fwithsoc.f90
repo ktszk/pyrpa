@@ -1,5 +1,5 @@
 subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,olist,slist,kmap,invk,invs,invschi,&
-     temp,eps,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym) bind(C)
+     temp,eps,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,arnoldi_m) bind(C)
   !> calculate linearized eliashberg equations with soc and TRS
   !!@param     delta,out: gap function
   !!@param         Gk,in: normal green function
@@ -26,6 +26,7 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,ol
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym
+  integer(int64),intent(in):: arnoldi_m  !! Krylov subspace dimension (0=power method, >0=Arnoldi)
   integer(int64),intent(in),dimension(Nchi,2):: olist
   integer(int64),intent(in),dimension(Norb):: slist,invs
   integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
@@ -51,6 +52,9 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,ol
   call get_V_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
+  if(arnoldi_m>0)then !--- Arnoldi solver
+     call solve_arnoldi(arnoldi_m)
+  else !--- Power method
   eigenval_loop:do i_eig=1,eig_max !solve eig_val using power method, 1st eig is usually large negative value
      call get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym)
      count=0 !count too small eigenvalue
@@ -100,6 +104,7 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,ol
   !$omp parallel workshare
   delta(:,:,:,:)=newdelta(:,:,:,:)*inorm
   !$omp end parallel workshare
+  end if
 contains
   subroutine get_norm(norm,func)
     complex(real64),intent(in),dimension(Nkall,Nw,Norb,Norb):: func
@@ -178,6 +183,193 @@ contains
     !$omp end parallel
     verr=sqrt(2.0d0*min(tmp_pos,tmp_neg))
   end subroutine get_vec_err
+
+  subroutine solve_arnoldi(m_arnoldi)
+    !> Two-pass Arnoldi: pass 1 (no shift) finds lambda_-, pass 2 (shift+deflation) finds lambda_+.
+    integer(int64),intent(in):: m_arnoldi
+    integer(int32) :: m_dim,j,ii,m_act,idx,lwork,info
+    real(real64) :: beta,shift,lambda1
+    complex(real64) :: hij
+    complex(real64),allocatable :: V(:,:,:,:,:),delta1(:,:,:,:)
+    complex(real64),allocatable :: H_mat(:,:),A_mat(:,:),eigenvals(:)
+    complex(real64),allocatable :: VL_dum(:,:),VR(:,:),zwork(:)
+    real(real64),allocatable :: rwork(:)
+
+    m_dim=int(m_arnoldi,int32)
+    lwork=max(64,2*m_dim)
+    allocate(V(Nkall,Nw,Norb,Norb,0:m_dim-1),delta1(Nkall,Nw,Norb,Norb))
+    allocate(H_mat(m_dim+1,m_dim))
+    allocate(A_mat(m_dim,m_dim),eigenvals(m_dim))
+    allocate(VL_dum(1,1),VR(m_dim,m_dim),zwork(lwork),rwork(2*m_dim))
+
+    ! ===== Pass 1: no shift, find lambda_- =====================================
+    H_mat=(0.0d0,0.0d0)
+    call get_initial_delta_soc(V(:,:,:,:,0),init_delta,uni,kmap,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym)
+    print'(A,I4,A)','Arnoldi pass 1 (no shift): Krylov dim =',m_dim,' ...'
+    m_act=m_dim
+    do j=0,m_dim-1
+       call apply_op(newdelta,V(:,:,:,:,j))
+       do ii=0,j
+          call get_inner(hij,V(:,:,:,:,ii),newdelta)
+          H_mat(ii+1,j+1)=hij
+          !$omp parallel workshare
+          newdelta(:,:,:,:)=newdelta(:,:,:,:)-hij*V(:,:,:,:,ii)
+          !$omp end parallel workshare
+       end do
+       call get_norm(beta,newdelta)
+       H_mat(j+2,j+1)=cmplx(beta,0.0d0,real64)
+       if(beta<1.0d-14)then; m_act=j+1; exit; end if
+       if(j<m_dim-1)then
+          !$omp parallel workshare
+          V(:,:,:,:,j+1)=newdelta(:,:,:,:)*(1.0d0/beta)
+          !$omp end parallel workshare
+       end if
+    end do
+    A_mat(1:m_act,1:m_act)=H_mat(1:m_act,1:m_act)
+    call zgeev('N','V',m_act,A_mat,m_dim,eigenvals,VL_dum,1,VR,m_dim,zwork,lwork,rwork,info)
+    if(info/=0)then; print*,'ZGEEV failed pass 1: info=',info; stop; end if
+    print'(A)','Pass 1 Ritz values (real, imag):'
+    do ii=1,m_act
+       print'(I4,2F14.6)',ii,dble(eigenvals(ii)),aimag(eigenvals(ii))
+    end do
+    idx=minloc(dble(eigenvals(1:m_act)),1)
+    lambda1=dble(eigenvals(idx))
+    print'(A,2F12.6)','  lambda_- =',lambda1,aimag(eigenvals(idx))
+    ! early exit: if largest Ritz value >= 0.1, adopt it as lambda_+
+    if(maxval(dble(eigenvals(1:m_act)))>=0.1d0)then
+       idx=maxloc(dble(eigenvals(1:m_act)),1)
+       print'(A,2F12.6)','  eliash   =',dble(eigenvals(idx)),aimag(eigenvals(idx))
+       !$omp parallel workshare
+       delta(:,:,:,:)=(0.0d0,0.0d0)
+       !$omp end parallel workshare
+       do ii=1,m_act
+          !$omp parallel workshare
+          delta(:,:,:,:)=delta(:,:,:,:)+VR(ii,idx)*V(:,:,:,:,ii-1)
+          !$omp end parallel workshare
+       end do
+       call get_norm(beta,delta)
+       !$omp parallel workshare
+       delta(:,:,:,:)=delta(:,:,:,:)*(1.0d0/beta)
+       !$omp end parallel workshare
+       deallocate(V,delta1,H_mat,A_mat,eigenvals,VL_dum,VR,zwork,rwork)
+       return
+    end if
+    ! build delta1 = Ritz vector for lambda_-, store for deflation
+    !$omp parallel workshare
+    delta1(:,:,:,:)=(0.0d0,0.0d0)
+    !$omp end parallel workshare
+    do ii=1,m_act
+       !$omp parallel workshare
+       delta1(:,:,:,:)=delta1(:,:,:,:)+VR(ii,idx)*V(:,:,:,:,ii-1)
+       !$omp end parallel workshare
+    end do
+    call get_norm(beta,delta1)
+    !$omp parallel workshare
+    delta1(:,:,:,:)=delta1(:,:,:,:)*(1.0d0/beta)
+    !$omp end parallel workshare
+
+    ! ===== Pass 2: shift + deflation, find lambda_+ ============================
+    shift=-lambda1   ! shift = |lambda_-| > 0; all eigenvalues become lambda_i + shift
+    H_mat=(0.0d0,0.0d0)
+    call get_initial_delta_soc(V(:,:,:,:,0),init_delta,uni,kmap,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym)
+    ! orthogonalize initial vector against delta1
+    call get_inner(hij,delta1,V(:,:,:,:,0))
+    !$omp parallel workshare
+    V(:,:,:,:,0)=V(:,:,:,:,0)-hij*delta1(:,:,:,:)
+    !$omp end parallel workshare
+    call get_norm(beta,V(:,:,:,:,0))
+    !$omp parallel workshare
+    V(:,:,:,:,0)=V(:,:,:,:,0)*(1.0d0/beta)
+    !$omp end parallel workshare
+    print'(A,F10.6,A,I4,A)','Arnoldi pass 2 (shift=',shift,'): Krylov dim =',m_dim,' ...'
+    m_act=m_dim
+    do j=0,m_dim-1
+       ! w = (A + shift*I)*v_j - <delta1, (A+shift*I)*v_j>*delta1
+       call apply_op(newdelta,V(:,:,:,:,j))
+       !$omp parallel workshare
+       newdelta(:,:,:,:)=newdelta(:,:,:,:)+shift*V(:,:,:,:,j)   !shift
+       !$omp end parallel workshare
+       call get_inner(hij,delta1,newdelta)                       !deflation
+       !$omp parallel workshare
+       newdelta(:,:,:,:)=newdelta(:,:,:,:)-hij*delta1(:,:,:,:)
+       !$omp end parallel workshare
+       do ii=0,j  !Gram-Schmidt
+          call get_inner(hij,V(:,:,:,:,ii),newdelta)
+          H_mat(ii+1,j+1)=hij
+          !$omp parallel workshare
+          newdelta(:,:,:,:)=newdelta(:,:,:,:)-hij*V(:,:,:,:,ii)
+          !$omp end parallel workshare
+       end do
+       call get_norm(beta,newdelta)
+       H_mat(j+2,j+1)=cmplx(beta,0.0d0,real64)
+       if(beta<1.0d-14)then; m_act=j+1; exit; end if
+       if(j<m_dim-1)then
+          !$omp parallel workshare
+          V(:,:,:,:,j+1)=newdelta(:,:,:,:)*(1.0d0/beta)
+          !$omp end parallel workshare
+       end if
+    end do
+    A_mat(1:m_act,1:m_act)=H_mat(1:m_act,1:m_act)
+    call zgeev('N','V',m_act,A_mat,m_dim,eigenvals,VL_dum,1,VR,m_dim,zwork,lwork,rwork,info)
+    if(info/=0)then; print*,'ZGEEV failed pass 2: info=',info; stop; end if
+    ! physical eigenvalue = Ritz value - shift (undo the shift)
+    print'(A)','Pass 2 Ritz values - physical (real, imag):'
+    do ii=1,m_act
+       print'(I4,2F14.6)',ii,dble(eigenvals(ii))-shift,aimag(eigenvals(ii))
+    end do
+    idx=maxloc(dble(eigenvals(1:m_act)),1)
+    print'(A,2F12.6)','  eliash   =',dble(eigenvals(idx))-shift,aimag(eigenvals(idx))
+    !$omp parallel workshare
+    delta(:,:,:,:)=(0.0d0,0.0d0)
+    !$omp end parallel workshare
+    do ii=1,m_act
+       !$omp parallel workshare
+       delta(:,:,:,:)=delta(:,:,:,:)+VR(ii,idx)*V(:,:,:,:,ii-1)
+       !$omp end parallel workshare
+    end do
+    call get_norm(beta,delta)
+    !$omp parallel workshare
+    delta(:,:,:,:)=delta(:,:,:,:)*(1.0d0/beta)
+    !$omp end parallel workshare
+
+    deallocate(V,delta1,H_mat,A_mat,eigenvals,VL_dum,VR,zwork,rwork)
+  end subroutine solve_arnoldi
+
+  subroutine apply_op(w_out,v_in)
+    !> apply Eliashberg operator: w_out = (T/Nkall)*K*v_in; uses host fk as scratch
+    complex(real64),intent(in),dimension(Nkall,Nw,Norb,Norb):: v_in
+    complex(real64),intent(out),dimension(Nkall,Nw,Norb,Norb):: w_out
+    call mkfk_trs_soc(fk,Gk,v_in,sgnsig,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym)
+    call mkdelta_soc(w_out,fk,chi,Vmat,sgnsig,sgnsig2,kmap,invk,invs,invschi,olist,slist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,gap_sym)
+    !$omp parallel workshare
+    w_out(:,:,:,:)=w_out(:,:,:,:)*weight
+    !$omp end parallel workshare
+  end subroutine apply_op
+
+  subroutine get_inner(h,u,v)
+    !> complex inner product h = 2*<u,v> summed over full BZ
+    complex(real64),intent(in),dimension(Nkall,Nw,Norb,Norb):: u,v
+    complex(real64),intent(out):: h
+    integer(int32) i,j,l,m
+    real(real64) tmp_r,tmp_i
+    tmp_r=0.0d0
+    tmp_i=0.0d0
+    !$omp parallel
+    do l=1,Norb
+       do m=1,Norb
+          !$omp do private(i,j),reduction(+:tmp_r,tmp_i)
+          do j=1,Nw
+             do i=1,Nkall
+                tmp_r=tmp_r+dble(conjg(u(i,j,m,l))*v(i,j,m,l))
+                tmp_i=tmp_i+aimag(conjg(u(i,j,m,l))*v(i,j,m,l))
+             end do
+          end do
+          !$omp end do
+       end do
+    end do
+    !$omp end parallel
+    h=cmplx(2.0d0*tmp_r,2.0d0*tmp_i,real64)
+  end subroutine get_inner
 end subroutine lin_eliash_soc
 
 subroutine get_chi0_soc(chi,sgnsig,sgnsig2,invschi,Vmat,Gk,kmap,invk,invs,olist,slist,temp,&

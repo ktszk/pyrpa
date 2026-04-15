@@ -1471,7 +1471,8 @@ def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, 
                               Vmat: np.ndarray, sgnsig: np.ndarray, sgnsig2: np.ndarray, plist: np.ndarray,
                               slist: np.ndarray, olist: np.ndarray, kmap: np.ndarray, invk: np.ndarray,
                               invs: np.ndarray, invschi: np.ndarray, Nx: int, Ny: int, Nz: int, temp: float,
-                              gap_sym: int, eps: float = 1.0e-4, itemax: int = 300) -> np.ndarray:
+                              gap_sym: int, eps: float = 1.0e-4, itemax: int = 300,
+                              arnoldi_m: int = 10) -> np.ndarray:
     """
     @fn linearized_eliashberg_soc
     @brief Solve the linearized Eliashberg gap equation with spin-orbit coupling (SOC).
@@ -1520,7 +1521,8 @@ def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, 
         POINTER(c_int64), POINTER(c_int64),           # Nw, Nchi
         POINTER(c_int64), POINTER(c_int64),           # Norb, Nx
         POINTER(c_int64), POINTER(c_int64),           # Ny, Nz
-        POINTER(c_int64), POINTER(c_int64)            # itemax, gapsym
+        POINTER(c_int64), POINTER(c_int64),           # itemax, gapsym
+        POINTER(c_int64)                              # arnoldi_m
     ]
     flibs.lin_eliash_soc.retype = c_void_p
     flibs.lin_eliash_soc(delta, chi, Gk, uni, init_delta, Vmat, sgnsig, sgnsig2, plist, olist,
@@ -1528,7 +1530,8 @@ def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, 
                          byref(c_double(eps)), byref(c_int64(Nkall)), byref(c_int64(Nk)),
                          byref(c_int64(Nw)), byref(c_int64(Nchi)), byref(c_int64(Norb)),
                          byref(c_int64(Nx)), byref(c_int64(Ny)), byref(c_int64(Nz)),
-                         byref(c_int64(itemax)), byref(c_int64(gap_sym)))
+                         byref(c_int64(itemax)), byref(c_int64(gap_sym)),
+                         byref(c_int64(arnoldi_m)))
     return delta
 
 def gen_Vmatrix(olist: np.ndarray, slist: np.ndarray, site: np.ndarray, invs: np.ndarray,

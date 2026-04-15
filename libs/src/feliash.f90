@@ -265,8 +265,8 @@ contains
     idx=minloc(dble(eigenvals(1:m_act)),1)
     lambda1=dble(eigenvals(idx))   !save lambda_- in host variable
     print'(A,2F12.6)','  lambda_- =',lambda1,aimag(eigenvals(idx))
-    ! early exit: if all Ritz values are positive, lambda_+ is already found
-    if(lambda1>=0.0d0)then
+    ! early exit: if largest Ritz value >= 0.1, adopt it as lambda_+
+    if(maxval(dble(eigenvals(1:m_act)))>=0.1d0)then
        idx=maxloc(dble(eigenvals(1:m_act)),1)
        print'(A,2F12.6)','  eliash   =',dble(eigenvals(idx)),aimag(eigenvals(idx))
        !$omp parallel workshare
