@@ -1210,17 +1210,21 @@ def calc_tau_epa(eig: np.ndarray, gavg: np.ndarray, wavg: np.ndarray,
     return tau
 
 def gen_imp_ham(rvec: np.ndarray, ham_r: np.ndarray, ham_i: np.ndarray,
-                rlist: np.ndarray, imp_list: np.ndarray,eps: float = 1.0e-5) -> np.ndarray:
+                ham_ri: np.ndarray, rlist: np.ndarray,
+                imp_list: np.ndarray, eps: float = 1.0e-5) -> np.ndarray:
     """
     @fn gen_imp_ham
-    @brief Construct the real-space impurity Hamiltonian from bulk hopping blocks and impurity positions.
-    @param     rvec: Real-space displacement vectors [Nr, 3] float64
-    @param    ham_r: Real-part hopping blocks [Nr, Norb, Norb] complex128
-    @param    ham_i: Imaginary-part hopping blocks [Nr, Norb, Norb] complex128
-    @param    rlist: Impurity site positions [Nsite] float64
-    @param imp_list: Impurity orbital indices [Nimp] int64
-    @param      eps: Small tolerance for assembly
-    @return ham_imp: Impurity Hamiltonian [Norb*Nsite, Norb*Nsite] complex128
+    @brief Construct the real-space supercell Hamiltonian with species-dependent
+           Wannier hopping for host-host, imp-imp, and cross-species pairs.
+    @param     rvec: Wannier R-vectors [Nr, 3] float64
+    @param    ham_r: host-host Wannier H_rr(R) [Nr, Norb, Norb] complex128
+    @param    ham_i: imp-imp Wannier H_ii(R) [Nr, Norb, Norb] complex128; R=0 block -> imp on-site
+    @param   ham_ri: cross-species Wannier H_ri(R) [Nr, Norb, Norb] complex128,
+                     convention: ham_ri[k,m,l] = <m_imp, R|H|l_host, 0>
+    @param    rlist: site positions in fractional coords [Nsite, 3] float64
+    @param imp_list: 0-based indices of impurity sites [Nimp] int64
+    @param      eps: tolerance for R-vector matching
+    @return ham_imp: supercell Hamiltonian [Norb*Nsite, Norb*Nsite] complex128
     """
     Nr, Nimp, Nsite = len(rvec), len(imp_list), len(rlist)
     Norb = int(np.sqrt(ham_r.size / Nr))
@@ -1230,14 +1234,16 @@ def gen_imp_ham(rvec: np.ndarray, ham_r: np.ndarray, ham_i: np.ndarray,
         np.ctypeslib.ndpointer(dtype=np.complex128), # ham_r
         np.ctypeslib.ndpointer(dtype=np.float64),    # rvec
         np.ctypeslib.ndpointer(dtype=np.complex128), # ham_i
+        np.ctypeslib.ndpointer(dtype=np.complex128), # ham_ri
         np.ctypeslib.ndpointer(dtype=np.int64),      # imp_list
         np.ctypeslib.ndpointer(dtype=np.float64),    # rlist
-        POINTER(c_double),                           # eps
+        POINTER(c_double),                            # eps
         POINTER(c_int64), POINTER(c_int64),           # Nimp, Nsite
         POINTER(c_int64), POINTER(c_int64)            # Nr, Norb
     ]
     flibs.gen_imp_ham.restype = c_void_p
-    flibs.gen_imp_ham(ham_imp, ham_r, rvec, ham_i, imp_list, rlist, byref(c_double(eps)), byref(c_int64(Nimp)),
+    flibs.gen_imp_ham(ham_imp, ham_r, rvec, ham_i, ham_ri, imp_list, rlist,
+                      byref(c_double(eps)), byref(c_int64(Nimp)),
                       byref(c_int64(Nsite)), byref(c_int64(Nr)), byref(c_int64(Norb)))
     return ham_imp
 

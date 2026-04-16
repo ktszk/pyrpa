@@ -1297,9 +1297,10 @@ def main():
         rlist=plibs.gen_rlist(Nx,Ny,Nz)
         wlist=np.linspace(Emin,Emax,Nw,True)
         ham_i=ham_r
+        ham_ri=ham_r  # placeholder: use host hopping for cross-species pairs
         imp_list=np.array([0])
         print("get imp Ham",flush=True)
-        ham_imp=flibs.gen_imp_ham(rvec,ham_r,ham_i,rlist,imp_list)
+        ham_imp=flibs.gen_imp_ham(rvec,ham_r,ham_i,ham_ri,rlist,imp_list)
         eigs,uni=sclin.eigh(ham_imp)
         print("get mu",flush=True)
         mu=plibs.calc_mu_imp(eigs,len(rlist),fill,temp)
