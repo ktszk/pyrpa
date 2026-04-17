@@ -57,18 +57,9 @@ else ifeq ($(FC),gfortran)
 endif
 
 ifdef USE_MKL_FFT
-  ifndef MKLROOT
-    $(error MKLROOT is not set. Load the Intel oneAPI MKL module before running make.)
-  endif
-  FFTW3XF_INSTALL := $(abspath $(OBJDIR)/fftw3xf)
-  ifeq ($(FC),gfortran)
-    FFTW3XF_COMPILER := gnu
-  else
-    FFTW3XF_COMPILER := intel
-  endif
   FFT_OBJ  :=
-  FFT_DEP  := $(FFTW3XF_INSTALL)/libfftw3xf_intel.a
-  FFT_LIBS := -L$(FFTW3XF_INSTALL) -lfftw3xf_intel
+  FFT_DEP  :=
+  FFT_LIBS :=
 else
   FFT_OBJ  := $(OBJDIR)/fft_wrapper.o
   FFT_DEP  :=
@@ -141,15 +132,6 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.f90 | $(OBJDIR)
 # compile C++ pocketfft wrapper
 $(FFT_OBJ): $(SRCDIR)/fft_wrapper.cpp $(SRCDIR)/pocketfft_hdronly.h | $(OBJDIR)
 	$(CXX) $(CXXFLAGS) $(if $(DEBUG),$(FFLAGS_DEBUG)) -c $< -o $@
-
-# build MKL FFTW3 Fortran wrapper into obj/fftw3xf/ (MKL builds only)
-ifdef USE_MKL_FFT
-$(FFT_DEP): | $(OBJDIR)
-	mkdir -p $(FFTW3XF_INSTALL)
-	$(MAKE) -C $(MKLROOT)/share/mkl/interfaces/fftw3xf libintel64 \
-		MKLROOT=$(MKLROOT) INSTALL_DIR=$(FFTW3XF_INSTALL) \
-		compiler=$(FFTW3XF_COMPILER) INSTALL_LIBNAME=libfftw3xf_intel.a
-endif
 
 # module rule: constant.mod comes from fmod.o
 $(OBJDIR)/constant.mod: $(OBJDIR)/fmod.o

@@ -124,8 +124,8 @@ contains
                    else
                       unitmp=uni(ol(j,1),l,qshift(k))*conjg(uni(ol(i,1),l,qshift(k)))&
                            *uni(ol(i,2),m,k)*conjg(uni(ol(j,2),m,k))
-                      phi(i,j)=phi(i,j)-unitmp*(1.0d0-ffermi(l,qshift(k))-ffermi(m,k))&
-                           /cmplx(w-eig(m,k)-eig(l,qshift(k))+2.0d0*mu,idelta)
+                       phi(i,j)=phi(i,j)-unitmp*(1.0d0-ffermi(l,qshift(k))-ffermi(m,k))&
+                          /cmplx(w-eig(m,k)-eig(l,qshift(k))+2.0d0*mu,idelta,kind=real64)
                    end if
                 end do chiorb2_loop
              end do chiorb1_loop

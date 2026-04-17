@@ -319,8 +319,8 @@ subroutine get_dft_imp_ham(ham_k,ham_imp,klist,rlist,Nk,Nsite,Norb) bind(C)
                     ! ham_imp index: orbital-fast, site-slow
                     !   row: orbital n at site l  →  n + (l-1)*Norb
                     !   col: orbital m at site k  →  m + (k-1)*Norb
-                    ham_k(n+Norb*(j-1),m+Norb*(i-1))=ham_k(n+Norb*(j-1),m+Norb*(i-1))&
-                         +ham_imp(n+Norb*(l-1),m+Norb*(k-1))*cmplx(cos(phase),-sin(phase))
+                  ham_k(n+Norb*(j-1),m+Norb*(i-1))=ham_k(n+Norb*(j-1),m+Norb*(i-1))&
+                     +ham_imp(n+Norb*(l-1),m+Norb*(k-1))*cmplx(cos(phase),-sin(phase),kind=real64)
                  end do orb_loop2
               end do orb_loop1
            end do site_loop2
@@ -392,8 +392,8 @@ subroutine get_spectrum_spaghetti(spa,uni,eigs,klist,rlist,wlist,Nw,Nk,Nsite,Nor
                     !   <k,l|n> = Σ_j e^{ik·R_j} conjg(uni(l+(j-1)*Norb, n))
                     !   <n|k,l> = Σ_k' e^{-ik·R_k'} uni(l+(k'-1)*Norb, n)
                     ! uni index: orbital l at site j  →  l + (j-1)*Norb
-                    spa(m,i)=spa(m,i)+conjg(uni(l+(j-1)*Norb,n))*uni(l+(k-1)*Norb,n)&
-                         *cmplx(cos(phase),-sin(phase))/cmplx(wlist(m)-eigs(n)+mu,eta)
+                  spa(m,i)=spa(m,i)+conjg(uni(l+(j-1)*Norb,n))*uni(l+(k-1)*Norb,n)&
+                     *cmplx(cos(phase),-sin(phase),kind=real64)/cmplx(wlist(m)-eigs(n)+mu,eta,kind=real64)
                  end do w_loop
               end do eig_loop
            end do orb_loop

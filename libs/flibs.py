@@ -531,7 +531,7 @@ def get_Vsigma_nosoc_flex(chi: np.ndarray, Smat: np.ndarray, Cmat: np.ndarray) -
 def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray,
            olist: np.ndarray, hamk: np.ndarray, eig: np.ndarray, uni: np.ndarray, mu: float,
            fill: float, temp: float, Nw: int, Nx: int, Ny: int, Nz: int, sw_out: bool,
-           sw_in: bool, sw_sub_sigma: bool = True, scf_loop: int = 300, eps: float = 1.0e-4,
+           sw_in: bool, sub_sigma: int = 1, scf_loop: int = 300, eps: float = 1.0e-4,
            pp: float = 0.3, m_diis: int = 5, sw_rescale: bool = False) -> tuple[np.ndarray, float]:
     """
     @fn mkself
@@ -551,7 +551,7 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
     @param     Nx,Ny,Nz: k-grid dimensions
     @param       sw_out: If True, write intermediate sigma to file
     @param        sw_in: If True, read initial sigma from file
-    @param sw_sub_sigma: If True, restrict sigma to subspace
+    @param   sub_sigma: HF double-counting subtraction mode (0: none, 1: lowest Matsubara, 2: frequency-average)
     @param     scf_loop: Maximum number of self-consistency iterations
     @param          eps: Convergence tolerance
     @param           pp: Linear mixing rate (0 < pp < 1)
@@ -582,7 +582,7 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
         POINTER(c_int64), POINTER(c_int64),                    # Nk, Nw
         POINTER(c_int64), POINTER(c_int64),                    # Nchi, Norb
         POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),   # Nx, Ny, Nz
-        POINTER(c_bool), POINTER(c_bool), POINTER(c_bool),      # sw_sub_sigma, sw_out, sw_in
+        POINTER(c_int64), POINTER(c_bool), POINTER(c_bool),      # sub_sigma, sw_out, sw_in
         POINTER(c_int64),                                        # m_diis
         POINTER(c_bool)                                          # sw_rescale
     ]
@@ -591,14 +591,14 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
         byref(c_double(mu)), byref(c_double(fill)), byref(c_double(temp)), byref(c_int64(scf_loop)),
         byref(c_double(pp)), byref(c_double(eps)), byref(c_int64(Nkall)), byref(c_int64(Nk)),
         byref(c_int64(Nw)), byref(c_int64(Norb)), byref(c_int64(Nchi)), byref(c_int64(Nx)),
-        byref(c_int64(Ny)), byref(c_int64(Nz)), byref(c_bool(sw_sub_sigma)), byref(c_bool(sw_out)),
+        byref(c_int64(Ny)), byref(c_int64(Nz)), byref(c_int64(sub_sigma)), byref(c_bool(sw_out)),
         byref(c_bool(sw_in)), byref(c_int64(m_diis)), byref(c_bool(sw_rescale)))
     return sigmak, mu_self.value
 
 def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.ndarray,
            olist: np.ndarray, slist: np.ndarray, hamk: np.ndarray, eig: np.ndarray, uni: np.ndarray, mu: float,
            fill: float, temp: float, Nw: int, Nx: int, Ny: int, Nz: int, sw_out: bool,
-           sw_in: bool, sw_sub_sigma: bool = True, scf_loop: int = 300, eps: float = 1.0e-4,
+           sw_in: bool, sub_sigma: int = 1, scf_loop: int = 300, eps: float = 1.0e-4,
            pp: float = 0.3, m_diis: int = 5, sw_rescale: bool = False) -> tuple[np.ndarray, float]:
     """
     @fn mkself_soc
@@ -619,7 +619,7 @@ def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.nd
     @param     Nx,Ny,Nz: k-grid dimensions
     @param       sw_out: If True, write intermediate sigma to file
     @param        sw_in: If True, read initial sigma from file
-    @param sw_sub_sigma: If True, restrict sigma to subspace
+    @param   sub_sigma: HF double-counting subtraction mode (0: none, 1: lowest Matsubara, 2: frequency-average)
     @param     scf_loop: Maximum number of self-consistency iterations
     @param          eps: Convergence tolerance
     @param           pp: Linear mixing rate (0 < pp < 1)
@@ -650,14 +650,14 @@ def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.nd
         POINTER(c_int64), POINTER(c_int64),                     # Nk, Nw
         POINTER(c_int64), POINTER(c_int64),                     # Nchi, Norb
         POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),   # Nx, Ny, Nz
-        POINTER(c_bool), POINTER(c_bool), POINTER(c_bool),       # sw_sub_sigma, sw_out, sw_in
+        POINTER(c_int64), POINTER(c_bool), POINTER(c_bool),       # sub_sigma, sw_out, sw_in
         POINTER(c_int64), POINTER(c_bool)                        # m_diis, sw_rescale
     ]
     flibs.mkself_soc(sigmak,byref(mu_self),Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,
                byref(c_double(mu)), byref(c_double(fill)), byref(c_double(temp)), byref(c_int64(scf_loop)),
                byref(c_double(pp)), byref(c_double(eps)), byref(c_int64(Nkall)), byref(c_int64(Nk)),
                byref(c_int64(Nw)), byref(c_int64(Norb)), byref(c_int64(Nchi)), byref(c_int64(Nx)),
-               byref(c_int64(Ny)), byref(c_int64(Nz)), byref(c_bool(sw_sub_sigma)), byref(c_bool(sw_out)), byref(c_bool(sw_in)), byref(c_int64(m_diis)), byref(c_bool(sw_rescale)))
+               byref(c_int64(Ny)), byref(c_int64(Nz)), byref(c_int64(sub_sigma)), byref(c_bool(sw_out)), byref(c_bool(sw_in)), byref(c_int64(m_diis)), byref(c_bool(sw_rescale)))
     return sigmak, mu_self.value
 
 def get_qshift(klist: np.ndarray, qpoint: np.ndarray) -> np.ndarray:
@@ -846,7 +846,7 @@ def get_phi_irr(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, qshift: np
         np.ctypeslib.ndpointer(dtype=np.float64),    # wlist
         POINTER(c_int64), POINTER(c_int64),           # Nchi, Norb
         POINTER(c_int64), POINTER(c_int64),           # Nk, Nw
-        POINTER(c_double), POINTER(c_double),         # idelta, eps
+        POINTER(c_double), POINTER(c_double),         # eps, idelta
         POINTER(c_double), POINTER(c_double),         # mu, temp
     ]
     flibs.get_phi_irr.restype = c_void_p
@@ -989,10 +989,10 @@ def gen_SCmatrix_orb(olist: np.ndarray, site: np.ndarray, Umat: np.ndarray, Jmat
     flibs.get_scmat_orb.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.float64), # Smat
         np.ctypeslib.ndpointer(dtype=np.float64), # Cmat
-        np.ctypeslib.ndpointer(dtype=np.int64),   # olist
-        np.ctypeslib.ndpointer(dtype=np.int64),   # site
         np.ctypeslib.ndpointer(dtype=np.float64), # Umat
         np.ctypeslib.ndpointer(dtype=np.float64), # Jmat
+        np.ctypeslib.ndpointer(dtype=np.int64),   # olist
+        np.ctypeslib.ndpointer(dtype=np.int64),   # site
         POINTER(c_int64), POINTER(c_int64)        # Nchi, Norb
     ]
     flibs.get_scmat_orb.restype = c_void_p
@@ -1023,8 +1023,8 @@ def calc_Lij(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float, w: 
     eps = idelta * 1e-3
     flibs.calc_lij.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128), # L11
-        np.ctypeslib.ndpointer(dtype=np.complex128), # L22
         np.ctypeslib.ndpointer(dtype=np.complex128), # L12
+        np.ctypeslib.ndpointer(dtype=np.complex128), # L22
         np.ctypeslib.ndpointer(dtype=np.complex128), # vk
         np.ctypeslib.ndpointer(dtype=np.float64),    # eig
         np.ctypeslib.ndpointer(dtype=np.float64),    # ffermi
@@ -1210,21 +1210,17 @@ def calc_tau_epa(eig: np.ndarray, gavg: np.ndarray, wavg: np.ndarray,
     return tau
 
 def gen_imp_ham(rvec: np.ndarray, ham_r: np.ndarray, ham_i: np.ndarray,
-                ham_ri: np.ndarray, rlist: np.ndarray,
-                imp_list: np.ndarray, eps: float = 1.0e-5) -> np.ndarray:
+                rlist: np.ndarray, imp_list: np.ndarray,eps: float = 1.0e-5) -> np.ndarray:
     """
     @fn gen_imp_ham
-    @brief Construct the real-space supercell Hamiltonian with species-dependent
-           Wannier hopping for host-host, imp-imp, and cross-species pairs.
-    @param     rvec: Wannier R-vectors [Nr, 3] float64
-    @param    ham_r: host-host Wannier H_rr(R) [Nr, Norb, Norb] complex128
-    @param    ham_i: imp-imp Wannier H_ii(R) [Nr, Norb, Norb] complex128; R=0 block -> imp on-site
-    @param   ham_ri: cross-species Wannier H_ri(R) [Nr, Norb, Norb] complex128,
-                     convention: ham_ri[k,m,l] = <m_imp, R|H|l_host, 0>
-    @param    rlist: site positions in fractional coords [Nsite, 3] float64
-    @param imp_list: 0-based indices of impurity sites [Nimp] int64
-    @param      eps: tolerance for R-vector matching
-    @return ham_imp: supercell Hamiltonian [Norb*Nsite, Norb*Nsite] complex128
+    @brief Construct the real-space impurity Hamiltonian from bulk hopping blocks and impurity positions.
+    @param     rvec: Real-space displacement vectors [Nr, 3] float64
+    @param    ham_r: Real-part hopping blocks [Nr, Norb, Norb] complex128
+    @param    ham_i: Imaginary-part hopping blocks [Nr, Norb, Norb] complex128
+    @param    rlist: Impurity site positions [Nsite] float64
+    @param imp_list: Impurity orbital indices [Nimp] int64
+    @param      eps: Small tolerance for assembly
+    @return ham_imp: Impurity Hamiltonian [Norb*Nsite, Norb*Nsite] complex128
     """
     Nr, Nimp, Nsite = len(rvec), len(imp_list), len(rlist)
     Norb = int(np.sqrt(ham_r.size / Nr))
@@ -1234,16 +1230,14 @@ def gen_imp_ham(rvec: np.ndarray, ham_r: np.ndarray, ham_i: np.ndarray,
         np.ctypeslib.ndpointer(dtype=np.complex128), # ham_r
         np.ctypeslib.ndpointer(dtype=np.float64),    # rvec
         np.ctypeslib.ndpointer(dtype=np.complex128), # ham_i
-        np.ctypeslib.ndpointer(dtype=np.complex128), # ham_ri
         np.ctypeslib.ndpointer(dtype=np.int64),      # imp_list
         np.ctypeslib.ndpointer(dtype=np.float64),    # rlist
-        POINTER(c_double),                            # eps
+        POINTER(c_double),                           # eps
         POINTER(c_int64), POINTER(c_int64),           # Nimp, Nsite
         POINTER(c_int64), POINTER(c_int64)            # Nr, Norb
     ]
     flibs.gen_imp_ham.restype = c_void_p
-    flibs.gen_imp_ham(ham_imp, ham_r, rvec, ham_i, ham_ri, imp_list, rlist,
-                      byref(c_double(eps)), byref(c_int64(Nimp)),
+    flibs.gen_imp_ham(ham_imp, ham_r, rvec, ham_i, imp_list, rlist, byref(c_double(eps)), byref(c_int64(Nimp)),
                       byref(c_int64(Nsite)), byref(c_int64(Nr)), byref(c_int64(Norb)))
     return ham_imp
 
@@ -1289,7 +1283,7 @@ def get_imp_spectrum(uni: np.ndarray, eigs: np.ndarray, mu: float, wlist: np.nda
     Nw, Nk, Nsite = len(wlist), len(klist), len(rlist)
     Norb = int(len(eigs) / Nsite)
     spectrum = np.zeros((Nk, Nw), dtype=np.complex128)
-    flibs.get_spectrum_spaghetti.argtypes = [
+    flibs.get_spectrum_spagehtti.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128), # spectrum
         np.ctypeslib.ndpointer(dtype=np.complex128), # uni
         np.ctypeslib.ndpointer(dtype=np.float64),    # eigs
@@ -1300,8 +1294,8 @@ def get_imp_spectrum(uni: np.ndarray, eigs: np.ndarray, mu: float, wlist: np.nda
         POINTER(c_int64), POINTER(c_int64),           # Nsite, Norb
         POINTER(c_double), POINTER(c_double)          # mu, eta
     ]
-    flibs.get_spectrum_spaghetti.restype = c_void_p
-    flibs.get_spectrum_spaghetti(spectrum, uni, eigs, klist, rlist, wlist, byref(c_int64(Nw)), byref(c_int64(Nk)),
+    flibs.get_spectrum_spagehtti.retype = c_void_p
+    flibs.get_spectrum_spagehtti(spectrum, uni, eigs, klist, rlist, wlist, byref(c_int64(Nw)), byref(c_int64(Nk)),
                                  byref(c_int64(Nsite)), byref(c_int64(Norb)), byref(c_double(mu)), byref(c_double(eta)))
     return spectrum
 
@@ -1978,7 +1972,7 @@ def solve_cpa(hamk: np.ndarray, VA: np.ndarray, VB: np.ndarray,
     @param     VA: Onsite potential of species A [Norb, Norb] complex128
     @param     VB: Onsite potential of species B [Norb, Norb] complex128
     @param      x: Concentration of species A (0 < x < 1)
-    @param  zlist: Complex frequency array [Nw] complex128 (Matsubara iω_n or real frequency ω+iδ)
+    @param  zlist: Complex frequency array [Nw] complex128 (松原 iω_n or 実軸 ω+iδ)
     @param     pp: Linear mixing parameter (default 0.5)
     @param maxiter: Maximum CPA iterations per frequency (default 500)
     @param    tol: Convergence tolerance (default 1e-10)

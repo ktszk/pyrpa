@@ -80,7 +80,8 @@ Emin,Emax=-3,3
 delta=3.0e-2
 Ecut=1.0e-2
 tau_const=100
-olist=[0,[1,2],3]
+olist=[0,0,0]
+#olist=[0,[1,2],3]
 #olist=[[0,3],[1,4],[2,5]]
 #olist=[[0,4],[1,2,5,6],[3,7]]
 #U,J= 0.8, 0.1
@@ -102,7 +103,7 @@ sw_rescale_flex=True #True: rescale self energy to make max|Sigma|~U, False: no 
 sw_self=False  #True: use calculated self energy for spectrum band plot
 sw_out_self=False
 sw_in_self=False
-sw_from_file=False
+sw_from_file=True
 #------------------------ initial parameters are above -------------------------------
 #----------------------------------main functions-------------------------------------
 #-------------------------------- import packages ------------------------------------

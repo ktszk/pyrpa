@@ -39,13 +39,15 @@ subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   integer(int32) i,j,l,m
   real(real64) phase
 
+   ham_k(:,:,:)=(0.0d0,0.0d0)
+
   !$omp parallel do private(l,m,j,phase)
   klop: do i=1,Nk
      do l=1,Norb
         do m=l,Norb
            rloop: do j=1,Nr
               phase=2*pi*sum(klist(:,i)*rvec(:,j))
-              ham_k(m,l,i)=ham_k(m,l,i)+ham_r(m,l,j)*cmplx(cos(phase),-sin(phase))
+              ham_k(m,l,i)=ham_k(m,l,i)+ham_r(m,l,j)*cmplx(cos(phase),-sin(phase),kind=real64)
            end do rloop
            if(l==m)then
               ham_k(l,l,i)=dble(ham_k(l,l,i)) !diagonal is real
@@ -80,6 +82,10 @@ subroutine get_eig(eig,uni,ham_k,Nk,Norb) bind(C)
   kloop: do i=1,Nk
      en(:,:)=ham_k(:,:,i)
      call zheev('V','U',Norb,en,Norb,eq,work,2*Norb-1,rwork,info)
+     if(info/=0)then
+        print*,'zheev failed in get_eig: info=',info
+        stop
+     end if
      uni(:,:,i)=en(:,:)
      eig(:,i)=eq(:)
   end do kloop
@@ -111,9 +117,13 @@ subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,Norb) bind(C)
   kloop: do i=1,Nk
      tmp(:,:)=Ovlk(:,:,i)
      call zheev('V','U',norb,tmp,norb,eq,work,2*norb-1,rwork,info)
+     if(info/=0)then
+        print*,'zheev failed in get_eig_mlo (overlap): info=',info
+        stop
+     end if
      do j=1,Norb
         if(eq(j)>ovl_thresh)then
-           tmp2(:,j)=tmp(:,j)/sqrt(cmplx(eq(j)))
+           tmp2(:,j)=tmp(:,j)/sqrt(cmplx(eq(j),kind=real64))
         else
            tmp2(:,j)=(0.0d0,0.0d0) !discard near-null basis vector (canonical orthogonalization)
         end if
@@ -122,6 +132,10 @@ subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,Norb) bind(C)
      call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),ham_k(:,:,i),Norb,tmp2,Norb,(0.0d0,0.0d0),tmp3,Norb)
      call zgemm('C','N',Norb,Norb,Norb,(1.0d0,0.0d0),tmp2,Norb,tmp3,Norb,(0.0d0,0.0d0),tmp,Norb)
      call zheev('V','U',norb,tmp,norb,eq,work,2*norb-1,rwork,info)
+     if(info/=0)then
+        print*,'zheev failed in get_eig_mlo (ham): info=',info
+        stop
+     end if
      eig(:,i)=eq(:)
      ! uni = tmp2 * tmp  (compose transformations)
      call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),tmp2,Norb,tmp,Norb,(0.0d0,0.0d0),tmp3,Norb)
@@ -180,7 +194,7 @@ subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
               axis1: do k=1,3
                  axis2: do n=k,3
                     imk(n,k,m,l,i)=imk(n,k,m,l,i)-rvec(n,j)*rvec(k,j)&
-                         *ham_r(m,l,j)*cmplx(cos(phase),-sin(phase))
+                         *ham_r(m,l,j)*cmplx(cos(phase),-sin(phase),kind=real64)
                  end do axis2
               end do axis1
               !$omp end simd
@@ -271,7 +285,7 @@ subroutine get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
               phase=2*pi*sum(klist(:,i)*rvec(:,j))
               !$omp simd
               vaxis: do k=1,3
-                 vk(k,m,l,i)=vk(k,m,l,i)-rvec(k,j)*ham_r(m,l,j)*cmplx(sin(phase),cos(phase))
+                 vk(k,m,l,i)=vk(k,m,l,i)-rvec(k,j)*ham_r(m,l,j)*cmplx(sin(phase),cos(phase),kind=real64)
               end do vaxis
               !$omp end simd
            end do rloop
@@ -403,7 +417,7 @@ subroutine gen_tr_greenw_0(trGk,wl,eig,mu,delta,Nk,Nw,Norb) bind(C)
      !$omp simd
      wloop: do i=1,Nw
         band_loop: do n=1,Norb
-           trGk(i,j)=trGk(i,j)+1./cmplx(wl(i)-eig(n,j)+mu,delta)
+           trGk(i,j)=trGk(i,j)+1./cmplx(wl(i)-eig(n,j)+mu,delta,kind=real64)
         end do band_loop
      end do wloop
      !$omp end simd
@@ -442,7 +456,7 @@ subroutine gen_dos(Dos,wl,eig,uni,mu,delta,Nk,Nw,Norb) bind(C)
      wloop: do i=1,Nw
         kloop: do k=1,Nk
            bandloop: do n=1,Norb
-              Dos(i,j)=Dos(i,j)+uni(j,n,k)*conjg(uni(j,n,k))/cmplx(wl(i)-eig(n,k)+mu,delta)
+              Dos(i,j)=Dos(i,j)+uni(j,n,k)*conjg(uni(j,n,k))/cmplx(wl(i)-eig(n,k)+mu,delta,kind=real64)
            end do bandloop
         end do kloop
      end do wloop

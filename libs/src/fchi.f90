@@ -121,8 +121,8 @@ contains
                    if(abs(w)==0.0d0 .and. abs(eig(m,k)-eig(l,qshift(k)))<1.0d-9)then
                       chi(i,j)=chi(i,j)+unitmp*ffermi(m,k)*(1.0d0-ffermi(m,k))/temp
                    else if(abs(ffermi(l,qshift(k))-ffermi(m,k))>eps)then
-                      chi(i,j)=chi(i,j)+unitmp*(ffermi(l,qshift(k))-ffermi(m,k))&
-                           /cmplx(w+eig(m,k)-eig(l,qshift(k)),idelta)
+                       chi(i,j)=chi(i,j)+unitmp*(ffermi(l,qshift(k))-ffermi(m,k))&
+                          /cmplx(w+eig(m,k)-eig(l,qshift(k)),idelta,kind=real64)
                    end if
                 end do chiorb2_loop
              end do chiorb1_loop
@@ -282,7 +282,7 @@ subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,e
         do l=1,Nchi
            if(ol(l,1)==ol(l,2))then
               do m=1,Nchi
-                 if(ol(m,2)==ol(m,2))then
+                 if(ol(m,1)==ol(m,2))then
                     trchis(j,i)=trchis(j,i)+tmp2(l,l)
                     trchi(j,i)=trchi(j,i)+chi(l,l)
                  end if

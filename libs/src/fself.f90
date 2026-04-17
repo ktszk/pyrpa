@@ -60,7 +60,7 @@ subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb) bind(C,name="gen_green0_")
      do m=1,Norb
         !$omp do private(iw,i,j,n)
         wloop: do j=1,Nw !ien=pi(2l+1)/beta l=0,1,... beta=(kBT)^-1
-           iw=cmplx(mu,dble(2*j-1)*pi*temp) !j=1=>l=0
+           iw=cmplx(mu,dble(2*j-1)*pi*temp,kind=real64) !j=1=>l=0
            band_loop: do n=1,Norb
               kloop: do i=1,Nk
                  Gk(i,j,m,l)=Gk(i,j,m,l)+uni(m,n,i)*conjg(uni(l,n,i))/(iw-eig(n,i))
@@ -101,7 +101,7 @@ subroutine gen_green_inv(Gk,self,hamk,mu,temp,Nk,Nw,Norb) bind(C,name="gen_green
      do m=1,Norb
         !$omp do private(iw,i)
         do j=1,Nw
-           iw=cmplx(mu,dble(2*j-1)*pi*temp)
+           iw=cmplx(mu,dble(2*j-1)*pi*temp,kind=real64)
            do i=1,Nk
               Gk(i,j,m,l)=-(hamk(m,l,i)+self(i,j,m,l))
               if(l==m)then
@@ -147,7 +147,7 @@ subroutine gen_green_inv_from_eig(Gk,self,uni,eig,mu,temp,Nk,Nw,Norb) bind(C)
      do m=1,norb
         !$omp do private(iw,i,n)
         wloop: do j=1,Nw
-           iw=cmplx(mu,dble(2*j-1)*pi*temp) !(2(j-1)+1)pi/beta
+           iw=cmplx(mu,dble(2*j-1)*pi*temp,kind=real64) !(2(j-1)+1)pi/beta
            kloop: do i=1,Nk
               band_loop: do n=1,norb
                  Gk(i,j,m,l)=Gk(i,j,m,l)+uni(m,n,i)*conjg(uni(l,n,i))*(iw-eig(n,i))
@@ -414,8 +414,8 @@ subroutine get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,&
         k_loop_tmp_to_chi:do i=1,Nkall
            if(invk(2,i)==0)then
               chi(invk(1,i),j,m,l)=tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight
-              if(abs(dble(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(0.0d0,imag(chi(invk(1,i),j,m,l)))
-              if(abs(imag(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(dble(chi(invk(1,i),j,m,l)),0.0d0)
+              if(abs(dble(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(0.0d0,imag(chi(invk(1,i),j,m,l)),kind=real64)
+              if(abs(imag(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(dble(chi(invk(1,i),j,m,l)),0.0d0,kind=real64)
            end if
         end do k_loop_tmp_to_chi
      end do w_loop_tmp_to_chi
@@ -694,7 +694,7 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
         end do
         !$omp end do
         !$omp workshare
-        tmpgk=cmplx(0.0d0,0.0d0)
+      tmpgk=cmplx(0.0d0,0.0d0,kind=real64)
         !$omp end workshare
         !$omp end parallel
         call FFT(tmp,tmpgk,Nx,Ny,Nz,2*Nw,.false.)
@@ -717,8 +717,8 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
         do j=1,Nw
            do i=1,Nk
               sigmak(i,j,m,l)=sigmak(i,j,m,l)*weight
-              if(abs(dble(sigmak(i,j,m,l)))<eps) sigmak(i,j,m,l)=cmplx(0.0d0,imag(sigmak(i,j,m,l)))
-              if(abs(imag(sigmak(i,j,m,l)))<eps) sigmak(i,j,m,l)=cmplx(dble(sigmak(i,j,m,l)),0.0d0)
+              if(abs(dble(sigmak(i,j,m,l)))<eps) sigmak(i,j,m,l)=cmplx(0.0d0,imag(sigmak(i,j,m,l)),kind=real64)
+              if(abs(imag(sigmak(i,j,m,l)))<eps) sigmak(i,j,m,l)=cmplx(dble(sigmak(i,j,m,l)),0.0d0,kind=real64)
            end do
         end do
         !$omp end parallel do
@@ -727,13 +727,14 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
 end subroutine calc_sigma
 
 subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill,temp,&
-     scf_loop,pp,eps,Nkall,Nk,Nw,Norb,Nchi,Nx,Ny,Nz,sw_sub_sigma,sw_out,sw_in,m_diis,sw_rescale) bind(C)
+     scf_loop,pp,eps,Nkall,Nk,Nw,Norb,Nchi,Nx,Ny,Nz,sub_sigma,sw_out,sw_in,m_diis,sw_rescale) bind(C)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
   integer(int64),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz,scf_loop,m_diis
   integer(int64),intent(in),dimension(Nchi,2):: olist
   integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
-  logical(1),intent(in):: sw_in,sw_out,sw_sub_sigma,sw_rescale
+  logical(1),intent(in):: sw_in,sw_out,sw_rescale
+  integer(int64),intent(in):: sub_sigma
   real(real64),intent(in):: temp,eps,pp,rfill,mu_init
   real(real64),intent(in),dimension(Norb,Nk):: eig
   real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
@@ -752,6 +753,9 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   complex(real64),allocatable:: xout_hist(:,:,:,:,:),res_hist(:,:,:,:,:)
   real(real64),allocatable:: B_diis(:,:),rhs_diis(:)
   integer(int32),allocatable:: ipiv_diis(:)
+  ! bracket cache for renew_mu
+  real(real64):: muS_cache,muL_cache
+  logical:: bracket_valid
 
   eps_sgm=1.0d-10
   mu=mu_init
@@ -781,6 +785,9 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   allocate(ipiv_diis(m_diis+1))
   n_hist=0
   i_hist=0
+  bracket_valid=.false.
+  muS_cache=0.0d0
+  muL_cache=0.0d0
   iter_loop: do scf_i=1,scf_loop
      print'(A5,I5)','iter=',scf_i
      call get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
@@ -792,25 +799,38 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
      call get_Vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi)
      print'(A16,E12.4,A5,E12.4)','Re V_sigma: max:',maxval(dble(chi)),' min:',minval(dble(chi))
      call calc_sigma(sigmak,Gk,chi,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
-     if(sw_sub_sigma)then
+     if(sub_sigma>0)then
         sub_self:block
           integer(int32) iw,l,m
           complex(real64),dimension(Nk,Norb,Norb):: sub_sigmak
-          !$omp parallel
-          do l=1,Norb
-             do m=l,Norb
-                !$omp workshare
-                sub_sigmak(:,l,m)=(sigmak(:,1,l,m)+conjg(sigmak(:,1,m,l)))*0.5d0
-                !$omp end workshare
-                if(l.ne.m)sub_sigmak(:,m,l)=conjg(sub_sigmak(:,l,m))
+          if(sub_sigma==1)then
+             !$omp parallel
+             do l=1,Norb
+                do m=l,Norb
+                   !$omp workshare
+                   sub_sigmak(:,l,m)=(sigmak(:,1,l,m)+conjg(sigmak(:,1,m,l)))*0.5d0
+                   !$omp end workshare
+                   if(l.ne.m)sub_sigmak(:,m,l)=conjg(sub_sigmak(:,l,m))
+                end do
              end do
-          end do
-          !$omp do
+             !$omp end parallel
+          else  !sub_sigma==2: frequency-average HF subtraction
+             !$omp parallel
+             do l=1,Norb
+                do m=l,Norb
+                   !$omp workshare
+                   sub_sigmak(:,l,m)=sum(sigmak(:,1:Nw,l,m)+conjg(sigmak(:,1:Nw,m,l)),dim=2)*(0.5d0/dble(Nw))
+                   !$omp end workshare
+                   if(l.ne.m)sub_sigmak(:,m,l)=conjg(sub_sigmak(:,l,m))
+                end do
+             end do
+             !$omp end parallel
+          end if
+          !$omp parallel do private(iw)
           do iw=1,Nw
              sigmak(:,iw,:,:)=sigmak(:,iw,:,:)-sub_sigmak(:,:,:)
           end do
-          !$omp end do
-          !$omp end parallel
+          !$omp end parallel do
         end block sub_self
      end if
      call compare_sigma()
@@ -981,6 +1001,7 @@ contains
     integer(int32) i_iter
     integer(int32),parameter:: itemax=100
     logical(int32) flag
+    logical bracket_found
     real(real64) rnS,rnL,rnc,rnM,muc,mud,muL,muS,muM,eps,dmu
 
     if(esterr>1.0d-2)then
@@ -991,50 +1012,72 @@ contains
     dmu= abs(mu-mu_OLD)*2.0d0
     if (dmu<eps*4.0d0) dmu= eps*4.0d0
     mu_OLD=mu
-    muL= mu+dmu
-    muS= mu-dmu
-    upper_lim: do i_iter=1,itemax
-       mu=muL
-       rnL=0.0d0
-       call get_rn(rnL,mu)
-       if(rnL<rfill)then
-          if(abs(rfill-rnL)>0.5d0)then
-             muL=muL+1.0d0
-          else if(abs(rfill-rnL)>dmu)then
-             muL=muL+0.5d0
-          else
-             muL= muL +dmu
-          end if
+
+    bracket_found=.false.
+    if(bracket_valid)then
+       call get_rn(rnS,muS_cache)
+       call get_rn(rnL,muL_cache)
+       if(rnS<rfill .and. rnL>rfill)then
+          muS=muS_cache
+          muL=muL_cache
+          bracket_found=.true.
+          print'(A)','[mu] cached bracket valid'
        else
-          exit
+          print'(A)','[mu] cached bracket invalid, re-searching'
        end if
-       if(i_iter==itemax)then
-          print*,'Too many'
-          stop
-       end if
-    end do upper_lim
-    
-    lower_lim: do i_iter=1,itemax
-       mu=muS
-       rnS=0.0d0
-       call get_rn(rnS,mu)
-       if(rnS>rfill)then
-          if(abs(rnS-rfill)>0.5d0)then
-             muS=muS-1.0d0
-          else if(abs(rnS-rfill)>dmu)then
-             muS=muS-0.5d0
+    end if
+
+    if(.not.bracket_found)then
+       muL= mu+dmu
+       muS= mu-dmu
+       upper_lim: do i_iter=1,itemax
+          mu=muL
+          rnL=0.0d0
+          call get_rn(rnL,mu)
+          if(rnL<rfill)then
+             if(abs(rfill-rnL)>0.5d0)then
+                muL=muL+1.0d0
+             else if(abs(rfill-rnL)>dmu)then
+                muL=muL+0.5d0
+             else
+                muL= muL +dmu
+             end if
           else
-             muS=muS-dmu
+             exit
           end if
-       else
-          exit
-       end if
-       if(i_iter==itemax)then
-          print*,'Too many'
-          stop
-       end if
-    end do lower_lim
-    
+          if(i_iter==itemax)then
+             print*,'Too many'
+             stop
+          end if
+       end do upper_lim
+
+       lower_lim: do i_iter=1,itemax
+          mu=muS
+          rnS=0.0d0
+          call get_rn(rnS,mu)
+          if(rnS>rfill)then
+             if(abs(rnS-rfill)>0.5d0)then
+                muS=muS-1.0d0
+             else if(abs(rnS-rfill)>dmu)then
+                muS=muS-0.5d0
+             else
+                muS=muS-dmu
+             end if
+          else
+             exit
+          end if
+          if(i_iter==itemax)then
+             print*,'Too many'
+             stop
+          end if
+       end do lower_lim
+    end if
+
+    ! save wide bracket before Brent narrows it
+    muS_cache=muS
+    muL_cache=muL
+    bracket_valid=.true.
+
     rnL=rnL-rfill
     rnS=rnS-rfill
     rnc=rnS
@@ -1109,9 +1152,10 @@ contains
     call gen_green_inv(Gk,sigmak,hamk,rmu,temp,Nk,Nw,Norb)
     call getinv(Gk,Nk,Nw,Norb)
     deltagk=0.0d0
-    do l=1,Norb
-       do j=1,Nw
-          iw=cmplx(rmu,dble(2*(j-1)+1)*pi*temp)
+    !$omp parallel do reduction(+:deltagk) private(l,i,n,iw,Gk0)
+    do j=1,Nw
+       do l=1,Norb
+          iw=cmplx(rmu,dble(2*(j-1)+1)*pi*temp,kind=real64)
           do i=1,Nk
              Gk0=0.0d0
              do n=1,Norb
@@ -1121,6 +1165,7 @@ contains
           end do
        end do
     end do
+    !$omp end parallel do
     rn=(tmp+2*temp*deltagk)/Nk
   end subroutine get_rn
   

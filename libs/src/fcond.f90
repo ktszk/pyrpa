@@ -38,13 +38,13 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
            do j=1,3
               do k=1,3
                  if(abs(eig(m,i)-eig(l,i))<1.0d-9)then
-                    tmp=vk(k,m,m,i)*vk(j,m,m,i)*ffermi(m,i)*(1.0d0-ffermi(m,i))/(temp*cmplx(w,idelta))
+                    tmp=vk(k,m,m,i)*vk(j,m,m,i)*ffermi(m,i)*(1.0d0-ffermi(m,i))/(temp*cmplx(w,idelta,kind=real64))
                     L11(k,j)=L11(k,j)+tmp
                     L12(k,j)=L12(k,j)+tmp*(eig(m,i)-mu)
                     L22(k,j)=L22(k,j)+tmp*(eig(m,i)-mu)*(eig(m,i)-mu)
                  else if(abs(ffermi(l,i)-ffermi(m,i))>eps)then
-                    tmp=vk(k,m,l,i)*vk(j,l,m,i)*(ffermi(l,i)-ffermi(m,i))/((eig(m,i)-eig(l,i))&
-                         *cmplx(w+eig(m,i)-eig(l,i),idelta))
+                  tmp=vk(k,m,l,i)*vk(j,l,m,i)*(ffermi(l,i)-ffermi(m,i))/((eig(m,i)-eig(l,i))&
+                     *cmplx(w+eig(m,i)-eig(l,i),idelta,kind=real64))
                     L11(k,j)=L11(k,j)+tmp
                     L12(k,j)=L12(k,j)+tmp*(eig(l,i)-mu)
                     L22(k,j)=L22(k,j)+tmp*(eig(m,i)-mu)*(eig(l,i)-mu)
