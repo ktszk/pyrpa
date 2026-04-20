@@ -258,17 +258,17 @@ contains
     A_mat(1:m_act,1:m_act)=H_mat(1:m_act,1:m_act)
     call zgeev('N','V',m_act,A_mat,m_dim,eigenvals,VL_dum,1,VR,m_dim,zwork,lwork,rwork,info)
     if(info/=0)then; print*,'ZGEEV failed pass 1: info=',info; stop; end if
-    print'(A)','Pass 1 Ritz values (real, imag):'
+    print'(A)','Pass 1 Ritz values (real):'
     do ii=1,m_act
-       print'(I4,2F14.6)',ii,dble(eigenvals(ii)),aimag(eigenvals(ii))
+       print'(I4,F14.6)',ii,dble(eigenvals(ii))
     end do
     idx=minloc(dble(eigenvals(1:m_act)),1)
     lambda1=dble(eigenvals(idx))   !save lambda_- in host variable
-    print'(A,2F12.6)','  lambda_- =',lambda1,aimag(eigenvals(idx))
+    print'(A,F12.6)','  lambda_- =',lambda1
     ! early exit: if largest Ritz value >= 0.1, adopt it as lambda_+
     if(maxval(dble(eigenvals(1:m_act)))>=0.1d0)then
        idx=maxloc(dble(eigenvals(1:m_act)),1)
-       print'(A,2F12.6)','  eliash   =',dble(eigenvals(idx)),aimag(eigenvals(idx))
+       print'(A,F12.6)','  eliash   =',dble(eigenvals(idx))
        !$omp parallel workshare
        delta(:,:,:,:)=(0.0d0,0.0d0)
        !$omp end parallel workshare
@@ -343,12 +343,12 @@ contains
     call zgeev('N','V',m_act,A_mat,m_dim,eigenvals,VL_dum,1,VR,m_dim,zwork,lwork,rwork,info)
     if(info/=0)then; print*,'ZGEEV failed pass 2: info=',info; stop; end if
     ! physical eigenvalue = Ritz value - shift (undo the shift)
-    print'(A)','Pass 2 Ritz values - physical (real, imag):'
+    print'(A)','Pass 2 Ritz values - physical (real):'
     do ii=1,m_act
-       print'(I4,2F14.6)',ii,dble(eigenvals(ii))-shift,aimag(eigenvals(ii))
+       print'(I4,F14.6)',ii,dble(eigenvals(ii))-shift
     end do
     idx=maxloc(dble(eigenvals(1:m_act)),1)
-    print'(A,2F12.6)','  eliash   =',dble(eigenvals(idx))-shift,aimag(eigenvals(idx))
+    print'(A,F12.6)','  eliash   =',dble(eigenvals(idx))-shift
     !$omp parallel workshare
     delta(:,:,:,:)=(0.0d0,0.0d0)
     !$omp end parallel workshare

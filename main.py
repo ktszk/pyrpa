@@ -22,11 +22,11 @@ else: monoclinic
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4nso',0,7,False
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
-fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
+#fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/FeS',2,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2_soc.input',1,0,True
-#fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
+fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
 #fname,ftype,brav,sw_soc='inputs/square_soc.hop',1,0,True
 
 sw_dec_axis=False
@@ -73,7 +73,7 @@ abc=[3.96*0.70711,3.96*0.70711,13.02*.5]
 #alpha_beta_gamma=[90.,90.,90]
 #temp=2.0e-2 #2.59e-2
 tempK=500 #Kelvin
-fill= 3.05
+fill= .48 #3.05
 #site_prof=[5]
 
 Emin,Emax=-3,3
@@ -88,7 +88,7 @@ olist=[0,0,0]
 U,J=1.2,0.15
 #U,J=1.8,0.225
 #0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py
-gap_sym=2
+gap_sym=1
 
 #mu0=9.85114560061123
 #k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
@@ -101,9 +101,9 @@ sw_tdf=False
 sw_omega=False #True: real freq, False: Matsubara freq.
 sw_rescale_flex=True #True: rescale self energy to make max|Sigma|~U, False: no rescaling
 sw_self=False  #True: use calculated self energy for spectrum band plot
-sw_out_self=False
+sw_out_self=True
 sw_in_self=False
-sw_from_file=True
+sw_from_file=False
 #------------------------ initial parameters are above -------------------------------
 #----------------------------------main functions-------------------------------------
 #-------------------------------- import packages ------------------------------------
@@ -620,6 +620,7 @@ def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,oli
     sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,pp=pp,m_diis=m_diis,sw_rescale=sw_rescale)
     if sw_out_self:
         np.savez('self_en',sigmak,mu_self)
+        plibs.output_self_wannier(sigmak,mu_self,kmap,invk,Nx,Ny,Nz,Nw,temp)
 
 def calc_flex_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,olist,slist,invs,site,eps=1.0e-4,pp=0.5,m_diis=5,sw_rescale:bool=True):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
@@ -633,6 +634,8 @@ def calc_flex_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float
                                     Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,pp=pp,m_diis=m_diis,sw_rescale=sw_rescale)
     if sw_out_self:
         np.savez('self_en',sigmak,mu_self)
+        plibs.output_self_wannier(sigmak,mu_self,kmap,invk,Nx,Ny,Nz,Nw,temp)
+
 
 def output_gap_function(invk,kmap,gap,uni,plist,gap_sym,soc=False,invs=None,slist=None,sw_orb=False):
     if sw_orb:
@@ -777,6 +780,7 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,chiolist,s
     gap=flibs.linearized_eliashberg(chi,Gk,uni,init_delta,Smat,Cmat,chiolist,plist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
     if sw_out_self:
         np.save('gap',gap)
+        plibs.output_gap_wannier(gap,kmap,invk,Nx,Ny,Nz,Nw,temp)
     info=output_gap_function(invk,kmap,gap,uni,plist,gap_sym)
 
 def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
@@ -822,6 +826,7 @@ def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
                                         kmap,invk,invs,invschi,Nx,Ny,Nz,temp,gap_sym)
     if sw_out_self:
         np.save('gap',gap)
+        plibs.output_gap_wannier(gap,kmap,invk,Nx,Ny,Nz,Nw,temp)
     info=output_gap_function(invk,kmap,gap,uni,plist,gap_sym,True,invs,slist)
 
 def get_carrier_num(kmesh,rvec,ham_r,S_r,mu:float,Arot):
