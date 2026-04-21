@@ -269,6 +269,49 @@ subroutine gen_imp_ham(ham_imp,ham_r,rvec,ham_i,ham_ri,imp_list,rlist,eps,Nimp,N
 end subroutine gen_imp_ham
 
 ! -----------------------------------------------------------------------------
+subroutine gen_bdg_ham(ham_bdg,ham_imp,gap_imp,Nsite,Norb) bind(C)
+!> gen_bdg_ham
+!> Build the real-space Bogoliubov-de Gennes (BdG) Hamiltonian from a
+!> normal-state supercell Hamiltonian and a gap (pairing) function, both
+!> produced by gen_imp_ham (or the same packing convention).
+!>
+!> Nambu basis ordering (orbital-fast, site-slow):
+!>   particle sector: orbital m at site i  →  m + (i-1)*Norb         (row/col 1..Norb*Nsite)
+!>   hole    sector: orbital m at site i  →  m + (i-1)*Norb + Norb*Nsite (row/col Norb*Nsite+1..2*Norb*Nsite)
+!>
+!> Block structure of the 2*Norb*Nsite × 2*Norb*Nsite matrix:
+!>
+!>   ham_bdg = |  ham_imp          gap_imp        |
+!>             |  gap_imp†       - conjg(ham_imp)  |
+!>
+!!@param  ham_bdg, out: BdG Hamiltonian [2*Norb*Nsite, 2*Norb*Nsite] complex128
+!!@param  ham_imp,  in: normal-state supercell H [Norb*Nsite, Norb*Nsite] complex128
+!!@param  gap_imp,  in: real-space gap function  [Norb*Nsite, Norb*Nsite] complex128
+!!@param    Nsite,  in: number of sites in supercell
+!!@param     Norb,  in: number of orbitals per site
+! -----------------------------------------------------------------------------
+  use,intrinsic:: iso_fortran_env, only: int64,real64
+  implicit none
+  integer(int64),intent(in):: Nsite,Norb
+  complex(real64),intent(in), dimension(Norb*Nsite,Norb*Nsite):: ham_imp
+  complex(real64),intent(in), dimension(Norb*Nsite,Norb*Nsite):: gap_imp
+  complex(real64),intent(out),dimension(2*Norb*Nsite,2*Norb*Nsite):: ham_bdg
+
+  integer(int64) N
+
+  N = Norb*Nsite
+  ham_bdg(:,:) = (0.0d0,0.0d0)
+  ! Top-left block:  H
+  ham_bdg(1:N, 1:N) = ham_imp
+  ! Top-right block:  Δ
+  ham_bdg(1:N, N+1:2*N) = gap_imp
+  ! Bottom-left block:  Δ†  =  conjg(transpose(gap_imp))
+  ham_bdg(N+1:2*N, 1:N) = conjg(transpose(gap_imp))
+  ! Bottom-right block:  -H*  =  -conjg(ham_imp)
+  ham_bdg(N+1:2*N, N+1:2*N) = -conjg(ham_imp)
+end subroutine gen_bdg_ham
+
+! -----------------------------------------------------------------------------
 subroutine get_dft_imp_ham(ham_k,ham_imp,klist,rlist,Nk,Nsite,Norb) bind(C)
 ! Fourier-transform the real-space impurity supercell Hamiltonian ham_imp to
 ! a (k,k')-space representation ham_k.
