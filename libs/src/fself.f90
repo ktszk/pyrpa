@@ -55,6 +55,8 @@ subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb) bind(C,name="gen_green0_")
   integer(int32) i,j,l,m,n
   complex(real64) iw
 
+   Gk(:,:,:,:)=0.0d0
+
   !$omp parallel private(l,m)
   do l=1,Norb
      do m=1,Norb

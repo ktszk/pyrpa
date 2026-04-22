@@ -160,9 +160,10 @@ subroutine get_ffermi(ffermi,eig,mu,temp,Nk,Norb) bind(C)
   real(real64),intent(out),dimension(Norb,Nk):: ffermi
 
   integer(int32) i,j
-  real(real64) itemp
+   real(real64) itemp,temp_safe
 
-  itemp=0.5d0/temp
+   temp_safe=max(temp,1.0d-12)
+   itemp=0.5d0/temp_safe
   !$omp parallel do private(j)
   do i=1,Nk
      do j=1,Norb
@@ -183,6 +184,8 @@ subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
 
   integer(int32) i,j,k,l,m,n
   real(real64) phase
+
+   imk(:,:,:,:,:)=0.0d0
 
   !$omp parallel do private(l,m,j,phase)
   kloop: do i=1,Nk
@@ -276,6 +279,8 @@ subroutine get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
 
   integer(int32) i,j,k,l,m
   real(real64) phase
+
+   vk(:,:,:,:)=0.0d0
 
   !$omp parallel do private(l,m,j,phase)
   kloop: do i=1,Nk
@@ -516,7 +521,7 @@ subroutine get_parity_prop(Pmn,rvec,ham_r,Norb,Nr) bind(C)
   !$omp do private(l,m)
   do l=1,Norb
      do m=1,Norb
-        if(Pmn(l,m)>=0.0d0)then
+        if(Pmn(m,l)>=0.0d0)then
            Pmn(m,l)=1.0d0
         else
            Pmn(m,l)=-1.0d0

@@ -106,10 +106,13 @@ contains
     real(real64),intent(in),dimension(Norb,Nk):: eig,ffermi
     complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
 
-    integer(int32) i,j,k,l,m
+   integer(int32) i,j,k,l,m
+   real(real64) temp_safe,w_eps
     complex(real64) unitmp
     complex(real64),dimension(Nchi,Nchi):: chi,calc_chi
 
+   temp_safe=max(temp,1.0d-12)
+   w_eps=1.0d-12
     chi(:,:)=0.0d0
     kloop: do k=1,Nk
        band1_loop: do l=1,Norb
@@ -118,8 +121,8 @@ contains
                 chiorb2_loop:do i=1,Nchi
                    unitmp=uni(ol(j,1),l,qshift(k))*conjg(uni(ol(i,1),l,qshift(k)))&
                         *uni(ol(i,2),m,k)*conjg(uni(ol(j,2),m,k))
-                   if(abs(w)==0.0d0 .and. abs(eig(m,k)-eig(l,qshift(k)))<1.0d-9)then
-                      chi(i,j)=chi(i,j)+unitmp*ffermi(m,k)*(1.0d0-ffermi(m,k))/temp
+                   if(abs(w)<w_eps .and. abs(eig(m,k)-eig(l,qshift(k)))<1.0d-9)then
+                      chi(i,j)=chi(i,j)+unitmp*ffermi(m,k)*(1.0d0-ffermi(m,k))/temp_safe
                    else if(abs(ffermi(l,qshift(k))-ffermi(m,k))>eps)then
                        chi(i,j)=chi(i,j)+unitmp*(ffermi(l,qshift(k))-ffermi(m,k))&
                           /cmplx(w+eig(m,k)-eig(l,qshift(k)),idelta,kind=real64)

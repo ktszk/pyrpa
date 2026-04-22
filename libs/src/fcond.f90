@@ -88,13 +88,15 @@ subroutine calc_kn(K0,K1,K2,eig,veloc,kweight,tau,temp,mu,Nk,Norb) bind(C)
 
   real(real64),dimension(Norb,Nk):: dfermi
   integer(int32) i,j,l,m
-  real(real64) tmp
+   real(real64) tmp,temp_safe
+
+   temp_safe=max(temp,1.0d-12)
 
   !$omp parallel
   !$omp do private(j)
   get_dfermi: do i=1,Nk
      do j=1,Norb
-        dfermi(j,i)=0.25d0*(1.0d0-tanh(0.5d0*(eig(j,i)-mu)/temp)**2)/temp
+        dfermi(j,i)=0.25d0*(1.0d0-tanh(0.5d0*(eig(j,i)-mu)/temp_safe)**2)/temp_safe
      end do
   end do get_dfermi
   !$omp end do
@@ -146,12 +148,14 @@ subroutine calc_sigma_hall(eig,veloc,imass,kweight,tau,temp,mu,Nk,Norb,sigma_hal
 
   real(real64),dimension(Norb,Nk):: dfermi
   integer(int32) i,j
+  real(real64) temp_safe
   sigma_hall=0.0d0
+  temp_safe=max(temp,1.0d-12)
   !$omp parallel
   !$omp do private(j)
   get_dfermi: do i=1,Nk
      do j=1,Norb
-        dfermi(j,i)=0.25d0*(1.0d0-tanh(0.5d0*(eig(j,i)-mu)/temp)**2)/temp
+        dfermi(j,i)=0.25d0*(1.0d0-tanh(0.5d0*(eig(j,i)-mu)/temp_safe)**2)/temp_safe
      end do
   end do get_dfermi
   !$omp end do
