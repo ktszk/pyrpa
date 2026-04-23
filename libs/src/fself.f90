@@ -512,39 +512,24 @@ subroutine get_vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi) bind(C,name='get_vsig
   real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
   complex(real64),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
 
-  integer(int32) i,j,l,m,n,info
+   integer(int32) i,j,l,info
   integer(int32),dimension(Nchi):: ipiv
-  complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,cmat5
+   complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,cmat5,Smat_c,Cmat_c
   complex(real64),dimension(2*Nchi):: work
+
+   Smat_c(:,:)=cmplx(Smat(:,:),0.0d0,kind=real64)
+   Cmat_c(:,:)=cmplx(Cmat(:,:),0.0d0,kind=real64)
 
   do j=1,Nw
      do i=1,Nk
-        !$omp parallel
-        !$omp workshare
-        cmat1(:,:)=0.0d0
-        cmat2(:,:)=0.0d0
-        !$omp end workshare
-        !$omp do private(m,n)
-        do l=1,Nchi
-           do m=1,Nchi
-              do n=1,Nchi
-                 cmat1(m,l)=cmat1(m,l)-chi(i,j,m,n)*Smat(n,l) !-chi0S
-                 cmat2(m,l)=cmat2(m,l)+chi(i,j,m,n)*Cmat(n,l) !chi0C
-              end do
-           end do
-        end do
-        !$omp end do
-        !$omp workshare
+        call zgemm('N','N',Nchi,Nchi,Nchi,(-1.0d0,0.0d0),chi(i,j,:,:),Nchi,Smat_c,Nchi,(0.0d0,0.0d0),cmat1,Nchi) !-chi0S
+        call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),chi(i,j,:,:),Nchi,Cmat_c,Nchi,(0.0d0,0.0d0),cmat2,Nchi)  !chi0C
         cmat3(:,:)=-cmat1(:,:) !chi0S
         cmat4(:,:)=cmat2(:,:)  !chi0C
-        !$omp end workshare
-        !$omp do 
         do l=1,Nchi
            cmat1(l,l)=cmat1(l,l)+1.0d0 !I-chi0S
            cmat2(l,l)=cmat2(l,l)+1.0d0 !I+chi0C
         end do
-        !$omp end do
-        !$omp end parallel
         call zgetrf(Nchi,Nchi,cmat1,Nchi,ipiv,info)
         if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
         call zgetri(Nchi,cmat1,Nchi,ipiv,work,2*Nchi,info)
@@ -553,51 +538,19 @@ subroutine get_vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi) bind(C,name='get_vsig
         if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
         call zgetri(Nchi,cmat2,Nchi,ipiv,work,2*Nchi,info)
         if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
-        !$omp parallel
-        !$omp workshare
-        cmat5(:,:)=0.0d0
-        !$omp end workshare
-        !$omp do private(m,n)
-        do l=1,Nchi
-           do m=1,Nchi
-              do n=1,Nchi
-                 cmat5(m,l)=cmat5(m,l)+cmat1(m,n)*cmat3(n,l) !(1-chi0S)^-1chi0S
-              end do
-           end do
-        end do
-        !$omp end do
-        !$omp workshare
+        call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),cmat1,Nchi,cmat3,Nchi,(0.0d0,0.0d0),cmat5,Nchi) !(1-chi0S)^-1chi0S
         cmat1(:,:)=cmat5(:,:)
-        cmat5(:,:)=0.0d0
-        !$omp end workshare
-        !$omp do private(m,n)
-        do l=1,Nchi
-           do m=1,Nchi
-              do n=1,Nchi
-                 cmat5(m,l)=cmat5(m,l)+cmat2(m,n)*cmat4(n,l) !(1+chi0C)^-1chi0C
-              end do
-           end do
-        end do
-        !$omp end do
-        !$omp workshare
+        call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),cmat2,Nchi,cmat4,Nchi,(0.0d0,0.0d0),cmat5,Nchi) !(1+chi0C)^-1chi0C
         cmat2(:,:)=cmat5(:,:)
         cmat5(:,:)=cmat3(:,:)+cmat4(:,:)
         cmat4(:,:)=1.5d0*Smat(:,:)-0.5d0*Cmat(:,:)
-        !$omp end workshare
-        !$omp do private(m,n)
-        do l=1,Nchi
-           do m=1,Nchi
-              do n=1,Nchi
-                 cmat4(m,l)=cmat4(m,l)+1.5d0*Smat(m,n)*cmat1(n,l)+0.5d0*Cmat(m,n)*cmat2(n,l)&
-                      -0.25*(Cmat(m,n)+Smat(m,n))*cmat5(n,l) !subtract double count 2nd order buble(ladder)
-              end do
-           end do
-        end do
-        !$omp end do
+        call zgemm('N','N',Nchi,Nchi,Nchi,(1.5d0,0.0d0),Smat_c,Nchi,cmat1,Nchi,(1.0d0,0.0d0),cmat4,Nchi)
+        call zgemm('N','N',Nchi,Nchi,Nchi,(0.5d0,0.0d0),Cmat_c,Nchi,cmat2,Nchi,(1.0d0,0.0d0),cmat4,Nchi)
+      cmat3(:,:)=Cmat_c(:,:)+Smat_c(:,:)
+      call zgemm('N','N',Nchi,Nchi,Nchi,(-0.25d0,0.0d0),cmat3,Nchi,cmat5,Nchi,(1.0d0,0.0d0),cmat4,Nchi) !subtract double count
         !!$omp workshare
         chi(i,j,:,:)=cmat4(:,:)
         !!$omp end workshare
-        !$omp end parallel
      end do
   end do
 end subroutine get_vsigma_flex_nosoc
@@ -1207,34 +1160,21 @@ subroutine get_chis_chic(chis,chic,chi,Smat,Cmat,Nk,Nw,Nchi) bind(C)
   complex(real64),intent(in),dimension(Nk,Nw,Nchi,Nchi):: chi
   complex(real64),intent(out),dimension(Nk,Nchi,Nchi):: chis,chic
 
-  integer(int32) i,l,m,n,info
+  integer(int32) i,l,info
   integer(int32),dimension(Nchi):: ipiv
-  complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4
+  complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,Smat_c,Cmat_c
   complex(real64),dimension(2*Nchi):: work
 
+  Smat_c=cmplx(Smat,0.0d0,kind=real64)
+  Cmat_c=cmplx(Cmat,0.0d0,kind=real64)
+
   qloop:do i=1,Nk
-     !$omp parallel
-     !$omp workshare
-     cmat1(:,:)=0.0d0
-     cmat2(:,:)=0.0d0
-     !$omp end workshare
-     !$omp do private(l,m,n)
-     do l=1,Nchi
-        do m=1,Nchi
-           do n=1,Nchi
-              cmat1(m,l)=cmat1(m,l)-chi(i,1,m,n)*Smat(n,l) !-chi0S
-              cmat2(m,l)=cmat2(m,l)+chi(i,1,m,n)*Cmat(n,l) !chi0C
-           end do
-        end do
-     end do
-     !$omp end do
-     !$omp do
+     call zgemm('N','N',Nchi,Nchi,Nchi,(-1.0d0,0.0d0),chi(i,1,:,:),Nchi,Smat_c,Nchi,(0.0d0,0.0d0),cmat1,Nchi) !-chi0S
+     call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),chi(i,1,:,:),Nchi,Cmat_c,Nchi,(0.0d0,0.0d0),cmat2,Nchi)  !chi0C
      do l=1,Nchi
         cmat1(l,l)=cmat1(l,l)+1.0d0 !I-chi0S
         cmat2(l,l)=cmat2(l,l)+1.0d0 !I+chi0C
      end do
-     !$omp end do
-     !$omp end parallel
      call zgetrf(Nchi,Nchi,cmat1,Nchi,ipiv,info)
      if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
      call zgetri(Nchi,cmat1,Nchi,ipiv,work,2*Nchi,info)
@@ -1243,26 +1183,10 @@ subroutine get_chis_chic(chis,chic,chi,Smat,Cmat,Nk,Nw,Nchi) bind(C)
      if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
      call zgetri(Nchi,cmat2,Nchi,ipiv,work,2*Nchi,info)
      if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
-     !$omp parallel
-     !$omp workshare
-     cmat3(:,:)=0.0d0
-     cmat4(:,:)=0.0d0
-     !$omp end workshare
-     !$omp do private(l,m,n)
-     do l=1,Nchi
-        do m=1,Nchi
-           do n=1,Nchi
-              cmat3(m,l)=cmat3(m,l)+cmat1(m,n)*chi(i,1,n,l) !(1+chi0S)^-1chi0
-              cmat4(m,l)=cmat4(m,l)+cmat2(m,n)*chi(i,1,n,l) !(1+chi0C)^-1chi0
-           end do
-        end do
-     end do
-     !$omp end do
-     !$omp workshare
+     call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),cmat1,Nchi,chi(i,1,:,:),Nchi,(0.0d0,0.0d0),cmat3,Nchi) !(1-chi0S)^-1chi0
+     call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),cmat2,Nchi,chi(i,1,:,:),Nchi,(0.0d0,0.0d0),cmat4,Nchi) !(1+chi0C)^-1chi0
      chis(i,:,:)=cmat3(:,:)
      chic(i,:,:)=cmat4(:,:)
-     !$omp end workshare
-     !$omp end parallel
   end do qloop
 end subroutine get_chis_chic
 
