@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 #data=np.loadtxt('Gpade.dat')
 nk=32
 nw=32
-#data=np.loadtxt('Fk_tr.dat')
-data=np.loadtxt('gap_44.dat')
+data=np.loadtxt('Fk_tr.dat')
+#data=np.loadtxt('gap_44.dat')
 
 x=data[:,0].reshape(nk,nw)
 y=data[:,1].reshape(nk,nw)

@@ -1,3 +1,32 @@
+! Caches forward/backward FFTW plans across calls within a loop.
+! Call init_fft_plans before the orbital loop and destroy_fft_plans after.
+module fftw_plan_cache
+  use,intrinsic::iso_fortran_env, only:int64
+  implicit none
+  integer(int64),save :: plan_fwd=0, plan_bwd=0
+end module fftw_plan_cache
+
+subroutine init_fft_plans(cmat,tmp,Nx,Ny,Nz,Nw)
+  use fftw_plan_cache
+  use,intrinsic::iso_fortran_env, only:int32,int64,real64
+  implicit none
+  integer(int64),intent(in):: Nx,Ny,Nz,Nw
+  complex(real64),intent(inout),dimension(Nx,Ny,Nz,Nw):: cmat,tmp
+  integer(int32),dimension(4):: Nlist
+  Nlist=(/int(Nx,int32),int(Ny,int32),int(Nz,int32),int(Nw,int32)/)
+  call dfftw_plan_dft(plan_fwd,4,Nlist,cmat,tmp,-1,64)
+  call dfftw_plan_dft(plan_bwd,4,Nlist,cmat,tmp, 1,64)
+end subroutine init_fft_plans
+
+subroutine destroy_fft_plans()
+  use fftw_plan_cache
+  implicit none
+  call dfftw_destroy_plan(plan_fwd)
+  call dfftw_destroy_plan(plan_bwd)
+  plan_fwd=0
+  plan_bwd=0
+end subroutine destroy_fft_plans
+
 subroutine FFT(cmat,tmp,Nx,Ny,Nz,Nw,SW)
   !> 4D Fast Fourier transform function
   !!@param cmat,inout: FFT source and results
@@ -7,25 +36,35 @@ subroutine FFT(cmat,tmp,Nx,Ny,Nz,Nw,SW)
   !!@param      Nz,in: z mesh
   !!@param      Nw,in: w mesh
   !!@param      SW,in: FFT or IFFT switch (if true IFFT)
+  use fftw_plan_cache
   use,intrinsic::iso_fortran_env, only:int32,int64,real64
   implicit none
   integer(int64),intent(in):: Nx,Ny,Nz,Nw
   logical,intent(in):: SW
   complex(real64),intent(inout),dimension(Nx,Ny,Nz,Nw):: cmat,tmp
-  
+
   integer(int64) plan
   integer(int32) Inv
   integer(int32),dimension(4):: Nlist
 
   Nlist=(/int(Nx,int32),int(Ny,int32),int(Nz,int32),int(Nw,int32)/)
-  if(SW)then
-     Inv=-1
+  if(plan_fwd /= 0)then
+     ! Reuse cached plans: avoids heap alloc/free on every call
+     if(SW)then
+        call dfftw_execute_dft(plan_fwd,cmat,tmp)
+     else
+        call dfftw_execute_dft(plan_bwd,cmat,tmp)
+     end if
   else
-     Inv=1
-  end If
-  call dfftw_plan_dft(plan,4,Nlist,cmat,tmp,Inv,64)
-  call dfftw_execute(plan)
-  call dfftw_destroy_plan(plan)
+     if(SW)then
+        Inv=-1
+     else
+        Inv=1
+     end if
+     call dfftw_plan_dft(plan,4,Nlist,cmat,tmp,Inv,64)
+     call dfftw_execute(plan)
+     call dfftw_destroy_plan(plan)
+  end if
   if(.not. SW)then
      cmat(:,:,:,:)=tmp(:,:,:,:)/product(Nlist)
   else
@@ -369,6 +408,7 @@ subroutine get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,&
   end do
   !$omp end do
   !$omp end parallel
+  call init_fft_plans(tmpgk13,tmp,Nx,Ny,Nz,2*Nw)
   orb_loop:do iorb=1,Nchi*(Nchi+1)/2
      l=irr_chi(iorb,1)
      m=irr_chi(iorb,2)
@@ -424,6 +464,7 @@ subroutine get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,&
      !$omp end parallel do
      chi(:,:,chi_map(m,l,1),chi_map(m,l,2))=conjg(chi(:,:,m,l))
   end do orb_loop
+  call destroy_fft_plans()
 end subroutine get_chi0_conv
 
 subroutine get_chi0_sum(chi,Gk,klist,invk,irr_chi,chi_map,olist,temp,Nw,Nk,Nkall,Norb,Nchi) bind(C)
@@ -594,6 +635,7 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
   !$omp parallel workshare
   sigmak(:,:,:,:)=0.0d0
   !$omp end parallel workshare
+  call init_fft_plans(tmpVsigma,tmp,Nx,Ny,Nz,2*Nw)
   do l=1,Nchi
      do m=1,Nchi
         !$omp parallel
@@ -666,6 +708,7 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
      end do
   end do
 
+  call destroy_fft_plans()
   do l=1,Norb
      do m=1,Norb
         !$omp parallel do private(i,j)
@@ -1126,28 +1169,16 @@ contains
   
   subroutine io_sigma(sw)
     logical(int32),intent(in):: sw !True: out, False: in
-    integer(int32)i,j,l,m
     open(55,file='sigma.bin',form='unformatted')
     if(sw)then
        write(55)mu
        write(55)mu_OLD
+       write(55)sigmak
     else
        read(55)mu
        read(55)mu_OLD
+       read(55)sigmak
     end if
-    do l=1,Norb
-       do m=1,Norb
-          do j=1,Nw
-             do i=1,Nk
-                if(sw)then
-                   write(55)sigmak(i,j,m,l)
-                else
-                   read(55)sigmak(i,j,m,l)
-                end if
-             end do
-          end do
-       end do
-    end do
     close(55)
   end subroutine io_sigma
 end subroutine mkself

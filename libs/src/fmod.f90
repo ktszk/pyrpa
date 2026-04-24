@@ -38,22 +38,25 @@ subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
 
   integer(int32) i,j,l,m
   real(real64) phase
+  complex(real64) cphase
 
    ham_k(:,:,:)=(0.0d0,0.0d0)
 
-  !$omp parallel do private(l,m,j,phase)
+  !$omp parallel do private(l,m,j,phase,cphase)
   klop: do i=1,Nk
+     rloop: do j=1,Nr
+        phase=2*pi*sum(klist(:,i)*rvec(:,j))
+        cphase=cmplx(cos(phase),-sin(phase),kind=real64)
+        do l=1,Norb
+           do m=l,Norb
+              ham_k(m,l,i)=ham_k(m,l,i)+ham_r(m,l,j)*cphase
+           end do
+        end do
+     end do rloop
      do l=1,Norb
-        do m=l,Norb
-           rloop: do j=1,Nr
-              phase=2*pi*sum(klist(:,i)*rvec(:,j))
-              ham_k(m,l,i)=ham_k(m,l,i)+ham_r(m,l,j)*cmplx(cos(phase),-sin(phase),kind=real64)
-           end do rloop
-           if(l==m)then
-              ham_k(l,l,i)=dble(ham_k(l,l,i)) !diagonal is real
-           else
-              ham_k(l,m,i)=conjg(ham_k(m,l,i)) !Hamiltonian is Hermite
-           end if
+        ham_k(l,l,i)=dble(ham_k(l,l,i))
+        do m=l+1,Norb
+           ham_k(l,m,i)=conjg(ham_k(m,l,i))
         end do
      end do
   end do klop
@@ -184,24 +187,29 @@ subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
 
   integer(int32) i,j,k,l,m,n
   real(real64) phase
+  complex(real64) cphase
 
    imk(:,:,:,:,:)=0.0d0
 
-  !$omp parallel do private(l,m,j,phase)
+  !$omp parallel do private(l,m,j,k,n,phase,cphase)
   kloop: do i=1,Nk
-     do l=1,Norb
-        do m=l,Norb
-           rloop: do j=1,Nr
-              phase=2*pi*sum(klist(:,i)*rvec(:,j))
+     rloop: do j=1,Nr
+        phase=2*pi*sum(klist(:,i)*rvec(:,j))
+        cphase=cmplx(cos(phase),-sin(phase),kind=real64)
+        do l=1,Norb
+           do m=l,Norb
               !$omp simd
               axis1: do k=1,3
                  axis2: do n=k,3
-                    imk(n,k,m,l,i)=imk(n,k,m,l,i)-rvec(n,j)*rvec(k,j)&
-                         *ham_r(m,l,j)*cmplx(cos(phase),-sin(phase),kind=real64)
+                    imk(n,k,m,l,i)=imk(n,k,m,l,i)-rvec(n,j)*rvec(k,j)*ham_r(m,l,j)*cphase
                  end do axis2
               end do axis1
               !$omp end simd
-           end do rloop
+           end do
+        end do
+     end do rloop
+     do l=1,Norb
+        do m=l,Norb
            !$omp simd
            axis12: do k=1,3
               axis22: do n=k,3
@@ -226,31 +234,31 @@ subroutine get_imassk(imk,imk0,mrot,uni,Nk,Norb) bind(C)
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
   real(real64),intent(out),dimension(3,3,Norb,Nk):: imk
 
-  integer(int32) i,j,k,l,m,n
+  integer(int32) i,j_ax,k_ax,l,m,n
   complex(real64) tmp(3,3,Norb)
+  complex(real64) Mtmp(Norb,Norb),Wtmp(Norb,Norb),res_mat(Norb,Norb)
 
-  !$omp parallel do private(tmp,l,m,n,j)
+  !$omp parallel do private(tmp,Mtmp,Wtmp,res_mat,j_ax,k_ax,l,m,n)
   kloop: do i=1,Nk
-     !rotate orb to band
-     tmp(:,:,:)=0.0d0
-     do l=1,norb
-        do m=1,norb
-           band_loop: do n=1,norb
-              do j=1,3
-                 do k=1,3 
-                    tmp(k,j,n)=tmp(k,j,n)+conjg(uni(l,n,i))*imk0(k,j,l,m,i)*uni(m,n,i)
-                 end do
-              end do
-           end do band_loop
+     !rotate orb to band via zgemm: tmp(k_ax,j_ax,n)=diag(U^H * imk0(k_ax,j_ax,:,:,i) * U)_n
+     do k_ax=1,3
+        do j_ax=1,3
+           Mtmp(:,:)=imk0(k_ax,j_ax,:,:,i)
+           call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),Mtmp,Norb,uni(:,:,i),Norb,(0.0d0,0.0d0),Wtmp,Norb)
+           call zgemm('C','N',Norb,Norb,Norb,(1.0d0,0.0d0),uni(:,:,i),Norb,Wtmp,Norb,(0.0d0,0.0d0),res_mat,Norb)
+           do n=1,norb
+              tmp(k_ax,j_ax,n)=res_mat(n,n)
+           end do
         end do
      end do
      !rotate axis
+     imk(:,:,:,i)=0.0d0
      band_loop2: do n=1,norb
         do l=1,3
            do m=1,3
-              do j=1,3
-                 do k=1,3
-                    imk(m,l,n,i)=imk(m,l,n,i)+mrot(m,k)*mrot(l,j)*dble(tmp(k,j,n))
+              do j_ax=1,3
+                 do k_ax=1,3
+                    imk(m,l,n,i)=imk(m,l,n,i)+mrot(m,k_ax)*mrot(l,j_ax)*dble(tmp(k_ax,j_ax,n))
                  end do
               end do
            end do
@@ -279,21 +287,27 @@ subroutine get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
 
   integer(int32) i,j,k,l,m
   real(real64) phase
+  complex(real64) cphase
 
    vk(:,:,:,:)=0.0d0
 
-  !$omp parallel do private(l,m,j,phase)
+  !$omp parallel do private(l,m,j,k,phase,cphase)
   kloop: do i=1,Nk
-     do l=1,Norb
-        do m=l,Norb
-           rloop: do j=1,Nr
-              phase=2*pi*sum(klist(:,i)*rvec(:,j))
+     rloop: do j=1,Nr
+        phase=2*pi*sum(klist(:,i)*rvec(:,j))
+        cphase=cmplx(sin(phase),cos(phase),kind=real64)
+        do l=1,Norb
+           do m=l,Norb
               !$omp simd
               vaxis: do k=1,3
-                 vk(k,m,l,i)=vk(k,m,l,i)-rvec(k,j)*ham_r(m,l,j)*cmplx(sin(phase),cos(phase),kind=real64)
+                 vk(k,m,l,i)=vk(k,m,l,i)-rvec(k,j)*ham_r(m,l,j)*cphase
               end do vaxis
               !$omp end simd
-           end do rloop
+           end do
+        end do
+     end do rloop
+     do l=1,Norb
+        do m=l,Norb
            vaxis2: do k=1,3
               vk(k,l,m,i)=conjg(vk(k,m,l,i))
            end do vaxis2
@@ -319,20 +333,19 @@ subroutine get_veloc(vk,vk0,mrot,uni,Nk,Norb) bind(C)
   complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
   real(real64),intent(out),dimension(3,Norb,Nk):: vk
 
-  integer(int32) i,j,l,m,n
+  integer(int32) i,j_dir,l,m,n
   complex(real64) tmp(3,Norb)
+  complex(real64) vtmp(Norb,Norb),Wtmp(Norb,Norb),tmp_j(Norb,Norb)
 
-  !$omp parallel do private(tmp,l,m,n,j)
+  !$omp parallel do private(tmp,vtmp,Wtmp,tmp_j,j_dir,l,m,n)
   kloop: do i=1,Nk
-     !rotate orb to band
-     tmp(:,:)=0.0d0
-     do l=1,Norb
-        do m=1,Norb
-           band_loop: do n=1,Norb
-              do j=1,3
-                 tmp(j,n)=tmp(j,n)+conjg(uni(l,n,i))*vk0(j,l,m,i)*uni(m,n,i)
-              end do
-           end do band_loop
+     !rotate orb to band via zgemm: tmp_j = U^H * vk0(j,:,:,i) * U, take diagonal
+     do j_dir=1,3
+        vtmp(:,:)=vk0(j_dir,:,:,i)
+        call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),vtmp,Norb,uni(:,:,i),Norb,(0.0d0,0.0d0),Wtmp,Norb)
+        call zgemm('C','N',Norb,Norb,Norb,(1.0d0,0.0d0),uni(:,:,i),Norb,Wtmp,Norb,(0.0d0,0.0d0),tmp_j,Norb)
+        do n=1,Norb
+           tmp(j_dir,n)=tmp_j(n,n)
         end do
      end do
      !rotate axis
