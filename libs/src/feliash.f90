@@ -420,46 +420,45 @@ subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
 
    integer(int32) i,j,l,info
   integer(int32),dimension(Nchi):: ipiv
-   complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,cmat5,Smat_c,Cmat_c
-  complex(real64),dimension(2*Nchi):: work
+   complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,cmat5,Smat_c,Cmat_c,V0_c
 
    Smat_c(:,:)=cmplx(Smat(:,:),0.0d0,kind=real64)
    Cmat_c(:,:)=cmplx(Cmat(:,:),0.0d0,kind=real64)
+   if(sw_pair)then
+      V0_c(:,:)=cmplx(0.5d0*(Smat(:,:)+Cmat(:,:)),0.0d0,kind=real64) !bare Vud=(C+S)/2
+   else
+      V0_c(:,:)=cmplx(0.5d0*(Smat(:,:)-Cmat(:,:)),0.0d0,kind=real64) !bare Vuu=(S-C)/2
+   end if
 
+  !$omp parallel do collapse(2) private(i,cmat1,cmat2,cmat3,cmat4,cmat5,ipiv,info,l)
   wloop:do j=1,Nw
      qloop:do i=1,Nk
         call zgemm('N','N',Nchi,Nchi,Nchi,(-1.0d0,0.0d0),chi(i,j,:,:),Nchi,Smat_c,Nchi,(0.0d0,0.0d0),cmat1,Nchi) !-chi0S
         call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),chi(i,j,:,:),Nchi,Cmat_c,Nchi,(0.0d0,0.0d0),cmat2,Nchi)  !chi0C
-        cmat3(:,:)=-cmat1(:,:) !chi0S
-        cmat4(:,:)=cmat2(:,:)  !chi0C
+        cmat3(:,:)=-cmat1(:,:) !chi0S (RHS for first solve)
+        cmat4(:,:)=cmat2(:,:)  !chi0C (RHS for second solve)
         do l=1,Nchi
            cmat1(l,l)=cmat1(l,l)+1.0d0 !I-chi0S
            cmat2(l,l)=cmat2(l,l)+1.0d0 !I+chi0C
         end do
-        call zgetrf(Nchi,Nchi,cmat1,Nchi,ipiv,info)
-        if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
-        call zgetri(Nchi,cmat1,Nchi,ipiv,work,2*Nchi,info)
-        if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
-        call zgetrf(Nchi,Nchi,cmat2,Nchi,ipiv,info)
-        if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
-        call zgetri(Nchi,cmat2,Nchi,ipiv,work,2*Nchi,info)
-        if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
-        call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),cmat1,Nchi,cmat3,Nchi,(0.0d0,0.0d0),cmat5,Nchi) !(1-chi0S)^-1chi0S
-        cmat1(:,:)=cmat5(:,:) !cmat1=(I-chi_0S)^-1chi_0S
-        call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),cmat2,Nchi,cmat4,Nchi,(0.0d0,0.0d0),cmat5,Nchi) !(1+chi0C)^-1chi0C
-        cmat2(:,:)=cmat5(:,:) !cmat2=(1+chi_0C)^--1chi_0C
+        call zgesv(Nchi,Nchi,cmat1,Nchi,ipiv,cmat3,Nchi,info) !(I-chi0S)X=chi0S -> cmat3=chiS
+        if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
+        call zgesv(Nchi,Nchi,cmat2,Nchi,ipiv,cmat4,Nchi,info) !(I+chi0C)X=chi0C -> cmat4=chiC
+        if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
+        cmat1(:,:)=cmat3(:,:) !cmat1=chiS
+        cmat2(:,:)=cmat4(:,:) !cmat2=chiC
+        cmat4(:,:)=V0_c(:,:)
         if(sw_pair)then !singlet
-           cmat4(:,:)=0.5d0*(Smat(:,:)+Cmat(:,:)) !bare Vud=(C+S)/2
            call zgemm('N','N',Nchi,Nchi,Nchi,(1.5d0,0.0d0),Smat_c,Nchi,cmat1,Nchi,(1.0d0,0.0d0),cmat4,Nchi)
            call zgemm('N','N',Nchi,Nchi,Nchi,(-0.5d0,0.0d0),Cmat_c,Nchi,cmat2,Nchi,(1.0d0,0.0d0),cmat4,Nchi)
         else !triplet
-           cmat4(:,:)=0.5d0*(Smat(:,:)-Cmat(:,:)) !bare Vuu=(C-S)/2
            call zgemm('N','N',Nchi,Nchi,Nchi,(-0.5d0,0.0d0),Smat_c,Nchi,cmat1,Nchi,(1.0d0,0.0d0),cmat4,Nchi)
            call zgemm('N','N',Nchi,Nchi,Nchi,(-0.5d0,0.0d0),Cmat_c,Nchi,cmat2,Nchi,(1.0d0,0.0d0),cmat4,Nchi)
         end if
         chi(i,j,:,:)=cmat4(:,:)
      end do qloop
   end do wloop
+  !$omp end parallel do
 end subroutine get_V_delta_nsoc_flex
 
 subroutine mkfk_trs_nsoc(fk,Gk,delta,Nk,Nw,Norb) bind(C,name="mkfk_trs_nsoc_")

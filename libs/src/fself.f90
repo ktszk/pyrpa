@@ -555,45 +555,36 @@ subroutine get_vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi) bind(C,name='get_vsig
 
    integer(int32) i,j,l,info
   integer(int32),dimension(Nchi):: ipiv
-   complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,cmat5,Smat_c,Cmat_c
-  complex(real64),dimension(2*Nchi):: work
+   complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,cmat5,Smat_c,Cmat_c,SC_c
 
    Smat_c(:,:)=cmplx(Smat(:,:),0.0d0,kind=real64)
    Cmat_c(:,:)=cmplx(Cmat(:,:),0.0d0,kind=real64)
+   SC_c(:,:)=Smat_c(:,:)+Cmat_c(:,:)
 
+  !$omp parallel do collapse(2) private(i,cmat1,cmat2,cmat3,cmat4,cmat5,ipiv,info,l)
   do j=1,Nw
      do i=1,Nk
         call zgemm('N','N',Nchi,Nchi,Nchi,(-1.0d0,0.0d0),chi(i,j,:,:),Nchi,Smat_c,Nchi,(0.0d0,0.0d0),cmat1,Nchi) !-chi0S
         call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),chi(i,j,:,:),Nchi,Cmat_c,Nchi,(0.0d0,0.0d0),cmat2,Nchi)  !chi0C
-        cmat3(:,:)=-cmat1(:,:) !chi0S
-        cmat4(:,:)=cmat2(:,:)  !chi0C
+        cmat3(:,:)=-cmat1(:,:) !chi0S (RHS for first solve)
+        cmat4(:,:)=cmat2(:,:)  !chi0C (RHS for second solve)
+        cmat5(:,:)=cmat3(:,:)+cmat4(:,:) !chi0S+chi0C (save before zgesv overwrites)
         do l=1,Nchi
            cmat1(l,l)=cmat1(l,l)+1.0d0 !I-chi0S
            cmat2(l,l)=cmat2(l,l)+1.0d0 !I+chi0C
         end do
-        call zgetrf(Nchi,Nchi,cmat1,Nchi,ipiv,info)
-        if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
-        call zgetri(Nchi,cmat1,Nchi,ipiv,work,2*Nchi,info)
-        if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
-        call zgetrf(Nchi,Nchi,cmat2,Nchi,ipiv,info)
-        if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
-        call zgetri(Nchi,cmat2,Nchi,ipiv,work,2*Nchi,info)
-        if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
-        call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),cmat1,Nchi,cmat3,Nchi,(0.0d0,0.0d0),cmat5,Nchi) !(1-chi0S)^-1chi0S
-        cmat1(:,:)=cmat5(:,:)
-        call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),cmat2,Nchi,cmat4,Nchi,(0.0d0,0.0d0),cmat5,Nchi) !(1+chi0C)^-1chi0C
-        cmat2(:,:)=cmat5(:,:)
-        cmat5(:,:)=cmat3(:,:)+cmat4(:,:)
-        cmat4(:,:)=1.5d0*Smat(:,:)-0.5d0*Cmat(:,:)
-        call zgemm('N','N',Nchi,Nchi,Nchi,(1.5d0,0.0d0),Smat_c,Nchi,cmat1,Nchi,(1.0d0,0.0d0),cmat4,Nchi)
-        call zgemm('N','N',Nchi,Nchi,Nchi,(0.5d0,0.0d0),Cmat_c,Nchi,cmat2,Nchi,(1.0d0,0.0d0),cmat4,Nchi)
-      cmat3(:,:)=Cmat_c(:,:)+Smat_c(:,:)
-      call zgemm('N','N',Nchi,Nchi,Nchi,(-0.25d0,0.0d0),cmat3,Nchi,cmat5,Nchi,(1.0d0,0.0d0),cmat4,Nchi) !subtract double count
-        !!$omp workshare
-        chi(i,j,:,:)=cmat4(:,:)
-        !!$omp end workshare
+        call zgesv(Nchi,Nchi,cmat1,Nchi,ipiv,cmat3,Nchi,info) !(I-chi0S)X=chi0S -> cmat3=chiS
+        if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
+        call zgesv(Nchi,Nchi,cmat2,Nchi,ipiv,cmat4,Nchi,info) !(I+chi0C)X=chi0C -> cmat4=chiC
+        if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
+        cmat1(:,:)=1.5d0*Smat(:,:)-0.5d0*Cmat(:,:)
+        call zgemm('N','N',Nchi,Nchi,Nchi,(1.5d0,0.0d0),Smat_c,Nchi,cmat3,Nchi,(1.0d0,0.0d0),cmat1,Nchi)
+        call zgemm('N','N',Nchi,Nchi,Nchi,(0.5d0,0.0d0),Cmat_c,Nchi,cmat4,Nchi,(1.0d0,0.0d0),cmat1,Nchi)
+        call zgemm('N','N',Nchi,Nchi,Nchi,(-0.25d0,0.0d0),SC_c,Nchi,cmat5,Nchi,(1.0d0,0.0d0),cmat1,Nchi) !subtract double count
+        chi(i,j,:,:)=cmat1(:,:)
      end do
   end do
+  !$omp end parallel do
 end subroutine get_vsigma_flex_nosoc
 
 subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
@@ -754,6 +745,8 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   ! bracket cache for renew_mu
   real(real64):: muS_cache,muL_cache
   logical:: bracket_valid
+  ! eigenvalues of H(k)+Sigma(k,iw) precomputed before mu search
+  complex(real64),allocatable:: eig_gkinv(:,:,:)
 
   eps_sgm=1.0d-10
   mu=mu_init
@@ -781,6 +774,7 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   allocate(B_diis(m_diis+1,m_diis+1))
   allocate(rhs_diis(m_diis+1))
   allocate(ipiv_diis(m_diis+1))
+  allocate(eig_gkinv(Norb,Nk,Nw))
   n_hist=0
   i_hist=0
   bracket_valid=.false.
@@ -849,6 +843,7 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
      call io_sigma(.true.)
   end if
   call renew_mu()
+  deallocate(eig_gkinv)
 contains
   subroutine ckchi()
     integer(int32) i,l,m,n,info,chisk,chick,chiskall,chickall
@@ -1002,6 +997,7 @@ contains
     logical bracket_found
     real(real64) rnS,rnL,rnc,rnM,muc,mud,muL,muS,muM,eps,dmu
 
+    call precompute_eig_gkinv()
     if(esterr>1.0d-2)then
        eps= 1.0d-8
     else
@@ -1142,30 +1138,52 @@ contains
     real(real64),intent(in):: rmu
     real(real64),intent(out):: rn
 
-    integer(int32) l,i,j,n
+    integer(int32) i,j,n
     real(real64) tmp,deltagk
-    complex(real64):: Gk0,iw
+    complex(real64) iw_im
 
+    ! non-interacting Fermi sum (unchanged)
     tmp=sum(0.5d0*(1.0d0-tanh(0.5d0*(eig(:,:)-rmu)/temp)))
-    call gen_green_inv(Gk,sigmak,hamk,rmu,temp,Nk,Nw,Norb)
-    call getinv(Gk,Nk,Nw,Norb)
+    ! use precomputed eigenvalues of H(k)+Sigma(k,iw): no getinv needed
     deltagk=0.0d0
-    !$omp parallel do reduction(+:deltagk) private(l,i,n,iw,Gk0)
+    !$omp parallel do reduction(+:deltagk) private(n,iw_im)
     do j=1,Nw
-       do l=1,Norb
-          iw=cmplx(rmu,dble(2*(j-1)+1)*pi*temp,kind=real64)
-          do i=1,Nk
-             Gk0=0.0d0
-             do n=1,Norb
-                Gk0=Gk0+uni(l,n,i)*conjg(uni(l,n,i))/(iw-eig(n,i))
-             end do
-             deltagk=deltagk+dble(Gk(i,j,l,l)-Gk0)
+       iw_im=cmplx(0.0d0,dble(2*j-1)*pi*temp,kind=real64)
+       do i=1,Nk
+          do n=1,Norb
+             deltagk=deltagk+dble(1.0d0/(rmu+iw_im-eig_gkinv(n,i,j)) &
+                                  -1.0d0/(rmu+iw_im-eig(n,i)))
           end do
        end do
     end do
     !$omp end parallel do
     rn=(tmp+2*temp*deltagk)/Nk
   end subroutine get_rn
+
+  subroutine precompute_eig_gkinv()
+    use constant
+    integer(int32) i,j,info_eig
+    complex(real64),dimension(Norb,Norb):: A_tmp
+    complex(real64),dimension(Norb):: eig_tmp
+    complex(real64),dimension(Norb,Norb):: vl_dum,vr_dum
+    real(real64),dimension(2*Norb):: rwork_eig
+    complex(real64),dimension(2*Norb):: work_eig
+
+    !$omp parallel do private(A_tmp,eig_tmp,vl_dum,vr_dum,rwork_eig,work_eig,info_eig)
+    do j=1,Nw
+       do i=1,Nk
+          A_tmp(:,:)=hamk(:,:,i)+sigmak(i,j,:,:)
+          call zgeev('N','N',Norb,A_tmp,Norb,eig_tmp,vl_dum,Norb,vr_dum,Norb, &
+                     work_eig,2*Norb,rwork_eig,info_eig)
+          if(info_eig/=0)then
+             print*,'zgeev failed in precompute_eig_gkinv: info=',info_eig
+             stop
+          end if
+          eig_gkinv(:,i,j)=eig_tmp(:)
+       end do
+    end do
+    !$omp end parallel do
+  end subroutine precompute_eig_gkinv
   
   subroutine io_sigma(sw)
     logical(int32),intent(in):: sw !True: out, False: in
@@ -1194,7 +1212,6 @@ subroutine get_chis_chic(chis,chic,chi,Smat,Cmat,Nk,Nw,Nchi) bind(C)
   integer(int32) i,l,info
   integer(int32),dimension(Nchi):: ipiv
   complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,Smat_c,Cmat_c
-  complex(real64),dimension(2*Nchi):: work
 
   Smat_c=cmplx(Smat,0.0d0,kind=real64)
   Cmat_c=cmplx(Cmat,0.0d0,kind=real64)
@@ -1206,16 +1223,12 @@ subroutine get_chis_chic(chis,chic,chi,Smat,Cmat,Nk,Nw,Nchi) bind(C)
         cmat1(l,l)=cmat1(l,l)+1.0d0 !I-chi0S
         cmat2(l,l)=cmat2(l,l)+1.0d0 !I+chi0C
      end do
-     call zgetrf(Nchi,Nchi,cmat1,Nchi,ipiv,info)
-     if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
-     call zgetri(Nchi,cmat1,Nchi,ipiv,work,2*Nchi,info)
-     if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
-     call zgetrf(Nchi,Nchi,cmat2,Nchi,ipiv,info)
-     if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
-     call zgetri(Nchi,cmat2,Nchi,ipiv,work,2*Nchi,info)
-     if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
-     call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),cmat1,Nchi,chi(i,1,:,:),Nchi,(0.0d0,0.0d0),cmat3,Nchi) !(1-chi0S)^-1chi0
-     call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),cmat2,Nchi,chi(i,1,:,:),Nchi,(0.0d0,0.0d0),cmat4,Nchi) !(1+chi0C)^-1chi0
+     cmat3(:,:)=chi(i,1,:,:) !RHS copy for spin susceptibility
+     cmat4(:,:)=chi(i,1,:,:) !RHS copy for charge susceptibility
+     call zgesv(Nchi,Nchi,cmat1,Nchi,ipiv,cmat3,Nchi,info) !(I-chi0S)X=chi0 -> cmat3=chiS
+     if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
+     call zgesv(Nchi,Nchi,cmat2,Nchi,ipiv,cmat4,Nchi,info) !(I+chi0C)X=chi0 -> cmat4=chiC
+     if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
      chis(i,:,:)=cmat3(:,:)
      chic(i,:,:)=cmat4(:,:)
   end do qloop
