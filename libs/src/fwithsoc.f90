@@ -356,7 +356,7 @@ contains
     call mkfk_trs_soc(fk,Gk,v_in,sgnsig,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym)
     call mkdelta_soc(w_out,fk,chi,Vmat,sgnsig,sgnsig2,kmap,invk,invs,invschi,olist,slist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,gap_sym)
     !$omp parallel workshare
-    w_out(:,:,:,:)=w_out(:,:,:,:)*weight
+      w_out(:,:,:,:)=-w_out(:,:,:,:)*weight
     !$omp end parallel workshare
   end subroutine apply_op
 
@@ -496,28 +496,27 @@ subroutine get_V_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
   
    integer(int32) i,j,l,info
   integer(int32),dimension(Nchi):: ipiv
-   complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmatv
-  complex(real64),dimension(2*Nchi):: work
+   complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmatv,neg_cmatv
 
    cmatv(:,:)=cmplx(Vmat(:,:),0.0d0,kind=real64)
+   neg_cmatv(:,:)=-cmatv(:,:)
 
+  !$omp parallel do collapse(2) private(i,cmat1,cmat2,cmat3,ipiv,info,l)
   wloop:do j=1,Nw
      qloop:do i=1,Nk
         call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),chi(i,j,:,:),Nchi,cmatv,Nchi,(0.0d0,0.0d0),cmat1,Nchi) !chi0V
-        cmat2(:,:)=cmat1(:,:) !chi0V
+        cmat2(:,:)=cmat1(:,:) !chi0V (RHS for zgesv)
         do l=1,Nchi
            cmat1(l,l)=cmat1(l,l)+1.0d0 !I-chi0V
         end do
-        call zgetrf(Nchi,Nchi,cmat1,Nchi,ipiv,info)
-        if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
-        call zgetri(Nchi,cmat1,Nchi,ipiv,work,2*Nchi,info)
-        if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
-        call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),cmat1,Nchi,cmat2,Nchi,(0.0d0,0.0d0),cmat3,Nchi) !(1-chi0V)^-1chi0V
-        cmat2(:,:)=-cmatv(:,:)
-        call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),cmatv,Nchi,cmat3,Nchi,(1.0d0,0.0d0),cmat2,Nchi)
-        chi(i,j,:,:)=cmat2(:,:)
+        call zgesv(Nchi,Nchi,cmat1,Nchi,ipiv,cmat2,Nchi,info) !(I-chi0V)X=chi0V -> cmat2=chi
+        if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
+        cmat3(:,:)=neg_cmatv(:,:)
+        call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),cmatv,Nchi,cmat2,Nchi,(1.0d0,0.0d0),cmat3,Nchi)
+        chi(i,j,:,:)=cmat3(:,:)
      end do qloop
   end do wloop
+  !$omp end parallel do
 end subroutine get_V_soc_flex
 
 subroutine mkfk_trs_soc(fk,Gk,delta,sgnsig,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym) bind(C,name="mkfk_trs_soc_")
@@ -1027,22 +1026,17 @@ subroutine get_chis_chic_soc(chic,chiszz,chispm,chi,Vmat,orb_list,olist,slist,in
    integer(int32) i,l,m,info
   integer(int32),dimension(Nchi):: ipiv
    complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmatv
-  complex(real64),dimension(2*Nchi):: work
 
    cmatv(:,:)=cmplx(Vmat(:,:),0.0d0,kind=real64)
 
   qloop:do i=1,Nk
      call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),chi(i,1,:,:),Nchi,cmatv,Nchi,(0.0d0,0.0d0),cmat1,Nchi) !chi0V
-     !$omp parallel do
+     cmat2(:,:)=chi(i,1,:,:) !RHS for zgesv = chi0
      do l=1,Nchi
         cmat1(l,l)=cmat1(l,l)+1.0d0 !I-chi0V
      end do
-     !$omp end parallel do
-     call zgetrf(Nchi,Nchi,cmat1,Nchi,ipiv,info)
-     if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
-     call zgetri(Nchi,cmat1,Nchi,ipiv,work,2*Nchi,info)
-     if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
-     call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),cmat1,Nchi,chi(i,1,:,:),Nchi,(0.0d0,0.0d0),cmat2,Nchi) !(1-chi0V)^-1chi0
+     call zgesv(Nchi,Nchi,cmat1,Nchi,ipiv,cmat2,Nchi,info) !(I-chi0V)X=chi0 -> cmat2=(I-chi0V)^-1chi0
+     if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
      do l=1,Nchi
         do m=1,Nchi
            if(slist(olist(l,1))==slist(olist(m,1)) .and. slist(olist(l,2))==slist(olist(m,2)))then
