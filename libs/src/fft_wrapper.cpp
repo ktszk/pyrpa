@@ -74,4 +74,16 @@ void dfftw_destroy_plan_(int64_t *plan)
     *plan = 0;
 }
 
+// Execute plan with different input/output arrays (same shape/type as planning arrays).
+// Equivalent to FFTW's dfftw_execute_dft — safe to call from multiple threads
+// as long as each thread uses distinct in_arr/out_arr buffers.
+void dfftw_execute_dft_(const int64_t *plan,
+                        std::complex<double> *in_arr,
+                        std::complex<double> *out_arr)
+{
+    const auto *p = reinterpret_cast<const Plan *>(static_cast<uintptr_t>(*plan));
+    c2c(p->shape, p->stride, p->stride, p->axes, p->forward,
+        in_arr, out_arr, 1.0);
+}
+
 } // extern "C"

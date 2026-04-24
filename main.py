@@ -60,7 +60,7 @@ color_option defines the meaning of color on Fermi surfaces
  2: velocity size
 """
 option=13
-color_option=1
+color_option=2
 
 Nx,Ny,Nz,Nw=32,32,2,512 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
@@ -80,8 +80,8 @@ Emin,Emax=-3,3
 delta=3.0e-2
 Ecut=1.0e-2
 tau_const=100
-olist=[0,0,0]
-#olist=[0,[1,2],3]
+#olist=[0,0,0]
+olist=[0,[1,2],3]
 #olist=[[0,3],[1,4],[2,5]]
 #olist=[[0,4],[1,2,5,6],[3,7]]
 #U,J= 0.8, 0.1
@@ -1324,8 +1324,8 @@ def main():
         # Species A (host): no perturbation -> VA = 0
         # Species B (impurity): diagonal shift
         VA = np.zeros((no, no), dtype=np.complex128)
-        VB = 2.0 * np.eye(no, dtype=np.complex128)
-        x_cpa = 0.
+        VB = 1.0 * np.eye(no, dtype=np.complex128)
+        x_cpa = .5
         Nk, klist = plibs.gen_klist(Nx, Ny, Nz)
         hamk = flibs.gen_ham(klist, ham_r, rvec)
         # shift onsite by -mu so that w=0 corresponds to the Fermi level
@@ -1342,16 +1342,25 @@ def main():
         hamk_s[:, range(no), range(no)] -= mu
         Nks = len(klist_s)
         Akw = np.zeros((Nks, Nw))
-        for iw in range(Nw):
-            zI = np.eye(no) * zlist_real[iw]
-            sig = sigma_cpa[iw]
-            for ik in range(Nks):
-                try:
-                    Gk = np.linalg.inv(zI - hamk_s[ik] - sig)
-                    Akw[ik, iw] = -np.trace(Gk).imag / np.pi
-                except np.linalg.LinAlgError:
-                    print(f"Warning: Matrix inversion failed at k-point {ik}, frequency index {iw}. Setting to zero.",flush=True)
-                    Akw[ik, iw] = 0.0
+        # A[iw,ik] = diag(zlist_real[iw]) - hamk_s[ik] - sigma_cpa[iw]
+        A_batch = (np.eye(no)[None, None, :, :] * zlist_real[:, None, None, None]
+                   - hamk_s[None, :, :, :]
+                   - sigma_cpa[:, None, :, :])  # (Nw, Nks, no, no)
+        try:
+            Gk_all = np.linalg.inv(A_batch)
+            Akw = (-np.trace(Gk_all, axis1=2, axis2=3).imag / np.pi).T
+        except np.linalg.LinAlgError:
+            print("Warning: Batch matrix inversion failed, falling back to element-wise.", flush=True)
+            for iw in range(Nw):
+                zI = np.eye(no) * zlist_real[iw]
+                sig = sigma_cpa[iw]
+                for ik in range(Nks):
+                    try:
+                        Gk = np.linalg.inv(zI - hamk_s[ik] - sig)
+                        Akw[ik, iw] = -np.trace(Gk).imag / np.pi
+                    except np.linalg.LinAlgError:
+                        print(f"Warning: Matrix inversion failed at k-point {ik}, frequency index {iw}. Setting to zero.", flush=True)
+                        Akw[ik, iw] = 0.0
         w, x = np.meshgrid(wlist, spa_length)
         plt.contourf(x, w, Akw, 100, cmap=plt.get_cmap('hot'))
         for xt in xticks[1:-1]:

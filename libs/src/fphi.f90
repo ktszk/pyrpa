@@ -109,26 +109,33 @@ contains
     real(real64),intent(in),dimension(Norb,Nk):: eig,ffermi
     complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
   
-    integer(int32) i,j,k,l,m
-    complex(real64) unitmp
+    integer(int32) i,j,k,l,m,nchi32
+    complex(real64) weight
+    complex(real64),dimension(Nchi):: A_vec,B_vec
     complex(real64),dimension(Nchi,Nchi):: phi,calc_phi
-  
+
+    nchi32=int(Nchi,int32)
     phi(:,:)=0.0d0
     kloop: do k=1,Nk
        band1_loop: do l=1,Norb
           band2_loop: do m=1,Norb
-             chiorb1_loop: do j=1,Nchi
-                chiorb2_loop:do i=1,Nchi
-                   if(abs(w-eig(m,k)-eig(l,qshift(k))+2.0d0*mu)<eps .and. idelta<eps)then
-                      continue
-                   else
-                      unitmp=uni(ol(j,1),l,qshift(k))*conjg(uni(ol(i,1),l,qshift(k)))&
-                           *uni(ol(i,2),m,k)*conjg(uni(ol(j,2),m,k))
-                       phi(i,j)=phi(i,j)-unitmp*(1.0d0-ffermi(l,qshift(k))-ffermi(m,k))&
-                          /cmplx(w-eig(m,k)-eig(l,qshift(k))+2.0d0*mu,idelta,kind=real64)
-                   end if
-                end do chiorb2_loop
-             end do chiorb1_loop
+             ! skip singular denominator
+             if(abs(w-eig(m,k)-eig(l,qshift(k))+2.0d0*mu)<eps .and. idelta<eps)then
+                cycle band2_loop
+             end if
+             ! compute scalar weight once per (k,l,m)
+             weight=-(1.0d0-ffermi(l,qshift(k))-ffermi(m,k))&
+                  /cmplx(w-eig(m,k)-eig(l,qshift(k))+2.0d0*mu,idelta,kind=real64)
+             ! A_vec(j) = uni(ol(j,1),l,qshift(k)) * conjg(uni(ol(j,2),m,k))
+             do j=1,Nchi
+                A_vec(j)=uni(ol(j,1),l,qshift(k))*conjg(uni(ol(j,2),m,k))
+             end do
+             ! B_vec(i) = conjg(uni(ol(i,1),l,qshift(k))) * uni(ol(i,2),m,k)
+             do i=1,Nchi
+                B_vec(i)=conjg(uni(ol(i,1),l,qshift(k)))*uni(ol(i,2),m,k)
+             end do
+             ! phi(i,j) += weight * B_vec(i) * A_vec(j)
+             call zgeru(nchi32,nchi32,weight,B_vec,1,A_vec,1,phi,nchi32)
           end do band2_loop
        end do band1_loop
     end do kloop

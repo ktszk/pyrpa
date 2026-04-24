@@ -21,16 +21,11 @@ subroutine get_a(a,xn,inp_data,Np) bind(C,name="get_a_")
   a(1)=g0(1)  !a_1=g_1(z1)
   do i=2,Np !g0=g_(i-1),g1=g_i
      !$omp parallel
-     !$omp workshare
-     g1(:)=0.0d0
-     !$omp end workshare
      !$omp do simd private(j)
      do j=1,Np !calc all g1 at data point
-        if(g0(j)==0)then
-           continue
-        else
-           g1(j)=(g0(i-1)-g0(j))/((xn(j)-xn(i-1))*g0(j))
-        end if
+        g1(j)=merge((0.0d0,0.0d0),(g0(i-1)-g0(j))/ &
+             merge((1.0d0,0.0d0),(xn(j)-xn(i-1))*g0(j),g0(j)==(0.0d0,0.0d0)), &
+             g0(j)==(0.0d0,0.0d0))
      end do
      !$omp end do simd
      !$omp workshare
@@ -68,16 +63,12 @@ subroutine get_QP(P,Q,a,xn,wlist,Nw,Np) bind(C,name='get_qp_')
   P1(:)=a(1)
   do i=2,Np
      !$omp parallel
-     !$omp workshare
-     Q(:)=0.0d0
-     P(:)=0.0d0
-     !$omp end workshare
-     !$omp do private(j) reduction(+: P,Q)
+     !$omp do simd private(j)
      do j=1,Nw !calc Pi(w)=P_i-1(w)+a_i(w-z_i-1)P_i-2(w) (Q is same as P)
         P(j)=P1(j)+a(i)*(wlist(j)-xn(i-1))*P0(j)
         Q(j)=Q1(j)+a(i)*(wlist(j)-xn(i-1))*Q0(j)
      end do
-     !$omp end do
+     !$omp end do simd
      !$omp workshare
      P0(:)=P1(:)
      P1(:)=P(:)
