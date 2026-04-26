@@ -32,19 +32,24 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
   L22(:,:)=0.0d0
   !$omp end workshare
   !$omp do reduction(+: L11,L12,L22) private(i,l,m,j,k,tmp)
+  ! Kubo formula: L_ij = (i/Nk) sum_{k,n,m} v_n(k) v_m(k) * [occupation factor] / [energy denominator]
+  ! Intraband (n==m, degenerate): weight = f*(1-f)/T  — Drude-like term (dc limit when w->0)
+  ! Interband (n/=m):             weight = (f_l-f_m)/[(e_m-e_l)*(w+e_m-e_l+i*delta)]
   k_loop: do i=1,Nk
      band_loop1: do l=1,Norb
         band_loop2: do m=1,Norb
            do j=1,3
               do k=1,3
                  if(abs(eig(m,i)-eig(l,i))<1.0d-9)then
+                    ! Intraband contribution: use f*(1-f)/T identity for -df/de
                     tmp=vk(k,m,m,i)*vk(j,m,m,i)*ffermi(m,i)*(1.0d0-ffermi(m,i))/(temp*cmplx(w,idelta,kind=real64))
                     L11(k,j)=L11(k,j)+tmp
                     L12(k,j)=L12(k,j)+tmp*(eig(m,i)-mu)
                     L22(k,j)=L22(k,j)+tmp*(eig(m,i)-mu)*(eig(m,i)-mu)
                  else if(abs(ffermi(l,i)-ffermi(m,i))>eps)then
-                  tmp=vk(k,m,l,i)*vk(j,l,m,i)*(ffermi(l,i)-ffermi(m,i))/((eig(m,i)-eig(l,i))&
-                     *cmplx(w+eig(m,i)-eig(l,i),idelta,kind=real64))
+                    ! Interband contribution: skip when both states have the same occupation
+                    tmp=vk(k,m,l,i)*vk(j,l,m,i)*(ffermi(l,i)-ffermi(m,i))/((eig(m,i)-eig(l,i))&
+                       *cmplx(w+eig(m,i)-eig(l,i),idelta,kind=real64))
                     L11(k,j)=L11(k,j)+tmp
                     L12(k,j)=L12(k,j)+tmp*(eig(l,i)-mu)
                     L22(k,j)=L22(k,j)+tmp*(eig(m,i)-mu)*(eig(l,i)-mu)
@@ -92,6 +97,7 @@ subroutine calc_kn(K0,K1,K2,eig,veloc,kweight,tau,temp,mu,Nk,Norb) bind(C)
 
    temp_safe=max(temp,1.0d-12)
 
+  ! -df/de = 0.25*(1-tanh^2((e-mu)/2T))/T  [numerically stable derivative of Fermi-Dirac]
   !$omp parallel
   !$omp do private(j)
   get_dfermi: do i=1,Nk
@@ -107,6 +113,10 @@ subroutine calc_kn(K0,K1,K2,eig,veloc,kweight,tau,temp,mu,Nk,Norb) bind(C)
   !$omp end workshare
   
   !$omp do private(j,l,m,tmp) reduction(+:K0,K1,K2)
+  ! K_n[ij] = sum_{k,band} v_i*v_j * tau * (-df/de) * (e-mu)^n * weight
+  ! K0 ~ sigma (charge conductivity kernel)
+  ! K1 ~ sigmaS (thermoelectric kernel)
+  ! K2 ~ kappa (thermal conductivity kernel)
   get_Kn: do i=1,Nk
      band_loop: do j=1,Norb
         axis1: do l=1,3
@@ -161,6 +171,8 @@ subroutine calc_sigma_hall(eig,veloc,imass,kweight,tau,temp,mu,Nk,Norb,sigma_hal
   !$omp end do
 
   !$omp do private(i,j) reduction(+:sigma_hall)
+  ! sigma_Hall ~ sum_{k,n} (vx^2 * m^-1_yy - vx*vy * m^-1_xy) * (-df/de) * tau^2
+  ! From the semi-classical Hall formula in the relaxation-time approximation
   get_Kn: do i=1,Nk
      band_loop: do j=1,Norb
         sigma_hall=sigma_hall+(veloc(1,j,i)*veloc(1,j,i)*imass(2,2,j,i)-veloc(1,j,i)*veloc(2,j,i)*imass(1,2,j,i))&

@@ -26,13 +26,15 @@ subroutine generate_irr_kpoint_inv(klist,kmap,invk_ft_list,Nk,Nx,Ny,Nz) bind(C)
 
     !$omp parallel do private(i,j,k,tmp,iktmp)
     do i=1,Nkall
+       ! For each full-BZ k-point, find its irreducible representative via TRS: k or -k mod 1
        do j=1,Nk !set invk(1,:) and invk(2,:)
           tmp(:)=all_k(:,i)-klist(:,j)
           if(sum(abs(tmp))<eps)then
              invk_ft_list(1,i)=j !irreducible k index
-             invk_ft_list(2,i)=0 !0 is normal (k)
+             invk_ft_list(2,i)=0 !0 = direct mapping (k == irr_k)
              exit
           end if
+          ! Compute -k mod 1: 0 stays 0, otherwise 1-k
           do k=1,3
              if(klist(k,j)==0.0d0)then
                 iktmp(k)=0.0d0
@@ -43,7 +45,7 @@ subroutine generate_irr_kpoint_inv(klist,kmap,invk_ft_list,Nk,Nx,Ny,Nz) bind(C)
           tmp(:)=all_k(:,i)-iktmp(:)
           if(sum(abs(tmp))<eps)then
              invk_ft_list(1,i)=j !irreducible k index
-             invk_ft_list(2,i)=1 !1 is reverse (-k)
+             invk_ft_list(2,i)=1 !1 = TRS-related mapping (k == -irr_k mod 1)
              exit
           end if
        end do

@@ -42,17 +42,19 @@ subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
 
    ham_k(:,:,:)=(0.0d0,0.0d0)
 
+  ! H(k) = sum_R  H(R) * exp(-2pi*i * k.R)
   !$omp parallel do private(l,m,j,phase,cphase)
   klop: do i=1,Nk
      rloop: do j=1,Nr
         phase=2*pi*sum(klist(:,i)*rvec(:,j))
-        cphase=cmplx(cos(phase),-sin(phase),kind=real64)
+        cphase=cmplx(cos(phase),-sin(phase),kind=real64)   ! exp(-i*phi)
         do l=1,Norb
            do m=l,Norb
               ham_k(m,l,i)=ham_k(m,l,i)+ham_r(m,l,j)*cphase
            end do
         end do
      end do rloop
+     ! Enforce Hermitian symmetry: diagonal must be real; upper = conj(lower)
      do l=1,Norb
         ham_k(l,l,i)=dble(ham_k(l,l,i))
         do m=l+1,Norb
@@ -124,14 +126,15 @@ subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,Norb) bind(C)
         print*,'zheev failed in get_eig_mlo (overlap): info=',info
         stop
      end if
+     ! Canonical orthogonalization: rescale eigenvectors by 1/sqrt(eigenvalue) of S
      do j=1,Norb
         if(eq(j)>ovl_thresh)then
            tmp2(:,j)=tmp(:,j)/sqrt(cmplx(eq(j),kind=real64))
         else
-           tmp2(:,j)=(0.0d0,0.0d0) !discard near-null basis vector (canonical orthogonalization)
+           tmp2(:,j)=(0.0d0,0.0d0) !discard near-null basis vector (near-linear dependence)
         end if
      end do
-     ! tmp = tmp2^H * ham_k(:,:,i) * tmp2
+     ! Transform H to orthonormal basis: H_orth = tmp2^H * H * tmp2
      call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),ham_k(:,:,i),Norb,tmp2,Norb,(0.0d0,0.0d0),tmp3,Norb)
      call zgemm('C','N',Norb,Norb,Norb,(1.0d0,0.0d0),tmp2,Norb,tmp3,Norb,(0.0d0,0.0d0),tmp,Norb)
      call zheev('V','U',norb,tmp,norb,eq,work,2*norb-1,rwork,info)
@@ -167,6 +170,7 @@ subroutine get_ffermi(ffermi,eig,mu,temp,Nk,Norb) bind(C)
 
    temp_safe=max(temp,1.0d-12)
    itemp=0.5d0/temp_safe
+  ! f(e) = 1/(exp((e-mu)/T)+1) = 0.5 - 0.5*tanh((e-mu)/(2T))  [numerically stable form]
   !$omp parallel do private(j)
   do i=1,Nk
      do j=1,Norb
@@ -295,7 +299,9 @@ subroutine get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   kloop: do i=1,Nk
      rloop: do j=1,Nr
         phase=2*pi*sum(klist(:,i)*rvec(:,j))
-        cphase=cmplx(sin(phase),cos(phase),kind=real64)
+        ! d/dk_alpha exp(-i*phi) = -i*R_alpha * exp(-i*phi)
+        ! Re/Im part: -(sin+i*cos) = -i*(cos-i*sin) = -i*exp(-i*phi)
+        cphase=cmplx(sin(phase),cos(phase),kind=real64)   ! = -i*exp(-i*phi) in real/imag components
         do l=1,Norb
            do m=l,Norb
               !$omp simd
@@ -505,10 +511,12 @@ subroutine get_parity_prop(Pmn,rvec,ham_r,Norb,Nr) bind(C)
   parity_den(:,:)=0.0d0
   !$omp end workshare
   !$omp do private(i,j,diff_r) reduction(+: parity_num,parity_den)
+  ! Find inversion-partner pairs: R_j = -R_i (i.e. R_i + R_j = 0)
+  ! Compare H(R) and H(-R): if Re(<H(R),H(-R)>) > 0 → even parity (+1), else odd (-1)
   do i=1,Nr
      do j=i+1,Nr
         diff_r=sum(abs(rvec(:,i)+rvec(:,j)))
-        if(diff_r<eps)then
+        if(diff_r<eps)then      ! found partner: rvec(:,j) = -rvec(:,i)
            do l=1,Norb
               do m=1,Norb
                  parity_num(m,l)=parity_num(m,l)+dble(ham_r(m,l,j)*conjg(ham_r(m,l,i)))

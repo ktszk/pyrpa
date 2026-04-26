@@ -17,6 +17,13 @@ subroutine get_scmat(Smat,Cmat,ol,site,Uval,Jval,Nchi) bind(C)
   integer(int32) i,j
   real(real64) Upval
 
+  ! Kanamori Hamiltonian: U'=U-2J (standard relation for t2g orbitals)
+  ! Smat = spin vertex (enters spin susceptibility chi_s)
+  ! Cmat = charge vertex (enters charge susceptibility chi_c)
+  ! Matrix elements follow from the multi-orbital Hubbard model:
+  !   S[iijj] = J,  C[iijj] = 2U'-J   (i/=j, density-density)
+  !   S[ijij] = U', C[ijij] = 2J-U'   (Hund's exchange)
+  !   S[ijji] = J,  C[ijji] = J        (pair hopping)
   Upval=Uval-2*Jval
   !$omp parallel
   !$omp workshare
@@ -26,21 +33,21 @@ subroutine get_scmat(Smat,Cmat,ol,site,Uval,Jval,Nchi) bind(C)
   !$omp do private(j)
   do i=1,Nchi
      do j=1,Nchi
-        if(site(i)==site(j))then
+        if(site(i)==site(j))then   ! on-site interactions only
            if((ol(i,1)==ol(i,2)).and.(ol(j,1)==ol(j,2)))then
               if(ol(i,1)==ol(j,1))then
-                 Smat(j,i)=Uval !iiii>U
-                 Cmat(j,i)=Uval !iiii>U
+                 Smat(j,i)=Uval !iiii: intra-orbital U
+                 Cmat(j,i)=Uval !iiii: intra-orbital U
               else
-                 Smat(j,i)=Jval         !iijj>J
-                 Cmat(j,i)=2*Upval-Jval !iijj>2U'-J
+                 Smat(j,i)=Jval         !iijj: Hund J
+                 Cmat(j,i)=2*Upval-Jval !iijj: 2U'-J
               end if
            else if((ol(i,1)==ol(j,1)).and.(ol(i,2)==ol(j,2)))then
-              Smat(j,i)=Upval         !ijij>U'
-              Cmat(j,i)=-Upval+2*Jval !ijij>2J-U'
+              Smat(j,i)=Upval         !ijij: inter-orbital U'
+              Cmat(j,i)=-Upval+2*Jval !ijij: 2J-U'
            else if((ol(i,1)==ol(j,2)).and.(ol(i,2)==ol(j,1)))then
-              Smat(j,i)=Jval    !ijji>J'
-              Cmat(j,i)=Jval    !ijji>J'
+              Smat(j,i)=Jval    !ijji: pair hopping J'=J
+              Cmat(j,i)=Jval    !ijji: pair hopping J'=J
            end if
         end if
      end do

@@ -101,7 +101,7 @@ subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb) bind(C,name="gen_green0_")
      do m=1,Norb
         !$omp do private(iw,i,j,n)
         wloop: do j=1,Nw !ien=pi(2l+1)/beta l=0,1,... beta=(kBT)^-1
-           iw=cmplx(mu,dble(2*j-1)*pi*temp,kind=real64) !j=1=>l=0
+           iw=cmplx(mu,dble(2*j-1)*pi*temp,kind=real64) !iω_j = μ + i(2j-1)πT (j=1: ω_0=πT)
            band_loop: do n=1,Norb
               kloop: do i=1,Nk
                  Gk(i,j,m,l)=Gk(i,j,m,l)+uni(m,n,i)*conjg(uni(l,n,i))/(iw-eig(n,i))
@@ -577,10 +577,11 @@ subroutine get_vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi) bind(C,name='get_vsig
         if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
         call zgesv(Nchi,Nchi,cmat2,Nchi,ipiv,cmat4,Nchi,info) !(I+chi0C)X=chi0C -> cmat4=chiC
         if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
-        cmat1(:,:)=1.5d0*Smat(:,:)-0.5d0*Cmat(:,:)
-        call zgemm('N','N',Nchi,Nchi,Nchi,(1.5d0,0.0d0),Smat_c,Nchi,cmat3,Nchi,(1.0d0,0.0d0),cmat1,Nchi)
-        call zgemm('N','N',Nchi,Nchi,Nchi,(0.5d0,0.0d0),Cmat_c,Nchi,cmat4,Nchi,(1.0d0,0.0d0),cmat1,Nchi)
-        call zgemm('N','N',Nchi,Nchi,Nchi,(-0.25d0,0.0d0),SC_c,Nchi,cmat5,Nchi,(1.0d0,0.0d0),cmat1,Nchi) !subtract double count
+        ! FLEX self-energy kernel: V_σ = 3/2·S·χ_s + 1/2·C·χ_c - 1/4·(S+C)·(χ_s+χ_c) + static (3/2·S - 1/2·C)
+        cmat1(:,:)=1.5d0*Smat(:,:)-0.5d0*Cmat(:,:)   !static (HF-like) bare vertex
+        call zgemm('N','N',Nchi,Nchi,Nchi,(1.5d0,0.0d0),Smat_c,Nchi,cmat3,Nchi,(1.0d0,0.0d0),cmat1,Nchi)  !+3/2·S·χ_s
+        call zgemm('N','N',Nchi,Nchi,Nchi,(0.5d0,0.0d0),Cmat_c,Nchi,cmat4,Nchi,(1.0d0,0.0d0),cmat1,Nchi)  !+1/2·C·χ_c
+        call zgemm('N','N',Nchi,Nchi,Nchi,(-0.25d0,0.0d0),SC_c,Nchi,cmat5,Nchi,(1.0d0,0.0d0),cmat1,Nchi) !-1/4·(S+C)·(χ_s+χ_c), subtract double count
         chi(i,j,:,:)=cmat1(:,:)
      end do
   end do
@@ -1142,9 +1143,10 @@ contains
     real(real64) tmp,deltagk
     complex(real64) iw_im
 
+    ! n(μ) = (1/Nk){Σ_{k,n} f(ε_{kn}) + 2T·Σ_{k,j}[G(k,iω_j) - G_0(k,iω_j)]}
     ! non-interacting Fermi sum (unchanged)
     tmp=sum(0.5d0*(1.0d0-tanh(0.5d0*(eig(:,:)-rmu)/temp)))
-    ! use precomputed eigenvalues of H(k)+Sigma(k,iw): no getinv needed
+    ! correction from self-energy: use precomputed eigenvalues of H(k)+Sigma(k,iw): no getinv needed
     deltagk=0.0d0
     !$omp parallel do reduction(+:deltagk) private(n,iw_im)
     do j=1,Nw
@@ -1225,8 +1227,10 @@ subroutine get_chis_chic(chis,chic,chi,Smat,Cmat,Nk,Nw,Nchi) bind(C)
      end do
      cmat3(:,:)=chi(i,1,:,:) !RHS copy for spin susceptibility
      cmat4(:,:)=chi(i,1,:,:) !RHS copy for charge susceptibility
+     ! RPA spin susceptibility:   chi_s = (I - chi0·S)^{-1} chi0
      call zgesv(Nchi,Nchi,cmat1,Nchi,ipiv,cmat3,Nchi,info) !(I-chi0S)X=chi0 -> cmat3=chiS
      if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
+     ! RPA charge susceptibility: chi_c = (I + chi0·C)^{-1} chi0
      call zgesv(Nchi,Nchi,cmat2,Nchi,ipiv,cmat4,Nchi,info) !(I+chi0C)X=chi0 -> cmat4=chiC
      if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
      chis(i,:,:)=cmat3(:,:)

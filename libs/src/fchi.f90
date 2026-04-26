@@ -15,9 +15,10 @@ subroutine get_qshift(qpoint,klist,qshift,Nk) bind(C,name="get_qshift_")
   integer(int64) :: key, key_t
   real(real64) :: tmpf(3)
 
-  ! parameters for integerized grid
-  scale_int = 1048576_int64  ! 2^20 resolution
-  m = max(3_int64, 2_int64*Nk + 3_int64)
+  ! Hash-table approach for O(Nk) k+q lookup (vs O(Nk^2) brute force)
+  ! k-coordinates are quantized to integer keys at 2^20 resolution
+  scale_int = 1048576_int64  ! 2^20 resolution (~10^-6 fractional precision)
+  m = max(3_int64, 2_int64*Nk + 3_int64)  ! table size > 2*Nk to keep load factor < 0.5
 
   allocate(ht_key(m))
   allocate(ht_val(m))
@@ -279,16 +280,18 @@ subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,e
         qpoint(3)=0.0d0
         call get_qshift(qpoint,klist,qshift,Nk)
         chi(:,:)=calc_chi(Nk,Norb,Nchi,uni,eig,ffermi,ol,temp,qshift,ecut,idelta,eps)
-        ! tmp = I - chi * Smat
+        ! RPA: chi_s = (1 - chi0*S)^{-1} * chi0
+        ! Step 1: tmp = I - chi0 * S
         call zgemm('N','N',Nchi,Nchi,Nchi,(-1.0d0,0.0d0),chi,Nchi,Smat_c,Nchi,(0.0d0,0.0d0),tmp,Nchi)
         do l=1,Nchi
            tmp(l,l)=tmp(l,l)+(1.0d0,0.0d0)
         end do
+        ! Step 2: invert (I - chi0*S) via LU factorization
         call zgetrf(Nchi,Nchi,tmp,Nchi,ipiv,info)
         if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
         call zgetri(Nchi,tmp,Nchi,ipiv,work,2*Nchi,info)
         if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
-        ! tmp2 = tmp * chi
+        ! Step 3: tmp2 = (I - chi0*S)^{-1} * chi0 = chi_s
         call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),tmp,Nchi,chi,Nchi,(0.0d0,0.0d0),tmp2,Nchi)
         !take chis_llmm
         do l=1,Nchi

@@ -151,13 +151,15 @@ if option in {0,4,7,12,20}:
         except NameError:
             xlabel=xlabel2
 if sw_unit:
+    # Physical constants in SI/eV units; ihbar converts velocity: hbar/(eV·s) * 1e-10 (AA->m)^-1
     hbar=scconst.physical_constants['Planck constant over 2 pi in eV s'][0]
-    ihbar=1.0e-10/hbar
+    ihbar=1.0e-10/hbar   # factor for v = (1/hbar) * dE/dk  [m/s per eV/AA^-1]
     kb=scconst.physical_constants['Boltzmann constant in eV/K'][0]
-    eC=scconst.e
-    tau_unit=1.e-15
-    emass=scconst.m_e
+    eC=scconst.e         # elementary charge [C]
+    tau_unit=1.e-15      # relaxation time unit: 1 fs = 1e-15 s
+    emass=scconst.m_e    # electron rest mass [kg]
 else:
+    # Dimensionless units: all constants set to 1 for testing or code-level checks
     hbar=1.
     ihbar=1.
     kb=1.
@@ -198,12 +200,14 @@ def plot_band(eig,spl,xlabel,xticks,uni,ol,color):
     ax=plt.axes()
     for e,cl in zip(eig,uni): #band loop
         if color:
+            # Normalize eigenvectors so that per-orbital weights (|u_n|^2) sum to 1
             norm=np.sqrt((abs(cl)**2).sum(axis=0))
             # Check for norm close to zero (use tolerance for floating-point comparison)
             if np.any(norm < 1e-14):
                 print("Warning: plot_band found norm close to zero. Skipping",flush=True)
                 continue
             cls=cl/norm
+            # Map three orbital groups to RGB channels for color coding
             c1=get_col(cls,ol[0])
             c2=get_col(cls,ol[1])
             c3=get_col(cls,ol[2])
@@ -365,12 +369,13 @@ def get_hall_coe(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
     if Vuc <= 0:
         print("Error: Unit cell volume (Vuc) is non-positive",flush=True)
         return
-    gsp=(1.0 if with_spin else 2.0) #spin weight
+    gsp=(1.0 if with_spin else 2.0) # spin degeneracy factor
     mu=plibs.calc_mu(eig,Nk,fill,temp)
     tau_mode=0
     if tau_mode==0:
-        tau=eig*0.+tau_const
+        tau=eig*0.+tau_const  # constant relaxation time (k- and band-independent)
     else:
+        # Energy-dependent tau from DOS (tau_mode != 0 path; not fully implemented)
         Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=True)
         wlist=np.linspace(eig.min()-mu,eig.max()-mu,Nw,True)
         Dos=flibs.gen_dos(eig,uni,mu,wlist,delta)
@@ -382,6 +387,7 @@ def get_hall_coe(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
     else:
         print(f"max tau = {tau.max()} "+('fs' if sw_unit else ''),flush=True)
     sigma_hall=flibs.calc_sigmahall(eig,vk,imass/eC,kweight,tau,temp,mu)
+    # K0 = charge transport kernel, K1 = thermoelectric kernel, K2 = thermal transport kernel
     K0,K1,K2=flibs.calc_Kn(eig,vk,kweight,temp,mu,tau)
     print(f"sigma_hall={sigma_hall:.6e}, K0[0,0]={K0[0,0]:.6e}, K0[1,1]={K0[1,1]:.6e}")
     # Check if K0 diagonal elements are non-zero (use tolerance for floating-point comparison)
@@ -389,6 +395,7 @@ def get_hall_coe(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
     if abs(K0[0,0]) < tol or abs(K0[1,1]) < tol:
         print("Error: K0 diagonal elements are too small. Cannot compute Hall coefficient",flush=True)
         return
+    # Rh = -1/(n*e) from sigma_xy / (sigma_xx * sigma_yy); nh in cm^-3
     Rh=-Vuc*Nk*sigma_hall/(gsp*K0[0,0]*K0[1,1])
     nh=-1./(Rh*eC)/1e6
     print(f"Hall coefficient Rh = {Rh:.6e}",flush=True)
@@ -443,7 +450,8 @@ def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
         plt.show()
     else:
         K0,K1,K2=flibs.calc_Kn(eig,vk,kweight,temp,mu,tau)
-    sigma=gsp*tau_unit*eC*K0*iNV #a e is canceled effect of eV2J
+    # sigma [S/m] = gsp * tau[s] * e[C] * K0[eV·m^-3] / (N*V[m^3])
+    sigma=gsp*tau_unit*eC*K0*iNV  # e cancels eV->J so units work out to S/m
     kappa=gsp*tau_unit*eC*kb*K2*iNV*itemp
 
     # Handle sclin.inv() failures
@@ -907,7 +915,9 @@ def get_mass(mesh,rvec,ham_r,S_r,mu:float,de=3.e-6,meshkz=20):
             Sm=plibs.get_band_area(v2_m,blist_m,band_idx,ABZ)
             if Sp is None or Sm is None:
                 continue
+            # dS/dE via central finite difference; *1e20 converts AA^-2/eV -> m^-2/J
             dSdE_SI=(Sp-Sm)/(2.*de)*1.e20
+            # Onsager: m*_c = (hbar^2 / 2pi) * dS/dE  [in units of electron mass m_e]
             mc=np.abs(dSdE_SI)*eC*hbar**2/(2*np.pi*emass)
             results.append((kz_ext,S0,mc))
             print(f"  kz={kz_ext:.4f}: S={S0:.4f} AA^-2, m*={mc:.4f} m_e",flush=True)
@@ -961,9 +971,8 @@ def get_dhva_band(mesh,rvec,ham_r,S_r,mu:float,theta_list,phi=0.,meshkz=20):
     # convert to arrays
     all_results={k:np.array(v) for k,v in all_results.items()}
 
-    # split each band into orbit branches:
-    # at each theta there are multiple extremal F values (kz=0, kz=pi/2, interior).
-    # sort F ascending at each theta and connect same-rank points across theta -> branches.
+    # Group extremal F values by rank (ascending) at each theta and connect same-rank points
+    # across angles to form continuous orbit branches (e.g., belly vs neck orbits)
     fig,ax=plt.subplots()
     prop_cycle=plt.rcParams['axes.prop_cycle'].by_key()['color']
     for ci,band_idx in enumerate(sorted(all_results.keys())):

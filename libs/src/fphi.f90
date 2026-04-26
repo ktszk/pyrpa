@@ -48,6 +48,7 @@ subroutine get_iqshift(qpoint,klist,qshift,Nk) bind(C,name="get_iqshift_")
      ht_val(h) = jj
   end do
 
+  ! Lookup for -k+q: compute 1-k+q = (-k+q) mod 1 (folds into [0,1))
   !$omp parallel do private(i1,i2,i3,key_t,h,step,tmpf,j1,j2,j3)
   do i=1,Nk
      tmpf(:)=1.0d0-klist(:,i)+qpoint(:)
@@ -123,7 +124,8 @@ contains
              if(abs(w-eig(m,k)-eig(l,qshift(k))+2.0d0*mu)<eps .and. idelta<eps)then
                 cycle band2_loop
              end if
-             ! compute scalar weight once per (k,l,m)
+             ! Cooper pair propagator (particle-particle channel):
+             ! weight = -(1-f_l(-k+q) - f_m(k)) / (ω - E_m(k) - E_l(-k+q) + 2μ)
              weight=-(1.0d0-ffermi(l,qshift(k))-ffermi(m,k))&
                   /cmplx(w-eig(m,k)-eig(l,qshift(k))+2.0d0*mu,idelta,kind=real64)
              ! A_vec(j) = uni(ol(j,1),l,qshift(k)) * conjg(uni(ol(j,2),m,k))
@@ -261,6 +263,7 @@ subroutine phiq_map(trphi,uni,eig,ffermi,klist,ol,mu,temp,ecut,idelta,eps,Nx,Ny,
   complex(real64),dimension(Nchi,Nchi):: phi
   complex(real64),dimension(2*Nchi):: work
 
+  ! sw_omega=.true.: real frequency ω+iδ;  .false.: Matsubara iω_n (w=0, δ=0)
   if(sw_omega)then !set omega=cmplex(w,idelta)
      wre=ecut
      wim=idelta

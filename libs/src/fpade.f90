@@ -14,25 +14,28 @@ subroutine get_a(a,xn,inp_data,Np) bind(C,name="get_a_")
   integer(int32) i,j
   complex(real64),dimension(Np):: g1,g0
 
+  ! Thiele's reciprocal difference algorithm for Padé continued fraction coefficients
+  ! g_{i}(z) = (g_{i-1}(z_{i-1}) - g_{i-1}(z)) / ((z - z_{i-1}) * g_{i-1}(z))
   g0(:)=inp_data(:) !g_1=inp_data
   !$omp parallel workshare
   a(:)=0.0d0
   !$omp end parallel workshare
   a(1)=g0(1)  !a_1=g_1(z1)
-  do i=2,Np !g0=g_(i-1),g1=g_i
+  do i=2,Np !g0=g_(i-1), g1=g_i
      !$omp parallel
      !$omp do simd private(j)
-     do j=1,Np !calc all g1 at data point
+     do j=1,Np !evaluate g_i at all data points
+        ! Guard against g0(j)=0 to avoid division by zero; merge selects zero branch
         g1(j)=merge((0.0d0,0.0d0),(g0(i-1)-g0(j))/ &
              merge((1.0d0,0.0d0),(xn(j)-xn(i-1))*g0(j),g0(j)==(0.0d0,0.0d0)), &
              g0(j)==(0.0d0,0.0d0))
      end do
      !$omp end do simd
      !$omp workshare
-     g0(:)=g1(:) !renew g0->g_i
+     g0(:)=g1(:) !advance: g_{i-1} <- g_i
      !$omp end workshare
      !$omp end parallel
-     a(i)=g1(i) !a_i=g_i(z_i)
+     a(i)=g1(i) !a_i = g_i(z_i), the i-th continued fraction coefficient
   end do
 
   return
