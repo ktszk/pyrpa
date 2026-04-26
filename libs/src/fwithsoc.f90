@@ -48,6 +48,9 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,ol
   complex(real64),dimension(Nkall,Nw,Norb,Norb):: newdelta,fk
 
   weight=temp/dble(Nkall)
+  ! norm2 is the shift used in the power iteration: newdelta = -weight*K*delta + norm2*delta
+  ! converges to (λ + norm2)*delta, so true eigenvalue λ = Rayleigh quotient - norm2.
+  ! After the 1st eigenvalue is found, norm2 is set to its norm for deflation (shift-deflation).
   norm2=0.0d0
   call get_V_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
@@ -412,6 +415,8 @@ subroutine get_chi0_soc(chi,sgnsig,sgnsig2,invschi,Vmat,Gk,kmap,invk,invs,olist,
   call ckchi()
 contains
   subroutine get_sgnsig()
+    ! sgnsig(i,j)  = s_i * s_j  (orbital spin signature for TRS G(-k) relation)
+    ! sgnsig2(i,j) = s_{i1}*s_{i2}*s_{j1}*s_{j2}  (chi index spin signature)
     integer(int32) i,j
     do j=1,Norb
        do i=j,Norb
@@ -501,18 +506,19 @@ subroutine get_V_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
    cmatv(:,:)=cmplx(Vmat(:,:),0.0d0,kind=real64)
    neg_cmatv(:,:)=-cmatv(:,:)
 
+  ! SOC-RPA pairing vertex: V_Δ = -V + V·χ,  χ = (I+χ₀·V)^{-1}·χ₀·V
   !$omp parallel do collapse(2) private(i,cmat1,cmat2,cmat3,ipiv,info,l)
   wloop:do j=1,Nw
      qloop:do i=1,Nk
         call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),chi(i,j,:,:),Nchi,cmatv,Nchi,(0.0d0,0.0d0),cmat1,Nchi) !chi0V
         cmat2(:,:)=cmat1(:,:) !chi0V (RHS for zgesv)
         do l=1,Nchi
-           cmat1(l,l)=cmat1(l,l)+1.0d0 !I-chi0V
+           cmat1(l,l)=cmat1(l,l)+1.0d0 !I+chi0V
         end do
-        call zgesv(Nchi,Nchi,cmat1,Nchi,ipiv,cmat2,Nchi,info) !(I-chi0V)X=chi0V -> cmat2=chi
+        call zgesv(Nchi,Nchi,cmat1,Nchi,ipiv,cmat2,Nchi,info) !(I+chi0V)X=chi0V -> cmat2=chi (RPA)
         if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
-        cmat3(:,:)=neg_cmatv(:,:)
-        call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),cmatv,Nchi,cmat2,Nchi,(1.0d0,0.0d0),cmat3,Nchi)
+        cmat3(:,:)=neg_cmatv(:,:)   !start from -V
+        call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),cmatv,Nchi,cmat2,Nchi,(1.0d0,0.0d0),cmat3,Nchi) !-V + V*chi
         chi(i,j,:,:)=cmat3(:,:)
      end do qloop
   end do wloop
@@ -541,22 +547,25 @@ subroutine mkfk_trs_soc(fk,Gk,delta,sgnsig,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_
   !$omp parallel do collapse(2) private(i,j,l,m,n,gmat1,gmat2,cmat1)
   do j=1,Nw
      do i=1,Nkall
+        ! F(k) = G(k)·Δ(k)·G(-k)^T, using TRS: G(-k)_{ln} = s_n s_l G(k)_{ī n̄}
+        ! invk(2,i)==0: k is direct; invk(2,i)==1: k is TRS-mapped from irr k
         if(invk(2,i)==0)then
-           gmat1(:,:)=Gk(invk(1,i),j,:,:)
+           gmat1(:,:)=Gk(invk(1,i),j,:,:)   !G(k)
            do l=1,Norb
               do n=1,Norb
-                 gmat2(l,n)=sgnsig(n,l)*Gk(invk(1,i),j,invs(l),invs(n))
+                 gmat2(l,n)=sgnsig(n,l)*Gk(invk(1,i),j,invs(l),invs(n))  !G(-k)_{ln}=s_n*s_l*G(k)_{ī n̄}
               end do
            end do
         else
            do l=1,Norb
               do n=1,Norb
-                 gmat1(l,n)=sgnsig(n,l)*Gk(invk(1,i),j,invs(n),invs(l))
-                 gmat2(l,n)=Gk(invk(1,i),j,n,l)
+                 gmat1(l,n)=sgnsig(n,l)*Gk(invk(1,i),j,invs(n),invs(l))  !G(k)_{ln} from G(-irr_k)
+                 gmat2(l,n)=Gk(invk(1,i),j,n,l)                           !G(-k)=G(irr_k)^T
               end do
            end do
         end if
 
+        ! F = -G(k) · Δ(k) · G(-k)^†  (linearized anomalous Green function)
         call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),gmat1,Norb,delta(i,j,:,:),Norb,(0.0d0,0.0d0),cmat1,Norb)
         call zgemm('N','C',Norb,Norb,Norb,(-1.0d0,0.0d0),cmat1,Norb,gmat2,Norb,(0.0d0,0.0d0),fk(i,j,:,:),Norb)
      end do
@@ -633,6 +642,8 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,kmap,invk,invs,
   !$omp end parallel workshare
   do l=1,Nchi
      do m=1,Nchi
+        ! triplet (gap_sym<0): all spin components needed;
+        ! singlet (gap_sym>0): only ↑↓/↓↑ components (same-spin pairs vanish for singlet)
         if((gap_sym<0) .or. (gap_sym>0 .and. slist(olist(l,1))*slist(olist(m,2))<0))then !triplet gap need all D, singlet gap only Dud(du)
            if((gap_sym==par_mix .and. slist(olist(l,1))*slist(olist(m,2))<0) .or. slist(olist(l,1))==1)then !calc only Duu, Dud
               if(slist(olist(m,2))==1 .or. olist(l,1)>=invs(olist(m,2)))then !Duu all, Dud upper triangle
@@ -642,6 +653,7 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,kmap,invk,invs,
                     if(invk(2,i)==0)then !k,0
                        tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vdelta(invk(1,i),1,m,l) !j=1 corresponds to w_n=0
                     else if(invk(2,i)==1)then !-k,0
+                       ! V(-q)_{ml} = s_{m1}s_{m2}s_{l1}s_{l2} * V(q)_{invschi(l),invschi(m)}  (TRS+SOC)
                        tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=sgnsig2(m,l)*Vdelta(invk(1,i),1,invschi(l),invschi(m)) !V^ml(-q,0)=V^lm(q,0)
                     end if
                     tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=-Vmat(m,l) !Nw+1 consider w_n=>inf limit
@@ -666,7 +678,7 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,kmap,invk,invs,
                  do j=1,Nw
                     do i=1,Nkall
                        tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),j)=delta(i,j,olist(l,2),olist(m,1))
-                       tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=-delta(invk(3,i),j,olist(m,1),olist(l,2)) !F(k,-w)=F(-k,w)
+                       tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=-delta(invk(3,i),j,olist(m,1),olist(l,2)) !F(k,-ω)=-F(-k,ω): anomalous GF Matsubara symmetry
                     end do
                  end do
                  !$omp end do

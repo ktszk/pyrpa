@@ -424,6 +424,9 @@ subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
 
    Smat_c(:,:)=cmplx(Smat(:,:),0.0d0,kind=real64)
    Cmat_c(:,:)=cmplx(Cmat(:,:),0.0d0,kind=real64)
+   ! Bare (static) pairing vertex from Kanamori model:
+   !   singlet: V0 = (S+C)/2 = Vud  (spin-singlet ↑↓ channel)
+   !   triplet: V0 = (S-C)/2 = Vuu  (spin-triplet ↑↑ channel)
    if(sw_pair)then
       V0_c(:,:)=cmplx(0.5d0*(Smat(:,:)+Cmat(:,:)),0.0d0,kind=real64) !bare Vud=(C+S)/2
    else
@@ -447,13 +450,16 @@ subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
         if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
         cmat1(:,:)=cmat3(:,:) !cmat1=chiS
         cmat2(:,:)=cmat4(:,:) !cmat2=chiC
-        cmat4(:,:)=V0_c(:,:)
+        cmat4(:,:)=V0_c(:,:)   !start from bare static vertex
+        ! FLEX pairing vertex (RPA-dressed):
+        !   singlet: V_Δ = (S+C)/2 + 3/2·S·χ_s - 1/2·C·χ_c
+        !   triplet: V_Δ = (S-C)/2 - 1/2·S·χ_s - 1/2·C·χ_c
         if(sw_pair)then !singlet
-           call zgemm('N','N',Nchi,Nchi,Nchi,(1.5d0,0.0d0),Smat_c,Nchi,cmat1,Nchi,(1.0d0,0.0d0),cmat4,Nchi)
-           call zgemm('N','N',Nchi,Nchi,Nchi,(-0.5d0,0.0d0),Cmat_c,Nchi,cmat2,Nchi,(1.0d0,0.0d0),cmat4,Nchi)
+           call zgemm('N','N',Nchi,Nchi,Nchi,(1.5d0,0.0d0),Smat_c,Nchi,cmat1,Nchi,(1.0d0,0.0d0),cmat4,Nchi)  !+3/2·S·χ_s
+           call zgemm('N','N',Nchi,Nchi,Nchi,(-0.5d0,0.0d0),Cmat_c,Nchi,cmat2,Nchi,(1.0d0,0.0d0),cmat4,Nchi) !-1/2·C·χ_c
         else !triplet
-           call zgemm('N','N',Nchi,Nchi,Nchi,(-0.5d0,0.0d0),Smat_c,Nchi,cmat1,Nchi,(1.0d0,0.0d0),cmat4,Nchi)
-           call zgemm('N','N',Nchi,Nchi,Nchi,(-0.5d0,0.0d0),Cmat_c,Nchi,cmat2,Nchi,(1.0d0,0.0d0),cmat4,Nchi)
+           call zgemm('N','N',Nchi,Nchi,Nchi,(-0.5d0,0.0d0),Smat_c,Nchi,cmat1,Nchi,(1.0d0,0.0d0),cmat4,Nchi) !-1/2·S·χ_s
+           call zgemm('N','N',Nchi,Nchi,Nchi,(-0.5d0,0.0d0),Cmat_c,Nchi,cmat2,Nchi,(1.0d0,0.0d0),cmat4,Nchi) !-1/2·C·χ_c
         end if
         chi(i,j,:,:)=cmat4(:,:)
      end do qloop
@@ -539,6 +545,8 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,olist,Nkal
   complex(real64),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpVdelta,tmpfk,tmp
   logical(1),parameter:: sw_odd_freq=.false.
 
+  ! sgn: F(-k,ω) = sgn·F^T(k,ω);  dprt: Δ(k,-ω) = dprt·Δ*(k,ω)
+  ! singlet: F(-k)=+F^T(k), even-ω gap; triplet: F(-k)=-F^T(k), odd-ω gap
   if(sw_pair)then
      sgn=1.0d0 !singlet Fk=F^T-k
      dprt=1.0d0 !gap parity even freq singlet is even

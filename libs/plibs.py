@@ -26,11 +26,13 @@ def import_hoppings(fname:str,ftype:int) -> tuple[np.ndarray,np.ndarray,int,int]
         tmp=np.array([complex(float(tp[0]),float(tp[1])) for tp in
                       [f.strip(' ()\n').split(',') for f in open(f'{name}/ham_r.txt','r')]])
         no=int(np.sqrt(tmp.size/nr))
+        # Divide each R-block by its degeneracy weight (number of equivalent k-points)
         ham_r=(tmp.reshape(nr,no,no).T/ndegen).T.round(6).copy()
         return(rvec,ham_r,no,nr)
 
     def import_out(name:str):
         data=np.loadtxt(name)
+        # Count rows that share the same R-vector as the first row → gives no^2 (orbital pairs per R)
         con=(data[:,:3]==data[0,:3]).prod(axis=1).sum()
         no,nr =int(np.sqrt(con)),data[:,0].size//con
         rvec=np.array(data[:nr,:3])
@@ -91,7 +93,7 @@ def import_MLO_hoppings(name:str) -> tuple[np.ndarray,np.ndarray,np.ndarray,int,
     tmp=np.array([complex(tp[5],tp[6]) for tp in tmp1])
     tmpS=np.array([complex(tp[7],tp[8]) for tp in tmp1])
     rvec=np.array([tmp1[i][2:5] for i in range(nr)])
-    ham_r=tmp.reshape((no*no,nr)).T.reshape((nr,no,no)).round(6).copy()*13.6
+    ham_r=tmp.reshape((no*no,nr)).T.reshape((nr,no,no)).round(6).copy()*13.6  # Rydberg -> eV
     S_r=tmpS.reshape((no*no,nr)).T.reshape((nr,no,no)).round(6).copy()
     return rvec,ham_r,S_r,no,nr
 
@@ -102,6 +104,7 @@ def get_bvec(avec: np.ndarray) -> np.ndarray:
     @param  avec: primitive translation vector
     @return bvec: reciprocal lattice vector
     """
+    # b_i = 2pi * (a^{-T})_i  (standard reciprocal lattice relation a_i . b_j = 2pi delta_ij)
     bvec=2*np.pi*sclin.inv(avec).T
     return bvec
 
@@ -130,6 +133,7 @@ def get_eigs(klist: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.nda
         ham_k,S_k=flibs.gen_ham(klist,ham_r,rvec,Ovl_r=S_r)
         eig,uni=flibs.get_eig(ham_k,S_k)
         if sw_std:
+            # Normalize each eigenvector column so orbital weights sum to 1 (MLO basis is non-orthogonal)
             norm=np.sqrt((abs(uni)**2).sum(axis=2))
             if sw_uni:
                 return np.array([[u/nm for u,nm in zip(un,nor)] for un,nor in zip(uni,norm)])
@@ -154,7 +158,7 @@ def calc_mu(eig,Nk,fill:float,temp:float)-> float:
     no=int(eig.size/len(eig))
     def func(mu):
         sum_fermi=flibs.get_ffermi(eig,mu,temp).sum()
-        return(fill*Nk-sum_fermi)
+        return(fill*Nk-sum_fermi)  # zero when total electrons equals target filling * Nk
     emax=eig.max()
     emin=eig.min()
     try:
@@ -241,6 +245,7 @@ def gen_klist(Nx: int, Ny: int, Nz: int | None = None, sw_pp: bool = True, kz: f
     @retval klist: list of k-points
     """
     if sw_pp:
+        # Symmetric BZ: k in [-0.5, 0.5] for band/FS plots (includes both zone boundaries)
         kx=np.linspace(-0.5,0.5,Nx,True)
         ky=np.linspace(-0.5,0.5,Ny,True)
         if Nz is None:
@@ -248,6 +253,7 @@ def gen_klist(Nx: int, Ny: int, Nz: int | None = None, sw_pp: bool = True, kz: f
         else:
             kz=np.linspace(-0.5,0.5,Nz,True)
     else:
+        # Periodic BZ: k in [0, 1) without endpoint for FFT-compatible k-summations
         kx=np.linspace(0,1,Nx,False)
         ky=np.linspace(0,1,Ny,False)
         kz=np.linspace(0,1,Nz,False)
@@ -272,14 +278,15 @@ def mk_klist(k_list: np.ndarray | list, N: int, bvec: np.ndarray) -> tuple[np.nd
     maxsplen=0
     for ks,ke in zip(k_list,k_list[1:]):
         dkv=np.array(ke)-np.array(ks)
+        # Arc length of segment in Cartesian reciprocal space (Angstrom^-1)
         dkv_length=abs(dkv.dot(bvec)).sum()
-        tmp=np.linspace(ks,ke,N,False)
+        tmp=np.linspace(ks,ke,N,False)       # N points, excluding endpoint (appended at end)
         tmp2=np.linspace(0,dkv_length,N,False)+maxsplen
         maxsplen=tmp2.max()
         xticks+=[tmp2[0]]
         klist+=tmp.tolist()
         splen+=tmp2.tolist()
-    klist+=[k_list[-1]]
+    klist+=[k_list[-1]]        # append the final symmetry point
     splen+=[maxsplen+dkv_length/N]
     xticks+=[splen[-1]]
     return np.array(klist),np.array(splen),xticks
@@ -308,12 +315,13 @@ def mk_qlist(k_set: np.ndarray | list, Nx: int, Ny: int, Nz: int, bvec: np.ndarr
         dk=np.array(ke)-np.array(ks)
         dk_length=abs(dk.dot(bvec)).sum()
         # ensure at least one division along non-zero component; use ceil to avoid zero due to truncation
+        # Compute per-axis step counts; use ceil so non-zero dk always yields ≥1 point
         dN=np.asarray(np.ceil(abs(dk)*Narray),dtype=int)
         nonzero=dN[dN>0]
         if len(nonzero)==0:
             dk_length=0.0  # identical consecutive k-points; skip this segment
             continue
-        N=nonzero.min()
+        N=nonzero.min()   # use the tightest constraint to avoid oversampling any axis
         tmp=np.linspace(ks,ke,N,False)
         tmp2=np.linspace(0,dk_length,N,False)+maxsplen
         maxsplen+=dk_length
@@ -338,8 +346,9 @@ def get_kf_points(eig: np.ndarray, mesh: int, mu: float, kz: float) -> tuple[lis
     kf_points=[]
     fsband=[]
     for i,e in enumerate(eig.T-mu):
-        if(e.max()*e.min() < 0. ):
+        if(e.max()*e.min() < 0. ):  # band crosses the Fermi level → has a Fermi surface sheet
             cont=sk.find_contours(e.reshape(mesh+1,mesh+1),0)
+            # Rescale contour indices from [0, mesh] pixel space to [-0.5, 0.5] fractional BZ coords
             ct=[np.array([list(c)+[kz] for c in (cc-mesh/2)/mesh]) for cc in cont]
             kf_points.append(ct)
             fsband.append(i)
@@ -359,6 +368,7 @@ def get_eigs_2d(mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray,
     @return   eig: eigenvalues shape (Nk, Norb)
     """
     Nk,klist=gen_klist(mesh+1,mesh+1,kz=kz)
+    # Rotate real-space vectors so that kz-slices are perpendicular to the magnetic field direction
     rvec1=RotMat.dot(rvec.T).T.copy()
     eig,_=get_eigs(klist,ham_r,S_r,rvec1)
     return eig
@@ -402,6 +412,8 @@ def make_rotmat(theta_deg: float, phi_deg: float) -> np.ndarray:
     th,ph=np.deg2rad(theta_deg),np.deg2rad(phi_deg)
     cp,sp=np.cos(ph),np.sin(ph)
     ct,st=np.cos(th),np.sin(th)
+    # First rotate about z by -phi (align azimuth), then about y by -theta (align polar)
+    # Result: R @ B_hat = z_hat, so dHvA cross-sections are perpendicular to B
     Rz=np.array([[ cp, sp, 0.],[-sp, cp, 0.],[0., 0., 1.]])   # Rz(-phi)
     Ry=np.array([[ ct, 0.,-st],[ 0., 1.,  0.],[ st, 0., ct]]) # Ry(-theta)
     return Ry@Rz
@@ -461,9 +473,10 @@ def find_extremal_kz(kz_arr: np.ndarray, S_arr: np.ndarray, band_idx: int,
         s=get_band_area(v2,blist,band_idx,ABZ)
         return s if s is not None else 0.
     dS=np.diff(S_arr)
+    # BZ boundaries (kz=0 and kz=pi/2) are always extremal candidates
     cand_kz=[kz_arr[0],kz_arr[-1]]
     for i in range(len(dS)-1):
-        if dS[i]*dS[i+1]<0:
+        if dS[i]*dS[i+1]<0:  # sign change in dS/dkz → local extremum in this bracket
             sign=-1. if dS[i]>0 else 1.
             res=minimize_scalar(lambda kz,s=sign: s*S_at_kz(kz),
                                 bounds=(kz_arr[i],kz_arr[i+2]),method='bounded',
@@ -621,6 +634,7 @@ def get_ptv(alatt: np.ndarray, deg: np.ndarray, brav: int) -> tuple[np.ndarray, 
         Arot=np.array([[1., 0., 0.],[-.5,.5*np.sqrt(3.),0.],[0., 0., 1.]])
     elif brav==4: #trigonal
         cg=np.cos(np.pi*deg[2]/180.)
+        # Primitive vectors of rhombohedral cell expressed in orthogonal frame (Ashcroft & Mermin convention)
         tx,ty,tz=np.sqrt((1-cg)*0.5),np.sqrt((1.-cg)/6.),np.sqrt((1.+2*cg)/3.)
         Arot=np.array([[ tx,  -ty, tz],[ 0., 2*ty, tz],[-tx,  -ty, tz]])
     elif brav==5: #base center
@@ -630,10 +644,12 @@ def get_ptv(alatt: np.ndarray, deg: np.ndarray, brav: int) -> tuple[np.ndarray, 
     elif brav==7: #body center 2
         Arot=np.array([[-.5, .5, .5],[.5, -.5, .5],[.5, .5, -.5]])
     else:
+        # General triclinic lattice: build orthogonal representation from lattice angles (alpha, beta, gamma)
         phase=[np.pi*deg[0]/180.,np.pi*deg[1]/180.,np.pi*deg[2]/180.]
-        ax1,a2=alatt[1]/alatt[0],alatt[2]/alatt[0]
+        ax1,ax2=alatt[1]/alatt[0],alatt[2]/alatt[0]   # b/a, c/a ratios
         r1,r2,r3=ax1*np.cos(phase[2]),ax1*np.sin(phase[2]),ax2*np.cos(phase[1])
         r4=ax2*(np.cos(phase[0])-np.cos(phase[1])*np.cos(phase[2]))/np.sin(phase[2])
+        # r5 = c * sqrt(1 - cos^2(alpha) - cos^2(beta) - cos^2(gamma) + 2cos(alpha)cos(beta)cos(gamma)) / sin(gamma)
         r5=ax2*np.sqrt(1+2*np.cos(phase[0])*np.cos(phase[1])*np.cos(phase[2])
                        -(np.cos(phase[0])**2+np.cos(phase[1])**2+np.cos(phase[2])**2))/np.sin(phase[2])
         Arot=np.array([[ 1., 0.,  0.],
@@ -1025,12 +1041,14 @@ def _irr_to_full_kgrid(data_irr: np.ndarray, invk: np.ndarray, kmap: np.ndarray,
     @return    full: (..., Nx, Ny, Nz) complex128
     """
     ik_arr             = invk[:, 0] - 1        # Fortran 1-based → Python 0-based
-    is_tr              = invk[:, 1] != 0
+    is_tr              = invk[:, 1] != 0       # True when this BZ point is reached via TRS: k -> -k
     ix_arr, iy_arr, iz_arr = kmap[:, 0], kmap[:, 1], kmap[:, 2]
     full = np.zeros(data_irr.shape[:-1] + (Nx, Ny, Nz), dtype=np.complex128)
     d = np.where(~is_tr)[0]
     t = np.where( is_tr)[0]
+    # Direct k-points: copy irreducible value unchanged
     full[..., ix_arr[d], iy_arr[d], iz_arr[d]] = data_irr[..., ik_arr[d]]
+    # TRS-related k-points: apply complex conjugation (TRS: f(k) = f*(-k))
     full[..., ix_arr[t], iy_arr[t], iz_arr[t]] = np.conj(data_irr[..., ik_arr[t]])
     return full
 
@@ -1047,14 +1065,17 @@ def _wannier_all_nonzero(data_full: np.ndarray,
     @retval rvec_kept: (Nr_nonzero, 3) int64 — centered R-vector coordinates
     """
     N_cut_use = min(N_cut, data_full.shape[2])
+    # IFFT over k-mesh (last 3 axes) to obtain Wannier R-space representation
     data_R    = np.fft.ifftn(data_full, axes=(-3, -2, -1))[:, :, :N_cut_use]
     abs_tol   = np.abs(data_R).max() * zero_tol
+    # Zero out numerically negligible Re/Im parts to reduce output file size
     data_R.real[np.abs(data_R.real) < abs_tol] = 0.0
     data_R.imag[np.abs(data_R.imag) < abs_tol] = 0.0
 
     nonzero          = np.abs(data_R).max(axis=(0, 1, 2)) > 0   # (Nx, Ny, Nz)
     ix_nz, iy_nz, iz_nz = np.where(nonzero)
 
+    # Wrap FFT indices to centered Wigner-Seitz convention: indices > N/2 map to negative R
     ix_c = np.where(ix_nz <= Nx // 2, ix_nz, ix_nz - Nx)
     iy_c = np.where(iy_nz <= Ny // 2, iy_nz, iy_nz - Ny)
     iz_c = np.where(iz_nz <= Nz // 2, iz_nz, iz_nz - Nz)
