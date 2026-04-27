@@ -1040,6 +1040,52 @@ def calc_Lij(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float, w: 
                    byref(c_double(eps)), byref(c_double(temp)))
     return L11, L12, L22
 
+def calc_Lij_wl(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float,
+                wl: np.ndarray, idelta: float, temp: float
+                ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    @fn calc_Lij_wl
+    @brief Evaluate L11, L12, L22 for all frequencies wl in a single Fortran call.
+    @param    eig: Eigenvalues [Nk, Norb] float64
+    @param     vk: Group velocities [Nk, Norb, Norb, 3] complex128
+    @param ffermi: Fermi-Dirac occupations [Nk, Norb] float64
+    @param     mu: Chemical potential in eV
+    @param     wl: Frequency mesh [Nw] float64
+    @param idelta: Lorentzian broadening parameter in eV
+    @param   temp: Temperature in eV
+    @retval   L11: [Nw, 3, 3] complex128
+    @retval   L12: [Nw, 3, 3] complex128
+    @retval   L22: [Nw, 3, 3] complex128
+    """
+    Nk = len(eig)
+    Norb = int(eig.size / Nk)
+    Nw = len(wl)
+    eps = idelta * 1e-3
+    wl = np.ascontiguousarray(wl, dtype=np.float64)
+    # Fortran array L11(Nw,3,3) with column-major layout matches numpy (Nw,3,3) order='F'
+    L11 = np.zeros((Nw, 3, 3), dtype=np.complex128, order='F')
+    L12 = np.zeros((Nw, 3, 3), dtype=np.complex128, order='F')
+    L22 = np.zeros((Nw, 3, 3), dtype=np.complex128, order='F')
+    flibs.calc_lij_wl.argtypes = [
+        np.ctypeslib.ndpointer(dtype=np.complex128),  # L11
+        np.ctypeslib.ndpointer(dtype=np.complex128),  # L22
+        np.ctypeslib.ndpointer(dtype=np.complex128),  # L12
+        np.ctypeslib.ndpointer(dtype=np.complex128),  # vk
+        np.ctypeslib.ndpointer(dtype=np.float64),     # eig
+        np.ctypeslib.ndpointer(dtype=np.float64),     # ffermi
+        POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),  # Norb, Nk, Nw
+        POINTER(c_double),                             # mu
+        np.ctypeslib.ndpointer(dtype=np.float64),     # wl
+        POINTER(c_double), POINTER(c_double),          # idelta, eps
+        POINTER(c_double),                             # temp
+    ]
+    flibs.calc_lij_wl.restype = c_void_p
+    flibs.calc_lij_wl(L11, L22, L12, vk, eig, ffermi,
+                      byref(c_int64(Norb)), byref(c_int64(Nk)), byref(c_int64(Nw)),
+                      byref(c_double(mu)), wl,
+                      byref(c_double(idelta)), byref(c_double(eps)), byref(c_double(temp)))
+    return L11, L12, L22
+
 def calc_Kn(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray, temp: float,
             mu: float, tau: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """

@@ -22,12 +22,12 @@ else: monoclinic
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4nso',0,7,False
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
-#fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
+fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/FeS',2,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2_soc.input',1,0,True
 #fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
-fname,ftype,brav,sw_soc='inputs/square_soc.hop',1,0,True
+#fname,ftype,brav,sw_soc='inputs/square_soc.hop',1,0,True
 
 sw_dec_axis=False
 
@@ -73,15 +73,15 @@ abc=[3.96*0.70711,3.96*0.70711,13.02*.5]
 #alpha_beta_gamma=[90.,90.,90]
 #temp=2.0e-2 #2.59e-2
 tempK=500 #Kelvin
-fill= .98 #3.02
+fill= 3.02
 #site_prof=[5]
 
 Emin,Emax=-3,3
 delta=3.0e-2
 Ecut=1.0e-2
 tau_const=100
-olist=[0,0,0]
-#olist=[0,[1,2],3]
+#olist=[0,0,0]
+olist=[0,[1,2],3]
 #olist=[[0,3],[1,4],[2,5]]
 #olist=[[0,4],[1,2,5,6],[3,7]]
 #U,J= 0.8, 0.1
@@ -100,9 +100,9 @@ sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 sw_omega=False #True: real freq, False: Matsubara freq.
 sw_rescale_flex=True #True: rescale self energy to make max|Sigma|~U, False: no rescaling
-sw_self=True  #True: use calculated self energy for spectrum band plot
+sw_self=False  #True: use calculated self energy for spectrum band plot
 sw_out_self=True
-sw_in_self=True
+sw_in_self=False
 sw_from_file=False
 #------------------------ initial parameters are above -------------------------------
 #----------------------------------main functions-------------------------------------

@@ -230,6 +230,54 @@ subroutine getinv(Gk,Nk,Nw,Norb) bind(C,name="getinv_")
   !$omp end parallel do
 end subroutine getinv
 
+subroutine ckchi_impl(chi,Smat,Cmat,kmap,invk,Nk,Nkall,Nchi,Nw,maxchi0s_out)
+  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  implicit none
+  integer(int64),intent(in):: Nk,Nkall,Nchi,Nw
+  integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
+  real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  real(real64),intent(out):: maxchi0s_out
+  complex(real64),intent(in),dimension(Nk,Nw,Nchi,Nchi):: chi
+
+  integer(int32) i,info,chisk,chick,chiskall,chickall
+  real(real64) maxchi0s,maxchi0c,maxchi0s2,maxchi0c2
+  real(real64),dimension(2*Nchi):: rwork
+  complex(real64),dimension(Nchi*Nchi*4+1):: work
+  complex(real64),dimension(Nchi):: eigs,eigc
+  complex(real64),dimension(Nchi,Nchi):: chi0s,chi0c,tmp1,tmp2,Smat_c,Cmat_c,chi_tmp
+
+  Smat_c = cmplx(Smat, 0.0d0, kind=real64)
+  Cmat_c = cmplx(Cmat, 0.0d0, kind=real64)
+  maxchi0s2=-1.0d5
+  maxchi0c2=-1.0d5
+  do i=1,Nk
+     chi_tmp = chi(i,1,:,:)
+     call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),chi_tmp,Nchi,Smat_c,Nchi,(0.0d0,0.0d0),chi0s,Nchi)
+     call zgemm('N','N',Nchi,Nchi,Nchi,(-1.0d0,0.0d0),chi_tmp,Nchi,Cmat_c,Nchi,(0.0d0,0.0d0),chi0c,Nchi)
+     call zgeev('N','N',Nchi,chi0s,Nchi,eigs,tmp1,Nchi,tmp2,Nchi,work,Nchi*Nchi*4+1,rwork,info)
+     call zgeev('N','N',Nchi,chi0c,Nchi,eigc,tmp1,Nchi,tmp2,Nchi,work,Nchi*Nchi*4+1,rwork,info)
+     maxchi0s=maxval(dble(eigs))
+     maxchi0c=maxval(dble(eigc))
+     if(maxchi0s>maxchi0s2)then
+        chisk=i
+        maxchi0s2=maxchi0s
+     end if
+     if(maxchi0c>maxchi0c2)then
+        chick=i
+        maxchi0c2=maxchi0c
+     end if
+  end do
+  do i=1,Nkall !get kmap footnote
+     if(invk(2,i)==0)then
+        if(invk(1,i)==chisk)chiskall=i
+        if(invk(1,i)==chick)chickall=i
+     end if
+  end do
+  print'(A3,3I4,F12.8)','SDW',kmap(:,chiskall),maxchi0s2
+  print'(A3,3I4,F12.8)','CDW',kmap(:,chickall),maxchi0c2
+  maxchi0s_out=maxchi0s2
+end subroutine ckchi_impl
+
 subroutine get_chi0(chi,Smat,Cmat,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi) bind(C)
   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
   implicit none
@@ -243,60 +291,11 @@ subroutine get_chi0(chi,Smat,Cmat,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,N
 
   integer(int32),dimension(Nchi,Nchi,2)::chi_map
   integer(int32),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
+  real(real64) dummy_maxchi0s
 
   call get_chi_map(chi_map,irr_chi,olist,Nchi)
   call get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
-  call ckchi()
-contains
-  subroutine ckchi()
-    integer(int32) i,l,m,n,info,chisk,chick,chiskall,chickall
-    real(real64) maxchi0s,maxchi0c,maxchi0s2,maxchi0c2
-    real(real64),dimension(2*Nchi):: rwork
-    complex(real64),dimension(Nchi*Nchi*4+1):: work
-    complex(real64),dimension(Nchi):: eigs,eigc
-    complex(real64),dimension(Nchi,Nchi):: chi0s,chi0c,tmp1,tmp2
-
-    maxchi0s2=-1.0d5
-    maxchi0c2=-1.0d5
-    do i=1,Nk
-       !$omp parallel
-       !$omp workshare
-       chi0s(:,:)=0.0d0
-       chi0c(:,:)=0.0d0
-       !$omp end workshare
-       !$omp do private(l,m,n)
-       do l=1,Nchi
-          do m=1,Nchi
-             do n=1,Nchi
-                chi0s(m,l)=chi0s(m,l)+chi(i,1,m,n)*Smat(n,l)
-                chi0c(m,l)=chi0c(m,l)-chi(i,1,m,n)*Cmat(n,l)
-             end do
-          end do
-       end do
-       !$omp end do
-       !$omp end parallel
-       call zgeev('N','N',Nchi,chi0s,Nchi,eigs,tmp1,Nchi,tmp2,Nchi,work,Nchi*Nchi*4+1,rwork,info)
-       call zgeev('N','N',Nchi,chi0c,Nchi,eigc,tmp1,Nchi,tmp2,Nchi,work,Nchi*Nchi*4+1,rwork,info)
-       maxchi0s=maxval(dble(eigs))
-       maxchi0c=maxval(dble(eigc))
-       if(maxchi0s>maxchi0s2)then
-          chisk=i
-          maxchi0s2=maxchi0s
-       end if
-       if(maxchi0c>maxchi0c2)then
-          chick=i
-          maxchi0c2=maxchi0c
-       end if
-    end do
-    do i=1,Nkall !get kmap footnote
-       if(invk(2,i)==0)then
-          if(invk(1,i)==chisk)chiskall=i
-          if(invk(1,i)==chick)chickall=i
-       end if
-    end do
-    print'(A3,3I4,F12.8)','SDW',kmap(:,chiskall),maxchi0s2
-    print'(A3,3I4,F12.8)','CDW',kmap(:,chickall),maxchi0c2
-  end subroutine ckchi
+  call ckchi_impl(chi,Smat,Cmat,kmap,invk,Nk,Nkall,Nchi,Nw,dummy_maxchi0s)
 end subroutine get_chi0
 
 subroutine get_chi_map(chi_map,irr_chi,olist,Nchi)
@@ -784,7 +783,7 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   iter_loop: do scf_i=1,scf_loop
      print'(A5,I5)','iter=',scf_i
      call get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
-     call ckchi()
+     call ckchi_impl(chi,Smat,Cmat,kmap,invk,Nk,Nkall,Nchi,Nw,maxchi0s_global)
      if(sw_rescale .and. maxchi0s_global>=1.0d0)then
         print'(A,F10.6,A)','[FLEX] Stoner factor=',maxchi0s_global,'>= 1: rescaling chi0'
         chi(:,:,:,:)=chi(:,:,:,:)*(1.0d0-1.0d-4)/maxchi0s_global
@@ -846,57 +845,6 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   call renew_mu()
   deallocate(eig_gkinv)
 contains
-  subroutine ckchi()
-    integer(int32) i,l,m,n,info,chisk,chick,chiskall,chickall
-    real(real64) maxchi0s,maxchi0c,maxchi0s2,maxchi0c2
-    real(real64),dimension(2*Nchi):: rwork
-    complex(real64),dimension(Nchi*Nchi*4+1):: work
-    complex(real64),dimension(Nchi):: eigs,eigc
-    complex(real64),dimension(Nchi,Nchi):: chi0s,chi0c,tmp1,tmp2
-
-    maxchi0s2=-1.0d5
-    maxchi0c2=-1.0d5
-    do i=1,Nk
-       !$omp parallel
-       !$omp workshare
-       chi0s(:,:)=0.0d0
-       chi0c(:,:)=0.0d0
-       !$omp end workshare
-       !$omp do private(l,m,n)
-       do l=1,Nchi
-          do m=1,Nchi
-             do n=1,Nchi
-                chi0s(m,l)=chi0s(m,l)+chi(i,1,m,n)*Smat(n,l)
-                chi0c(m,l)=chi0c(m,l)-chi(i,1,m,n)*Cmat(n,l)
-             end do
-          end do
-       end do
-       !$omp end do
-       !$omp end parallel
-       call zgeev('N','N',Nchi,chi0s,Nchi,eigs,tmp1,Nchi,tmp2,Nchi,work,Nchi*Nchi*4+1,rwork,info)
-       call zgeev('N','N',Nchi,chi0c,Nchi,eigc,tmp1,Nchi,tmp2,Nchi,work,Nchi*Nchi*4+1,rwork,info)
-       maxchi0s=maxval(dble(eigs))
-       maxchi0c=maxval(dble(eigc))
-       if(maxchi0s>maxchi0s2)then
-          chisk=i
-          maxchi0s2=maxchi0s
-       end if
-       if(maxchi0c>maxchi0c2)then
-          chick=i
-          maxchi0c2=maxchi0c
-       end if
-    end do
-    do i=1,Nkall !get kmap footnote
-       if(invk(2,i)==0)then
-          if(invk(1,i)==chisk)chiskall=i
-          if(invk(1,i)==chick)chickall=i
-       end if
-    end do
-    print'(A3,3I4,F12.8)','SDW',kmap(:,chiskall),maxchi0s2
-    print'(A3,3I4,F12.8)','CDW',kmap(:,chickall),maxchi0c2
-    maxchi0s_global=maxchi0s2
-  end subroutine ckchi
-
   subroutine compare_sigma()
     integer(int32) i,j,l,m,kerr,iwerr,lerr,merr,ih,jh,idx_i,idx_j,info,n_cur
    real(real64) est, eps_reg

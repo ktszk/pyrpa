@@ -80,13 +80,20 @@ subroutine get_eig(eig,uni,ham_k,Nk,Norb) bind(C)
   complex(real64),intent(out),dimension(Norb,Norb,Nk):: uni
 
   integer(int32) i,info
+  integer(int64) lwork
   real(real64) rwork(3*Norb-2),eq(Norb)
-  complex(real64) work(2*Norb-1),en(Norb,Norb)
+  complex(real64) work_query(1),en(Norb,Norb)
+  complex(real64),allocatable :: work(:)
 
-  !$omp parallel do private(en,eq,work,rwork,info)
+  call zheev('V','U',Norb,en,Norb,eq,work_query,-1_int64,rwork,info)
+  lwork = int(dble(work_query(1)), int64)
+
+  !$omp parallel private(en,eq,work,rwork,info)
+  allocate(work(lwork))
+  !$omp do
   kloop: do i=1,Nk
      en(:,:)=ham_k(:,:,i)
-     call zheev('V','U',Norb,en,Norb,eq,work,2*Norb-1,rwork,info)
+     call zheev('V','U',Norb,en,Norb,eq,work,lwork,rwork,info)
      if(info/=0)then
         print*,'zheev failed in get_eig: info=',info
         stop
@@ -94,7 +101,9 @@ subroutine get_eig(eig,uni,ham_k,Nk,Norb) bind(C)
      uni(:,:,i)=en(:,:)
      eig(:,i)=eq(:)
   end do kloop
-  !$omp end parallel do
+  !$omp end do
+  deallocate(work)
+  !$omp end parallel
 end subroutine get_eig
 
 subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,Norb) bind(C)
@@ -113,15 +122,22 @@ subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,Norb) bind(C)
   complex(real64),intent(out),dimension(Norb,Norb,Nk):: uni
 
   integer(int32) i,j,k,l,m,info
+  integer(int64) lwork
   real(real64) rwork(3*Norb-2),eq(Norb),norm
-  complex(real64) work(2*Norb-1)
+  complex(real64) work_query(1)
+  complex(real64),allocatable :: work(:)
   complex(real64),dimension(Norb,Norb):: tmp,tmp2,tmp3
   real(real64),parameter:: ovl_thresh=1.0d-8
 
-  !$omp parallel do private(tmp,tmp2,tmp3,norm,eq,work,rwork,info)
+  call zheev('V','U',norb,tmp,norb,eq,work_query,-1_int64,rwork,info)
+  lwork = int(dble(work_query(1)), int64)
+
+  !$omp parallel private(tmp,tmp2,tmp3,norm,eq,work,rwork,info)
+  allocate(work(lwork))
+  !$omp do
   kloop: do i=1,Nk
      tmp(:,:)=Ovlk(:,:,i)
-     call zheev('V','U',norb,tmp,norb,eq,work,2*norb-1,rwork,info)
+     call zheev('V','U',norb,tmp,norb,eq,work,lwork,rwork,info)
      if(info/=0)then
         print*,'zheev failed in get_eig_mlo (overlap): info=',info
         stop
@@ -137,7 +153,7 @@ subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,Norb) bind(C)
      ! Transform H to orthonormal basis: H_orth = tmp2^H * H * tmp2
      call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),ham_k(:,:,i),Norb,tmp2,Norb,(0.0d0,0.0d0),tmp3,Norb)
      call zgemm('C','N',Norb,Norb,Norb,(1.0d0,0.0d0),tmp2,Norb,tmp3,Norb,(0.0d0,0.0d0),tmp,Norb)
-     call zheev('V','U',norb,tmp,norb,eq,work,2*norb-1,rwork,info)
+     call zheev('V','U',norb,tmp,norb,eq,work,lwork,rwork,info)
      if(info/=0)then
         print*,'zheev failed in get_eig_mlo (ham): info=',info
         stop
@@ -147,7 +163,9 @@ subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,Norb) bind(C)
      call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),tmp2,Norb,tmp,Norb,(0.0d0,0.0d0),tmp3,Norb)
      uni(:,:,i)=tmp3(:,:)
   end do kloop
-  !$omp end parallel do
+  !$omp end do
+  deallocate(work)
+  !$omp end parallel
 end subroutine get_eig_mlo
 
 subroutine get_ffermi(ffermi,eig,mu,temp,Nk,Norb) bind(C)

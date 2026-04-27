@@ -263,7 +263,6 @@ subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,e
   integer(int32),dimension(Nchi):: ipiv
   real(real64),dimension(3):: qpoint
   complex(real64),dimension(Nchi,Nchi):: chi,tmp,tmp2,Smat_c
-  complex(real64),dimension(2*Nchi):: work
 
   Smat_c = Smat
 
@@ -272,7 +271,7 @@ subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,e
   trchi(:,:)=0.0d0
   trchis(:,:)=0.0d0
   !$omp end workshare
-  !$omp do private(j,l,chi,tmp,tmp2,qpoint,qshift,ipiv,work,info)
+  !$omp do private(j,l,chi,tmp,tmp2,qpoint,qshift,ipiv,info)
   do i=1,Nx
      do j=1,Ny
         qpoint(1)=dble(i-1)/Nx
@@ -280,19 +279,14 @@ subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,e
         qpoint(3)=0.0d0
         call get_qshift(qpoint,klist,qshift,Nk)
         chi(:,:)=calc_chi(Nk,Norb,Nchi,uni,eig,ffermi,ol,temp,qshift,ecut,idelta,eps)
-        ! RPA: chi_s = (1 - chi0*S)^{-1} * chi0
-        ! Step 1: tmp = I - chi0 * S
+        ! RPA: chi_s = (I - chi0*S)^{-1} * chi0
+        tmp2(:,:)=chi(:,:)
         call zgemm('N','N',Nchi,Nchi,Nchi,(-1.0d0,0.0d0),chi,Nchi,Smat_c,Nchi,(0.0d0,0.0d0),tmp,Nchi)
         do l=1,Nchi
            tmp(l,l)=tmp(l,l)+(1.0d0,0.0d0)
         end do
-        ! Step 2: invert (I - chi0*S) via LU factorization
-        call zgetrf(Nchi,Nchi,tmp,Nchi,ipiv,info)
-        if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
-        call zgetri(Nchi,tmp,Nchi,ipiv,work,2*Nchi,info)
-        if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
-        ! Step 3: tmp2 = (I - chi0*S)^{-1} * chi0 = chi_s
-        call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),tmp,Nchi,chi,Nchi,(0.0d0,0.0d0),tmp2,Nchi)
+        call zgesv(Nchi,Nchi,tmp,Nchi,ipiv,tmp2,Nchi,info)
+        if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
         !take chis_llmm
         do l=1,Nchi
            if(ol(l,1)==ol(l,2))then
@@ -326,24 +320,19 @@ subroutine get_chis(chis,chi0,Smat,Nchi,Nw) bind(C)
 
   integer(int32) i,l,info
   integer(int32),dimension(Nchi):: ipiv
-  complex(real64),dimension(2*Nchi):: work
   complex(real64),dimension(Nchi,Nchi):: tmp,Smat_c
 
   Smat_c = Smat
 
-  !$omp parallel do private(tmp,l,work,ipiv,info)
+  !$omp parallel do private(tmp,l,ipiv,info)
   do i=1,Nw
-     ! tmp = I - chi0(:,:,i) * Smat
+     chis(:,:,i)=chi0(:,:,i)
      call zgemm('N','N',Nchi,Nchi,Nchi,(-1.0d0,0.0d0),chi0(:,:,i),Nchi,Smat_c,Nchi,(0.0d0,0.0d0),tmp,Nchi)
      do l=1,Nchi
         tmp(l,l)=tmp(l,l)+(1.0d0,0.0d0)
      end do
-     call zgetrf(Nchi,Nchi,tmp,Nchi,ipiv,info)
-     if(info/=0)then; print*,'zgetrf failed: info=',info; stop; end if
-     call zgetri(Nchi,tmp,Nchi,ipiv,work,2*Nchi,info)
-     if(info/=0)then; print*,'zgetri failed: info=',info; stop; end if
-     ! chis(:,:,i) = tmp * chi0(:,:,i)
-     call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),tmp,Nchi,chi0(:,:,i),Nchi,(0.0d0,0.0d0),chis(:,:,i),Nchi)
+     call zgesv(Nchi,Nchi,tmp,Nchi,ipiv,chis(:,:,i),Nchi,info)
+     if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
   end do
   !$omp end parallel do
 end subroutine get_chis

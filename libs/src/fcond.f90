@@ -68,6 +68,84 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
   !$omp end parallel
 end subroutine calc_lij
 
+subroutine calc_lij_wl(L11,L22,L12,vk,eig,ffermi,Norb,Nk,Nw,mu,wl,idelta,eps,temp) bind(C)
+  !> calc_Lij for all Nw frequencies in a single k-loop pass.
+  !> Precomputes frequency-independent prefactors per (k,l,m) pair,
+  !> then applies the w-dependent denominator in the inner loop.
+  !!@param  L11,out: L11 [Nw,3,3]
+  !!@param  L22,out: L22 [Nw,3,3]
+  !!@param  L12,out: L12 [Nw,3,3]
+  !!@param   vk,in: group velocity [3,Norb,Norb,Nk]
+  !!@param  eig,in: energy of bands [Norb,Nk]
+  !!@param   ff,in: fermi distribute function [Norb,Nk]
+  !!@param Norb,in: The number of orbitals
+  !!@param   Nk,in: The number of k-points
+  !!@param   Nw,in: The number of frequency points
+  !!@param   mu,in: chemical potential
+  !!@param   wl,in: frequency mesh [Nw]
+  !!@param idelta,in: dumping factor
+  !!@param  eps,in: threshold of energy
+  !!@param temp,in: Temperature
+  use,intrinsic:: iso_fortran_env, only:int64,real64
+  implicit none
+  integer(int64),intent(in):: Nk,Norb,Nw
+  real(real64),intent(in):: temp,eps,idelta,mu
+  real(real64),intent(in),dimension(Nw):: wl
+  real(real64),intent(in),dimension(Norb,Nk):: eig,ffermi
+  complex(real64),intent(in),dimension(3,Norb,Norb,Nk):: vk
+  complex(real64),intent(out),dimension(Nw,3,3):: L11,L12,L22
+
+  integer(int64) i,j,k,l,m,iw
+  real(real64) de,fl,fm,el,em
+  complex(real64) p11,p12,p22,denom
+  complex(real64),parameter::ii=(0.0d0,1.0d0)
+
+  L11(:,:,:)=(0.0d0,0.0d0)
+  L12(:,:,:)=(0.0d0,0.0d0)
+  L22(:,:,:)=(0.0d0,0.0d0)
+
+  !$omp parallel do reduction(+: L11,L12,L22) private(i,l,m,j,k,iw,de,fl,fm,el,em,p11,p12,p22,denom)
+  k_loop: do i=1,Nk
+     band_loop1: do l=1,Norb
+        fl=ffermi(l,i); el=eig(l,i)
+        band_loop2: do m=1,Norb
+           fm=ffermi(m,i); em=eig(m,i)
+           de=em-el
+           do j=1,3
+              do k=1,3
+                 if(abs(de)<1.0d-9)then
+                    p11=vk(k,m,m,i)*vk(j,m,m,i)*fm*(1.0d0-fm)/temp
+                    p12=p11*(em-mu)
+                    p22=p12*(em-mu)
+                    do iw=1,Nw
+                       denom=cmplx(wl(iw),idelta,kind=real64)
+                       L11(iw,j,k)=L11(iw,j,k)+p11/denom
+                       L12(iw,j,k)=L12(iw,j,k)+p12/denom
+                       L22(iw,j,k)=L22(iw,j,k)+p22/denom
+                    end do
+                 else if(abs(fl-fm)>eps)then
+                    p11=vk(k,m,l,i)*vk(j,l,m,i)*(fl-fm)/de
+                    p12=p11*(el-mu)
+                    p22=p11*(em-mu)*(el-mu)
+                    do iw=1,Nw
+                       denom=cmplx(wl(iw)+de,idelta,kind=real64)
+                       L11(iw,j,k)=L11(iw,j,k)+p11/denom
+                       L12(iw,j,k)=L12(iw,j,k)+p12/denom
+                       L22(iw,j,k)=L22(iw,j,k)+p22/denom
+                    end do
+                 end if
+              end do
+           end do
+        end do band_loop2
+     end do band_loop1
+  end do k_loop
+  !$omp end parallel do
+
+  L11(:,:,:)=ii*L11(:,:,:)/Nk
+  L12(:,:,:)=ii*L12(:,:,:)/Nk
+  L22(:,:,:)=ii*L22(:,:,:)/Nk
+end subroutine calc_lij_wl
+
 subroutine calc_kn(K0,K1,K2,eig,veloc,kweight,tau,temp,mu,Nk,Norb) bind(C)
   !> calc_Kn
   !> Kn_ij=sum_k(v_ki*v_kj*(e_k-mu)^n*(-df(e_k)/de))
