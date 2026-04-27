@@ -68,8 +68,8 @@ kscale=[1.0,1.0,1.0]
 kz=0.0
 #RotMat=[[0,0,1],[0,1,0],[1,0,0]]
 
-abc=[3.96*0.70711,3.96*0.70711,13.02*.5]
-#abc=[3.68,3.68,5.03]
+#abc=[3.96*0.70711,3.96*0.70711,13.02*.5]
+abc=[3.68,3.68,5.03]
 #alpha_beta_gamma=[90.,90.,90]
 #temp=2.0e-2 #2.59e-2
 tempK=500 #Kelvin
@@ -82,13 +82,11 @@ Ecut=1.0e-2
 tau_const=100
 #olist=[0,0,0]
 olist=[0,[1,2],3]
-#olist=[[0,3],[1,4],[2,5]]
-#olist=[[0,4],[1,2,5,6],[3,7]]
 #U,J= 0.8, 0.1
 U,J=1.2,0.15
 #U,J=1.8,0.225
 #0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py
-gap_sym=1
+gap_sym=2
 
 #mu0=9.85114560061123
 #k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
@@ -103,7 +101,7 @@ sw_rescale_flex=True #True: rescale self energy to make max|Sigma|~U, False: no 
 sw_self=False  #True: use calculated self energy for spectrum band plot
 sw_out_self=True
 sw_in_self=False
-sw_from_file=False
+sw_from_file=True
 #------------------------ initial parameters are above -------------------------------
 #----------------------------------main functions-------------------------------------
 #-------------------------------- import packages ------------------------------------
@@ -267,7 +265,7 @@ def plot_FS(fscolors,klist,color_option:int):
     plt.yticks([-0.5,0,0.5],[r'-$\pi$','0',r'$\pi$'])
     plt.show()
 
-def plot_3d_surf(fspolys,fscenters,fscolors,surface_opt,kscale):
+def plot_3d_surf(fspolys,fscenters,fscolors,surface_opt,kscale,bvec):
     from mpl_toolkits.mplot3d import axes3d
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
     import matplotlib.colors as colors
@@ -306,7 +304,7 @@ def plot_3d_surf(fspolys,fscenters,fscolors,surface_opt,kscale):
     ax.set_yticks([])
     ax.set_zticks([])
     plt.tight_layout()
-    plibs.BZedge(0)
+    plibs.BZedge(bvec, ax)
     plt.show()
     #plt.savefig(fname='3DFS.png',dpi=300)
     
@@ -761,6 +759,7 @@ def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,chiolist,s
             try:
                 npz=np.load('self_en.npz')
                 sigmak,mu_self=npz['arr_0'],npz['arr_1']
+                print("Import sigma form self_en.npz")
             except FileNotFoundError:
                 print("Error: 'self_en.npz' not found",flush=True)
                 return
@@ -1210,7 +1209,7 @@ def main():
     elif option==3: #3D Fermi surface plot
         polys,centers,blist=plibs.gen_3d_surf_points(Nx,rvec,ham_r,S_r,mu,kscale)
         fspolys,fscenters,fscolors=set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist)
-        plot_3d_surf(fspolys,fscenters,fscolors,color_option,kscale)
+        plot_3d_surf(fspolys,fscenters,fscolors,color_option,kscale,bvec)
     elif option==4: #plot spectrum
         plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw,sw_self)
     elif option==5: #calc conductivity
@@ -1383,6 +1382,30 @@ def main():
         plt.tight_layout()
         plt.savefig('cpa_spectrum.png', dpi=150)
         plt.show()
+        # --- CPA on Matsubara frequencies -> sigma.bin ---
+        iwlist_mats = 1j*np.pi*temp*(2*np.arange(Nw, dtype=np.float64)+1)
+        print(f"CPA Matsubara: Norb={no}, Nk={Nk}, Nw={Nw}, x={x_cpa}", flush=True)
+        # reuse hamk (already shifted by -mu) computed above
+        sigma_cpa_mats = flibs.solve_cpa(hamk, VA, VB, x_cpa, iwlist_mats, pp=0.5)
+        print("CPA Matsubara converged", flush=True)
+        # build (Norb, Norb, Nw, Nk_irr) array for sigma.bin
+        # sigma_cpa_mats: (Nw, no, no) -> (no, no, Nw) -> broadcast over Nk_irr
+        klist_irr, kmap, invk = flibs.gen_irr_k_TRS(Nx, Ny, Nz)
+        Nk_irr = len(klist_irr)
+        sigma_out = np.broadcast_to(
+            sigma_cpa_mats.transpose(1, 2, 0)[:, :, :, np.newaxis],
+            (no, no, Nw, Nk_irr)
+        ).copy()
+        # write sigma.bin in Fortran unformatted format
+        # records: mu (float64), mu_OLD (float64), sigmak (Nk_irr,Nw,Norb,Norb) = (Norb,Norb,Nw,Nk_irr) C-order
+        from scipy.io import FortranFile
+        with FortranFile('sigma.bin', 'w') as f:
+            f.write_record(np.float64(mu))
+            f.write_record(np.float64(mu))   # mu_OLD = mu (no iteration history for CPA)
+            f.write_record(sigma_out.flatten().astype(np.complex128))
+        np.savez('self_en', sigma_out, np.float64(mu))
+        print(f"CPA Matsubara self-energy written to sigma.bin and self_en.npz"
+              f" (Nk_irr={Nk_irr}, Nw={Nw})", flush=True)
 if __name__=="__main__":
     main()
 __license__="MIT"
