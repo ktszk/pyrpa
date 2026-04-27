@@ -726,17 +726,7 @@ def get_conductivity(mu: float, temp: float, eig: np.ndarray, vk: np.ndarray, Nw
     """
     wlist=np.linspace(0,Emax,Nw)
     ffermi=flibs.get_ffermi(eig,mu,temp)
-    L11=[]
-    L12=[]
-    L22=[]
-    for w in wlist:
-        L11w,L12w,L22w=flibs.calc_Lij(eig,vk,ffermi,mu,w,idelta,temp)
-        L11.append(L11w)
-        L12.append(L12w)
-        L22.append(L22w)
-    L11=np.array(L11)
-    L12=np.array(L12)
-    L22=np.array(L22)
+    L11,L12,L22=flibs.calc_Lij_wl(eig,vk,ffermi,mu,wlist,idelta,temp)
     return L11,L12,L22,wlist
 
 def chis_spectrum(mu: float, temp: float, Smat: np.ndarray, klist: np.ndarray, qlist: np.ndarray,
@@ -1116,10 +1106,12 @@ def _write_wannier_dat(fname: str, data_out: np.ndarray, rvec_kept: np.ndarray,
     Im = vals.ravel().imag
 
     try:
+        lines = (np.char.mod('%4d', Rx) + np.char.mod('%4d', Ry) + np.char.mod('%4d', Rz)
+                 + np.char.mod('%3d', io) + np.char.mod('%3d', jo) + np.char.mod('%5d', iw)
+                 + np.char.mod('%16.8e', Re) + np.char.mod('%16.8e', Im))
         with open(f'{fname}.dat', 'w') as f:
             f.write(hdr + f'\n{Norb} {N_cut} {Nr}\n')
-            for rx, ry, rz, i, j, n, re, im in zip(Rx, Ry, Rz, io, jo, iw, Re, Im):
-                f.write(f'{rx:4d}{ry:4d}{rz:4d}{i:3d}{j:3d}{n:5d}{re:16.8e}{im:16.8e}\n')
+            f.write('\n'.join(lines.tolist()) + '\n')
     except IOError as e:
         print(f'Error: Failed to write {fname}.dat: {e}', flush=True)
         return
