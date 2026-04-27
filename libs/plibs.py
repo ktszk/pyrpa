@@ -698,14 +698,54 @@ def get_symm_line(brav:int)->tuple[list,list]:
         xlabel=[r'$\Gamma$','X','M',r'$\Gamma$']
     return k_list,xlabel
 
-def BZedge(brav: int) -> None:
+def BZedge(bvec: np.ndarray, ax=None) -> None:
     """
     @fn BZedge
-    @brief Placeholder function for Brillouin zone edge drawing (not yet implemented).
-    @param brav: Bravais lattice type index
-    @return None
+    @brief Draw first Brillouin zone boundary edges using Wigner-Seitz construction in reciprocal space.
+    @param bvec: reciprocal lattice vectors as rows, shape (3,3), in Angstrom^-1
+    @param   ax: matplotlib Axes3D; uses plt.gca() if None
     """
-    pass
+    import itertools
+    import matplotlib.pyplot as plt
+    from scipy.spatial import Voronoi
+
+    if ax is None:
+        ax = plt.gca()
+
+    # Generate reciprocal lattice points in Cartesian coordinates
+    idx = range(-2, 3)
+    pts = np.array([i*bvec[0] + j*bvec[1] + k*bvec[2]
+                    for i, j, k in itertools.product(idx, repeat=3)])
+
+    vor = Voronoi(pts)
+    origin_idx = np.argmin(np.linalg.norm(pts, axis=1))
+
+    # avec transforms Cartesian k to fractional*2pi plot coordinates: k_plot = avec @ k_cart
+    avec = 2*np.pi * np.linalg.inv(bvec).T
+
+    def _order_polygon(verts):
+        c = verts.mean(axis=0)
+        u = verts[0] - c
+        u /= np.linalg.norm(u)
+        v = None
+        for i in range(1, len(verts)):
+            n = np.cross(u, verts[i] - c)
+            if np.linalg.norm(n) > 1e-10:
+                v = np.cross(n / np.linalg.norm(n), u)
+                break
+        if v is None:
+            return verts
+        angles = np.arctan2([(p-c).dot(v) for p in verts], [(p-c).dot(u) for p in verts])
+        return verts[np.argsort(angles)]
+
+    for ridge_pts, ridge_verts in zip(vor.ridge_points, vor.ridge_vertices):
+        if origin_idx not in ridge_pts or -1 in ridge_verts:
+            continue
+        verts_cart = vor.vertices[ridge_verts]
+        verts_plot = (avec @ verts_cart.T).T
+        ordered = _order_polygon(verts_plot)
+        poly = np.vstack([ordered, ordered[0]])
+        ax.plot(poly[:, 0], poly[:, 1], poly[:, 2], color='black', lw=0.5)
 
 def get_conductivity(mu: float, temp: float, eig: np.ndarray, vk: np.ndarray, Nw: int, Emax: float,
                      idelta: float = 1.e-3) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
