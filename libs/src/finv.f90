@@ -9,18 +9,18 @@ subroutine generate_irr_kpoint_inv(klist,kmap,invk_ft_list,Nk,Nx,Ny,Nz) bind(C)
   !!@param            Nz,in: kz mesh
   use constant
   implicit none
-  integer(int64),intent(in):: Nx,Ny,Nz,Nk
-  integer(int64),intent(out),dimension(3,Nx*Ny*Nz):: invk_ft_list,kmap
-  real(real64),intent(out),dimension(3,Nk)::klist
+  integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nk
+  integer(c_int64_t),intent(out),dimension(3,Nx*Ny*Nz):: invk_ft_list,kmap
+  real(c_double),intent(out),dimension(3,Nk)::klist
 
-  real(real64),dimension(3,Nx*Ny*Nz):: all_k
+  real(c_double),dimension(3,Nx*Ny*Nz):: all_k
 
   call gen_allk(all_k,kmap) !get info of all k-points
   call gen_irr_k(klist) !get irreducible k-points' info
 
   gen_inv_ft:block
-    integer(int32) Nkall,i,j,k
-    real(real64) tmp(3),iktmp(3),eps
+    integer(c_int32_t) Nkall,i,j,k
+    real(c_double) tmp(3),iktmp(3),eps
     eps=1.0d0/max(Nx,Ny,Nz)
     Nkall=Nx*Ny*Nz
 
@@ -69,10 +69,10 @@ subroutine generate_irr_kpoint_inv(klist,kmap,invk_ft_list,Nk,Nx,Ny,Nz) bind(C)
   end block gen_inv_ft
 contains
   subroutine gen_allk(klist,kmap)
-    integer(int64),intent(out),dimension(3,Nx*Ny*Nz):: kmap
-    real(real64),intent(out),dimension(3,Nx*Ny*Nz):: klist
-    integer(int32) i,j,k,iter_k
-    real(real64) dx,dy,dz
+    integer(c_int64_t),intent(out),dimension(3,Nx*Ny*Nz):: kmap
+    real(c_double),intent(out),dimension(3,Nx*Ny*Nz):: klist
+    integer(c_int32_t) i,j,k,iter_k
+    real(c_double) dx,dy,dz
     dx=1.0d0/dble(Nx)
     dy=1.0d0/dble(Ny)
     dz=1.0d0/dble(Nz)
@@ -99,9 +99,9 @@ contains
   end subroutine gen_allk
 
   subroutine gen_irr_k(klist)
-    real(real64),intent(out),dimension(3,Nk)::klist
+    real(c_double),intent(out),dimension(3,Nk)::klist
 
-    integer(int32) i,j,k,iter_k,iter_k_ini
+    integer(c_int32_t) i,j,k,iter_k,iter_k_ini
     !$omp parallel workshare
     klist(:,:)=0.0d0
     !$omp end parallel workshare
@@ -289,13 +289,13 @@ contains
 end subroutine generate_irr_kpoint_inv
 
 subroutine get_kweight(weight,invk,Nk,Nkall) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nkall,Nk
-  integer(int64),intent(in),dimension(3,Nkall):: invk
-  real(real64),intent(out),dimension(Nk):: weight
+  integer(c_int64_t),intent(in):: Nkall,Nk
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: invk
+  real(c_double),intent(out),dimension(Nk):: weight
 
-  integer(int32) i
+  integer(c_int32_t) i
 
   weight(:)=0.0d0
   do i=1,Nkall

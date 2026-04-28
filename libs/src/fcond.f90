@@ -13,17 +13,17 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
   !!@param  idelta,in: dumping factor
   !!@param     eps,in: threshold of energy
   !!@param    temp,in: Temperature
-  use,intrinsic:: iso_fortran_env, only:int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nk,Norb
-  real(real64),intent(in):: temp,eps,w,idelta,mu
-  real(real64),intent(in),dimension(Norb,Nk):: eig,ffermi
-  complex(real64),intent(in),dimension(3,Norb,Norb,Nk):: vk
-  complex(real64),intent(out),dimension(3,3):: L11,L12,L22
+  integer(c_int64_t),intent(in):: Nk,Norb
+  real(c_double),intent(in):: temp,eps,w,idelta,mu
+  real(c_double),intent(in),dimension(Norb,Nk):: eig,ffermi
+  complex(c_double),intent(in),dimension(3,Norb,Norb,Nk):: vk
+  complex(c_double),intent(out),dimension(3,3):: L11,L12,L22
   
-  integer(int64) i,j,k,l,m
-  complex(real64) tmp
-  complex(real64),parameter::ii=(0.0d0,1.0d0)
+  integer(c_int64_t) i,j,k,l,m
+  complex(c_double) tmp
+  complex(c_double),parameter::ii=(0.0d0,1.0d0)
 
   !$omp parallel
   !$omp workshare
@@ -42,14 +42,14 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
               do k=1,3
                  if(abs(eig(m,i)-eig(l,i))<1.0d-9)then
                     ! Intraband contribution: use f*(1-f)/T identity for -df/de
-                    tmp=vk(k,m,m,i)*vk(j,m,m,i)*ffermi(m,i)*(1.0d0-ffermi(m,i))/(temp*cmplx(w,idelta,kind=real64))
+                    tmp=vk(k,m,m,i)*vk(j,m,m,i)*ffermi(m,i)*(1.0d0-ffermi(m,i))/(temp*cmplx(w,idelta,kind=c_double))
                     L11(k,j)=L11(k,j)+tmp
                     L12(k,j)=L12(k,j)+tmp*(eig(m,i)-mu)
                     L22(k,j)=L22(k,j)+tmp*(eig(m,i)-mu)*(eig(m,i)-mu)
                  else if(abs(ffermi(l,i)-ffermi(m,i))>eps)then
                     ! Interband contribution: skip when both states have the same occupation
                     tmp=vk(k,m,l,i)*vk(j,l,m,i)*(ffermi(l,i)-ffermi(m,i))/((eig(m,i)-eig(l,i))&
-                       *cmplx(w+eig(m,i)-eig(l,i),idelta,kind=real64))
+                       *cmplx(w+eig(m,i)-eig(l,i),idelta,kind=c_double))
                     L11(k,j)=L11(k,j)+tmp
                     L12(k,j)=L12(k,j)+tmp*(eig(l,i)-mu)
                     L22(k,j)=L22(k,j)+tmp*(eig(m,i)-mu)*(eig(l,i)-mu)
@@ -86,19 +86,19 @@ subroutine calc_lij_wl(L11,L22,L12,vk,eig,ffermi,Norb,Nk,Nw,mu,wl,idelta,eps,tem
   !!@param idelta,in: dumping factor
   !!@param  eps,in: threshold of energy
   !!@param temp,in: Temperature
-  use,intrinsic:: iso_fortran_env, only:int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nk,Norb,Nw
-  real(real64),intent(in):: temp,eps,idelta,mu
-  real(real64),intent(in),dimension(Nw):: wl
-  real(real64),intent(in),dimension(Norb,Nk):: eig,ffermi
-  complex(real64),intent(in),dimension(3,Norb,Norb,Nk):: vk
-  complex(real64),intent(out),dimension(Nw,3,3):: L11,L12,L22
+  integer(c_int64_t),intent(in):: Nk,Norb,Nw
+  real(c_double),intent(in):: temp,eps,idelta,mu
+  real(c_double),intent(in),dimension(Nw):: wl
+  real(c_double),intent(in),dimension(Norb,Nk):: eig,ffermi
+  complex(c_double),intent(in),dimension(3,Norb,Norb,Nk):: vk
+  complex(c_double),intent(out),dimension(Nw,3,3):: L11,L12,L22
 
-  integer(int64) i,j,k,l,m,iw
-  real(real64) de,fl,fm,el,em
-  complex(real64) p11,p12,p22,denom
-  complex(real64),parameter::ii=(0.0d0,1.0d0)
+  integer(c_int64_t) i,j,k,l,m,iw
+  real(c_double) de,fl,fm,el,em
+  complex(c_double) p11,p12,p22,denom
+  complex(c_double),parameter::ii=(0.0d0,1.0d0)
 
   L11(:,:,:)=(0.0d0,0.0d0)
   L12(:,:,:)=(0.0d0,0.0d0)
@@ -118,7 +118,7 @@ subroutine calc_lij_wl(L11,L22,L12,vk,eig,ffermi,Norb,Nk,Nw,mu,wl,idelta,eps,tem
                     p12=p11*(em-mu)
                     p22=p12*(em-mu)
                     do iw=1,Nw
-                       denom=cmplx(wl(iw),idelta,kind=real64)
+                       denom=cmplx(wl(iw),idelta,kind=c_double)
                        L11(iw,j,k)=L11(iw,j,k)+p11/denom
                        L12(iw,j,k)=L12(iw,j,k)+p12/denom
                        L22(iw,j,k)=L22(iw,j,k)+p22/denom
@@ -128,7 +128,7 @@ subroutine calc_lij_wl(L11,L22,L12,vk,eig,ffermi,Norb,Nk,Nw,mu,wl,idelta,eps,tem
                     p12=p11*(el-mu)
                     p22=p11*(em-mu)*(el-mu)
                     do iw=1,Nw
-                       denom=cmplx(wl(iw)+de,idelta,kind=real64)
+                       denom=cmplx(wl(iw)+de,idelta,kind=c_double)
                        L11(iw,j,k)=L11(iw,j,k)+p11/denom
                        L12(iw,j,k)=L12(iw,j,k)+p12/denom
                        L22(iw,j,k)=L22(iw,j,k)+p22/denom
@@ -160,18 +160,18 @@ subroutine calc_kn(K0,K1,K2,eig,veloc,kweight,tau,temp,mu,Nk,Norb) bind(C)
   !!@param      mu,in: chemical potential
   !!@param      Nk,in: The number of k-points
   !!@param    Norb,in: The number of orbitals
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nk,Norb
-  real(real64),intent(in):: temp,mu
-  real(real64),intent(in),dimension(Norb,Nk):: eig,tau
-  real(real64),intent(in),dimension(Nk):: kweight
-  real(real64),intent(in),dimension(3,Norb,Nk):: veloc
-  real(real64),intent(out),dimension(3,3):: K0,K1,K2
+  integer(c_int64_t),intent(in):: Nk,Norb
+  real(c_double),intent(in):: temp,mu
+  real(c_double),intent(in),dimension(Norb,Nk):: eig,tau
+  real(c_double),intent(in),dimension(Nk):: kweight
+  real(c_double),intent(in),dimension(3,Norb,Nk):: veloc
+  real(c_double),intent(out),dimension(3,3):: K0,K1,K2
 
-  real(real64),dimension(Norb,Nk):: dfermi
-  integer(int32) i,j,l,m
-   real(real64) tmp,temp_safe
+  real(c_double),dimension(Norb,Nk):: dfermi
+  integer(c_int32_t) i,j,l,m
+   real(c_double) tmp,temp_safe
 
    temp_safe=max(temp,1.0d-12)
 
@@ -224,19 +224,19 @@ subroutine calc_sigma_hall(eig,veloc,imass,kweight,tau,temp,mu,Nk,Norb,sigma_hal
   !!@param         mu,in: chemical potential
   !!@param         Nk,in: The number of k-points
   !!@param       Norb,in: The number of orbitals
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nk,Norb
-  real(real64),intent(in):: temp,mu
-  real(real64),intent(in),dimension(Norb,Nk):: eig,tau
-  real(real64),intent(in),dimension(Nk):: kweight
-  real(real64),intent(in),dimension(3,Norb,Nk):: veloc
-  real(real64),intent(in),dimension(3,3,Norb,Nk):: imass
-  real(real64),intent(out):: sigma_hall
+  integer(c_int64_t),intent(in):: Nk,Norb
+  real(c_double),intent(in):: temp,mu
+  real(c_double),intent(in),dimension(Norb,Nk):: eig,tau
+  real(c_double),intent(in),dimension(Nk):: kweight
+  real(c_double),intent(in),dimension(3,Norb,Nk):: veloc
+  real(c_double),intent(in),dimension(3,3,Norb,Nk):: imass
+  real(c_double),intent(out):: sigma_hall
 
-  real(real64),dimension(Norb,Nk):: dfermi
-  integer(int32) i,j
-  real(real64) temp_safe
+  real(c_double),dimension(Norb,Nk):: dfermi
+  integer(c_int32_t) i,j
+  real(c_double) temp_safe
   sigma_hall=0.0d0
   temp_safe=max(temp,1.0d-12)
   !$omp parallel
@@ -272,16 +272,16 @@ subroutine calc_tdf(tdf,eig,veloc,kweight,tau,Nw,Nk,Norb) bind(C)
   !!@param      Nw,in: The number of energy mesh
   !!@param      Nk,in: The number of k-points
   !!@param    Norb,in: The number of orbitals
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nk,Norb,Nw
-  real(real64),intent(in),dimension(Norb,Nk):: eig,tau
-  real(real64),intent(in),dimension(Nk):: kweight
-  real(real64),intent(in),dimension(3,Norb,Nk):: veloc
-  real(real64),intent(out),dimension(3,3,Nw):: tdf
+  integer(c_int64_t),intent(in):: Nk,Norb,Nw
+  real(c_double),intent(in),dimension(Norb,Nk):: eig,tau
+  real(c_double),intent(in),dimension(Nk):: kweight
+  real(c_double),intent(in),dimension(3,Norb,Nk):: veloc
+  real(c_double),intent(out),dimension(3,3,Nw):: tdf
 
-  integer(int32) i,j,l,m,iw
-  real(real64) tmp,emax,emin,id,dw
+  integer(c_int32_t) i,j,l,m,iw
+  real(c_double) tmp,emax,emin,id,dw
   id=1.0d-3
   emax=maxval(eig)
   emin=minval(eig)
@@ -311,16 +311,16 @@ subroutine calc_tdf(tdf,eig,veloc,kweight,tau,Nw,Nk,Norb) bind(C)
 end subroutine calc_tdf
 
 subroutine get_tau(tau,tauw,eig,tau_max,eps,tau_mode,Nk,Nw,Norb) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nk,Nw,Norb,tau_mode
-  real(real64),intent(in):: eps,tau_max
-  real(real64),intent(in),dimension(Nw):: tauw
-  real(real64),intent(in),dimension(Norb,Nk):: eig
-  real(real64),intent(out),dimension(Norb,Nk):: tau
+  integer(c_int64_t),intent(in):: Nk,Nw,Norb,tau_mode
+  real(c_double),intent(in):: eps,tau_max
+  real(c_double),intent(in),dimension(Nw):: tauw
+  real(c_double),intent(in),dimension(Norb,Nk):: eig
+  real(c_double),intent(out),dimension(Norb,Nk):: tau
 
-  integer(int32) i,j,iter_w
-  real(real64) Emax,Emin,Elength
+  integer(c_int32_t) i,j,iter_w
+  real(c_double) Emax,Emin,Elength
   Emin=minval(eig(:,:))
   Emax=maxval(eig(:,:))
   Elength=Emax-Emin
@@ -367,23 +367,23 @@ subroutine calc_tau_epa(tau,gavg,wavg,eig,edge,step,mu,temp,&
   !!@param       nbin, in: number of bins per grid [ngrid]
   !!@param      ngrid, in: number of energy grids (typically 2)
   !!@param   nbin_max, in: max(nbin) — leading dimension for gavg
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nk,Norb,nmodes,ngrid,nbin_max
-  integer(int64),intent(in),dimension(ngrid):: nbin
-  real(real64),intent(in):: mu,temp
-  real(real64),intent(in),dimension(ngrid):: edge,step
-  real(real64),intent(in),dimension(nmodes):: wavg
-  real(real64),intent(in),dimension(nmodes,nbin_max,nbin_max,ngrid):: gavg
-  real(real64),intent(in),dimension(Norb,Nk):: eig
-  real(real64),intent(out),dimension(Norb,Nk):: tau
+  integer(c_int64_t),intent(in):: Nk,Norb,nmodes,ngrid,nbin_max
+  integer(c_int64_t),intent(in),dimension(ngrid):: nbin
+  real(c_double),intent(in):: mu,temp
+  real(c_double),intent(in),dimension(ngrid):: edge,step
+  real(c_double),intent(in),dimension(nmodes):: wavg
+  real(c_double),intent(in),dimension(nmodes,nbin_max,nbin_max,ngrid):: gavg
+  real(c_double),intent(in),dimension(Norb,Nk):: eig
+  real(c_double),intent(out),dimension(Norb,Nk):: tau
 
-  integer(int32) ik,ib,ig,ig_found,jbin,kk,nu
-  real(real64) eps,gamma,w,nB,ff,xb,xf,g2,de
-  real(real64),parameter:: pi=acos(-1.0d0)
-  real(real64),parameter:: tau_max=1.0d+15
-  real(real64),parameter:: xcut=500.0d0
-  real(real64) ecenter
+  integer(c_int32_t) ik,ib,ig,ig_found,jbin,kk,nu
+  real(c_double) eps,gamma,w,nB,ff,xb,xf,g2,de
+  real(c_double),parameter:: pi=acos(-1.0d0)
+  real(c_double),parameter:: tau_max=1.0d+15
+  real(c_double),parameter:: xcut=500.0d0
+  real(c_double) ecenter
 
   !$omp parallel do private(ik,ib,ig,ig_found,jbin,kk,nu,eps,gamma,w,nB,ff,xb,xf,g2,de,ecenter)
   do ik=1,Nk

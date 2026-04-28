@@ -4,15 +4,15 @@ subroutine get_a(a,xn,inp_data,Np) bind(C,name="get_a_")
   !!@param       xn,in: variables of origin data
   !!@param inp_data,in: The origin data
   !!@param       Np,in: The number of origin data
-  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Np !length of data point
-  complex(real64),intent(in),dimension(Np):: xn !variables of data
-  complex(real64),intent(in),dimension(Np):: inp_data !data
-  complex(real64),intent(out),dimension(Np):: a
+  integer(c_int64_t),intent(in):: Np !length of data point
+  complex(c_double),intent(in),dimension(Np):: xn !variables of data
+  complex(c_double),intent(in),dimension(Np):: inp_data !data
+  complex(c_double),intent(out),dimension(Np):: a
 
-  integer(int32) i,j
-  complex(real64),dimension(Np):: g1,g0
+  integer(c_int32_t) i,j
+  complex(c_double),dimension(Np):: g1,g0
 
   ! Thiele's reciprocal difference algorithm for Padé continued fraction coefficients
   ! g_{i}(z) = (g_{i-1}(z_{i-1}) - g_{i-1}(z)) / ((z - z_{i-1}) * g_{i-1}(z))
@@ -50,15 +50,15 @@ subroutine get_QP(P,Q,a,xn,wlist,Nw,Np) bind(C,name='get_qp_')
   !!@param wlist,in: new variables of pade data
   !!@param    Nw,in: The number of pade data
   !!@param    Np,in: The number of origin data
-  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nw,Np
-  complex(real64),intent(in),dimension(Np):: xn,a
-  complex(real64),intent(in),dimension(Nw):: wlist
-  complex(real64),intent(out),dimension(Nw):: P,Q !output P_N,Q_N
+  integer(c_int64_t),intent(in):: Nw,Np
+  complex(c_double),intent(in),dimension(Np):: xn,a
+  complex(c_double),intent(in),dimension(Nw):: wlist
+  complex(c_double),intent(out),dimension(Nw):: P,Q !output P_N,Q_N
 
-  integer(int32) i,j,k
-  complex(real64),dimension(Nw):: P0,P1,Q0,Q1
+  integer(c_int32_t) i,j,k
+  complex(c_double),dimension(Nw):: P0,P1,Q0,Q1
 
   Q0(:)=1.0d0
   Q1(:)=1.0d0
@@ -86,17 +86,17 @@ end subroutine get_QP
 
 subroutine pade_analytic_continuation_arrays(arrayin,arrayout,&
      iwlist,wlist,Nk,Niw,Nw) bind(C,name="pade_analytic_continuation_arrays_")
-  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nk,Nw,Niw
-  complex(real64),intent(in),dimension(Nk,Niw)::arrayin
-  complex(real64),intent(in),dimension(Nw):: wlist
-  complex(real64),intent(in),dimension(Niw):: iwlist
-  complex(real64),intent(out),dimension(Nk,Nw):: arrayout
+  integer(c_int64_t),intent(in):: Nk,Nw,Niw
+  complex(c_double),intent(in),dimension(Nk,Niw)::arrayin
+  complex(c_double),intent(in),dimension(Nw):: wlist
+  complex(c_double),intent(in),dimension(Niw):: iwlist
+  complex(c_double),intent(out),dimension(Nk,Nw):: arrayout
 
-  integer(int32)i,j
-  complex(real64),dimension(Niw):: a
-  complex(real64),dimension(Nw):: P,Q
+  integer(c_int32_t)i,j
+  complex(c_double),dimension(Niw):: a
+  complex(c_double),dimension(Nw):: P,Q
 
   do i=1,Nk
      call get_a(a,iwlist,arrayin(i,:),Niw)
@@ -106,16 +106,16 @@ subroutine pade_analytic_continuation_arrays(arrayin,arrayout,&
 end subroutine pade_analytic_continuation_arrays
 
 subroutine pade_with_trace(arrayin,arrayout,iwlist,wlist,Nk,Niw,Nw,Norb) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nk,Nw,Niw,Norb
-  complex(real64),intent(in),dimension(Nk,Niw,Norb,Norb)::arrayin
-  complex(real64),intent(in),dimension(Nw):: wlist
-  complex(real64),intent(in),dimension(Niw):: iwlist
-  complex(real64),intent(out),dimension(Nw,Nk):: arrayout
+  integer(c_int64_t),intent(in):: Nk,Nw,Niw,Norb
+  complex(c_double),intent(in),dimension(Nk,Niw,Norb,Norb)::arrayin
+  complex(c_double),intent(in),dimension(Nw):: wlist
+  complex(c_double),intent(in),dimension(Niw):: iwlist
+  complex(c_double),intent(out),dimension(Nw,Nk):: arrayout
 
-  integer(int32) i,j,k
-  complex(real64),dimension(Nk,Nw):: tmp
+  integer(c_int32_t) i,j,k
+  complex(c_double),dimension(Nk,Nw):: tmp
 
   do i=1,Norb
      call pade_analytic_continuation_arrays(arrayin(:,:,i,i),tmp,iwlist,wlist,Nk,Niw,Nw)

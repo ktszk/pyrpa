@@ -6,16 +6,16 @@ subroutine get_scmat(Smat,Cmat,ol,site,Uval,Jval,Nchi) bind(C)
   !!@param  Uval,in: U value
   !!@param  Jval,in: J value
   !!@param  Nchi,in: The number of orbitals for chi
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nchi
-  integer(int64),intent(in),dimension(Nchi,2):: ol
-  integer(int64),intent(in),dimension(Nchi):: site
-  real(real64),intent(in):: Uval,Jval
-  real(real64),intent(out),dimension(Nchi,Nchi):: Smat,Cmat
+  integer(c_int64_t),intent(in):: Nchi
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: ol
+  integer(c_int64_t),intent(in),dimension(Nchi):: site
+  real(c_double),intent(in):: Uval,Jval
+  real(c_double),intent(out),dimension(Nchi,Nchi):: Smat,Cmat
 
-  integer(int32) i,j
-  real(real64) Upval
+  integer(c_int32_t) i,j
+  real(c_double) Upval
 
   ! Kanamori Hamiltonian: U'=U-2J (standard relation for t2g orbitals)
   ! Smat = spin vertex (enters spin susceptibility chi_s)
@@ -65,15 +65,15 @@ subroutine get_scmat_orb(Smat,Cmat,ol,site,Umat,Jmat,Nchi,Norb) bind(C)
   !!@param  Jmat,in: orbital dependent J
   !!@param  Nchi,in: The number of footnote of chi
   !!@param  Norb,in: The number of orbitals
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nchi,Norb
-  integer(int64),intent(in),dimension(Nchi,2):: ol
-  integer(int64),intent(in),dimension(Nchi):: site
-  real(real64),intent(in),dimension(Norb,Norb):: Umat,Jmat
-  real(real64),intent(out),dimension(Nchi,Nchi):: Smat,Cmat
+  integer(c_int64_t),intent(in):: Nchi,Norb
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: ol
+  integer(c_int64_t),intent(in),dimension(Nchi):: site
+  real(c_double),intent(in),dimension(Norb,Norb):: Umat,Jmat
+  real(c_double),intent(out),dimension(Nchi,Nchi):: Smat,Cmat
 
-  integer(int32) i,j
+  integer(c_int32_t) i,j
 
   !$omp parallel
   !$omp workshare
@@ -116,17 +116,17 @@ subroutine get_Vmat_soc(Vmat,ol,sl,site,invs,Uval,Jval,Nchi,Norb) bind(C)
   !!@param  Jval,in: J value
   !!@param  Nchi,in: The number of orbitals for chi
   !!@param  Norb,in: The number of orbitals
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nchi,Norb
-  integer(int64),intent(in),dimension(Nchi,2):: ol !1:orb1, 2:orb2
-  integer(int64),intent(in),dimension(Nchi):: site
-  integer(int64),intent(in),dimension(Norb):: sl,invs
-  real(real64),intent(in):: Uval,Jval
-  real(real64),intent(out),dimension(Nchi,Nchi):: Vmat
+  integer(c_int64_t),intent(in):: Nchi,Norb
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: ol !1:orb1, 2:orb2
+  integer(c_int64_t),intent(in),dimension(Nchi):: site
+  integer(c_int64_t),intent(in),dimension(Norb):: sl,invs
+  real(c_double),intent(in):: Uval,Jval
+  real(c_double),intent(out),dimension(Nchi,Nchi):: Vmat
 
-  integer(int32) i,j
-  real(real64) Upval
+  integer(c_int32_t) i,j
+  real(c_double) Upval
 
   Upval=Uval-2*Jval
   !$omp parallel
@@ -189,16 +189,16 @@ subroutine get_Vmat_soc_orb(Vmat,ol,sl,site,invs,Umat,Jmat,Nchi,Norb) bind(C)
   !!@param  Jmat,in: orbital dependent J
   !!@param  Nchi,in: The number of orbitals for chi
   !!@param  Norb,in: The number of orbitals
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nchi,Norb
-  integer(int64),intent(in),dimension(Nchi,2):: ol !1:orb1, 2:orb2
-  integer(int64),intent(in),dimension(Nchi):: site
-  integer(int64),intent(in),dimension(Norb):: sl,invs
-  real(real64),intent(in),dimension(Norb,Norb):: Umat,Jmat
-  real(real64),intent(out),dimension(Nchi,Nchi):: Vmat
+  integer(c_int64_t),intent(in):: Nchi,Norb
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: ol !1:orb1, 2:orb2
+  integer(c_int64_t),intent(in),dimension(Nchi):: site
+  integer(c_int64_t),intent(in),dimension(Norb):: sl,invs
+  real(c_double),intent(in),dimension(Norb,Norb):: Umat,Jmat
+  real(c_double),intent(out),dimension(Nchi,Nchi):: Vmat
 
-  integer(int32) i,j
+  integer(c_int32_t) i,j
 
   !$omp parallel
   !$omp workshare

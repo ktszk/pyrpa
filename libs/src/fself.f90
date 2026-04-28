@@ -1,19 +1,19 @@
 ! Caches forward/backward FFTW plans across calls within a loop.
 ! Call init_fft_plans before the orbital loop and destroy_fft_plans after.
 module fftw_plan_cache
-  use,intrinsic::iso_fortran_env, only:int64
+  use,intrinsic::iso_c_binding, only:c_int64_t
   implicit none
-  integer(int64),save :: plan_fwd=0, plan_bwd=0
+  integer(c_int64_t),save :: plan_fwd=0, plan_bwd=0
 end module fftw_plan_cache
 
 subroutine init_fft_plans(cmat,tmp,Nx,Ny,Nz,Nw)
   use fftw_plan_cache
-  use,intrinsic::iso_fortran_env, only:int32,int64,real64
+  use,intrinsic::iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nx,Ny,Nz,Nw
-  complex(real64),intent(inout),dimension(Nx,Ny,Nz,Nw):: cmat,tmp
-  integer(int32),dimension(4):: Nlist
-  Nlist=(/int(Nx,int32),int(Ny,int32),int(Nz,int32),int(Nw,int32)/)
+  integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nw
+  complex(c_double),intent(inout),dimension(Nx,Ny,Nz,Nw):: cmat,tmp
+  integer(c_int32_t),dimension(4):: Nlist
+  Nlist=(/int(Nx,c_int32_t),int(Ny,c_int32_t),int(Nz,c_int32_t),int(Nw,c_int32_t)/)
   call dfftw_plan_dft(plan_fwd,4,Nlist,cmat,tmp,-1,64)
   call dfftw_plan_dft(plan_bwd,4,Nlist,cmat,tmp, 1,64)
 end subroutine init_fft_plans
@@ -37,17 +37,17 @@ subroutine FFT(cmat,tmp,Nx,Ny,Nz,Nw,SW)
   !!@param      Nw,in: w mesh
   !!@param      SW,in: FFT or IFFT switch (if true IFFT)
   use fftw_plan_cache
-  use,intrinsic::iso_fortran_env, only:int32,int64,real64
+  use,intrinsic::iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nx,Ny,Nz,Nw
+  integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nw
   logical,intent(in):: SW
-  complex(real64),intent(inout),dimension(Nx,Ny,Nz,Nw):: cmat,tmp
+  complex(c_double),intent(inout),dimension(Nx,Ny,Nz,Nw):: cmat,tmp
 
-  integer(int64) plan
-  integer(int32) Inv
-  integer(int32),dimension(4):: Nlist
+  integer(c_int64_t) plan
+  integer(c_int32_t) Inv
+  integer(c_int32_t),dimension(4):: Nlist
 
-  Nlist=(/int(Nx,int32),int(Ny,int32),int(Nz,int32),int(Nw,int32)/)
+  Nlist=(/int(Nx,c_int32_t),int(Ny,c_int32_t),int(Nz,c_int32_t),int(Nw,c_int32_t)/)
   if(plan_fwd /= 0)then
      ! Reuse cached plans: avoids heap alloc/free on every call
      if(SW)then
@@ -82,17 +82,17 @@ subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb) bind(C,name="gen_green0_")
   !!@param   Nk,in: The number of k-points
   !!@param   Nw,in: The number of energies mesh
   !!@param Norb,in: The number of orbitals
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   use constant
   implicit none
-  integer(int64),intent(in):: Nk,Nw,norb
-  real(real64),intent(in):: mu,temp
-  real(real64),intent(in),dimension(Norb,Nk):: eig
-  complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
-  complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: Gk
+  integer(c_int64_t),intent(in):: Nk,Nw,norb
+  real(c_double),intent(in):: mu,temp
+  real(c_double),intent(in),dimension(Norb,Nk):: eig
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
+  complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: Gk
   
-  integer(int32) i,j,l,m,n
-  complex(real64) iw
+  integer(c_int32_t) i,j,l,m,n
+  complex(c_double) iw
 
    Gk(:,:,:,:)=0.0d0
 
@@ -101,7 +101,7 @@ subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb) bind(C,name="gen_green0_")
      do m=1,Norb
         !$omp do private(iw,i,j,n)
         wloop: do j=1,Nw !ien=pi(2l+1)/beta l=0,1,... beta=(kBT)^-1
-           iw=cmplx(mu,dble(2*j-1)*pi*temp,kind=real64) !iω_j = μ + i(2j-1)πT (j=1: ω_0=πT)
+           iw=cmplx(mu,dble(2*j-1)*pi*temp,kind=c_double) !iω_j = μ + i(2j-1)πT (j=1: ω_0=πT)
            band_loop: do n=1,Norb
               kloop: do i=1,Nk
                  Gk(i,j,m,l)=Gk(i,j,m,l)+uni(m,n,i)*conjg(uni(l,n,i))/(iw-eig(n,i))
@@ -124,17 +124,17 @@ subroutine gen_green_inv(Gk,self,hamk,mu,temp,Nk,Nw,Norb) bind(C,name="gen_green
   !!@param   Nk,in: The number of k-points
   !!@param   Nw,in: The number of energies mesh
   !!@param Norb,in: The number of orbitals
-  use,intrinsic:: iso_fortran_env, only: int64,real64,int32
+  use,intrinsic:: iso_c_binding, only: c_int64_t,c_double,c_int32_t
   use constant
   implicit none
-  integer(int64),intent(in):: Nk,Nw,Norb
-  real(real64),intent(in):: mu,temp
-  complex(real64),intent(in),dimension(norb,norb,Nk):: hamk
-  complex(real64),intent(in),dimension(Nk,Nw,norb,norb):: self
-  complex(real64),intent(out),dimension(Nk,Nw,norb,norb):: Gk
+  integer(c_int64_t),intent(in):: Nk,Nw,Norb
+  real(c_double),intent(in):: mu,temp
+  complex(c_double),intent(in),dimension(norb,norb,Nk):: hamk
+  complex(c_double),intent(in),dimension(Nk,Nw,norb,norb):: self
+  complex(c_double),intent(out),dimension(Nk,Nw,norb,norb):: Gk
 
-  integer(int32)i,j,l,m
-  complex(real64) iw
+  integer(c_int32_t)i,j,l,m
+  complex(c_double) iw
 
   !G^-1=G^-1_0-sigma (=iwI-Hk-sigma)
   !$omp parallel private(l,m)
@@ -142,7 +142,7 @@ subroutine gen_green_inv(Gk,self,hamk,mu,temp,Nk,Nw,Norb) bind(C,name="gen_green
      do m=1,Norb
         !$omp do private(iw,i)
         do j=1,Nw
-           iw=cmplx(mu,dble(2*j-1)*pi*temp,kind=real64)
+           iw=cmplx(mu,dble(2*j-1)*pi*temp,kind=c_double)
            do i=1,Nk
               Gk(i,j,m,l)=-(hamk(m,l,i)+self(i,j,m,l))
               if(l==m)then
@@ -167,18 +167,18 @@ subroutine gen_green_inv_from_eig(Gk,self,uni,eig,mu,temp,Nk,Nw,Norb) bind(C)
   !!@param   Nk,in: The number of k-points
   !!@param   Nw,in: The number of energies mesh
   !!@param Norb,in: The number of orbitals
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   use constant
   implicit none
-  integer(int64),intent(in):: Nk,Nw,norb
-  real(real64),intent(in):: mu,temp
-  real(real64),intent(in),dimension(norb,Nk):: eig
-  complex(real64),intent(in),dimension(norb,norb,Nk):: uni
-  complex(real64),intent(in),dimension(Nk,Nw,norb,norb):: self
-  complex(real64),intent(out),dimension(Nk,Nw,norb,norb):: Gk
+  integer(c_int64_t),intent(in):: Nk,Nw,norb
+  real(c_double),intent(in):: mu,temp
+  real(c_double),intent(in),dimension(norb,Nk):: eig
+  complex(c_double),intent(in),dimension(norb,norb,Nk):: uni
+  complex(c_double),intent(in),dimension(Nk,Nw,norb,norb):: self
+  complex(c_double),intent(out),dimension(Nk,Nw,norb,norb):: Gk
 
-  integer(int32)i,j,l,m,n
-  complex(real64) iw
+  integer(c_int32_t)i,j,l,m,n
+  complex(c_double) iw
 
   !$omp parallel private(l,m)
   !$omp workshare
@@ -188,7 +188,7 @@ subroutine gen_green_inv_from_eig(Gk,self,uni,eig,mu,temp,Nk,Nw,Norb) bind(C)
      do m=1,norb
         !$omp do private(iw,i,n)
         wloop: do j=1,Nw
-           iw=cmplx(mu,dble(2*j-1)*pi*temp,kind=real64) !(2(j-1)+1)pi/beta
+           iw=cmplx(mu,dble(2*j-1)*pi*temp,kind=c_double) !(2(j-1)+1)pi/beta
            kloop: do i=1,Nk
               band_loop: do n=1,norb
                  Gk(i,j,m,l)=Gk(i,j,m,l)+uni(m,n,i)*conjg(uni(l,n,i))*(iw-eig(n,i))
@@ -208,13 +208,13 @@ subroutine getinv(Gk,Nk,Nw,Norb) bind(C,name="getinv_")
   !!@param    Nk,in: The number of k-points
   !!@param    Nw,in: The number of energies mesh
   !!@param  Norb,in: The number of orbitals
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nk,Nw,Norb
-  complex(real64),intent(inout),dimension(Nk,Nw,Norb,Norb):: Gk
+  integer(c_int64_t),intent(in):: Nk,Nw,Norb
+  complex(c_double),intent(inout),dimension(Nk,Nw,Norb,Norb):: Gk
 
-  integer(int32) i,j,ipiv(Norb),info
-  complex(real64) tmp(Norb,Norb),work(2*Norb)
+  integer(c_int32_t) i,j,ipiv(Norb),info
+  complex(c_double) tmp(Norb,Norb),work(2*Norb)
 
   !$omp parallel do private(i,j,tmp,work,ipiv,info)
   do i=1,Nw
@@ -231,23 +231,23 @@ subroutine getinv(Gk,Nk,Nw,Norb) bind(C,name="getinv_")
 end subroutine getinv
 
 subroutine ckchi_impl(chi,Smat,Cmat,kmap,invk,Nk,Nkall,Nchi,Nw,maxchi0s_out)
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nk,Nkall,Nchi,Nw
-  integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
-  real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
-  real(real64),intent(out):: maxchi0s_out
-  complex(real64),intent(in),dimension(Nk,Nw,Nchi,Nchi):: chi
+  integer(c_int64_t),intent(in):: Nk,Nkall,Nchi,Nw
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
+  real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  real(c_double),intent(out):: maxchi0s_out
+  complex(c_double),intent(in),dimension(Nk,Nw,Nchi,Nchi):: chi
 
-  integer(int32) i,info,chisk,chick,chiskall,chickall
-  real(real64) maxchi0s,maxchi0c,maxchi0s2,maxchi0c2
-  real(real64),dimension(2*Nchi):: rwork
-  complex(real64),dimension(Nchi*Nchi*4+1):: work
-  complex(real64),dimension(Nchi):: eigs,eigc
-  complex(real64),dimension(Nchi,Nchi):: chi0s,chi0c,tmp1,tmp2,Smat_c,Cmat_c,chi_tmp
+  integer(c_int32_t) i,info,chisk,chick,chiskall,chickall
+  real(c_double) maxchi0s,maxchi0c,maxchi0s2,maxchi0c2
+  real(c_double),dimension(2*Nchi):: rwork
+  complex(c_double),dimension(Nchi*Nchi*4+1):: work
+  complex(c_double),dimension(Nchi):: eigs,eigc
+  complex(c_double),dimension(Nchi,Nchi):: chi0s,chi0c,tmp1,tmp2,Smat_c,Cmat_c,chi_tmp
 
-  Smat_c = cmplx(Smat, 0.0d0, kind=real64)
-  Cmat_c = cmplx(Cmat, 0.0d0, kind=real64)
+  Smat_c = cmplx(Smat, 0.0d0, kind=c_double)
+  Cmat_c = cmplx(Cmat, 0.0d0, kind=c_double)
   maxchi0s2=-1.0d5
   maxchi0c2=-1.0d5
   do i=1,Nk
@@ -279,19 +279,19 @@ subroutine ckchi_impl(chi,Smat,Cmat,kmap,invk,Nk,Nkall,Nchi,Nw,maxchi0s_out)
 end subroutine ckchi_impl
 
 subroutine get_chi0(chi,Smat,Cmat,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
-  integer(int64),intent(in),dimension(Nchi,2):: olist
-  integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
-  real(real64),intent(in):: temp
-  real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
-  complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
-  complex(real64),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
+  integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
+  real(c_double),intent(in):: temp
+  real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
+  complex(c_double),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
 
-  integer(int32),dimension(Nchi,Nchi,2)::chi_map
-  integer(int32),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
-  real(real64) dummy_maxchi0s
+  integer(c_int32_t),dimension(Nchi,Nchi,2)::chi_map
+  integer(c_int32_t),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
+  real(c_double) dummy_maxchi0s
 
   call get_chi_map(chi_map,irr_chi,olist,Nchi)
   call get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
@@ -305,17 +305,17 @@ subroutine get_chi_map(chi_map,irr_chi,olist,Nchi)
   !!@param irr_chi,out: irreducible index of chii
   !!@param    olist,in: orbital index list of chi index
   !!@param     Nchi,in: Number of chi index
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nchi
-  integer(int64),intent(in),dimension(Nchi,2):: olist
-  integer(int32),intent(out),dimension(Nchi,Nchi,2):: chi_map
-  integer(int32),intent(out),dimension(Nchi*(Nchi+1)/2,2):: irr_chi
+  integer(c_int64_t),intent(in):: Nchi
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  integer(c_int32_t),intent(out),dimension(Nchi,Nchi,2):: chi_map
+  integer(c_int32_t),intent(out),dimension(Nchi*(Nchi+1)/2,2):: irr_chi
 
-  integer(int32) l1,m1,l2,m2,iter
-  integer(int32),dimension(Nchi,Nchi):: chi_irr
-  integer(int32),dimension(4):: tmp1,tmp2
-  logical(int32) ck
+  integer(c_int32_t) l1,m1,l2,m2,iter
+  integer(c_int32_t),dimension(Nchi,Nchi):: chi_irr
+  integer(c_int32_t),dimension(4):: tmp1,tmp2
+  logical ck
 
   chi_irr(:,:)=0
   chi_map(:,:,:)=0
@@ -363,22 +363,22 @@ end subroutine get_chi_map
 subroutine get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,&
      Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi) bind(C,name='get_chi0_conv_')
   !> This function obtains chi_0 using convolution.
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
-  integer(int64),intent(in),dimension(Nchi,2):: olist
-  integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
-  integer(int32),intent(in),dimension(Nchi,Nchi,2):: chi_map
-  integer(int32),intent(in),dimension(Nchi*(Nchi+1)/2,2):: irr_chi
-  real(real64),intent(in):: temp
-  complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
-  complex(real64),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
+  integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
+  integer(c_int32_t),intent(in),dimension(Nchi,Nchi,2):: chi_map
+  integer(c_int32_t),intent(in),dimension(Nchi*(Nchi+1)/2,2):: irr_chi
+  real(c_double),intent(in):: temp
+  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
+  complex(c_double),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
 
-  integer(int32) i,j,k,l,m,n,iorb
-  integer(int32) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(2*Nw)
-  real(real64) weight
-  real(real64),parameter:: eps=1.0d-9
-  complex(real64),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmp,tmpgk13,tmpgk42
+  integer(c_int32_t) i,j,k,l,m,n,iorb
+  integer(c_int32_t) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(2*Nw)
+  real(c_double) weight
+  real(c_double),parameter:: eps=1.0d-9
+  complex(c_double),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmp,tmpgk13,tmpgk42
   
   weight=temp/dble(Nkall)
   ii(0)=0
@@ -455,8 +455,8 @@ subroutine get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,&
         k_loop_tmp_to_chi:do i=1,Nkall
            if(invk(2,i)==0)then
               chi(invk(1,i),j,m,l)=tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight
-              if(abs(dble(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(0.0d0,imag(chi(invk(1,i),j,m,l)),kind=real64)
-              if(abs(imag(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(dble(chi(invk(1,i),j,m,l)),0.0d0,kind=real64)
+              if(abs(dble(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(0.0d0,imag(chi(invk(1,i),j,m,l)),kind=c_double)
+              if(abs(imag(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(dble(chi(invk(1,i),j,m,l)),0.0d0,kind=c_double)
            end if
         end do k_loop_tmp_to_chi
      end do w_loop_tmp_to_chi
@@ -468,23 +468,23 @@ end subroutine get_chi0_conv
 
 subroutine get_chi0_sum(chi,Gk,klist,invk,irr_chi,chi_map,olist,temp,Nw,Nk,Nkall,Norb,Nchi) bind(C)
   !> It obtains chi_0 using summation. Its cost is O(Nk^2), so it is heavy. You should use get_chi0_conv.
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nw,Norb,Nchi,Nk,Nkall
-  integer(int64),intent(in),dimension(Nchi,2):: olist
-  integer(int64),intent(in),dimension(3,Nkall):: invk
-  integer(int32),intent(in),dimension(Nchi,Nchi,2):: chi_map
-  integer(int32),intent(in),dimension(Nchi*(Nchi+1)/2,2):: irr_chi
-  real(real64),intent(in),dimension(3,Nkall):: klist
-  real(real64),intent(in):: temp
-  complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
-  complex(real64),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
+  integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nk,Nkall
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: invk
+  integer(c_int32_t),intent(in),dimension(Nchi,Nchi,2):: chi_map
+  integer(c_int32_t),intent(in),dimension(Nchi*(Nchi+1)/2,2):: irr_chi
+  real(c_double),intent(in),dimension(3,Nkall):: klist
+  real(c_double),intent(in):: temp
+  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
+  complex(c_double),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
 
-  integer(int32) i,j,l,m,iq,iw,iorb
-  integer(int32),dimension(2*Nw):: wshift
-  integer(int64),dimension(Nkall):: qshift
-  real(real64) weight
-  complex(real64),dimension(Nkall,2*Nw):: tmpgk13,tmpgk42
+  integer(c_int32_t) i,j,l,m,iq,iw,iorb
+  integer(c_int32_t),dimension(2*Nw):: wshift
+  integer(c_int64_t),dimension(Nkall):: qshift
+  real(c_double) weight
+  complex(c_double),dimension(Nkall,2*Nw):: tmpgk13,tmpgk42
 
   !$omp parallel workshare
   chi(:,:,:,:)=0.0d0
@@ -546,18 +546,18 @@ subroutine get_vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi) bind(C,name='get_vsig
   !!@param      Nk,in: Number of k-points
   !!@param      Nw,in: Number of Matsubara frequencies
   !!@param    Nchi,in: Number of footnote of chi
-   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nk,Nw,Nchi
-  real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
-  complex(real64),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
+  integer(c_int64_t),intent(in):: Nk,Nw,Nchi
+  real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  complex(c_double),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
 
-   integer(int32) i,j,l,info
-  integer(int32),dimension(Nchi):: ipiv
-   complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,cmat5,Smat_c,Cmat_c,SC_c
+   integer(c_int32_t) i,j,l,info
+  integer(c_int32_t),dimension(Nchi):: ipiv
+   complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,cmat5,Smat_c,Cmat_c,SC_c
 
-   Smat_c(:,:)=cmplx(Smat(:,:),0.0d0,kind=real64)
-   Cmat_c(:,:)=cmplx(Cmat(:,:),0.0d0,kind=real64)
+   Smat_c(:,:)=cmplx(Smat(:,:),0.0d0,kind=c_double)
+   Cmat_c(:,:)=cmplx(Cmat(:,:),0.0d0,kind=c_double)
    SC_c(:,:)=Smat_c(:,:)+Cmat_c(:,:)
 
   !$omp parallel do collapse(2) private(i,cmat1,cmat2,cmat3,cmat4,cmat5,ipiv,info,l)
@@ -606,21 +606,21 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
   !!@param      Nx,in: Number of kx mesh
   !!@param      Ny,in: Number of ky mesh
   !!@param      Nz,in: Number of kz mesh
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
-  integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
-  integer(int64),intent(in),dimension(Nchi,2):: olist
-  real(real64),intent(in):: temp
-  real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
-  complex(real64),intent(in),dimension(Nk,Nw,Nchi,Nchi):: Vsigma
-  complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
-  complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: sigmak
+  integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  real(c_double),intent(in):: temp
+  real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  complex(c_double),intent(in),dimension(Nk,Nw,Nchi,Nchi):: Vsigma
+  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
+  complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: sigmak
 
-  integer(int32) i,j,k,n,l,m
-  real(real64) weight
-  real(real64),parameter:: eps=1.0d-9
-  complex(real64),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpVsigma,tmp,tmpgk
+  integer(c_int32_t) i,j,k,n,l,m
+  real(c_double) weight
+  real(c_double),parameter:: eps=1.0d-9
+  complex(c_double),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpVsigma,tmp,tmpgk
 
   weight=temp/dble(Nkall)
   !$omp parallel workshare
@@ -682,7 +682,7 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
         end do
         !$omp end do
         !$omp workshare
-      tmpgk=cmplx(0.0d0,0.0d0,kind=real64)
+      tmpgk=cmplx(0.0d0,0.0d0,kind=c_double)
         !$omp end workshare
         !$omp end parallel
         call FFT(tmp,tmpgk,Nx,Ny,Nz,2*Nw,.false.)
@@ -706,8 +706,8 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
         do j=1,Nw
            do i=1,Nk
               sigmak(i,j,m,l)=sigmak(i,j,m,l)*weight
-              if(abs(dble(sigmak(i,j,m,l)))<eps) sigmak(i,j,m,l)=cmplx(0.0d0,imag(sigmak(i,j,m,l)),kind=real64)
-              if(abs(imag(sigmak(i,j,m,l)))<eps) sigmak(i,j,m,l)=cmplx(dble(sigmak(i,j,m,l)),0.0d0,kind=real64)
+              if(abs(dble(sigmak(i,j,m,l)))<eps) sigmak(i,j,m,l)=cmplx(0.0d0,imag(sigmak(i,j,m,l)),kind=c_double)
+              if(abs(imag(sigmak(i,j,m,l)))<eps) sigmak(i,j,m,l)=cmplx(dble(sigmak(i,j,m,l)),0.0d0,kind=c_double)
            end do
         end do
         !$omp end parallel do
@@ -717,36 +717,36 @@ end subroutine calc_sigma
 
 subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill,temp,&
      scf_loop,pp,eps,Nkall,Nk,Nw,Norb,Nchi,Nx,Ny,Nz,sub_sigma,sw_out,sw_in,m_diis,sw_rescale) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz,scf_loop,m_diis
-  integer(int64),intent(in),dimension(Nchi,2):: olist
-  integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
+  integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz,scf_loop,m_diis
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
   logical(1),intent(in):: sw_in,sw_out,sw_rescale
-  integer(int64),intent(in):: sub_sigma
-  real(real64),intent(in):: temp,eps,pp,rfill,mu_init
-  real(real64),intent(in),dimension(Norb,Nk):: eig
-  real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
-  real(real64),intent(out):: mu
-  complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni,hamk
-  complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: sigmak
+  integer(c_int64_t),intent(in):: sub_sigma
+  real(c_double),intent(in):: temp,eps,pp,rfill,mu_init
+  real(c_double),intent(in),dimension(Norb,Nk):: eig
+  real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  real(c_double),intent(out):: mu
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni,hamk
+  complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: sigmak
 
-  integer(int32) scf_i
-  integer(int32),dimension(Nchi,Nchi,2)::chi_map
-  integer(int32),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
-  real(real64)esterr,mu_OLD,eps_sgm,maxchi0s_global
-  complex(real64),dimension(Nk,Nw,Norb,Norb):: Gk,sigmak0
-  complex(real64),dimension(Nk,Nw,Nchi,Nchi):: chi
+  integer(c_int32_t) scf_i
+  integer(c_int32_t),dimension(Nchi,Nchi,2)::chi_map
+  integer(c_int32_t),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
+  real(c_double)esterr,mu_OLD,eps_sgm,maxchi0s_global
+  complex(c_double),dimension(Nk,Nw,Norb,Norb):: Gk,sigmak0
+  complex(c_double),dimension(Nk,Nw,Nchi,Nchi):: chi
   ! DIIS
-  integer(int32):: n_hist,i_hist
-  complex(real64),allocatable:: xout_hist(:,:,:,:,:),res_hist(:,:,:,:,:)
-  real(real64),allocatable:: B_diis(:,:),rhs_diis(:)
-  integer(int32),allocatable:: ipiv_diis(:)
+  integer(c_int32_t):: n_hist,i_hist
+  complex(c_double),allocatable:: xout_hist(:,:,:,:,:),res_hist(:,:,:,:,:)
+  real(c_double),allocatable:: B_diis(:,:),rhs_diis(:)
+  integer(c_int32_t),allocatable:: ipiv_diis(:)
   ! bracket cache for renew_mu
-  real(real64):: muS_cache,muL_cache
+  real(c_double):: muS_cache,muL_cache
   logical:: bracket_valid
   ! eigenvalues of H(k)+Sigma(k,iw) precomputed before mu search
-  complex(real64),allocatable:: eig_gkinv(:,:,:)
+  complex(c_double),allocatable:: eig_gkinv(:,:,:)
 
   eps_sgm=1.0d-10
   mu=mu_init
@@ -793,8 +793,8 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
      call calc_sigma(sigmak,Gk,chi,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
      if(sub_sigma>0)then
         sub_self:block
-          integer(int32) iw,l,m
-          complex(real64),dimension(Nk,Norb,Norb):: sub_sigmak
+          integer(c_int32_t) iw,l,m
+          complex(c_double),dimension(Nk,Norb,Norb):: sub_sigmak
           if(sub_sigma==1)then
              !$omp parallel
              do l=1,Norb
@@ -846,14 +846,14 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   deallocate(eig_gkinv)
 contains
   subroutine compare_sigma()
-    integer(int32) i,j,l,m,kerr,iwerr,lerr,merr,ih,jh,idx_i,idx_j,info,n_cur
-   real(real64) est, eps_reg
-    complex(real64) cksigm
-    complex(real64),dimension(Nk,Nw,Norb,Norb):: sigma_diis
+    integer(c_int32_t) i,j,l,m,kerr,iwerr,lerr,merr,ih,jh,idx_i,idx_j,info,n_cur
+   real(c_double) est, eps_reg
+    complex(c_double) cksigm
+    complex(c_double),dimension(Nk,Nw,Norb,Norb):: sigma_diis
 
     ! --- Store current output and residual in circular buffer ---
-    i_hist=mod(i_hist,int(m_diis,int32))+1
-    n_hist=min(n_hist+1,int(m_diis,int32))
+    i_hist=mod(i_hist,int(m_diis,c_int32_t))+1
+    n_hist=min(n_hist+1,int(m_diis,c_int32_t))
     xout_hist(:,:,:,:,i_hist)=sigmak(:,:,:,:)
     res_hist(:,:,:,:,i_hist)=sigmak(:,:,:,:)-sigmak0(:,:,:,:)
     n_cur=n_hist
@@ -861,10 +861,10 @@ contains
     ! --- Build Pulay matrix B of size (n_cur+1 x n_cur+1) ---
     B_diis(1:n_cur+1,1:n_cur+1)=0.0d0
     do ih=1,n_cur
-       idx_i=modulo(i_hist-n_cur+ih-1,int(m_diis,int32))+1
+       idx_i=modulo(i_hist-n_cur+ih-1,int(m_diis,c_int32_t))+1
        do jh=1,n_cur
-          idx_j=modulo(i_hist-n_cur+jh-1,int(m_diis,int32))+1
-          B_diis(ih,jh)=real(sum(conjg(res_hist(:,:,:,:,idx_i))*res_hist(:,:,:,:,idx_j)),kind=real64)
+          idx_j=modulo(i_hist-n_cur+jh-1,int(m_diis,c_int32_t))+1
+          B_diis(ih,jh)=real(sum(conjg(res_hist(:,:,:,:,idx_i))*res_hist(:,:,:,:,idx_j)),kind=c_double)
        end do
        B_diis(ih,n_cur+1)=1.0d0
        B_diis(n_cur+1,ih)=1.0d0
@@ -897,7 +897,7 @@ contains
     ! --- DIIS extrapolation: sigma_diis = sum_i c_i * xout_hist_i ---
     sigma_diis(:,:,:,:)=0.0d0
     do ih=1,n_cur
-       idx_i=modulo(i_hist-n_cur+ih-1,int(m_diis,int32))+1
+       idx_i=modulo(i_hist-n_cur+ih-1,int(m_diis,c_int32_t))+1
        sigma_diis=sigma_diis+rhs_diis(ih)*xout_hist(:,:,:,:,idx_i)
     end do
 
@@ -940,11 +940,11 @@ contains
   end subroutine compare_sigma
 
   subroutine renew_mu()
-    integer(int32) i_iter
-    integer(int32),parameter:: itemax=100
-    logical(int32) flag
+    integer(c_int32_t) i_iter
+    integer(c_int32_t),parameter:: itemax=100
+    logical flag
     logical bracket_found
-    real(real64) rnS,rnL,rnc,rnM,muc,mud,muL,muS,muM,eps,dmu
+    real(c_double) rnS,rnL,rnc,rnM,muc,mud,muL,muS,muM,eps,dmu
 
     call precompute_eig_gkinv()
     if(esterr>1.0d-2)then
@@ -1084,12 +1084,12 @@ contains
   
   subroutine get_rn(rn,rmu)
     use constant
-    real(real64),intent(in):: rmu
-    real(real64),intent(out):: rn
+    real(c_double),intent(in):: rmu
+    real(c_double),intent(out):: rn
 
-    integer(int32) i,j,n
-    real(real64) tmp,deltagk
-    complex(real64) iw_im
+    integer(c_int32_t) i,j,n
+    real(c_double) tmp,deltagk
+    complex(c_double) iw_im
 
     ! n(μ) = (1/Nk){Σ_{k,n} f(ε_{kn}) + 2T·Σ_{k,j}[G(k,iω_j) - G_0(k,iω_j)]}
     ! non-interacting Fermi sum (unchanged)
@@ -1098,7 +1098,7 @@ contains
     deltagk=0.0d0
     !$omp parallel do reduction(+:deltagk) private(n,iw_im)
     do j=1,Nw
-       iw_im=cmplx(0.0d0,dble(2*j-1)*pi*temp,kind=real64)
+       iw_im=cmplx(0.0d0,dble(2*j-1)*pi*temp,kind=c_double)
        do i=1,Nk
           do n=1,Norb
              deltagk=deltagk+dble(1.0d0/(rmu+iw_im-eig_gkinv(n,i,j)) &
@@ -1112,12 +1112,12 @@ contains
 
   subroutine precompute_eig_gkinv()
     use constant
-    integer(int32) i,j,info_eig
-    complex(real64),dimension(Norb,Norb):: A_tmp
-    complex(real64),dimension(Norb):: eig_tmp
-    complex(real64),dimension(Norb,Norb):: vl_dum,vr_dum
-    real(real64),dimension(2*Norb):: rwork_eig
-    complex(real64),dimension(2*Norb):: work_eig
+    integer(c_int32_t) i,j,info_eig
+    complex(c_double),dimension(Norb,Norb):: A_tmp
+    complex(c_double),dimension(Norb):: eig_tmp
+    complex(c_double),dimension(Norb,Norb):: vl_dum,vr_dum
+    real(c_double),dimension(2*Norb):: rwork_eig
+    complex(c_double),dimension(2*Norb):: work_eig
 
     !$omp parallel do private(A_tmp,eig_tmp,vl_dum,vr_dum,rwork_eig,work_eig,info_eig)
     do j=1,Nw
@@ -1136,7 +1136,7 @@ contains
   end subroutine precompute_eig_gkinv
   
   subroutine io_sigma(sw)
-    logical(int32),intent(in):: sw !True: out, False: in
+    logical,intent(in):: sw !True: out, False: in
     open(55,file='sigma.bin',form='unformatted')
     if(sw)then
        write(55)mu
@@ -1152,19 +1152,19 @@ contains
 end subroutine mkself
 
 subroutine get_chis_chic(chis,chic,chi,Smat,Cmat,Nk,Nw,Nchi) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nk,Nw,Nchi
-  real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
-  complex(real64),intent(in),dimension(Nk,Nw,Nchi,Nchi):: chi
-  complex(real64),intent(out),dimension(Nk,Nchi,Nchi):: chis,chic
+  integer(c_int64_t),intent(in):: Nk,Nw,Nchi
+  real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  complex(c_double),intent(in),dimension(Nk,Nw,Nchi,Nchi):: chi
+  complex(c_double),intent(out),dimension(Nk,Nchi,Nchi):: chis,chic
 
-  integer(int32) i,l,info
-  integer(int32),dimension(Nchi):: ipiv
-  complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,Smat_c,Cmat_c
+  integer(c_int32_t) i,l,info
+  integer(c_int32_t),dimension(Nchi):: ipiv
+  complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,Smat_c,Cmat_c
 
-  Smat_c=cmplx(Smat,0.0d0,kind=real64)
-  Cmat_c=cmplx(Cmat,0.0d0,kind=real64)
+  Smat_c=cmplx(Smat,0.0d0,kind=c_double)
+  Cmat_c=cmplx(Cmat,0.0d0,kind=c_double)
 
   qloop:do i=1,Nk
      call zgemm('N','N',Nchi,Nchi,Nchi,(-1.0d0,0.0d0),chi(i,1,:,:),Nchi,Smat_c,Nchi,(0.0d0,0.0d0),cmat1,Nchi) !-chi0S
@@ -1187,19 +1187,19 @@ subroutine get_chis_chic(chis,chic,chi,Smat,Cmat,Nk,Nw,Nchi) bind(C)
 end subroutine get_chis_chic
 
 subroutine get_eig_or_tr_chi(chiqout,chi,invk,Nkall,Nk,Nchi,sw_eig) bind(C)
-   use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
    implicit none
-   integer(int64),intent(in):: Nkall,Nk,Nchi
-   integer(int64),intent(in),dimension(3,Nkall):: invk
+   integer(c_int64_t),intent(in):: Nkall,Nk,Nchi
+   integer(c_int64_t),intent(in),dimension(3,Nkall):: invk
    logical,intent(in):: sw_eig
-   complex(real64),intent(in),dimension(Nk,Nchi,Nchi):: chi
-   complex(real64),intent(out),dimension(Nkall):: chiqout
+   complex(c_double),intent(in),dimension(Nk,Nchi,Nchi):: chi
+   complex(c_double),intent(out),dimension(Nkall):: chiqout
 
-   integer(int32) i,l,info
-   real(real64),dimension(2*Nchi):: rwork
-   complex(real64),dimension(Nchi*Nchi*4+1):: work
-   complex(real64),dimension(Nchi):: eig
-   complex(real64),dimension(Nchi,Nchi):: tmp,tmp1,tmp2
+   integer(c_int32_t) i,l,info
+   real(c_double),dimension(2*Nchi):: rwork
+   complex(c_double),dimension(Nchi*Nchi*4+1):: work
+   complex(c_double),dimension(Nchi):: eig
+   complex(c_double),dimension(Nchi,Nchi):: tmp,tmp1,tmp2
 
    !$omp parallel
    !$omp workshare

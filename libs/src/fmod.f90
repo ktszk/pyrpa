@@ -1,14 +1,14 @@
 module constant
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  real(real64),parameter:: pi=3.141592653589793238462643383279d0
+  real(c_double),parameter:: pi=3.141592653589793238462643383279d0
 end module constant
 
 subroutine openmp_params(omp_num,omp_check) bind(C)
   !$ use omp_lib
-  use,intrinsic:: iso_fortran_env, only:int64
+  use,intrinsic:: iso_c_binding, only:c_int64_t
   implicit none
-  integer(int64),intent(out):: omp_num
+  integer(c_int64_t),intent(out):: omp_num
   logical(1),intent(out):: omp_check
   !$ if(.true.)then
   !$   omp_check=.true.
@@ -30,15 +30,15 @@ subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   !!@param   Norb,in: The number of orbitals
   use constant
   implicit none
-  integer(int64),intent(in):: Nk,Nr,Norb
-  real(real64),intent(in),dimension(3,Nk):: klist
-  real(real64),intent(in),dimension(3,Nr):: rvec
-  complex(real64),intent(in),dimension(Norb,Norb,Nr):: ham_r
-  complex(real64),intent(out),dimension(Norb,Norb,Nk):: ham_k
+  integer(c_int64_t),intent(in):: Nk,Nr,Norb
+  real(c_double),intent(in),dimension(3,Nk):: klist
+  real(c_double),intent(in),dimension(3,Nr):: rvec
+  complex(c_double),intent(in),dimension(Norb,Norb,Nr):: ham_r
+  complex(c_double),intent(out),dimension(Norb,Norb,Nk):: ham_k
 
-  integer(int32) i,j,l,m
-  real(real64) phase
-  complex(real64) cphase
+  integer(c_int32_t) i,j,l,m
+  real(c_double) phase
+  complex(c_double) cphase
 
    ham_k(:,:,:)=(0.0d0,0.0d0)
 
@@ -47,7 +47,7 @@ subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   klop: do i=1,Nk
      rloop: do j=1,Nr
         phase=2*pi*sum(klist(:,i)*rvec(:,j))
-        cphase=cmplx(cos(phase),-sin(phase),kind=real64)   ! exp(-i*phi)
+        cphase=cmplx(cos(phase),-sin(phase),kind=c_double)   ! exp(-i*phi)
         do l=1,Norb
            do m=l,Norb
               ham_k(m,l,i)=ham_k(m,l,i)+ham_r(m,l,j)*cphase
@@ -72,21 +72,21 @@ subroutine get_eig(eig,uni,ham_k,Nk,Norb) bind(C)
   !!@param ham_k,in: k-space Hamiltonian
   !!@param    Nk,in: The number of k-points
   !!@param  Norb,in: The number of orbitals
-  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nk,Norb
-  complex(real64),intent(in),dimension(Norb,Norb,Nk):: ham_k
-  real(real64),intent(out),dimension(Norb,Nk):: eig
-  complex(real64),intent(out),dimension(Norb,Norb,Nk):: uni
+  integer(c_int64_t),intent(in):: Nk,Norb
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: ham_k
+  real(c_double),intent(out),dimension(Norb,Nk):: eig
+  complex(c_double),intent(out),dimension(Norb,Norb,Nk):: uni
 
-  integer(int32) i,info
-  integer(int64) lwork
-  real(real64) rwork(3*Norb-2),eq(Norb)
-  complex(real64) work_query(1),en(Norb,Norb)
-  complex(real64),allocatable :: work(:)
+  integer(c_int32_t) i,info
+  integer(c_int64_t) lwork
+  real(c_double) rwork(3*Norb-2),eq(Norb)
+  complex(c_double) work_query(1),en(Norb,Norb)
+  complex(c_double),allocatable :: work(:)
 
-  call zheev('V','U',Norb,en,Norb,eq,work_query,-1_int64,rwork,info)
-  lwork = int(dble(work_query(1)), int64)
+  call zheev('V','U',Norb,en,Norb,eq,work_query,-1_c_int64_t,rwork,info)
+  lwork = int(dble(work_query(1)), c_int64_t)
 
   !$omp parallel private(en,eq,work,rwork,info)
   allocate(work(lwork))
@@ -114,23 +114,23 @@ subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,Norb) bind(C)
   !!@param  Ovlk,in: k-space Overlap integrals
   !!@param    Nk,in: The number of k-points
   !!@param  Norb,in: The number of orbitals
-  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nk,norb
-  complex(real64),intent(in),dimension(Norb,Norb,Nk):: ham_k,Ovlk
-  real(real64),intent(out),dimension(Norb,Nk):: eig
-  complex(real64),intent(out),dimension(Norb,Norb,Nk):: uni
+  integer(c_int64_t),intent(in):: Nk,norb
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: ham_k,Ovlk
+  real(c_double),intent(out),dimension(Norb,Nk):: eig
+  complex(c_double),intent(out),dimension(Norb,Norb,Nk):: uni
 
-  integer(int32) i,j,k,l,m,info
-  integer(int64) lwork
-  real(real64) rwork(3*Norb-2),eq(Norb),norm
-  complex(real64) work_query(1)
-  complex(real64),allocatable :: work(:)
-  complex(real64),dimension(Norb,Norb):: tmp,tmp2,tmp3
-  real(real64),parameter:: ovl_thresh=1.0d-8
+  integer(c_int32_t) i,j,k,l,m,info
+  integer(c_int64_t) lwork
+  real(c_double) rwork(3*Norb-2),eq(Norb),norm
+  complex(c_double) work_query(1)
+  complex(c_double),allocatable :: work(:)
+  complex(c_double),dimension(Norb,Norb):: tmp,tmp2,tmp3
+  real(c_double),parameter:: ovl_thresh=1.0d-8
 
-  call zheev('V','U',norb,tmp,norb,eq,work_query,-1_int64,rwork,info)
-  lwork = int(dble(work_query(1)), int64)
+  call zheev('V','U',norb,tmp,norb,eq,work_query,-1_c_int64_t,rwork,info)
+  lwork = int(dble(work_query(1)), c_int64_t)
 
   !$omp parallel private(tmp,tmp2,tmp3,norm,eq,work,rwork,info)
   allocate(work(lwork))
@@ -145,7 +145,7 @@ subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,Norb) bind(C)
      ! Canonical orthogonalization: rescale eigenvectors by 1/sqrt(eigenvalue) of S
      do j=1,Norb
         if(eq(j)>ovl_thresh)then
-           tmp2(:,j)=tmp(:,j)/sqrt(cmplx(eq(j),kind=real64))
+           tmp2(:,j)=tmp(:,j)/sqrt(cmplx(eq(j),kind=c_double))
         else
            tmp2(:,j)=(0.0d0,0.0d0) !discard near-null basis vector (near-linear dependence)
         end if
@@ -176,15 +176,15 @@ subroutine get_ffermi(ffermi,eig,mu,temp,Nk,Norb) bind(C)
   !!@param    temp,in: Temperature
   !!@param      Nk,in: The number of k-points
   !!@param    Norb,in: The number of orbitals
-  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nk,Norb
-  real(real64),intent(in):: mu,temp
-  real(real64),intent(in),dimension(Norb,Nk):: eig
-  real(real64),intent(out),dimension(Norb,Nk):: ffermi
+  integer(c_int64_t),intent(in):: Nk,Norb
+  real(c_double),intent(in):: mu,temp
+  real(c_double),intent(in),dimension(Norb,Nk):: eig
+  real(c_double),intent(out),dimension(Norb,Nk):: ffermi
 
-  integer(int32) i,j
-   real(real64) itemp,temp_safe
+  integer(c_int32_t) i,j
+   real(c_double) itemp,temp_safe
 
    temp_safe=max(temp,1.0d-12)
    itemp=0.5d0/temp_safe
@@ -201,15 +201,15 @@ end subroutine get_ffermi
 subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   use constant
   implicit none
-  integer(int64),intent(in):: Nk,Nr,norb
-  real(real64),intent(in),dimension(3,Nk):: klist
-  real(real64),intent(in),dimension(3,Nr):: rvec
-  complex(real64),intent(in),dimension(Norb,Norb,Nr):: ham_r
-  complex(real64),intent(out),dimension(3,3,Norb,Norb,Nk):: imk
+  integer(c_int64_t),intent(in):: Nk,Nr,norb
+  real(c_double),intent(in),dimension(3,Nk):: klist
+  real(c_double),intent(in),dimension(3,Nr):: rvec
+  complex(c_double),intent(in),dimension(Norb,Norb,Nr):: ham_r
+  complex(c_double),intent(out),dimension(3,3,Norb,Norb,Nk):: imk
 
-  integer(int32) i,j,k,l,m,n
-  real(real64) phase
-  complex(real64) cphase
+  integer(c_int32_t) i,j,k,l,m,n
+  real(c_double) phase
+  complex(c_double) cphase
 
    imk(:,:,:,:,:)=0.0d0
 
@@ -217,7 +217,7 @@ subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   kloop: do i=1,Nk
      rloop: do j=1,Nr
         phase=2*pi*sum(klist(:,i)*rvec(:,j))
-        cphase=cmplx(cos(phase),-sin(phase),kind=real64)
+        cphase=cmplx(cos(phase),-sin(phase),kind=c_double)
         do l=1,Norb
            do m=l,Norb
               !$omp simd
@@ -248,17 +248,17 @@ subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
 end subroutine get_imass0
 
 subroutine get_imassk(imk,imk0,mrot,uni,Nk,Norb) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nk,Norb
-  real(real64),intent(in),dimension(3,3):: mrot
-  complex(real64),intent(in),dimension(3,3,Norb,Norb,Nk):: imk0
-  complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
-  real(real64),intent(out),dimension(3,3,Norb,Nk):: imk
+  integer(c_int64_t),intent(in):: Nk,Norb
+  real(c_double),intent(in),dimension(3,3):: mrot
+  complex(c_double),intent(in),dimension(3,3,Norb,Norb,Nk):: imk0
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
+  real(c_double),intent(out),dimension(3,3,Norb,Nk):: imk
 
-  integer(int32) i,j_ax,k_ax,l,m,n
-  complex(real64) tmp(3,3,Norb)
-  complex(real64) Mtmp(Norb,Norb),Wtmp(Norb,Norb),res_mat(Norb,Norb)
+  integer(c_int32_t) i,j_ax,k_ax,l,m,n
+  complex(c_double) tmp(3,3,Norb)
+  complex(c_double) Mtmp(Norb,Norb),Wtmp(Norb,Norb),res_mat(Norb,Norb)
 
   !$omp parallel do private(tmp,Mtmp,Wtmp,res_mat,j_ax,k_ax,l,m,n)
   kloop: do i=1,Nk
@@ -301,15 +301,15 @@ subroutine get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   !!@param  Norb,in: The number of orbitals
   use constant
   implicit none
-  integer(int64),intent(in):: Nk,Nr,Norb
-  real(real64),intent(in),dimension(3,Nk):: klist
-  real(real64),intent(in),dimension(3,Nr):: rvec
-  complex(real64),intent(in),dimension(Norb,Norb,Nr):: ham_r
-  complex(real64),intent(out),dimension(3,Norb,Norb,Nk):: vk
+  integer(c_int64_t),intent(in):: Nk,Nr,Norb
+  real(c_double),intent(in),dimension(3,Nk):: klist
+  real(c_double),intent(in),dimension(3,Nr):: rvec
+  complex(c_double),intent(in),dimension(Norb,Norb,Nr):: ham_r
+  complex(c_double),intent(out),dimension(3,Norb,Norb,Nk):: vk
 
-  integer(int32) i,j,k,l,m
-  real(real64) phase
-  complex(real64) cphase
+  integer(c_int32_t) i,j,k,l,m
+  real(c_double) phase
+  complex(c_double) cphase
 
    vk(:,:,:,:)=0.0d0
 
@@ -319,7 +319,7 @@ subroutine get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
         phase=2*pi*sum(klist(:,i)*rvec(:,j))
         ! d/dk_alpha exp(-i*phi) = -i*R_alpha * exp(-i*phi)
         ! Re/Im part: -(sin+i*cos) = -i*(cos-i*sin) = -i*exp(-i*phi)
-        cphase=cmplx(sin(phase),cos(phase),kind=real64)   ! = -i*exp(-i*phi) in real/imag components
+        cphase=cmplx(sin(phase),cos(phase),kind=c_double)   ! = -i*exp(-i*phi) in real/imag components
         do l=1,Norb
            do m=l,Norb
               !$omp simd
@@ -349,17 +349,17 @@ subroutine get_veloc(vk,vk0,mrot,uni,Nk,Norb) bind(C)
   !!@param  uni,in: unitary matrix orbital to band
   !!@param   Nk,in: The number of k-points
   !!@param Norb,in: The number of orbitals
-  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nk,Norb
-  real(real64),intent(in),dimension(3,3):: mrot
-  complex(real64),intent(in),dimension(3,Norb,Norb,Nk):: vk0
-  complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
-  real(real64),intent(out),dimension(3,Norb,Nk):: vk
+  integer(c_int64_t),intent(in):: Nk,Norb
+  real(c_double),intent(in),dimension(3,3):: mrot
+  complex(c_double),intent(in),dimension(3,Norb,Norb,Nk):: vk0
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
+  real(c_double),intent(out),dimension(3,Norb,Nk):: vk
 
-  integer(int32) i,j_dir,l,m,n
-  complex(real64) tmp(3,Norb)
-  complex(real64) vtmp(Norb,Norb),Wtmp(Norb,Norb),tmp_j(Norb,Norb)
+  integer(c_int32_t) i,j_dir,l,m,n
+  complex(c_double) tmp(3,Norb)
+  complex(c_double) vtmp(Norb,Norb),Wtmp(Norb,Norb),tmp_j(Norb,Norb)
 
   !$omp parallel do private(tmp,vtmp,Wtmp,tmp_j,j_dir,l,m,n)
   kloop: do i=1,Nk
@@ -392,17 +392,17 @@ subroutine get_vnm(vk,vk0,mrot,uni,Nk,Norb) bind(C)
   !!@param  uni,in: unitary matrix orbital to band
   !!@param   Nk,in: The number of k-points
   !!@param Norb,in: The number of orbitals
-  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nk,Norb
-  real(real64),intent(in),dimension(3,3):: mrot
-  complex(real64),intent(in),dimension(3,Norb,Norb,Nk):: vk0
-  complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
-  complex(real64),intent(out),dimension(3,Norb,Norb,Nk):: vk
+  integer(c_int64_t),intent(in):: Nk,Norb
+  real(c_double),intent(in),dimension(3,3):: mrot
+  complex(c_double),intent(in),dimension(3,Norb,Norb,Nk):: vk0
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
+  complex(c_double),intent(out),dimension(3,Norb,Norb,Nk):: vk
 
-  integer(int32) i,j_dir,l,m,n,k
-  complex(real64) tmp(3,Norb,Norb)
-  complex(real64),dimension(Norb,Norb):: vtmp,Wtmp,tmp_j
+  integer(c_int32_t) i,j_dir,l,m,n,k
+  complex(c_double) tmp(3,Norb,Norb)
+  complex(c_double),dimension(Norb,Norb):: vtmp,Wtmp,tmp_j
 
   !$omp parallel
   !$omp workshare
@@ -442,15 +442,15 @@ subroutine gen_tr_greenw_0(trGk,wl,eig,mu,delta,Nk,Nw,Norb) bind(C)
   !!@param    Nk,in: The number of k-points
   !!@param    Nw,in: The number of energies mesh
   !!@param  Norb,in: The number of orbitals
-  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nk,Nw,Norb
-  real(real64),intent(in):: mu,delta
-  real(real64),intent(in),dimension(Norb,Nk):: eig
-  real(real64),intent(in),dimension(Nw):: wl
-  complex(real64),intent(out),dimension(Nw,Nk):: trGk
+  integer(c_int64_t),intent(in):: Nk,Nw,Norb
+  real(c_double),intent(in):: mu,delta
+  real(c_double),intent(in),dimension(Norb,Nk):: eig
+  real(c_double),intent(in),dimension(Nw):: wl
+  complex(c_double),intent(out),dimension(Nw,Nk):: trGk
 
-  integer(int32) i,j,n
+  integer(c_int32_t) i,j,n
 
   trGk(:,:) = (0.0d0, 0.0d0)
 
@@ -459,7 +459,7 @@ subroutine gen_tr_greenw_0(trGk,wl,eig,mu,delta,Nk,Nw,Norb) bind(C)
      !$omp simd
      wloop: do i=1,Nw
         band_loop: do n=1,Norb
-           trGk(i,j)=trGk(i,j)+1./cmplx(wl(i)-eig(n,j)+mu,delta,kind=real64)
+           trGk(i,j)=trGk(i,j)+1./cmplx(wl(i)-eig(n,j)+mu,delta,kind=c_double)
         end do band_loop
      end do wloop
      !$omp end simd
@@ -478,16 +478,16 @@ subroutine gen_dos(Dos,wl,eig,uni,mu,delta,Nk,Nw,Norb) bind(C)
   !!@param    Nk,in: The number of k-points
   !!@param    Nw,in: The number of energies mesh
   !!@param  Norb,in: The number of orbitals
-  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nk,Nw,Norb
-  real(real64),intent(in):: mu,delta
-  real(real64),intent(in),dimension(Norb,Nk):: eig
-  real(real64),intent(in),dimension(Nw):: wl
-  complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
-  complex(real64),intent(out),dimension(Nw,Norb):: Dos
+  integer(c_int64_t),intent(in):: Nk,Nw,Norb
+  real(c_double),intent(in):: mu,delta
+  real(c_double),intent(in),dimension(Norb,Nk):: eig
+  real(c_double),intent(in),dimension(Nw):: wl
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
+  complex(c_double),intent(out),dimension(Nw,Norb):: Dos
 
-  integer(int32) i,j,k,n
+  integer(c_int32_t) i,j,k,n
 
   !$omp parallel
   !$omp workshare
@@ -498,7 +498,7 @@ subroutine gen_dos(Dos,wl,eig,uni,mu,delta,Nk,Nw,Norb) bind(C)
      wloop: do i=1,Nw
         kloop: do k=1,Nk
            bandloop: do n=1,Norb
-              Dos(i,j)=Dos(i,j)+uni(j,n,k)*conjg(uni(j,n,k))/cmplx(wl(i)-eig(n,k)+mu,delta,kind=real64)
+              Dos(i,j)=Dos(i,j)+uni(j,n,k)*conjg(uni(j,n,k))/cmplx(wl(i)-eig(n,k)+mu,delta,kind=c_double)
            end do bandloop
         end do kloop
      end do wloop
@@ -511,17 +511,17 @@ subroutine gen_dos(Dos,wl,eig,uni,mu,delta,Nk,Nw,Norb) bind(C)
 end subroutine gen_dos
 
 subroutine get_parity_prop(Pmn,rvec,ham_r,Norb,Nr) bind(C)
-  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Norb,Nr
-  real(real64),intent(in),dimension(3,Nr):: rvec
-  complex(real64),intent(in),dimension(Norb,Norb,Nr):: ham_r
-  real(real64),intent(inout),dimension(Norb,Norb):: Pmn
+  integer(c_int64_t),intent(in):: Norb,Nr
+  real(c_double),intent(in),dimension(3,Nr):: rvec
+  complex(c_double),intent(in),dimension(Norb,Norb,Nr):: ham_r
+  real(c_double),intent(inout),dimension(Norb,Norb):: Pmn
 
-  integer(int32) i,j,l,m
-  real(real64) diff_r
-  real(real64),parameter:: eps=1e-6
-  real(real64),dimension(Norb,Norb):: parity_den,parity_num
+  integer(c_int32_t) i,j,l,m
+  real(c_double) diff_r
+  real(c_double),parameter:: eps=1e-6
+  real(c_double),dimension(Norb,Norb):: parity_den,parity_num
   
   !$omp parallel
   !$omp workshare

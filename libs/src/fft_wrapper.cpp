@@ -23,12 +23,12 @@ struct Plan {
 extern "C" {
 
 // Fortran signature:
-//   integer(int64)          :: plan         (out, by reference)
-//   integer(int32)          :: rank         (in,  by reference — literal 4)
-//   integer(int32), dim(*) :: n            (in,  Nlist array)
-//   complex(real64), dim(*) :: in_arr, out_arr
-//   integer(int32)          :: sign         (in,  -1=forward, +1=backward)
-//   integer(int32)          :: flags        (in,  ignored)
+//   integer(c_int64_t)          :: plan         (out, by reference)
+//   integer(c_int32_t)          :: rank         (in,  by reference — literal 4)
+//   integer(c_int32_t), dim(*) :: n            (in,  Nlist array)
+//   complex(c_double), dim(*) :: in_arr, out_arr
+//   integer(c_int32_t)          :: sign         (in,  -1=forward, +1=backward)
+//   integer(c_int32_t)          :: flags        (in,  ignored)
 void dfftw_plan_dft_(int64_t *plan_out,
                      const int32_t *rank,
                      const int32_t *n,

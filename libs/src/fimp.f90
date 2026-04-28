@@ -65,7 +65,7 @@ subroutine gen_imp_ham(ham_imp,ham_r,rvec,ham_i,ham_ri,imp_list,rlist,eps,Nimp,N
 !!@param     rvec, in: Wannier R-vectors in fractional coords [3,Nr]
 !!@param    ham_i, in: imp-imp Wannier H_ii(R) [Norb,Norb,Nr] complex128; R=0 → on-site
 !!@param   ham_ri, in: cross-species Wannier H_ri(R) [Norb,Norb,Nr] complex128
-!!@param imp_list, in: 0-based indices of impurity sites [Nimp] int64
+!!@param imp_list, in: 0-based indices of impurity sites [Nimp] c_int64_t
 !!@param    rlist, in: site positions in fractional coords [3,Nsite]
 !!@param      eps, in: tolerance for R-vector matching
 !!@param     Nimp, in: number of impurity sites
@@ -92,21 +92,21 @@ subroutine gen_imp_ham(ham_imp,ham_r,rvec,ham_i,ham_ri,imp_list,rlist,eps,Nimp,N
 ! The lower triangle is always set as the Hermitian conjugate of the upper.
 ! If a required R-vector is not found in the table, that pair is skipped.
 ! -----------------------------------------------------------------------------
-  use,intrinsic:: iso_fortran_env, only: int64,real64
+  use,intrinsic:: iso_c_binding, only: c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nimp,Nsite,Norb,Nr
-  integer(int64),intent(in),dimension(Nimp):: imp_list  ! 0-based impurity site indices
-  real(real64),intent(in):: eps                          ! tolerance for R-vector matching
-  real(real64),intent(in),dimension(3,Nsite):: rlist     ! fractional coords of each site
-  real(real64),intent(in),dimension(3,Nr):: rvec         ! Wannier R-vectors (fractional)
-  complex(real64),intent(in),dimension(Norb,Norb,Nr):: ham_r   ! host-host H(R)
-  complex(real64),intent(in),dimension(Norb,Norb,Nr):: ham_i   ! imp-imp   H(R)
-  complex(real64),intent(in),dimension(Norb,Norb,Nr):: ham_ri  ! cross     H(R), bra=imp
-  complex(real64),intent(out),dimension(Norb*Nsite,Norb*Nsite):: ham_imp
+  integer(c_int64_t),intent(in):: Nimp,Nsite,Norb,Nr
+  integer(c_int64_t),intent(in),dimension(Nimp):: imp_list  ! 0-based impurity site indices
+  real(c_double),intent(in):: eps                          ! tolerance for R-vector matching
+  real(c_double),intent(in),dimension(3,Nsite):: rlist     ! fractional coords of each site
+  real(c_double),intent(in),dimension(3,Nr):: rvec         ! Wannier R-vectors (fractional)
+  complex(c_double),intent(in),dimension(Norb,Norb,Nr):: ham_r   ! host-host H(R)
+  complex(c_double),intent(in),dimension(Norb,Norb,Nr):: ham_i   ! imp-imp   H(R)
+  complex(c_double),intent(in),dimension(Norb,Norb,Nr):: ham_ri  ! cross     H(R), bra=imp
+  complex(c_double),intent(out),dimension(Norb*Nsite,Norb*Nsite):: ham_imp
 
-  integer(int64) i,j,k,l,m,n,k_onsite,k_hop,k_hop_neg,Nrx,Nry,Nrz
+  integer(c_int64_t) i,j,k,l,m,n,k_onsite,k_hop,k_hop_neg,Nrx,Nry,Nrz
   logical sw_imp1,sw_imp2
-  real(real64) tmpr(3)
+  real(c_double) tmpr(3)
 
   ! Supercell dimensions (used for minimum-image wrapping below)
   Nrx=maxval(rlist(1,:))+1
@@ -290,14 +290,14 @@ subroutine gen_bdg_ham(ham_bdg,ham_imp,gap_imp,Nsite,Norb) bind(C)
 !!@param    Nsite,  in: number of sites in supercell
 !!@param     Norb,  in: number of orbitals per site
 ! -----------------------------------------------------------------------------
-  use,intrinsic:: iso_fortran_env, only: int64,real64
+  use,intrinsic:: iso_c_binding, only: c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nsite,Norb
-  complex(real64),intent(in), dimension(Norb*Nsite,Norb*Nsite):: ham_imp
-  complex(real64),intent(in), dimension(Norb*Nsite,Norb*Nsite):: gap_imp
-  complex(real64),intent(out),dimension(2*Norb*Nsite,2*Norb*Nsite):: ham_bdg
+  integer(c_int64_t),intent(in):: Nsite,Norb
+  complex(c_double),intent(in), dimension(Norb*Nsite,Norb*Nsite):: ham_imp
+  complex(c_double),intent(in), dimension(Norb*Nsite,Norb*Nsite):: gap_imp
+  complex(c_double),intent(out),dimension(2*Norb*Nsite,2*Norb*Nsite):: ham_bdg
 
-  integer(int64) N
+  integer(c_int64_t) N
 
   N = Norb*Nsite
   ham_bdg(:,:) = (0.0d0,0.0d0)
@@ -336,14 +336,14 @@ subroutine get_dft_imp_ham(ham_k,ham_imp,klist,rlist,Nk,Nsite,Norb) bind(C)
 ! -----------------------------------------------------------------------------
   use constant
   implicit none
-  integer(int64),intent(in):: Nk,Nsite,Norb
-  real(real64),intent(in),dimension(3,Nsite):: rlist   ! site positions (fractional)
-  real(real64),intent(in),dimension(3,Nk):: klist      ! k-point coordinates (fractional)
-  complex(real64),intent(in),dimension(Norb*Nsite,Norb*Nsite):: ham_imp
-  complex(real64),intent(out),dimension(Norb*Nk,Norb*Nk):: ham_k
+  integer(c_int64_t),intent(in):: Nk,Nsite,Norb
+  real(c_double),intent(in),dimension(3,Nsite):: rlist   ! site positions (fractional)
+  real(c_double),intent(in),dimension(3,Nk):: klist      ! k-point coordinates (fractional)
+  complex(c_double),intent(in),dimension(Norb*Nsite,Norb*Nsite):: ham_imp
+  complex(c_double),intent(out),dimension(Norb*Nk,Norb*Nk):: ham_k
 
   integer i,j,k,l,m,n
-  real(real64) phase
+  real(c_double) phase
 
   ! Must initialise to zero; the loops below accumulate into ham_k
   ham_k(:,:) = (0.0d0, 0.0d0)
@@ -363,7 +363,7 @@ subroutine get_dft_imp_ham(ham_k,ham_imp,klist,rlist,Nk,Nsite,Norb) bind(C)
                     !   row: orbital n at site l  →  n + (l-1)*Norb
                     !   col: orbital m at site k  →  m + (k-1)*Norb
                   ham_k(n+Norb*(j-1),m+Norb*(i-1))=ham_k(n+Norb*(j-1),m+Norb*(i-1))&
-                     +ham_imp(n+Norb*(l-1),m+Norb*(k-1))*cmplx(cos(phase),-sin(phase),kind=real64)
+                     +ham_imp(n+Norb*(l-1),m+Norb*(k-1))*cmplx(cos(phase),-sin(phase),kind=c_double)
                  end do orb_loop2
               end do orb_loop1
            end do site_loop2
@@ -406,17 +406,17 @@ subroutine get_spectrum_spaghetti(spa,uni,eigs,klist,rlist,wlist,Nw,Nk,Nsite,Nor
 ! -----------------------------------------------------------------------------
   use constant
   implicit none
-  integer(int64),intent(in):: Nw,Nk,Nsite,Norb
-  real(real64),intent(in):: eta,mu
-  real(real64),intent(in),dimension(Nw):: wlist
-  real(real64),intent(in),dimension(3,Nsite):: rlist   ! site positions (fractional)
-  real(real64),intent(in),dimension(3,Nk):: klist      ! k-points (fractional)
-  real(real64),intent(in),dimension(Norb*Nsite):: eigs ! supercell eigenvalues
-  complex(real64),intent(in),dimension(Norb*Nsite,Norb*Nsite):: uni  ! eigenvectors (columns)
-  complex(real64),intent(out),dimension(Nw,Nk):: spa   ! spectral function G(k,ω)
+  integer(c_int64_t),intent(in):: Nw,Nk,Nsite,Norb
+  real(c_double),intent(in):: eta,mu
+  real(c_double),intent(in),dimension(Nw):: wlist
+  real(c_double),intent(in),dimension(3,Nsite):: rlist   ! site positions (fractional)
+  real(c_double),intent(in),dimension(3,Nk):: klist      ! k-points (fractional)
+  real(c_double),intent(in),dimension(Norb*Nsite):: eigs ! supercell eigenvalues
+  complex(c_double),intent(in),dimension(Norb*Nsite,Norb*Nsite):: uni  ! eigenvectors (columns)
+  complex(c_double),intent(out),dimension(Nw,Nk):: spa   ! spectral function G(k,ω)
 
   integer i,j,k,l,m,n
-  real(real64) phase
+  real(c_double) phase
 
   !$omp parallel
   !$omp workshare
@@ -436,7 +436,7 @@ subroutine get_spectrum_spaghetti(spa,uni,eigs,klist,rlist,wlist,Nw,Nk,Nsite,Nor
                     !   <n|k,l> = Σ_k' e^{-ik·R_k'} uni(l+(k'-1)*Norb, n)
                     ! uni index: orbital l at site j  →  l + (j-1)*Norb
                   spa(m,i)=spa(m,i)+conjg(uni(l+(j-1)*Norb,n))*uni(l+(k-1)*Norb,n)&
-                     *cmplx(cos(phase),-sin(phase),kind=real64)/cmplx(wlist(m)-eigs(n)+mu,eta,kind=real64)
+                     *cmplx(cos(phase),-sin(phase),kind=c_double)/cmplx(wlist(m)-eigs(n)+mu,eta,kind=c_double)
                  end do w_loop
               end do eig_loop
            end do orb_loop
@@ -468,20 +468,20 @@ subroutine calc_gloc(Gloc,hamk,sigma,z,Nk,Norb) bind(C)
 !   parallelism when this routine is called from inside solve_cpa_array,
 !   which already runs an OMP loop over frequencies.
 ! -----------------------------------------------------------------------------
-  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   use omp_lib, only: omp_get_active_level
   implicit none
-  integer(int64),intent(in):: Nk,Norb
-  complex(real64),intent(in):: z
-  complex(real64),intent(in),dimension(Norb,Norb,Nk):: hamk
-  complex(real64),intent(in),dimension(Norb,Norb):: sigma
-  complex(real64),intent(out),dimension(Norb,Norb):: Gloc
+  integer(c_int64_t),intent(in):: Nk,Norb
+  complex(c_double),intent(in):: z
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: hamk
+  complex(c_double),intent(in),dimension(Norb,Norb):: sigma
+  complex(c_double),intent(out),dimension(Norb,Norb):: Gloc
 
-  complex(real64),dimension(Norb,Norb):: gk
-  complex(real64),dimension(Norb*Norb):: work  ! LAPACK workspace (Norb^2 is sufficient)
-  integer(int32),dimension(Norb):: ipiv         ! LAPACK pivot indices
-  integer(int64) :: ik, nfail
-  integer(int32) :: i,j,info
+  complex(c_double),dimension(Norb,Norb):: gk
+  complex(c_double),dimension(Norb*Norb):: work  ! LAPACK workspace (Norb^2 is sufficient)
+  integer(c_int32_t),dimension(Norb):: ipiv         ! LAPACK pivot indices
+  integer(c_int64_t) :: ik, nfail
+  integer(c_int32_t) :: i,j,info
 
   Gloc(:,:) = (0.0d0, 0.0d0)
   nfail = 0
@@ -549,17 +549,17 @@ subroutine calc_tmat_cpa(sigma_new,Gloc,sigma,VA,VB,x,Norb) bind(C)
 !   t_alpha = delta_alpha * M_alpha^{-1}   (delta on the LEFT of the inverse)
 !   This is the standard BEB / Velicky-KE single-site form.
 ! -----------------------------------------------------------------------------
-  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Norb
-  real(real64),intent(in):: x
-  complex(real64),intent(in),dimension(Norb,Norb):: Gloc,sigma,VA,VB
-  complex(real64),intent(out),dimension(Norb,Norb):: sigma_new
+  integer(c_int64_t),intent(in):: Norb
+  real(c_double),intent(in):: x
+  complex(c_double),intent(in),dimension(Norb,Norb):: Gloc,sigma,VA,VB
+  complex(c_double),intent(out),dimension(Norb,Norb):: sigma_new
 
-  complex(real64),dimension(Norb,Norb):: dA,dB,matA,matB,tA,tB
-  complex(real64),dimension(Norb*Norb):: work
-  integer(int32),dimension(Norb):: ipiv
-  integer(int32) :: i,j,info
+  complex(c_double),dimension(Norb,Norb):: dA,dB,matA,matB,tA,tB
+  complex(c_double),dimension(Norb*Norb):: work
+  integer(c_int32_t),dimension(Norb):: ipiv
+  integer(c_int32_t) :: i,j,info
 
   ! delta_alpha = V_alpha - Sigma
   dA(:,:) = VA(:,:) - sigma(:,:)
@@ -631,34 +631,34 @@ subroutine solve_cpa(sigma_cpa,hamk,VA,VB,x,z,pp,Nk,Norb,maxiter,tol) bind(C)
 !   Applied after convergence check; pp=1 gives the unmodified fixed-point
 !   update, smaller pp stabilises iteration near singular points.
 ! -----------------------------------------------------------------------------
-  use,intrinsic:: iso_fortran_env, only:int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nk,Norb,maxiter
-  real(real64),intent(in):: x,pp,tol
-  complex(real64),intent(in):: z
-  complex(real64),intent(in),dimension(Norb,Norb,Nk):: hamk
-  complex(real64),intent(in),dimension(Norb,Norb):: VA,VB
-  complex(real64),intent(inout),dimension(Norb,Norb):: sigma_cpa
+  integer(c_int64_t),intent(in):: Nk,Norb,maxiter
+  real(c_double),intent(in):: x,pp,tol
+  complex(c_double),intent(in):: z
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: hamk
+  complex(c_double),intent(in),dimension(Norb,Norb):: VA,VB
+  complex(c_double),intent(inout),dimension(Norb,Norb):: sigma_cpa
 
-  complex(real64),dimension(Norb,Norb):: Gloc,sigma_new
-  real(real64) diff
-  integer(int64) iter,i,j
+  complex(c_double),dimension(Norb,Norb):: Gloc,sigma_new
+  real(c_double) diff
+  integer(c_int64_t) iter,i,j
 
   interface
      subroutine calc_gloc(Gloc,hamk,sigma,z,Nk,Norb) bind(C)
-       import:: int64,real64
-       integer(int64),intent(in):: Nk,Norb
-       complex(real64),intent(in):: z
-       complex(real64),intent(in),dimension(Norb,Norb,Nk):: hamk
-       complex(real64),intent(in),dimension(Norb,Norb):: sigma
-       complex(real64),intent(out),dimension(Norb,Norb):: Gloc
+       import:: c_int64_t,c_double
+       integer(c_int64_t),intent(in):: Nk,Norb
+       complex(c_double),intent(in):: z
+       complex(c_double),intent(in),dimension(Norb,Norb,Nk):: hamk
+       complex(c_double),intent(in),dimension(Norb,Norb):: sigma
+       complex(c_double),intent(out),dimension(Norb,Norb):: Gloc
      end subroutine calc_gloc
      subroutine calc_tmat_cpa(sigma_new,Gloc,sigma,VA,VB,x,Norb) bind(C)
-       import:: int64,real64
-       integer(int64),intent(in):: Norb
-       real(real64),intent(in):: x
-       complex(real64),intent(in),dimension(Norb,Norb):: Gloc,sigma,VA,VB
-       complex(real64),intent(out),dimension(Norb,Norb):: sigma_new
+       import:: c_int64_t,c_double
+       integer(c_int64_t),intent(in):: Norb
+       real(c_double),intent(in):: x
+       complex(c_double),intent(in),dimension(Norb,Norb):: Gloc,sigma,VA,VB
+       complex(c_double),intent(out),dimension(Norb,Norb):: sigma_new
      end subroutine calc_tmat_cpa
   end interface
 
@@ -719,26 +719,26 @@ subroutine solve_cpa_array(sigma_cpa_w,hamk,VA,VB,x,zlist,pp,Nk,Norb,Nw,maxiter,
 !   omp_get_active_level()==0, so it is disabled here, keeping the nesting
 !   flat (frequency-level parallelism only).
 ! -----------------------------------------------------------------------------
-  use,intrinsic:: iso_fortran_env, only:int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nk,Norb,Nw,maxiter
-  real(real64),intent(in):: x,pp,tol
-  complex(real64),intent(in),dimension(Nw):: zlist
-  complex(real64),intent(in),dimension(Norb,Norb,Nk):: hamk
-  complex(real64),intent(in),dimension(Norb,Norb):: VA,VB
-  complex(real64),intent(inout),dimension(Norb,Norb,Nw):: sigma_cpa_w
+  integer(c_int64_t),intent(in):: Nk,Norb,Nw,maxiter
+  real(c_double),intent(in):: x,pp,tol
+  complex(c_double),intent(in),dimension(Nw):: zlist
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: hamk
+  complex(c_double),intent(in),dimension(Norb,Norb):: VA,VB
+  complex(c_double),intent(inout),dimension(Norb,Norb,Nw):: sigma_cpa_w
 
-  integer(int64) iw
+  integer(c_int64_t) iw
 
   interface
      subroutine solve_cpa(sigma_cpa,hamk,VA,VB,x,z,pp,Nk,Norb,maxiter,tol) bind(C)
-       import:: int64,real64
-       integer(int64),intent(in):: Nk,Norb,maxiter
-       real(real64),intent(in):: x,pp,tol
-       complex(real64),intent(in):: z
-       complex(real64),intent(in),dimension(Norb,Norb,Nk):: hamk
-       complex(real64),intent(in),dimension(Norb,Norb):: VA,VB
-       complex(real64),intent(inout),dimension(Norb,Norb):: sigma_cpa
+       import:: c_int64_t,c_double
+       integer(c_int64_t),intent(in):: Nk,Norb,maxiter
+       real(c_double),intent(in):: x,pp,tol
+       complex(c_double),intent(in):: z
+       complex(c_double),intent(in),dimension(Norb,Norb,Nk):: hamk
+       complex(c_double),intent(in),dimension(Norb,Norb):: VA,VB
+       complex(c_double),intent(inout),dimension(Norb,Norb):: sigma_cpa
      end subroutine solve_cpa
   end interface
 
