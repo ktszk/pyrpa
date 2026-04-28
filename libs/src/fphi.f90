@@ -4,43 +4,43 @@ subroutine get_iqshift(qpoint,klist,qshift,Nk) bind(C,name="get_iqshift_")
   !!@param   klist,in: list of all k-point
   !!@param qshift,out: list of footnote of klist that correspond to k+q shift
   !!@param      Nk,in: number of k-points
-  use,intrinsic:: iso_fortran_env, only:int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nk
-  real(real64),intent(in),dimension(3,Nk):: klist
-  real(real64),intent(in),dimension(3):: qpoint
-  integer(int64),intent(out),dimension(Nk):: qshift
+  integer(c_int64_t),intent(in):: Nk
+  real(c_double),intent(in),dimension(3,Nk):: klist
+  real(c_double),intent(in),dimension(3):: qpoint
+  integer(c_int64_t),intent(out),dimension(Nk):: qshift
   
-  integer(int64) i,j,k,ck
-  real(real64) tmp
-  real(real64),dimension(3,Nk):: kqlist
+  integer(c_int64_t) i,j,k,ck
+  real(c_double) tmp
+  real(c_double),dimension(3,Nk):: kqlist
   
-  integer(int64) :: scale_int, i1, i2, i3, j1, j2, j3
-  integer(int64), allocatable :: ht_key(:), ht_val(:)
-  integer(int64) :: m, h, step
-  integer(int64) :: jj
-  integer(int64) :: key, key_t
-  real(real64) :: tmpf(3)
+  integer(c_int64_t) :: scale_int, i1, i2, i3, j1, j2, j3
+  integer(c_int64_t), allocatable :: ht_key(:), ht_val(:)
+  integer(c_int64_t) :: m, h, step
+  integer(c_int64_t) :: jj
+  integer(c_int64_t) :: key, key_t
+  real(c_double) :: tmpf(3)
 
-  scale_int=1048576_int64
-  m = max(3_int64, 2_int64*Nk + 3_int64)
+  scale_int=1048576_c_int64_t
+  m = max(3_c_int64_t, 2_c_int64_t*Nk + 3_c_int64_t)
   allocate(ht_key(m))
   allocate(ht_val(m))
-  ht_key(:) = -1_int64
-  ht_val(:) = -1_int64
+  ht_key(:) = -1_c_int64_t
+  ht_val(:) = -1_c_int64_t
 
   ! build hash table from klist (single-threaded)
   do jj=1,int(Nk)
-     i1 = int(klist(1,jj)*dble(scale_int)+0.5d0, int64)
-     i2 = int(klist(2,jj)*dble(scale_int)+0.5d0, int64)
-     i3 = int(klist(3,jj)*dble(scale_int)+0.5d0, int64)
+     i1 = int(klist(1,jj)*dble(scale_int)+0.5d0, c_int64_t)
+     i2 = int(klist(2,jj)*dble(scale_int)+0.5d0, c_int64_t)
+     i3 = int(klist(3,jj)*dble(scale_int)+0.5d0, c_int64_t)
      i1 = mod(i1, scale_int)
      i2 = mod(i2, scale_int)
      i3 = mod(i3, scale_int)
      key = i1 + i2*scale_int + i3*scale_int*scale_int
-     h = mod(abs(key), m) + 1_int64
-     step = 1_int64
-     do while(ht_key(h) /= -1_int64 .and. ht_key(h) /= key)
+     h = mod(abs(key), m) + 1_c_int64_t
+     step = 1_c_int64_t
+     do while(ht_key(h) /= -1_c_int64_t .and. ht_key(h) /= key)
         h = h + step
         if(h>m) h = h - m
      end do
@@ -59,17 +59,17 @@ subroutine get_iqshift(qpoint,klist,qshift,Nk) bind(C,name="get_iqshift_")
            tmpf(j)=tmpf(j)+1.0d0
         end if
      end do
-     j1 = int(tmpf(1)*dble(scale_int)+0.5d0, int64)
-     j2 = int(tmpf(2)*dble(scale_int)+0.5d0, int64)
-     j3 = int(tmpf(3)*dble(scale_int)+0.5d0, int64)
+     j1 = int(tmpf(1)*dble(scale_int)+0.5d0, c_int64_t)
+     j2 = int(tmpf(2)*dble(scale_int)+0.5d0, c_int64_t)
+     j3 = int(tmpf(3)*dble(scale_int)+0.5d0, c_int64_t)
      j1 = mod(j1, scale_int)
      j2 = mod(j2, scale_int)
      j3 = mod(j3, scale_int)
      key_t = j1 + j2*scale_int + j3*scale_int*scale_int
-     h = mod(abs(key_t), m) + 1_int64
-     step = 1_int64
+     h = mod(abs(key_t), m) + 1_c_int64_t
+     step = 1_c_int64_t
      qshift(i) = 1
-     do while(ht_key(h) /= -1_int64)
+     do while(ht_key(h) /= -1_c_int64_t)
         if(ht_key(h) == key_t) then
            qshift(i) = ht_val(h)
            exit
@@ -84,7 +84,7 @@ subroutine get_iqshift(qpoint,klist,qshift,Nk) bind(C,name="get_iqshift_")
 end subroutine get_iqshift
 
 module calc_irr_phi
-  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
 contains
   function calc_phi(Nk,Norb,Nchi,uni,eig,ffermi,ol,mu,temp,qshift,w,idelta,eps)
@@ -103,19 +103,19 @@ contains
     !!@param    idelta: dumping factor
     !!@param       eps: threshold of calculation value
     !!@return calc_phi: irreducible sc susceptibility matrix
-    integer(int64),intent(in):: Nk,Norb,Nchi
-    integer(int64),intent(in),dimension(Nk):: qshift
-    integer(int64),intent(in),dimension(Nchi,2):: ol
-    real(real64),intent(in):: mu,temp,eps,idelta,w
-    real(real64),intent(in),dimension(Norb,Nk):: eig,ffermi
-    complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
+    integer(c_int64_t),intent(in):: Nk,Norb,Nchi
+    integer(c_int64_t),intent(in),dimension(Nk):: qshift
+    integer(c_int64_t),intent(in),dimension(Nchi,2):: ol
+    real(c_double),intent(in):: mu,temp,eps,idelta,w
+    real(c_double),intent(in),dimension(Norb,Nk):: eig,ffermi
+    complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
   
-    integer(int32) i,j,k,l,m,nchi32
-    complex(real64) weight
-    complex(real64),dimension(Nchi):: A_vec,B_vec
-    complex(real64),dimension(Nchi,Nchi):: phi,calc_phi
+    integer(c_int32_t) i,j,k,l,m,nchi32
+    complex(c_double) weight
+    complex(c_double),dimension(Nchi):: A_vec,B_vec
+    complex(c_double),dimension(Nchi,Nchi):: phi,calc_phi
 
-    nchi32=int(Nchi,int32)
+    nchi32=int(Nchi,c_int32_t)
     phi(:,:)=0.0d0
     kloop: do k=1,Nk
        band1_loop: do l=1,Norb
@@ -127,7 +127,7 @@ contains
              ! Cooper pair propagator (particle-particle channel):
              ! weight = -(1-f_l(-k+q) - f_m(k)) / (ω - E_m(k) - E_l(-k+q) + 2μ)
              weight=-(1.0d0-ffermi(l,qshift(k))-ffermi(m,k))&
-                  /cmplx(w-eig(m,k)-eig(l,qshift(k))+2.0d0*mu,idelta,kind=real64)
+                  /cmplx(w-eig(m,k)-eig(l,qshift(k))+2.0d0*mu,idelta,kind=c_double)
              ! A_vec(j) = uni(ol(j,1),l,qshift(k)) * conjg(uni(ol(j,2),m,k))
              do j=1,Nchi
                 A_vec(j)=uni(ol(j,1),l,qshift(k))*conjg(uni(ol(j,2),m,k))
@@ -164,16 +164,16 @@ subroutine get_phi_irr(phi,uni,eig,ffermi,qshift,ol,wl,Nchi,Norb,Nk,Nw,idelta,ep
   !!@param   temp,in: temperature
   use calc_irr_phi
   implicit none
-  integer(int64),intent(in):: Nk,Norb,Nw,Nchi
-  integer(int64),intent(in),dimension(Nk):: qshift
-  integer(int64),intent(in),dimension(Nchi,2):: ol
-  real(real64),intent(in):: temp,mu,eps,idelta
-  real(real64),intent(in),dimension(Norb,Nk):: eig,ffermi
-  real(real64),intent(in),dimension(Nw):: wl
-  complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
-  complex(real64),intent(out),dimension(Nchi,Nchi,Nw):: phi
+  integer(c_int64_t),intent(in):: Nk,Norb,Nw,Nchi
+  integer(c_int64_t),intent(in),dimension(Nk):: qshift
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: ol
+  real(c_double),intent(in):: temp,mu,eps,idelta
+  real(c_double),intent(in),dimension(Norb,Nk):: eig,ffermi
+  real(c_double),intent(in),dimension(Nw):: wl
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
+  complex(c_double),intent(out),dimension(Nchi,Nchi,Nw):: phi
 
-  integer(int64) i
+  integer(c_int64_t) i
 
   !$omp parallel do private(i)
   wloop: do i=1,Nw
@@ -191,15 +191,15 @@ subroutine get_tr_phi(trphi,phi_orb,phi,olist,Nw,Nchi,Norb) bind(C)
   !!@param       Nw,in: The number of frequency mesh
   !!@param     Nchi,in: The number of footnote of chis,chi0
   !!@param     Norb,in: The number of orbitals
-  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nchi,Nw,Norb
-  integer(int64),intent(in),dimension(Nchi,2):: olist
-  complex(real64),intent(in),dimension(Nchi,Nchi,Nw):: phi
-  complex(real64),intent(out),dimension(Nw):: trphi
-  complex(real64),intent(out),dimension(Norb+2,Nw):: phi_orb
+  integer(c_int64_t),intent(in):: Nchi,Nw,Norb
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  complex(c_double),intent(in),dimension(Nchi,Nchi,Nw):: phi
+  complex(c_double),intent(out),dimension(Nw):: trphi
+  complex(c_double),intent(out),dimension(Norb+2,Nw):: phi_orb
   
-  integer(int64) i,j,k
+  integer(c_int64_t) i,j,k
 
   trphi(:)     = (0.0d0, 0.0d0)
   phi_orb(:,:) = (0.0d0, 0.0d0)
@@ -245,23 +245,23 @@ subroutine phiq_map(trphi,uni,eig,ffermi,klist,ol,mu,temp,ecut,idelta,eps,Nx,Ny,
   !!@param sw_omega,in: switch matsubara or real frequency
   use calc_irr_phi
   implicit none
-  integer(int64),intent(in):: Nx,Ny,Nk,Norb,Nchi
-  integer(int64),intent(in),dimension(Nchi,2):: ol
-  real(real64),intent(in):: ecut,idelta,eps,temp,mu
-  real(real64),intent(in),dimension(3,Nk):: klist
-  real(real64),intent(in),dimension(Norb,Nk):: eig,ffermi
-  complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
-  complex(real64),intent(out),dimension(Ny,Nx):: trphi
+  integer(c_int64_t),intent(in):: Nx,Ny,Nk,Norb,Nchi
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: ol
+  real(c_double),intent(in):: ecut,idelta,eps,temp,mu
+  real(c_double),intent(in),dimension(3,Nk):: klist
+  real(c_double),intent(in),dimension(Norb,Nk):: eig,ffermi
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
+  complex(c_double),intent(out),dimension(Ny,Nx):: trphi
   logical(1),intent(in):: sw_omega
 
-  integer(int32) info
-  integer(int64) i,j,l,m,n
-  integer(int64),dimension(Nk):: qshift
-  integer(int32),dimension(Nchi):: ipiv
-  real(real64) wre,wim
-  real(real64),dimension(3):: qpoint
-  complex(real64),dimension(Nchi,Nchi):: phi
-  complex(real64),dimension(2*Nchi):: work
+  integer(c_int32_t) info
+  integer(c_int64_t) i,j,l,m,n
+  integer(c_int64_t),dimension(Nk):: qshift
+  integer(c_int32_t),dimension(Nchi):: ipiv
+  real(c_double) wre,wim
+  real(c_double),dimension(3):: qpoint
+  complex(c_double),dimension(Nchi,Nchi):: phi
+  complex(c_double),dimension(2*Nchi):: work
 
   ! sw_omega=.true.: real frequency ω+iδ;  .false.: Matsubara iω_n (w=0, δ=0)
   if(sw_omega)then !set omega=cmplex(w,idelta)

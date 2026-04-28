@@ -1,42 +1,42 @@
 subroutine get_qshift(qpoint,klist,qshift,Nk) bind(C,name="get_qshift_")
   !> shift k to k+q (hash-based O(Nk) mapping)
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nk
-  real(real64),intent(in),dimension(3,Nk):: klist
-  real(real64),intent(in),dimension(3):: qpoint
-  integer(int64),intent(out),dimension(Nk):: qshift
+  integer(c_int64_t),intent(in):: Nk
+  real(c_double),intent(in),dimension(3,Nk):: klist
+  real(c_double),intent(in),dimension(3):: qpoint
+  integer(c_int64_t),intent(out),dimension(Nk):: qshift
 
-  integer(int32) :: i,j
-  integer(int64) :: jj
-  integer(int64) :: scale_int, m, h, step
-  integer(int64) :: i1, i2, i3, j1, j2, j3
-  integer(int64), allocatable :: ht_key(:), ht_val(:)
-  integer(int64) :: key, key_t
-  real(real64) :: tmpf(3)
+  integer(c_int32_t) :: i,j
+  integer(c_int64_t) :: jj
+  integer(c_int64_t) :: scale_int, m, h, step
+  integer(c_int64_t) :: i1, i2, i3, j1, j2, j3
+  integer(c_int64_t), allocatable :: ht_key(:), ht_val(:)
+  integer(c_int64_t) :: key, key_t
+  real(c_double) :: tmpf(3)
 
   ! Hash-table approach for O(Nk) k+q lookup (vs O(Nk^2) brute force)
   ! k-coordinates are quantized to integer keys at 2^20 resolution
-  scale_int = 1048576_int64  ! 2^20 resolution (~10^-6 fractional precision)
-  m = max(3_int64, 2_int64*Nk + 3_int64)  ! table size > 2*Nk to keep load factor < 0.5
+  scale_int = 1048576_c_int64_t  ! 2^20 resolution (~10^-6 fractional precision)
+  m = max(3_c_int64_t, 2_c_int64_t*Nk + 3_c_int64_t)  ! table size > 2*Nk to keep load factor < 0.5
 
   allocate(ht_key(m))
   allocate(ht_val(m))
-  ht_key(:) = -1_int64
-  ht_val(:) = -1_int64
+  ht_key(:) = -1_c_int64_t
+  ht_val(:) = -1_c_int64_t
 
   ! Build hash table from klist (single-threaded)
   do jj = 1, int(Nk)
-     i1 = int(klist(1,jj)*dble(scale_int)+0.5d0, int64)
-     i2 = int(klist(2,jj)*dble(scale_int)+0.5d0, int64)
-     i3 = int(klist(3,jj)*dble(scale_int)+0.5d0, int64)
+     i1 = int(klist(1,jj)*dble(scale_int)+0.5d0, c_int64_t)
+     i2 = int(klist(2,jj)*dble(scale_int)+0.5d0, c_int64_t)
+     i3 = int(klist(3,jj)*dble(scale_int)+0.5d0, c_int64_t)
      i1 = mod(i1, scale_int)
      i2 = mod(i2, scale_int)
      i3 = mod(i3, scale_int)
      key = i1 + i2*scale_int + i3*scale_int*scale_int
-     h = mod(abs(key), m) + 1_int64
-     step = 1_int64
-     do while(ht_key(h) /= -1_int64 .and. ht_key(h) /= key)
+     h = mod(abs(key), m) + 1_c_int64_t
+     step = 1_c_int64_t
+     do while(ht_key(h) /= -1_c_int64_t .and. ht_key(h) /= key)
         h = h + step
         if(h > m) h = h - m
      end do
@@ -55,17 +55,17 @@ subroutine get_qshift(qpoint,klist,qshift,Nk) bind(C,name="get_qshift_")
            tmpf(j) = tmpf(j) + 1.0d0
         end if
      end do
-     j1 = int(tmpf(1)*dble(scale_int)+0.5d0, int64)
-     j2 = int(tmpf(2)*dble(scale_int)+0.5d0, int64)
-     j3 = int(tmpf(3)*dble(scale_int)+0.5d0, int64)
+     j1 = int(tmpf(1)*dble(scale_int)+0.5d0, c_int64_t)
+     j2 = int(tmpf(2)*dble(scale_int)+0.5d0, c_int64_t)
+     j3 = int(tmpf(3)*dble(scale_int)+0.5d0, c_int64_t)
      j1 = mod(j1, scale_int)
      j2 = mod(j2, scale_int)
      j3 = mod(j3, scale_int)
      key_t = j1 + j2*scale_int + j3*scale_int*scale_int
-     h = mod(abs(key_t), m) + 1_int64
-     step = 1_int64
+     h = mod(abs(key_t), m) + 1_c_int64_t
+     step = 1_c_int64_t
      qshift(i) = 1
-     do while(ht_key(h) /= -1_int64)
+     do while(ht_key(h) /= -1_c_int64_t)
         if(ht_key(h) == key_t) then
            qshift(i) = ht_val(h)
            exit
@@ -81,7 +81,7 @@ subroutine get_qshift(qpoint,klist,qshift,Nk) bind(C,name="get_qshift_")
 end subroutine get_qshift
 
 module calc_irr_chi
-  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
 contains
   function calc_chi(Nk,Norb,Nchi,uni,eig,ffermi,ol,temp,qshift,w,idelta,eps)
@@ -100,32 +100,32 @@ contains
     !!@param    idelta: dumping factor
     !!@param       eps: threshold of calculation value
     !!@return calc_chi: irreducible susceptibility matrix
-    integer(int64),intent(in):: Nk,Norb,Nchi
-    integer(int64),intent(in),dimension(Nk):: qshift
-    integer(int64),intent(in),dimension(Nchi,2):: ol
-    real(real64),intent(in):: temp,eps,idelta,w
-    real(real64),intent(in),dimension(Norb,Nk):: eig,ffermi
-    complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
+    integer(c_int64_t),intent(in):: Nk,Norb,Nchi
+    integer(c_int64_t),intent(in),dimension(Nk):: qshift
+    integer(c_int64_t),intent(in),dimension(Nchi,2):: ol
+    real(c_double),intent(in):: temp,eps,idelta,w
+    real(c_double),intent(in),dimension(Norb,Nk):: eig,ffermi
+    complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
 
-   integer(int32) i,j,k,l,m,nchi32
-   real(real64) temp_safe,w_eps
-   complex(real64) weight
-   complex(real64),dimension(Nchi):: A_vec,B_vec
-   complex(real64),dimension(Nchi,Nchi):: chi,calc_chi
+   integer(c_int32_t) i,j,k,l,m,nchi32
+   real(c_double) temp_safe,w_eps
+   complex(c_double) weight
+   complex(c_double),dimension(Nchi):: A_vec,B_vec
+   complex(c_double),dimension(Nchi,Nchi):: chi,calc_chi
 
    temp_safe=max(temp,1.0d-12)
    w_eps=1.0d-12
-   nchi32=int(Nchi,int32)
+   nchi32=int(Nchi,c_int32_t)
    chi(:,:)=0.0d0
    kloop: do k=1,Nk
       band1_loop: do l=1,Norb
          band2_loop: do m=1,Norb
             ! compute scalar weight once per (k,l,m)
             if(abs(w)<w_eps .and. abs(eig(m,k)-eig(l,qshift(k)))<1.0d-9)then
-               weight=cmplx(ffermi(m,k)*(1.0d0-ffermi(m,k))/temp_safe,0.0d0,kind=real64)
+               weight=cmplx(ffermi(m,k)*(1.0d0-ffermi(m,k))/temp_safe,0.0d0,kind=c_double)
             else if(abs(ffermi(l,qshift(k))-ffermi(m,k))>eps)then
                weight=(ffermi(l,qshift(k))-ffermi(m,k))&
-                    /cmplx(w+eig(m,k)-eig(l,qshift(k)),idelta,kind=real64)
+                    /cmplx(w+eig(m,k)-eig(l,qshift(k)),idelta,kind=c_double)
             else
                cycle band2_loop
             end if
@@ -157,15 +157,15 @@ subroutine get_tr_chi(trchis,trchi0,chis_orb,chis,chi0,olist,Nw,Nchi,Norb) bind(
   !!@param        Nw,in: The number of frequency mesh
   !!@param      Nchi,in: The number of footnote of chis,chi0
   !!@param      Norb,in: The number of orbitals
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nchi,Nw,Norb
-  integer(int64),intent(in),dimension(Nchi,2):: olist
-  complex(real64),intent(in),dimension(Nchi,Nchi,Nw):: chis,chi0
-  complex(real64),intent(out),dimension(Nw):: trchis,trchi0
-  complex(real64),intent(out),dimension(Norb+2,Nw):: chis_orb
+  integer(c_int64_t),intent(in):: Nchi,Nw,Norb
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  complex(c_double),intent(in),dimension(Nchi,Nchi,Nw):: chis,chi0
+  complex(c_double),intent(out),dimension(Nw):: trchis,trchi0
+  complex(c_double),intent(out),dimension(Norb+2,Nw):: chis_orb
 
-  integer(int32) i,j,k
+  integer(c_int32_t) i,j,k
 
   trchis(:)    = (0.0d0, 0.0d0)
   trchi0(:)    = (0.0d0, 0.0d0)
@@ -210,16 +210,16 @@ subroutine get_chi_irr(chi,uni,eig,ffermi,qshift,ol,wl,Nchi,Norb,Nk,Nw,idelta,ep
   !!@param   temp,in: temperature
   use calc_irr_chi
   implicit none
-  integer(int64),intent(in):: Nk,Norb,Nw,Nchi
-  integer(int64),intent(in),dimension(Nk):: qshift
-  integer(int64),intent(in),dimension(Nchi,2):: ol
-  real(real64),intent(in):: temp,eps,idelta
-  real(real64),intent(in),dimension(Norb,Nk):: eig,ffermi
-  real(real64),intent(in),dimension(Nw):: wl
-  complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
-  complex(real64),intent(out),dimension(Nchi,Nchi,Nw):: chi
+  integer(c_int64_t),intent(in):: Nk,Norb,Nw,Nchi
+  integer(c_int64_t),intent(in),dimension(Nk):: qshift
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: ol
+  real(c_double),intent(in):: temp,eps,idelta
+  real(c_double),intent(in),dimension(Norb,Nk):: eig,ffermi
+  real(c_double),intent(in),dimension(Nw):: wl
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
+  complex(c_double),intent(out),dimension(Nchi,Nchi,Nw):: chi
 
-  integer(int32) i
+  integer(c_int32_t) i
  
   !$omp parallel do private(i)
   wloop: do i=1,Nw
@@ -249,20 +249,20 @@ subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,e
   !!@param    Nchi,in: The footnote of chi
   use calc_irr_chi
   implicit none
-  integer(int64),intent(in):: Nx,Ny,Nk,Norb,Nchi
-  integer(int64),intent(in),dimension(Nchi,2):: ol
-  real(real64),intent(in):: ecut,idelta,eps,temp
-  real(real64),intent(in),dimension(3,Nk):: klist
-  real(real64),intent(in),dimension(Norb,Nk):: eig,ffermi
-  real(real64),intent(in),dimension(Nchi,Nchi):: Smat
-  complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
-  complex(real64),intent(out),dimension(Ny,Nx):: trchis,trchi
+  integer(c_int64_t),intent(in):: Nx,Ny,Nk,Norb,Nchi
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: ol
+  real(c_double),intent(in):: ecut,idelta,eps,temp
+  real(c_double),intent(in),dimension(3,Nk):: klist
+  real(c_double),intent(in),dimension(Norb,Nk):: eig,ffermi
+  real(c_double),intent(in),dimension(Nchi,Nchi):: Smat
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
+  complex(c_double),intent(out),dimension(Ny,Nx):: trchis,trchi
 
-  integer(int32) i,j,l,m,info
-  integer(int64),dimension(Nk):: qshift
-  integer(int32),dimension(Nchi):: ipiv
-  real(real64),dimension(3):: qpoint
-  complex(real64),dimension(Nchi,Nchi):: chi,tmp,tmp2,Smat_c
+  integer(c_int32_t) i,j,l,m,info
+  integer(c_int64_t),dimension(Nk):: qshift
+  integer(c_int32_t),dimension(Nchi):: ipiv
+  real(c_double),dimension(3):: qpoint
+  complex(c_double),dimension(Nchi,Nchi):: chi,tmp,tmp2,Smat_c
 
   Smat_c = Smat
 
@@ -311,16 +311,16 @@ subroutine get_chis(chis,chi0,Smat,Nchi,Nw) bind(C)
   !!@param  Smat,in: S-matrix
   !!@param  Nchi,in: The footnote of chi
   !!@param    Nw,in: The number of w mesh
-  use,intrinsic:: iso_fortran_env, only:int32,int64,real64
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
-  integer(int64),intent(in):: Nchi,Nw
-  real(real64),dimension(Nchi,Nchi):: Smat
-  complex(real64),intent(in),dimension(Nchi,Nchi,Nw):: chi0
-  complex(real64),intent(out),dimension(Nchi,Nchi,Nw):: chis
+  integer(c_int64_t),intent(in):: Nchi,Nw
+  real(c_double),dimension(Nchi,Nchi):: Smat
+  complex(c_double),intent(in),dimension(Nchi,Nchi,Nw):: chi0
+  complex(c_double),intent(out),dimension(Nchi,Nchi,Nw):: chis
 
-  integer(int32) i,l,info
-  integer(int32),dimension(Nchi):: ipiv
-  complex(real64),dimension(Nchi,Nchi):: tmp,Smat_c
+  integer(c_int32_t) i,l,info
+  integer(c_int32_t),dimension(Nchi):: ipiv
+  complex(c_double),dimension(Nchi,Nchi):: tmp,Smat_c
 
   Smat_c = Smat
 

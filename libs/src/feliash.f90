@@ -25,26 +25,26 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,kmap,invk,
   !!@param         Nz,in: Number of kz mesh
   !!@param     itemax,in: maximum iteration of power method
   !!@param    gap_sym,in: gap symmetry number
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym
-  integer(int64),intent(in):: arnoldi_m  !! Krylov subspace dimension (0=power method, >0=Arnoldi)
-  integer(int64),intent(in),dimension(Nchi,2):: olist
-  integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
-  real(real64),intent(in):: temp,eps
-  real(real64),intent(in),dimension(Norb):: prt
-  real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
-  real(real64),intent(in),dimension(Nk,Norb):: init_delta
-  complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
-  complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
-  complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: delta
-  complex(real64),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
+  integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym
+  integer(c_int64_t),intent(in):: arnoldi_m  !! Krylov subspace dimension (0=power method, >0=Arnoldi)
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
+  real(c_double),intent(in):: temp,eps
+  real(c_double),intent(in),dimension(Norb):: prt
+  real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  real(c_double),intent(in),dimension(Nk,Norb):: init_delta
+  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
+  complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: delta
+  complex(c_double),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
 
-  integer(int32) i_iter,i_eig,i
-  integer(int32),parameter:: eig_max=2
+  integer(c_int32_t) i_iter,i_eig,i
+  integer(c_int32_t),parameter:: eig_max=2
   logical(1) sw_pair
-  real(real64) norm,inorm,weight,lambda_rq,lambda_prev,lambda_phys,lambda1,vec_err,proj
-  complex(real64),dimension(Nk,Nw,Norb,Norb):: newdelta,fk,delta1
+  real(c_double) norm,inorm,weight,lambda_rq,lambda_prev,lambda_phys,lambda1,vec_err,proj
+  complex(c_double),dimension(Nk,Nw,Norb,Norb):: newdelta,fk,delta1
 
   if(gap_sym>=0)then
      sw_pair=.true.
@@ -136,11 +136,11 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,kmap,invk,
   end if
 contains
   subroutine get_norm(norm,func)
-    complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: func
-    real(real64),intent(out):: norm
+    complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: func
+    real(c_double),intent(out):: norm
 
-    integer(int32) i,j,l,m
-    real(real64) tmp
+    integer(c_int32_t) i,j,l,m
+    real(c_double) tmp
 
     tmp=0.0d0
     !$omp parallel
@@ -161,11 +161,11 @@ contains
 
   subroutine get_rayleigh(rq,del,newdel)
     !> Rayleigh quotient: rq = Re(<del, newdel>) assuming ||del||=1
-    complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: del,newdel
-    real(real64),intent(out):: rq
+    complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: del,newdel
+    real(c_double),intent(out):: rq
 
-    integer(int32) i,j,l,m
-    real(real64) tmp
+    integer(c_int32_t) i,j,l,m
+    real(c_double) tmp
 
     tmp=0.0d0
     !$omp parallel
@@ -188,12 +188,12 @@ contains
     !> Vector convergence: min(||newdel*inrm - del||, ||newdel*inrm + del||)
     !> Taking the minimum handles sign-flipping convergence for negative eigenvalues
     !> Note: if both tmp_pos and tmp_neg are 0, verr becomes 0, indicating convergence
-    complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: newdel,del
-    real(real64),intent(in):: inrm
-    real(real64),intent(out):: verr
+    complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: newdel,del
+    real(c_double),intent(in):: inrm
+    real(c_double),intent(out):: verr
 
-    integer(int32) i,j,l,m
-    real(real64) tmp_pos,tmp_neg
+    integer(c_int32_t) i,j,l,m
+    real(c_double) tmp_pos,tmp_neg
 
     tmp_pos=0.0d0
     tmp_neg=0.0d0
@@ -217,16 +217,16 @@ contains
   subroutine solve_arnoldi(m_arnoldi)
     !> Two-pass Arnoldi: pass 1 (no shift) finds lambda_-, pass 2 (shift+deflation) finds lambda_+.
     !> Uses host delta1 as deflation vector and lambda1 to store the pass-1 eigenvalue.
-    integer(int64),intent(in):: m_arnoldi
-    integer(int32) :: m_dim,j,ii,m_act,idx,lwork,info
-    real(real64) :: beta,shift
-    complex(real64) :: hij
-    complex(real64),allocatable :: V(:,:,:,:,:)
-    complex(real64),allocatable :: H_mat(:,:),A_mat(:,:),eigenvals(:)
-    complex(real64),allocatable :: VL_dum(:,:),VR(:,:),zwork(:)
-    real(real64),allocatable :: rwork(:)
+    integer(c_int64_t),intent(in):: m_arnoldi
+    integer(c_int32_t) :: m_dim,j,ii,m_act,idx,lwork,info
+    real(c_double) :: beta,shift
+    complex(c_double) :: hij
+    complex(c_double),allocatable :: V(:,:,:,:,:)
+    complex(c_double),allocatable :: H_mat(:,:),A_mat(:,:),eigenvals(:)
+    complex(c_double),allocatable :: VL_dum(:,:),VR(:,:),zwork(:)
+    real(c_double),allocatable :: rwork(:)
 
-    m_dim=int(m_arnoldi,int32)
+    m_dim=int(m_arnoldi,c_int32_t)
     lwork=max(64,2*m_dim)
     allocate(V(Nk,Nw,Norb,Norb,0:m_dim-1),H_mat(m_dim+1,m_dim))
     allocate(A_mat(m_dim,m_dim),eigenvals(m_dim))
@@ -247,7 +247,7 @@ contains
           !$omp end parallel workshare
        end do
        call get_norm(beta,newdelta)
-       H_mat(j+2,j+1)=cmplx(beta,0.0d0,real64)
+       H_mat(j+2,j+1)=cmplx(beta,0.0d0,c_double)
        if(beta<1.0d-14)then; m_act=j+1; exit; end if
        if(j<m_dim-1)then
           !$omp parallel workshare
@@ -331,7 +331,7 @@ contains
           !$omp end parallel workshare
        end do
        call get_norm(beta,newdelta)
-       H_mat(j+2,j+1)=cmplx(beta,0.0d0,real64)
+       H_mat(j+2,j+1)=cmplx(beta,0.0d0,c_double)
        if(beta<1.0d-14)then; m_act=j+1; exit; end if
        if(j<m_dim-1)then
           !$omp parallel workshare
@@ -367,8 +367,8 @@ contains
 
   subroutine apply_op(w_out,v_in)
     !> apply Eliashberg operator: w_out = (T/Nkall)*K*v_in; uses host fk as scratch
-    complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: v_in
-    complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: w_out
+    complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: v_in
+    complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: w_out
     call mkfk_trs_nsoc(fk,Gk,v_in,Nk,Nw,Norb)
     call mkdelta_nsoc(w_out,fk,chi,Smat,Cmat,kmap,invk,prt,olist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
     !$omp parallel workshare
@@ -378,10 +378,10 @@ contains
 
   subroutine get_inner(h,u,v)
     !> complex inner product h = 2*<u,v> summed over IBZ (factor 2 for k/-k symmetry)
-    complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: u,v
-    complex(real64),intent(out):: h
-    integer(int32) i,j,l,m
-    real(real64) tmp_r,tmp_i
+    complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: u,v
+    complex(c_double),intent(out):: h
+    integer(c_int32_t) i,j,l,m
+    real(c_double) tmp_r,tmp_i
     tmp_r=0.0d0
     tmp_i=0.0d0
     !$omp parallel
@@ -398,7 +398,7 @@ contains
        end do
     end do
     !$omp end parallel
-    h=cmplx(2.0d0*tmp_r,2.0d0*tmp_i,real64)
+    h=cmplx(2.0d0*tmp_r,2.0d0*tmp_i,c_double)
   end subroutine get_inner
 end subroutine lin_eliash
 
@@ -411,26 +411,26 @@ subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
   !!@param      Nw,in: Number of Matsubara frequencies
   !!@param    Nchi,in: Number of footnote of chi
   !!@param sw_pair,in: switch of singlet or triplet paring interacton
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nk,Nw,Nchi
+  integer(c_int64_t),intent(in):: Nk,Nw,Nchi
   logical(1),intent(in):: sw_pair
-  real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
-  complex(real64),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
+  real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  complex(c_double),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
 
-   integer(int32) i,j,l,info
-  integer(int32),dimension(Nchi):: ipiv
-   complex(real64),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,cmat5,Smat_c,Cmat_c,V0_c
+   integer(c_int32_t) i,j,l,info
+  integer(c_int32_t),dimension(Nchi):: ipiv
+   complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,cmat5,Smat_c,Cmat_c,V0_c
 
-   Smat_c(:,:)=cmplx(Smat(:,:),0.0d0,kind=real64)
-   Cmat_c(:,:)=cmplx(Cmat(:,:),0.0d0,kind=real64)
+   Smat_c(:,:)=cmplx(Smat(:,:),0.0d0,kind=c_double)
+   Cmat_c(:,:)=cmplx(Cmat(:,:),0.0d0,kind=c_double)
    ! Bare (static) pairing vertex from Kanamori model:
    !   singlet: V0 = (S+C)/2 = Vud  (spin-singlet ↑↓ channel)
    !   triplet: V0 = (S-C)/2 = Vuu  (spin-triplet ↑↑ channel)
    if(sw_pair)then
-      V0_c(:,:)=cmplx(0.5d0*(Smat(:,:)+Cmat(:,:)),0.0d0,kind=real64) !bare Vud=(C+S)/2
+      V0_c(:,:)=cmplx(0.5d0*(Smat(:,:)+Cmat(:,:)),0.0d0,kind=c_double) !bare Vud=(C+S)/2
    else
-      V0_c(:,:)=cmplx(0.5d0*(Smat(:,:)-Cmat(:,:)),0.0d0,kind=real64) !bare Vuu=(S-C)/2
+      V0_c(:,:)=cmplx(0.5d0*(Smat(:,:)-Cmat(:,:)),0.0d0,kind=c_double) !bare Vuu=(S-C)/2
    end if
 
   !$omp parallel do collapse(2) private(i,cmat1,cmat2,cmat3,cmat4,cmat5,ipiv,info,l)
@@ -479,15 +479,15 @@ subroutine mkfk_trs_nsoc(fk,Gk,delta,Nk,Nw,Norb) bind(C,name="mkfk_trs_nsoc_")
   !!@param    Nk,in: Number of irreducible k-points
   !!@param    Nw,in: Number of Matsubara frequencies
   !!@param  Norb,in: Number of orbitals
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nk,Nw,Norb
-  complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
-  complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: delta
-  complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: fk
+  integer(c_int64_t),intent(in):: Nk,Nw,Norb
+  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
+  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: delta
+  complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: fk
  
-  integer(int32) i,j,l,m
-  complex(real64),dimension(Norb,Norb):: cmat1
+  integer(c_int32_t) i,j,l,m
+  complex(c_double),dimension(Norb,Norb):: cmat1
 
   !$omp parallel do collapse(2) private(i,j,l,m,cmat1)
   do j=1,Nw
@@ -528,21 +528,21 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,olist,Nkal
   !!@param        Ny,in: Number of ky mesh
   !!@param        Nz,in: Number of kz mesh
   !!@param sw_pair,in: switch of singlet or triplet paring interacton
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
-  integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
-  integer(int64),intent(in),dimension(Nchi,2):: olist
+  integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
   logical(1),intent(in):: sw_pair
-  real(real64),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
-  real(real64),intent(in),dimension(Norb):: prt
-  complex(real64),intent(in),dimension(Nk,Nw,Nchi,Nchi):: Vdelta
-  complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: delta
-  complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: newdelta
+  real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  real(c_double),intent(in),dimension(Norb):: prt
+  complex(c_double),intent(in),dimension(Nk,Nw,Nchi,Nchi):: Vdelta
+  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: delta
+  complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: newdelta
   
-  integer(int32) i,j,k,n,l,m
-  real(real64) sgn,dprt
-  complex(real64),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpVdelta,tmpfk,tmp
+  integer(c_int32_t) i,j,k,n,l,m
+  real(c_double) sgn,dprt
+  complex(c_double),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpVdelta,tmpfk,tmp
   logical(1),parameter:: sw_odd_freq=.false.
 
   ! sgn: F(-k,ω) = sgn·F^T(k,ω);  dprt: Δ(k,-ω) = dprt·Δ*(k,ω)
@@ -671,19 +671,19 @@ subroutine get_initial_delta(delta,init_delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,gap
   !!@param         Nk,in: Number of irreducible k-points
   !!@param       Norb,in: Number of orbitals
   !!@param    gap_sym,in: gap symmetry number
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   use constant
   implicit none
-  integer(int64),intent(in):: Nw,Norb,Nkall,Nk,gap_sym
-  integer(int64),intent(in),dimension(3,Nkall):: kmap,invk
-  real(real64),intent(in),dimension(Nk,Norb):: init_delta
-  complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
-  complex(real64),intent(out),dimension(Nk,Nw,Norb,Norb):: delta
+  integer(c_int64_t),intent(in):: Nw,Norb,Nkall,Nk,gap_sym
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
+  real(c_double),intent(in),dimension(Nk,Norb):: init_delta
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
+  complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: delta
 
-   integer(int32) i,j,l,m,n
-  real(real64) norm,sgn
-   complex(real64),dimension(Nk,Norb,Norb):: delta0
-   complex(real64),dimension(Norb,Norb):: tmpu
+   integer(c_int32_t) i,j,l,m,n
+  real(c_double) norm,sgn
+   complex(c_double),dimension(Nk,Norb,Norb):: delta0
+   complex(c_double),dimension(Norb,Norb):: tmpu
 
   if(gap_sym==0)then
      !$omp parallel
@@ -766,18 +766,18 @@ subroutine conv_delta_orb_to_band(deltab,delta,uni,prt,invk,Norb,Nkall,Nk,Nw,gap
   !!@param   Nkall,in: Number of all k-points
   !!@param      Nk,in: Number of irreducible k-points
   !!oparam      Nw,in: Number of Matsubara frequencies
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nw,Norb,Nk,Nkall,gap_sym
-  integer(int64),intent(in),dimension(3,Nkall):: invk
-  real(real64),intent(in),dimension(Norb):: prt
-  complex(real64),intent(in),dimension(Norb,Norb,Nk):: uni
-  complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: delta
-  complex(real64),intent(out),dimension(Nkall,Norb,Norb):: deltab
+  integer(c_int64_t),intent(in):: Nw,Norb,Nk,Nkall,gap_sym
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: invk
+  real(c_double),intent(in),dimension(Norb):: prt
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
+  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: delta
+  complex(c_double),intent(out),dimension(Nkall,Norb,Norb):: deltab
 
-   integer(int32) i,k,l,n
-  real(real64) dprt
-   complex(real64),dimension(Norb,Norb):: matL,matR,tmpm
+   integer(c_int32_t) i,k,l,n
+  real(c_double) dprt
+   complex(c_double),dimension(Norb,Norb):: matL,matR,tmpm
 
   if(gap_sym<0)then
      dprt=-1.0d0 !odd
@@ -811,16 +811,16 @@ subroutine conv_delta_orb_to_band(deltab,delta,uni,prt,invk,Norb,Nkall,Nk,Nw,gap
 end subroutine conv_delta_orb_to_band
 
 subroutine remap_delta(delta,delta0,prt,invk,Nkall,Nk,Nw,Norb,gap_sym) bind(C,name='remap_delta_')
-  use,intrinsic:: iso_fortran_env, only:int64,real64,int32
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(int64),intent(in):: Nkall,Nk,Nw,Norb,gap_sym
-  integer(int64),intent(in),dimension(3,Nkall):: invk
-  real(real64),intent(in),dimension(Norb):: prt
-  complex(real64),intent(in),dimension(Nk,Nw,Norb,Norb):: delta0
-  complex(real64),intent(out),dimension(Nkall,Nw,Norb,Norb):: delta
+  integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Norb,gap_sym
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: invk
+  real(c_double),intent(in),dimension(Norb):: prt
+  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: delta0
+  complex(c_double),intent(out),dimension(Nkall,Nw,Norb,Norb):: delta
 
-  integer(int32) i,j,l,m
-  real(real64) dprt
+  integer(c_int32_t) i,j,l,m
+  real(c_double) dprt
   if(gap_sym<0)then
      dprt=-1.0d0
   else
