@@ -417,8 +417,7 @@ subroutine mkfk_trs_nsoc(fk,Gk,delta,Nk,Nw,Norb) bind(C,name="mkfk_trs_nsoc_")
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nk,Nw,Norb
-  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
-  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: delta
+  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk,delta
   complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: fk
  
   integer(c_int32_t) i,j,l,m

@@ -268,7 +268,7 @@ subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
 
    integer(c_int32_t) i,j,l,info
   integer(c_int32_t),dimension(Nchi):: ipiv
-   complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,cmat5,Smat_c,Cmat_c,V0_c
+   complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,Smat_c,Cmat_c,V0_c
 
    Smat_c(:,:)=cmplx(Smat(:,:),0.0d0,kind=c_double)
    Cmat_c(:,:)=cmplx(Cmat(:,:),0.0d0,kind=c_double)
@@ -281,7 +281,7 @@ subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
       V0_c(:,:)=cmplx(0.5d0*(Smat(:,:)-Cmat(:,:)),0.0d0,kind=c_double) !bare Vuu=(S-C)/2
    end if
 
-  !$omp parallel do collapse(2) private(i,cmat1,cmat2,cmat3,cmat4,cmat5,ipiv,info,l)
+  !$omp parallel do collapse(2) private(i,cmat1,cmat2,cmat3,cmat4,ipiv,info,l)
   wloop:do j=1,Nw
      qloop:do i=1,Nk
         call zgemm('N','N',Nchi,Nchi,Nchi,(-1.0d0,0.0d0),chi(i,j,:,:),Nchi,Smat_c,Nchi,(0.0d0,0.0d0),cmat1,Nchi) !-chi0S
