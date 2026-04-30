@@ -8,6 +8,7 @@ subroutine generate_irr_kpoint_inv(klist,kmap,invk_ft_list,Nk,Nx,Ny,Nz) bind(C)
   !!@param            Ny,in: ky mesh
   !!@param            Nz,in: kz mesh
   use constant
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
   integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nk
   integer(c_int64_t),intent(out),dimension(3,Nx*Ny*Nz):: invk_ft_list,kmap

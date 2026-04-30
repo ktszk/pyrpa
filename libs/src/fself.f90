@@ -1084,6 +1084,7 @@ contains
   
   subroutine get_rn(rn,rmu)
     use constant
+    use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
     real(c_double),intent(in):: rmu
     real(c_double),intent(out):: rn
 
@@ -1112,6 +1113,7 @@ contains
 
   subroutine precompute_eig_gkinv()
     use constant
+    use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
     integer(c_int32_t) i,j,info_eig
     complex(c_double),dimension(Norb,Norb):: A_tmp
     complex(c_double),dimension(Norb):: eig_tmp

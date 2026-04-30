@@ -335,6 +335,7 @@ subroutine get_dft_imp_ham(ham_k,ham_imp,klist,rlist,Nk,Nsite,Norb) bind(C)
 !   ham_k row/col for orbital n at k-point j  →  n + (j-1)*Norb
 ! -----------------------------------------------------------------------------
   use constant
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double
   implicit none
   integer(c_int64_t),intent(in):: Nk,Nsite,Norb
   real(c_double),intent(in),dimension(3,Nsite):: rlist   ! site positions (fractional)
@@ -405,6 +406,7 @@ subroutine get_spectrum_spaghetti(spa,uni,eigs,klist,rlist,wlist,Nw,Nk,Nsite,Nor
 !   element for orbital l at site j  →  l + (j-1)*Norb
 ! -----------------------------------------------------------------------------
   use constant
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double
   implicit none
   integer(c_int64_t),intent(in):: Nw,Nk,Nsite,Norb
   real(c_double),intent(in):: eta,mu

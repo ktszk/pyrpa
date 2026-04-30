@@ -1,5 +1,5 @@
 module constant
-  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  use,intrinsic:: iso_c_binding, only:c_double
   implicit none
   real(c_double),parameter:: pi=3.141592653589793238462643383279d0
 end module constant
@@ -29,6 +29,7 @@ subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   !!@param     Nr,in: The number of r-vector
   !!@param   Norb,in: The number of orbitals
   use constant
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
   integer(c_int64_t),intent(in):: Nk,Nr,Norb
   real(c_double),intent(in),dimension(3,Nk):: klist
@@ -200,6 +201,7 @@ end subroutine get_ffermi
 
 subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   use constant
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
   integer(c_int64_t),intent(in):: Nk,Nr,norb
   real(c_double),intent(in),dimension(3,Nk):: klist
@@ -300,6 +302,7 @@ subroutine get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   !!@param    Nr,in: The number of r-vector
   !!@param  Norb,in: The number of orbitals
   use constant
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
   integer(c_int64_t),intent(in):: Nk,Nr,Norb
   real(c_double),intent(in),dimension(3,Nk):: klist
