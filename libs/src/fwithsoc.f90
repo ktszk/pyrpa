@@ -1569,6 +1569,7 @@ contains
   
   subroutine get_rn(rn,rmu)
     use constant
+    use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
     real(c_double),intent(in):: rmu
     real(c_double),intent(out):: rn
 
