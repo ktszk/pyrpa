@@ -336,3 +336,311 @@ subroutine get_chis(chis,chi0,Smat,Nchi,Nw) bind(C)
   end do
   !$omp end parallel do
 end subroutine get_chis
+
+subroutine ckchi_impl(chi,Smat,Cmat,kmap,invk,Nk,Nkall,Nchi,Nw,maxchi0s_out)
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  implicit none
+  integer(c_int64_t),intent(in):: Nk,Nkall,Nchi,Nw
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
+  real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  real(c_double),intent(out):: maxchi0s_out
+  complex(c_double),intent(in),dimension(Nk,Nw,Nchi,Nchi):: chi
+
+  integer(c_int32_t) i,info,chisk,chick,chiskall,chickall
+  real(c_double) maxchi0s,maxchi0c,maxchi0s2,maxchi0c2
+  real(c_double),dimension(2*Nchi):: rwork
+  complex(c_double),dimension(Nchi*Nchi*4+1):: work
+  complex(c_double),dimension(Nchi):: eigs,eigc
+  complex(c_double),dimension(Nchi,Nchi):: chi0s,chi0c,tmp1,tmp2,Smat_c,Cmat_c,chi_tmp
+
+  Smat_c = cmplx(Smat, 0.0d0, kind=c_double)
+  Cmat_c = cmplx(Cmat, 0.0d0, kind=c_double)
+  maxchi0s2=-1.0d5
+  maxchi0c2=-1.0d5
+  do i=1,Nk
+     chi_tmp = chi(i,1,:,:)
+     call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),chi_tmp,Nchi,Smat_c,Nchi,(0.0d0,0.0d0),chi0s,Nchi)
+     call zgemm('N','N',Nchi,Nchi,Nchi,(-1.0d0,0.0d0),chi_tmp,Nchi,Cmat_c,Nchi,(0.0d0,0.0d0),chi0c,Nchi)
+     call zgeev('N','N',Nchi,chi0s,Nchi,eigs,tmp1,Nchi,tmp2,Nchi,work,Nchi*Nchi*4+1,rwork,info)
+     call zgeev('N','N',Nchi,chi0c,Nchi,eigc,tmp1,Nchi,tmp2,Nchi,work,Nchi*Nchi*4+1,rwork,info)
+     maxchi0s=maxval(dble(eigs))
+     maxchi0c=maxval(dble(eigc))
+     if(maxchi0s>maxchi0s2)then
+        chisk=i
+        maxchi0s2=maxchi0s
+     end if
+     if(maxchi0c>maxchi0c2)then
+        chick=i
+        maxchi0c2=maxchi0c
+     end if
+  end do
+  do i=1,Nkall !get kmap footnote
+     if(invk(2,i)==0)then
+        if(invk(1,i)==chisk)chiskall=i
+        if(invk(1,i)==chick)chickall=i
+     end if
+  end do
+  print'(A3,3I4,F12.8)','SDW',kmap(:,chiskall),maxchi0s2
+  print'(A3,3I4,F12.8)','CDW',kmap(:,chickall),maxchi0c2
+  maxchi0s_out=maxchi0s2
+end subroutine ckchi_impl
+
+subroutine get_chi0(chi,Smat,Cmat,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi) bind(C)
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  implicit none
+  integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
+  real(c_double),intent(in):: temp
+  real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
+  complex(c_double),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
+
+  integer(c_int32_t),dimension(Nchi,Nchi,2)::chi_map
+  integer(c_int32_t),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
+  real(c_double) dummy_maxchi0s
+
+  call get_chi_map(chi_map,irr_chi,olist,Nchi)
+  call get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+  call ckchi_impl(chi,Smat,Cmat,kmap,invk,Nk,Nkall,Nchi,Nw,dummy_maxchi0s)
+end subroutine get_chi0
+
+subroutine get_chi_map(chi_map,irr_chi,olist,Nchi)
+  !> This function generate index of exchange symmetry chi1234(q,iw)=chi*4321(q,iw).
+  !> This symmetry can use system has no spin dependence and TRS.
+  !!@param chi_map,out: mapping list of chi index
+  !!@param irr_chi,out: irreducible index of chii
+  !!@param    olist,in: orbital index list of chi index
+  !!@param     Nchi,in: Number of chi index
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  implicit none
+  integer(c_int64_t),intent(in):: Nchi
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  integer(c_int32_t),intent(out),dimension(Nchi,Nchi,2):: chi_map
+  integer(c_int32_t),intent(out),dimension(Nchi*(Nchi+1)/2,2):: irr_chi
+
+  integer(c_int32_t) l1,m1,l2,m2,iter
+  integer(c_int32_t),dimension(Nchi,Nchi):: chi_irr
+  integer(c_int32_t),dimension(4):: tmp1,tmp2
+  logical ck
+
+  chi_irr(:,:)=0
+  chi_map(:,:,:)=0
+  do l1=1,Nchi
+     tmp1(1)=olist(l1,1) !1 of 1234
+     tmp1(2)=olist(l1,2) !2 of 1234
+     do m1=1,Nchi
+        tmp1(3)=olist(m1,1) !3 of 1234
+        tmp1(4)=olist(m1,2) !4 of 1234
+        ck=.false.
+        do l2=1,Nchi
+           tmp2(3)=olist(l2,2) !2 of 4321
+           tmp2(4)=olist(l2,1) !1 of 4321
+           do m2=1,Nchi
+              tmp2(1)=olist(m2,2) !4 of 4321
+              tmp2(2)=olist(m2,1) !3 of 4321
+              if(sum(abs(tmp1(:)-tmp2(:)))==0)then !4321 correspond to 1234
+                 chi_map(m1,l1,1)=m2
+                 chi_map(m1,l1,2)=l2
+                 if(chi_irr(m2,l2)==0)then !4321 is not irreducible
+                    chi_irr(m1,l1)=1 !1 is irreducible index
+                 end if
+                 ck=.true.
+                 exit
+              end if
+           end do
+           if(ck)exit
+        end do
+     end do
+  end do
+
+  !get list of irreducible chi index
+  iter=1
+  do l1=1,Nchi
+     do m1=1,Nchi
+        if(chi_irr(m1,l1)==1)then
+           irr_chi(iter,1)=l1
+           irr_chi(iter,2)=m1
+           iter=iter+1
+        end if
+     end do
+  end do
+end subroutine get_chi_map
+
+subroutine get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,&
+     Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi) bind(C,name='get_chi0_conv_')
+  !> This function obtains chi_0 using convolution.
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  implicit none
+  integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
+  integer(c_int32_t),intent(in),dimension(Nchi,Nchi,2):: chi_map
+  integer(c_int32_t),intent(in),dimension(Nchi*(Nchi+1)/2,2):: irr_chi
+  real(c_double),intent(in):: temp
+  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
+  complex(c_double),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
+
+  integer(c_int32_t) i,j,k,l,m,n,iorb
+  integer(c_int32_t) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(2*Nw)
+  real(c_double) weight
+  real(c_double),parameter:: eps=1.0d-9
+  complex(c_double),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmp,tmpgk13,tmpgk42
+  
+  weight=temp/dble(Nkall)
+  ii(0)=0
+  ij(0)=0
+  ik(0)=0
+  iw(1)=1
+  !$omp parallel
+  !$omp do
+  do i=1,Nx-1
+     ii(i)=Nx-i
+  end do
+  !$omp end do
+  !$omp do
+  do i=1,Ny-1
+     ij(i)=Ny-i
+  end do
+  !$omp end do
+  !$omp do
+  do i=1,Nz-1
+     ik(i)=Nz-i
+  end do
+  !$omp end do
+  !$omp do
+  do i=2,2*Nw
+     iw(i)=2*Nw-i+2
+  end do
+  !$omp end do
+  !$omp end parallel
+  call init_fft_plans(tmpgk13,tmp,Nx,Ny,Nz,2*Nw)
+  orb_loop:do iorb=1,Nchi*(Nchi+1)/2
+     l=irr_chi(iorb,1)
+     m=irr_chi(iorb,2)
+     !use symmetry G^lm(k,iw)=G^ml(k,-iw) from Hermitian symmetry of Hamiltonian
+     !$omp parallel do private(i)
+     w_loop_Gk_to_tmp:do j=1,Nw
+        k_loop_Gk_to_tmp:do i=1,Nkall
+           if(invk(2,i)==0)then
+              !iw
+              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(l,1),olist(m,1)) !G13(k,iw)
+              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(m,2),olist(l,2)) !G42(k,iw)
+              !-iw
+              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(m,1),olist(l,1))) !G13(k,-iw)=G^*31(k,iw)
+              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(l,2),olist(m,2))) !G42(k,-iw)=G^*24(k,iw)
+           else if(invk(2,i)==1)then
+              !iw
+              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(m,1),olist(l,1)) !G13(-k,iw)=G^31(k,iw)
+              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(l,2),olist(m,2)) !G42(-k,iw)=G^24(k,iw)
+              !-iw
+              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(l,1),olist(m,1))) !G13(-k,-iw)=G^*13(k,iw)
+              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(m,2),olist(l,2))) !G42(-k,-iw)=G^*42(k,iw)
+           end if
+        end do k_loop_Gk_to_tmp
+     end do w_loop_Gk_to_tmp
+     !$omp end parallel do
+     call FFT(tmpgk13,tmp,Nx,Ny,Nz,2*Nw,.true.)
+     call FFT(tmpgk42,tmp,Nx,Ny,Nz,2*Nw,.true.)
+     !calculate G(r)G(-r)
+     !$omp parallel do private(i,j,k)
+     w_loop_conv:do n=1,2*Nw
+        z_loop:do k=0,Nz-1
+           y_loop:do j=0,Ny-1
+              !$omp simd
+              x_loop:do i=0,Nx-1
+                 tmp(i,j,k,n)=-tmpgk13(i,j,k,n)*tmpgk42(ii(i),ij(j),ik(k),iw(n))
+              end do x_loop
+              !$omp end simd
+           end do y_loop
+        end do z_loop
+     end do w_loop_conv
+     !$omp end parallel do
+     call FFT(tmp,tmpgk13,Nx,Ny,Nz,2*Nw,.false.)
+     !$omp parallel do private(i,j)
+     w_loop_tmp_to_chi:do j=1,Nw
+        k_loop_tmp_to_chi:do i=1,Nkall
+           if(invk(2,i)==0)then
+              chi(invk(1,i),j,m,l)=tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight
+              if(abs(dble(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(0.0d0,imag(chi(invk(1,i),j,m,l)),kind=c_double)
+              if(abs(imag(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(dble(chi(invk(1,i),j,m,l)),0.0d0,kind=c_double)
+           end if
+        end do k_loop_tmp_to_chi
+     end do w_loop_tmp_to_chi
+     !$omp end parallel do
+     chi(:,:,chi_map(m,l,1),chi_map(m,l,2))=conjg(chi(:,:,m,l))
+  end do orb_loop
+  call destroy_fft_plans()
+end subroutine get_chi0_conv
+
+subroutine get_chi0_sum(chi,Gk,klist,invk,irr_chi,chi_map,olist,temp,Nw,Nk,Nkall,Norb,Nchi) bind(C)
+  !> It obtains chi_0 using summation. Its cost is O(Nk^2), so it is heavy. You should use get_chi0_conv.
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  implicit none
+  integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nk,Nkall
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: invk
+  integer(c_int32_t),intent(in),dimension(Nchi,Nchi,2):: chi_map
+  integer(c_int32_t),intent(in),dimension(Nchi*(Nchi+1)/2,2):: irr_chi
+  real(c_double),intent(in),dimension(3,Nkall):: klist
+  real(c_double),intent(in):: temp
+  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
+  complex(c_double),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
+
+  integer(c_int32_t) i,j,l,m,iq,iw,iorb
+  integer(c_int32_t),dimension(2*Nw):: wshift
+  integer(c_int64_t),dimension(Nkall):: qshift
+  real(c_double) weight
+  complex(c_double),dimension(Nkall,2*Nw):: tmpgk13,tmpgk42
+
+  !$omp parallel workshare
+  chi(:,:,:,:)=0.0d0
+  !$omp end parallel workshare
+
+  weight=temp/dble(Nkall)
+  orb_loop:do iorb=1,Nchi*(Nchi+1)/2
+     l=irr_chi(iorb,1)
+     m=irr_chi(iorb,2)
+     !$omp parallel do private(i)
+     do j=1,Nw
+        do i=1,Nkall
+           if(invk(2,i)==0)then
+              tmpgk13(i,j)=Gk(i,j,olist(m,1),olist(l,1))
+              tmpgk42(i,j)=Gk(i,j,olist(l,2),olist(m,2))
+              tmpgk13(i,2*Nw-j+1)=conjg(Gk(i,j,olist(l,1),olist(m,1)))
+              tmpgk42(i,2*Nw-j+1)=conjg(Gk(i,j,olist(m,2),olist(l,2)))
+           else if(invk(2,i)==1)then
+              tmpgk13(i,j)=Gk(i,j,olist(l,1),olist(m,1))
+              tmpgk42(i,j)=Gk(i,j,olist(m,2),olist(l,2))
+              tmpgk13(i,2*Nw-j+1)=conjg(Gk(i,j,olist(m,1),olist(l,1)))
+              tmpgk42(i,2*Nw-j+1)=conjg(Gk(i,j,olist(l,2),olist(m,2)))
+           end if
+        end do
+     end do
+     !$omp end parallel do
+     wloop: do iw=1,Nw
+        wl_loop: do j=1,2*Nw
+           wshift(j)=mod(j+iw-1,2*Nw)
+           if(wshift(j)==0)then
+              wshift(j)=2*Nw
+           end if
+        end do wl_loop
+        qloop: do iq=1,Nkall
+           if(invk(2,iq)==0)then
+              call get_qshift(klist(:,iq),klist,qshift,Nk)
+              !$omp parallel do private(i) reduction(+: chi)
+              wloop2: do j=1,2*Nw
+                 !$omp simd
+                 kloop: do i=1,Nkall
+                    chi(invk(1,iq),iw,m,l)=chi(invk(1,iq),iw,m,l)-tmpgk13(i,j)*tmpgk42(qshift(i),wshift(j))
+                 end do kloop
+                 !$omp end simd
+              end do wloop2
+              !$omp end parallel do
+           end if
+        end do qloop
+     end do wloop
+     chi(:,:,chi_map(m,l,1),chi_map(m,l,2))=conjg(chi(:,:,m,l))
+  end do orb_loop
+  chi(:,:,:,:)=chi(:,:,:,:)*weight
+end subroutine get_chi0_sum

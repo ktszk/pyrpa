@@ -19,6 +19,80 @@ subroutine openmp_params(omp_num,omp_check) bind(C)
   !$ end if
 end subroutine openmp_params
 
+! Caches forward/backward FFTW plans across calls within a loop.
+! Call init_fft_plans before the orbital loop and destroy_fft_plans after.
+module fftw_plan_cache
+  use,intrinsic::iso_c_binding, only:c_int64_t
+  implicit none
+  integer(c_int64_t),save :: plan_fwd=0, plan_bwd=0
+end module fftw_plan_cache
+
+subroutine init_fft_plans(cmat,tmp,Nx,Ny,Nz,Nw)
+  use fftw_plan_cache
+  use,intrinsic::iso_c_binding, only:c_int32_t,c_int64_t,c_double
+  implicit none
+  integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nw
+  complex(c_double),intent(inout),dimension(Nx,Ny,Nz,Nw):: cmat,tmp
+  integer(c_int32_t),dimension(4):: Nlist
+  Nlist=(/int(Nx,c_int32_t),int(Ny,c_int32_t),int(Nz,c_int32_t),int(Nw,c_int32_t)/)
+  call dfftw_plan_dft(plan_fwd,4,Nlist,cmat,tmp,-1,64)
+  call dfftw_plan_dft(plan_bwd,4,Nlist,cmat,tmp, 1,64)
+end subroutine init_fft_plans
+
+subroutine destroy_fft_plans()
+  use fftw_plan_cache
+  implicit none
+  call dfftw_destroy_plan(plan_fwd)
+  call dfftw_destroy_plan(plan_bwd)
+  plan_fwd=0
+  plan_bwd=0
+end subroutine destroy_fft_plans
+
+subroutine FFT(cmat,tmp,Nx,Ny,Nz,Nw,SW)
+  !> 4D Fast Fourier transform function
+  !!@param cmat,inout: FFT source and results
+  !!@param  tmp,inout: temporary
+  !!@param      Nx,in: x mesh
+  !!@param      Ny,in: y mesh
+  !!@param      Nz,in: z mesh
+  !!@param      Nw,in: w mesh
+  !!@param      SW,in: FFT or IFFT switch (if true IFFT)
+  use fftw_plan_cache
+  use,intrinsic::iso_c_binding, only:c_int32_t,c_int64_t,c_double
+  implicit none
+  integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nw
+  logical,intent(in):: SW
+  complex(c_double),intent(inout),dimension(Nx,Ny,Nz,Nw):: cmat,tmp
+
+  integer(c_int64_t) plan
+  integer(c_int32_t) Inv
+  integer(c_int32_t),dimension(4):: Nlist
+
+  Nlist=(/int(Nx,c_int32_t),int(Ny,c_int32_t),int(Nz,c_int32_t),int(Nw,c_int32_t)/)
+  if(plan_fwd /= 0)then
+     ! Reuse cached plans: avoids heap alloc/free on every call
+     if(SW)then
+        call dfftw_execute_dft(plan_fwd,cmat,tmp)
+     else
+        call dfftw_execute_dft(plan_bwd,cmat,tmp)
+     end if
+  else
+     if(SW)then
+        Inv=-1
+     else
+        Inv=1
+     end if
+     call dfftw_plan_dft(plan,4,Nlist,cmat,tmp,Inv,64)
+     call dfftw_execute(plan)
+     call dfftw_destroy_plan(plan)
+  end if
+  if(.not. SW)then
+     cmat(:,:,:,:)=tmp(:,:,:,:)/product(Nlist)
+  else
+     cmat(:,:,:,:)=tmp(:,:,:,:)
+  end if
+end subroutine FFT
+
 subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   !> This function generate model hamiltonian from hoppings
   !!@param ham_k,out: k-space Hamiltonian

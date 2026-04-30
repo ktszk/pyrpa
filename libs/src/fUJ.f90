@@ -249,3 +249,151 @@ subroutine get_Vmat_soc_orb(Vmat,ol,sl,site,invs,Umat,Jmat,Nchi,Norb) bind(C)
   !$omp end do
   !$omp end parallel
 end subroutine get_Vmat_soc_orb
+
+subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
+  !> This function obtains pairing interaction V_delta without soc
+  !!@param  chi,inout: irreducible susceptibility and pairing interaction
+  !!@param    Smat,in: S-matrix
+  !!@param    Cmat,in: C-matrix
+  !!@param      Nk,in: Number of k-points
+  !!@param      Nw,in: Number of Matsubara frequencies
+  !!@param    Nchi,in: Number of footnote of chi
+  !!@param sw_pair,in: switch of singlet or triplet paring interacton
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  implicit none
+  integer(c_int64_t),intent(in):: Nk,Nw,Nchi
+  logical(1),intent(in):: sw_pair
+  real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  complex(c_double),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
+
+   integer(c_int32_t) i,j,l,info
+  integer(c_int32_t),dimension(Nchi):: ipiv
+   complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,cmat5,Smat_c,Cmat_c,V0_c
+
+   Smat_c(:,:)=cmplx(Smat(:,:),0.0d0,kind=c_double)
+   Cmat_c(:,:)=cmplx(Cmat(:,:),0.0d0,kind=c_double)
+   ! Bare (static) pairing vertex from Kanamori model:
+   !   singlet: V0 = (S+C)/2 = Vud  (spin-singlet ↑↓ channel)
+   !   triplet: V0 = (S-C)/2 = Vuu  (spin-triplet ↑↑ channel)
+   if(sw_pair)then
+      V0_c(:,:)=cmplx(0.5d0*(Smat(:,:)+Cmat(:,:)),0.0d0,kind=c_double) !bare Vud=(C+S)/2
+   else
+      V0_c(:,:)=cmplx(0.5d0*(Smat(:,:)-Cmat(:,:)),0.0d0,kind=c_double) !bare Vuu=(S-C)/2
+   end if
+
+  !$omp parallel do collapse(2) private(i,cmat1,cmat2,cmat3,cmat4,cmat5,ipiv,info,l)
+  wloop:do j=1,Nw
+     qloop:do i=1,Nk
+        call zgemm('N','N',Nchi,Nchi,Nchi,(-1.0d0,0.0d0),chi(i,j,:,:),Nchi,Smat_c,Nchi,(0.0d0,0.0d0),cmat1,Nchi) !-chi0S
+        call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),chi(i,j,:,:),Nchi,Cmat_c,Nchi,(0.0d0,0.0d0),cmat2,Nchi)  !chi0C
+        cmat3(:,:)=-cmat1(:,:) !chi0S (RHS for first solve)
+        cmat4(:,:)=cmat2(:,:)  !chi0C (RHS for second solve)
+        do l=1,Nchi
+           cmat1(l,l)=cmat1(l,l)+1.0d0 !I-chi0S
+           cmat2(l,l)=cmat2(l,l)+1.0d0 !I+chi0C
+        end do
+        call zgesv(Nchi,Nchi,cmat1,Nchi,ipiv,cmat3,Nchi,info) !(I-chi0S)X=chi0S -> cmat3=chiS
+        if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
+        call zgesv(Nchi,Nchi,cmat2,Nchi,ipiv,cmat4,Nchi,info) !(I+chi0C)X=chi0C -> cmat4=chiC
+        if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
+        cmat1(:,:)=cmat3(:,:) !cmat1=chiS
+        cmat2(:,:)=cmat4(:,:) !cmat2=chiC
+        cmat4(:,:)=V0_c(:,:)   !start from bare static vertex
+        ! FLEX pairing vertex (RPA-dressed):
+        !   singlet: V_Δ = (S+C)/2 + 3/2·S·χ_s - 1/2·C·χ_c
+        !   triplet: V_Δ = (S-C)/2 - 1/2·S·χ_s - 1/2·C·χ_c
+        if(sw_pair)then !singlet
+           call zgemm('N','N',Nchi,Nchi,Nchi,(1.5d0,0.0d0),Smat_c,Nchi,cmat1,Nchi,(1.0d0,0.0d0),cmat4,Nchi)  !+3/2·S·χ_s
+           call zgemm('N','N',Nchi,Nchi,Nchi,(-0.5d0,0.0d0),Cmat_c,Nchi,cmat2,Nchi,(1.0d0,0.0d0),cmat4,Nchi) !-1/2·C·χ_c
+        else !triplet
+           call zgemm('N','N',Nchi,Nchi,Nchi,(-0.5d0,0.0d0),Smat_c,Nchi,cmat1,Nchi,(1.0d0,0.0d0),cmat4,Nchi) !-1/2·S·χ_s
+           call zgemm('N','N',Nchi,Nchi,Nchi,(-0.5d0,0.0d0),Cmat_c,Nchi,cmat2,Nchi,(1.0d0,0.0d0),cmat4,Nchi) !-1/2·C·χ_c
+        end if
+        chi(i,j,:,:)=cmat4(:,:)
+     end do qloop
+  end do wloop
+  !$omp end parallel do
+end subroutine get_V_delta_nsoc_flex
+
+subroutine get_vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi) bind(C,name='get_vsigma_flex_nosoc_')
+  !> This function obtains interaction V_sigma without soc
+  !!@param  chi,inout: irreducible susceptibility and pairing interaction
+  !!@param    Smat,in: S-matrix
+  !!@param    Cmat,in: C-matrix
+  !!@param      Nk,in: Number of k-points
+  !!@param      Nw,in: Number of Matsubara frequencies
+  !!@param    Nchi,in: Number of footnote of chi
+   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  implicit none
+  integer(c_int64_t),intent(in):: Nk,Nw,Nchi
+  real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  complex(c_double),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
+
+   integer(c_int32_t) i,j,l,info
+  integer(c_int32_t),dimension(Nchi):: ipiv
+   complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,cmat5,Smat_c,Cmat_c,SC_c
+
+   Smat_c(:,:)=cmplx(Smat(:,:),0.0d0,kind=c_double)
+   Cmat_c(:,:)=cmplx(Cmat(:,:),0.0d0,kind=c_double)
+   SC_c(:,:)=Smat_c(:,:)+Cmat_c(:,:)
+
+  !$omp parallel do collapse(2) private(i,cmat1,cmat2,cmat3,cmat4,cmat5,ipiv,info,l)
+  do j=1,Nw
+     do i=1,Nk
+        call zgemm('N','N',Nchi,Nchi,Nchi,(-1.0d0,0.0d0),chi(i,j,:,:),Nchi,Smat_c,Nchi,(0.0d0,0.0d0),cmat1,Nchi) !-chi0S
+        call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),chi(i,j,:,:),Nchi,Cmat_c,Nchi,(0.0d0,0.0d0),cmat2,Nchi)  !chi0C
+        cmat3(:,:)=-cmat1(:,:) !chi0S (RHS for first solve)
+        cmat4(:,:)=cmat2(:,:)  !chi0C (RHS for second solve)
+        cmat5(:,:)=cmat3(:,:)+cmat4(:,:) !chi0S+chi0C (save before zgesv overwrites)
+        do l=1,Nchi
+           cmat1(l,l)=cmat1(l,l)+1.0d0 !I-chi0S
+           cmat2(l,l)=cmat2(l,l)+1.0d0 !I+chi0C
+        end do
+        call zgesv(Nchi,Nchi,cmat1,Nchi,ipiv,cmat3,Nchi,info) !(I-chi0S)X=chi0S -> cmat3=chiS
+        if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
+        call zgesv(Nchi,Nchi,cmat2,Nchi,ipiv,cmat4,Nchi,info) !(I+chi0C)X=chi0C -> cmat4=chiC
+        if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
+        ! FLEX self-energy kernel: V_σ = 3/2·S·χ_s + 1/2·C·χ_c - 1/4·(S+C)·(χ_s+χ_c) + static (3/2·S - 1/2·C)
+        cmat1(:,:)=1.5d0*Smat(:,:)-0.5d0*Cmat(:,:)   !static (HF-like) bare vertex
+        call zgemm('N','N',Nchi,Nchi,Nchi,(1.5d0,0.0d0),Smat_c,Nchi,cmat3,Nchi,(1.0d0,0.0d0),cmat1,Nchi)  !+3/2·S·χ_s
+        call zgemm('N','N',Nchi,Nchi,Nchi,(0.5d0,0.0d0),Cmat_c,Nchi,cmat4,Nchi,(1.0d0,0.0d0),cmat1,Nchi)  !+1/2·C·χ_c
+        call zgemm('N','N',Nchi,Nchi,Nchi,(-0.25d0,0.0d0),SC_c,Nchi,cmat5,Nchi,(1.0d0,0.0d0),cmat1,Nchi) !-1/4·(S+C)·(χ_s+χ_c), subtract double count
+        chi(i,j,:,:)=cmat1(:,:)
+     end do
+  end do
+  !$omp end parallel do
+end subroutine get_vsigma_flex_nosoc
+
+subroutine get_V_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  implicit none
+  integer(c_int64_t),intent(in):: Nk,Nw,Nchi
+  real(c_double),intent(in),dimension(Nchi,Nchi)::sgnsig2
+  real(c_double),intent(in),dimension(Nchi,Nchi):: Vmat
+  complex(c_double),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
+  
+   integer(c_int32_t) i,j,l,info
+  integer(c_int32_t),dimension(Nchi):: ipiv
+   complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmatv,neg_cmatv
+
+   cmatv(:,:)=cmplx(Vmat(:,:),0.0d0,kind=c_double)
+   neg_cmatv(:,:)=-cmatv(:,:)
+
+  ! SOC-RPA pairing vertex: V_Δ = -V + V·χ,  χ = (I+χ₀·V)^{-1}·χ₀·V
+  !$omp parallel do collapse(2) private(i,cmat1,cmat2,cmat3,ipiv,info,l)
+  wloop:do j=1,Nw
+     qloop:do i=1,Nk
+        call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),chi(i,j,:,:),Nchi,cmatv,Nchi,(0.0d0,0.0d0),cmat1,Nchi) !chi0V
+        cmat2(:,:)=cmat1(:,:) !chi0V (RHS for zgesv)
+        do l=1,Nchi
+           cmat1(l,l)=cmat1(l,l)+1.0d0 !I+chi0V
+        end do
+        call zgesv(Nchi,Nchi,cmat1,Nchi,ipiv,cmat2,Nchi,info) !(I+chi0V)X=chi0V -> cmat2=chi (RPA)
+        if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
+        cmat3(:,:)=neg_cmatv(:,:)   !start from -V
+        call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),cmatv,Nchi,cmat2,Nchi,(1.0d0,0.0d0),cmat3,Nchi) !-V + V*chi
+        chi(i,j,:,:)=cmat3(:,:)
+     end do qloop
+  end do wloop
+  !$omp end parallel do
+end subroutine get_V_soc_flex
