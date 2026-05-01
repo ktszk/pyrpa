@@ -1,3 +1,24 @@
+subroutine mkBdGhamk(hamBdGk,hamk,delta,Nk,Norb)
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
+  implicit none
+  integer(c_int64_t),intent(in):: Nk,Norb
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: hamk,delta
+  complex(c_double),intent(out),dimension(2*Norb,2*Norb,Nk):: hamBdGk
+
+  integer(c_int32_t) k,l,m
+
+  do k=1,Nk
+     do l=1,Norb
+        do m=1,Norb
+           hamBdGk(l,m,k)=hamk(l,m,k)
+           hamBdGk(l+Norb,m+Norb,k)=-conjg(hamk(l,m,k))
+           hamBdGk(l,m+Norb,k)=delta(l,m,k)
+           hamBdGk(l+Norb,m,k)=conjg(delta(m,l,k))
+        end do
+     end do
+  end do
+end subroutine mkBdGhamk
+
 module calc_irr_chi_sc
   use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
@@ -25,10 +46,10 @@ contains
     real(c_double),intent(in),dimension(2*Norb,Nk):: eig,ffermi
     complex(c_double),intent(in),dimension(2*Norb,2*Norb,Nk):: uni
 
-   integer(c_int32_t) i,j,k,l,m,nchi32
+   integer(c_int32_t) i,k,l,m,nchi32
    real(c_double) temp_safe,w_eps,sgn
    complex(c_double) weight
-   complex(c_double),dimension(Nchi):: A_vec,B_vec
+   complex(c_double),dimension(Nchi):: A_vec,B_vec,P_vec,R_vec
    complex(c_double),dimension(Nchi,Nchi):: chi,irr_chi_sc
 
    if(sw_spsym)then
@@ -40,10 +61,10 @@ contains
    w_eps=1.0d-12
    nchi32=int(Nchi,c_int32_t)
    chi(:,:)=0.0d0
+   !$omp parallel do reduction(+:chi) private(l,m,i,weight,A_vec,B_vec,P_vec,R_vec)
    kloop: do k=1,Nk
       band1_loop: do l=1,2*Norb
          band2_loop: do m=1,2*Norb
-            ! compute scalar weight once per (k,l,m)
             if(abs(w)<w_eps .and. abs(eig(m,k)-eig(l,qshift(k)))<1.0d-9)then
                weight=cmplx(ffermi(m,k)*(1.0d0-ffermi(m,k))/temp_safe,0.0d0,kind=c_double)
             else if(abs(ffermi(l,qshift(k))-ffermi(m,k))>eps)then
@@ -52,20 +73,19 @@ contains
             else
                cycle band2_loop
             end if
-            ! A_vec(j) = uni(ol(j,1),l,qshift(k)) * conjg(uni(ol(j,2),m,k))
-            do j=1,Nchi
-               A_vec(j)=uni(ol(j,1),l,qshift(k))*conjg(uni(ol(j,2),m,k))
+            do i=1,nchi32
+               ! uni is stored as uni(orbital,band,k)
+               A_vec(i)=uni(ol(i,1),l,qshift(k))*conjg(uni(ol(i,2),m,k))
+               B_vec(i)=conjg(uni(ol(i,1),l,qshift(k)))*uni(ol(i,2),m,k)
+               P_vec(i)=uni(ol(i,1),l,qshift(k))*conjg(uni(ol(i,2)+Norb,m,k))
+               R_vec(i)=uni(ol(i,2)+Norb,l,qshift(k))*conjg(uni(ol(i,1),m,k))
             end do
-            ! B_vec(i) = conjg(uni(ol(i,1),l,qshift(k))) * uni(ol(i,2),m,k)
-            do i=1,Nchi
-               B_vec(i)=conjg(uni(ol(i,1),l,qshift(k)))*uni(ol(i,2),m,k)&
-                   + sgn*conjg(uni(ol(i,2)+Norb,l,qshift(k)))*uni(ol(i,1)+Norb,m,k)
-            end do
-            ! chi(i,j) += weight * B_vec(i) * A_vec(j)
             call zgeru(nchi32,nchi32,weight,B_vec,1,A_vec,1,chi,nchi32)
+            call zgeru(nchi32,nchi32,sgn*weight,R_vec,1,P_vec,1,chi,nchi32)
          end do band2_loop
       end do band1_loop
    end do kloop
+   !$omp end parallel do
    irr_chi_sc=chi(:,:)/Nk
   end function irr_chi_sc
 end module calc_irr_chi_sc

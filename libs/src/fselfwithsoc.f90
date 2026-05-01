@@ -1,13 +1,13 @@
 subroutine mkself_soc(sigmak,mu,Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,mu_init,&
      rfill,temp,scf_loop,pp,eps,Nkall,Nk,Nw,Norb,Nchi,Nx,Ny,Nz,sub_sigma,sw_out,&
      sw_in,m_diis,sw_rescale) bind(C)
-  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t,c_bool
   implicit none
   integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz,scf_loop,m_diis
   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
   integer(c_int64_t),intent(in),dimension(Norb):: slist,invs
   integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
-  logical(1),intent(in):: sw_in,sw_out,sw_rescale
+   logical(c_bool),intent(in):: sw_in,sw_out,sw_rescale
   integer(c_int64_t),intent(in):: sub_sigma
   real(c_double),intent(in):: temp,eps,pp,rfill,mu_init
   real(c_double),intent(in),dimension(Norb,Nk):: eig

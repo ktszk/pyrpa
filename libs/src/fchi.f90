@@ -292,8 +292,9 @@ subroutine chiq_map(trchis,trchi,uni,eig,ffermi,klist,Smat,ol,temp,ecut,idelta,e
            if(ol(l,1)==ol(l,2))then
               do m=1,Nchi
                  if(ol(m,1)==ol(m,2))then
-                    trchis(j,i)=trchis(j,i)+tmp2(l,l)
-                    trchi(j,i)=trchi(j,i)+chi(l,l)
+                    ! Sum chi_{ll,mm} components (same convention as get_tr_chi)
+                    trchis(j,i)=trchis(j,i)+tmp2(m,l)
+                    trchi(j,i)=trchi(j,i)+chi(m,l)
                  end if
               end do
            end if

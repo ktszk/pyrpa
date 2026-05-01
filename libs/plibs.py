@@ -155,6 +155,8 @@ def calc_mu(eig,Nk,fill:float,temp:float)-> float:
     @param  temp: Temperature
     @return   mu: chemical potential
     """
+    if temp <= 0:
+        raise ValueError(f"calc_mu requires temp > 0, got {temp}")
     no=int(eig.size/len(eig))
     def func(mu):
         sum_fermi=flibs.get_ffermi(eig,mu,temp).sum()
@@ -182,6 +184,8 @@ def calc_mu_imp(eigs,Nsite,fill:float,temp:float)-> float:
     @param   temp: Temperature in eV
     @return    mu: Chemical potential in eV
     """
+    if temp <= 0:
+        raise ValueError(f"calc_mu_imp requires temp > 0, got {temp}")
     itemp=1./temp
     def func(mu):
         return(fill*Nsite-0.5*(1.0-np.tanh(0.5*(eigs-mu)*itemp)).sum())
@@ -648,10 +652,13 @@ def get_ptv(alatt: np.ndarray, deg: np.ndarray, brav: int) -> tuple[np.ndarray, 
         phase=[np.pi*deg[0]/180.,np.pi*deg[1]/180.,np.pi*deg[2]/180.]
         ax1,ax2=alatt[1]/alatt[0],alatt[2]/alatt[0]   # b/a, c/a ratios
         r1,r2,r3=ax1*np.cos(phase[2]),ax1*np.sin(phase[2]),ax2*np.cos(phase[1])
-        r4=ax2*(np.cos(phase[0])-np.cos(phase[1])*np.cos(phase[2]))/np.sin(phase[2])
+        sin_gamma=np.sin(phase[2])
+        if abs(sin_gamma) < 1.0e-12:
+            raise ValueError(f"Invalid gamma angle for triclinic cell: gamma={deg[2]} deg")
+        r4=ax2*(np.cos(phase[0])-np.cos(phase[1])*np.cos(phase[2]))/sin_gamma
         # r5 = c * sqrt(1 - cos^2(alpha) - cos^2(beta) - cos^2(gamma) + 2cos(alpha)cos(beta)cos(gamma)) / sin(gamma)
         r5=ax2*np.sqrt(1+2*np.cos(phase[0])*np.cos(phase[1])*np.cos(phase[2])
-                       -(np.cos(phase[0])**2+np.cos(phase[1])**2+np.cos(phase[2])**2))/np.sin(phase[2])
+                       -(np.cos(phase[0])**2+np.cos(phase[1])**2+np.cos(phase[2])**2))/sin_gamma
         Arot=np.array([[ 1., 0.,  0.],
                       [ r1, r2,  0.],
                       [ r3, r4, r5]])
@@ -954,7 +961,8 @@ def get_chi_orb_list(Norb: int, site_prof: np.ndarray) -> tuple[np.ndarray, np.n
                 tmp=np.arange(i_site)+N0
                 o1,o2=np.meshgrid(tmp,tmp)
                 chiolist+=list(np.array([o1.flatten(),o2.flatten()]).T)
-                site+=[N0]*len(o1)
+                # One site label per orbital pair (i_site^2 entries), not per row (i_site).
+                site+=[N0]*o1.size
                 N0+=i_site
             chiolist=np.array(chiolist)
             site=np.array(site,dtype=np.int64)

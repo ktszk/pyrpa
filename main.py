@@ -851,8 +851,8 @@ def get_carrier_num(kmesh,rvec,ham_r,S_r,mu:float,Arot):
 
 def get_mu(ham_r,S_r,rvec,Arot,temp:float,kmesh=40)->float:
     # Parameter validation
-    if temp < 0:
-        print("Error: Temperature (temp) is negative",flush=True)
+    if temp <= 0:
+        print("Error: Temperature (temp) is non-positive",flush=True)
         return None
     if kmesh <= 0:
         print("Error: k-mesh size (kmesh) is non-positive",flush=True)
@@ -1017,8 +1017,9 @@ def main():
         print(f"Error: Invalid mesh size (Nx={Nx}, Ny={Ny}, Nz={Nz}, Nw={Nw})",flush=True)
         return
     # Temperature check
-    if tempK < 0:
-        print(f"Error: Temperature (tempK) is negative ({tempK} K)",flush=True)
+    # Many kernels use 1/temp or finite-T Fermi functions; T=0 is not supported in this implementation.
+    if tempK <= 0:
+        print(f"Error: Temperature (tempK) is non-positive ({tempK} K)",flush=True)
         return
     # U, J check
     if U < 0 or J < 0:
@@ -1070,6 +1071,24 @@ def main():
     if fill > no:
         print(f"Error: filling={fill} exceeds number of bands={no}. Valid range: 0 < fill <= {no}",flush=True)
         return
+
+    if orb_dep:
+        # Orbital-dependent interaction mode requires full Norb x Norb U/J matrices.
+        if 'Umat' not in globals() or 'Jmat' not in globals():
+            print("Error: orb_dep=True requires Umat and Jmat to be defined",flush=True)
+            return
+        Umat_arr=np.asarray(Umat)
+        Jmat_arr=np.asarray(Jmat)
+        exp_shape=(no,no)
+        if Umat_arr.shape != exp_shape or Jmat_arr.shape != exp_shape:
+            print(f"Error: Umat/Jmat shape must be {exp_shape}, got {Umat_arr.shape}/{Jmat_arr.shape}",flush=True)
+            return
+        if np.iscomplexobj(Umat_arr) or np.iscomplexobj(Jmat_arr):
+            print("Error: Umat/Jmat must be real-valued matrices",flush=True)
+            return
+        # Use contiguous float64 arrays for stable ctypes calls to Fortran wrappers.
+        globals()['Umat']=np.ascontiguousarray(Umat_arr,dtype=np.float64)
+        globals()['Jmat']=np.ascontiguousarray(Jmat_arr,dtype=np.float64)
     # =============================================
 
     #set lattice vector
@@ -1223,7 +1242,7 @@ def main():
         if option in {7,8,9}:
             print("generate coulomb vertex matrix S")
             if orb_dep:
-                Smat,Cmat=flibs.gen_SCmatrix_soc(chiolist,site,Umat,Jmat)
+                Smat,Cmat=flibs.gen_SCmatrix_orb(chiolist,site,Umat,Jmat)
             else:
                 Smat,Cmat=flibs.gen_SCmatrix(chiolist,site,U,J)
         if option in {7,10}: #chis/phi spectrum with symmetry line
