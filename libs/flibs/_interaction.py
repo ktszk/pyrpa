@@ -42,16 +42,17 @@ def gen_SCmatrix_orb(olist: np.ndarray, site: np.ndarray, Umat: np.ndarray, Jmat
     Norb = len(Umat)
     Smat = np.zeros((Nchi, Nchi), dtype=np.float64)
     Cmat = np.zeros((Nchi, Nchi), dtype=np.float64)
+    # Keep ctypes argument order identical to Fortran ABI: Smat, Cmat, olist, site, Umat, Jmat, Nchi, Norb.
     _lib.get_scmat_orb.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.float64),
         np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
         np.ctypeslib.ndpointer(dtype=np.int64),
         np.ctypeslib.ndpointer(dtype=np.int64),
+        np.ctypeslib.ndpointer(dtype=np.float64),
+        np.ctypeslib.ndpointer(dtype=np.float64),
         POINTER(c_int64), POINTER(c_int64)
     ]
-    _lib.get_scmat_orb.restype = c_void_p
+    _lib.get_scmat_orb.restype = None
     _lib.get_scmat_orb(Smat, Cmat, olist, site, Umat, Jmat, byref(c_int64(Nchi)), byref(c_int64(Norb)))
     return Smat, Cmat
 
