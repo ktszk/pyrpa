@@ -649,9 +649,9 @@ subroutine get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,invs,Nkall
   complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(c_double),intent(out),dimension(Nkall,Nw,Norb,Norb):: delta
 
-   integer(c_int32_t) i,j,k,l,m,n
+  integer(c_int32_t) i,j,k,l,m,n
   real(c_double) norm
-   complex(c_double),dimension(Norb,Norb):: matL,matR,tmpm
+  complex(c_double),dimension(Norb,Norb):: matL,matR,tmpm
 
   !$omp parallel do private(i,k,l,m,n,matL,matR,tmpm)
   do i=1,Nkall
@@ -732,8 +732,8 @@ subroutine conv_delta_orb_to_band_soc(deltab,delta,uni,invk,invs,slist,Norb,Nkal
   complex(c_double),intent(in),dimension(Nkall,Nw,Norb,Norb):: delta
   complex(c_double),intent(out),dimension(Nkall,Norb,Norb):: deltab
 
-   integer(c_int32_t) i,k,l,n
-   complex(c_double),dimension(Norb,Norb):: matL,matR,tmpm
+  integer(c_int32_t) i,k,l,n
+  complex(c_double),dimension(Norb,Norb):: matL,matR,tmpm
 
   !$omp parallel do private(i,k,l,n,matL,matR,tmpm)
   do i=1,Nkall

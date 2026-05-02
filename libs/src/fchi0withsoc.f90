@@ -289,11 +289,11 @@ subroutine get_chis_chic_soc(chic,chiszz,chispm,chi,Vmat,orb_list,olist,slist,in
   complex(c_double),intent(in),dimension(Nk,Nw,Nchi,Nchi):: chi
   complex(c_double),intent(out),dimension(Nk,Nchi/4,Nchi/4):: chiszz,chic,chispm
 
-   integer(c_int32_t) i,l,m,info
+  integer(c_int32_t) i,l,m,info
   integer(c_int32_t),dimension(Nchi):: ipiv
-   complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2,cmatv
+  complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2,cmatv
 
-   cmatv(:,:)=cmplx(Vmat(:,:),0.0d0,kind=c_double)
+  cmatv(:,:)=cmplx(Vmat(:,:),0.0d0,kind=c_double)
 
   qloop:do i=1,Nk
      call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),chi(i,1,:,:),Nchi,cmatv,Nchi,(0.0d0,0.0d0),cmat1,Nchi) !chi0V

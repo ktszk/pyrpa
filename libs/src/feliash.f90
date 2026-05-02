@@ -614,10 +614,10 @@ subroutine get_initial_delta(delta,init_delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,gap
   complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: delta
 
-   integer(c_int32_t) i,j,l,m,n
+  integer(c_int32_t) i,j,l,m,n
   real(c_double) norm,sgn
-   complex(c_double),dimension(Nk,Norb,Norb):: delta0
-   complex(c_double),dimension(Norb,Norb):: tmpu
+  complex(c_double),dimension(Nk,Norb,Norb):: delta0
+  complex(c_double),dimension(Norb,Norb):: tmpu
 
   if(gap_sym==0)then
      !$omp parallel
@@ -709,9 +709,9 @@ subroutine conv_delta_orb_to_band(deltab,delta,uni,prt,invk,Norb,Nkall,Nk,Nw,gap
   complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: delta
   complex(c_double),intent(out),dimension(Nkall,Norb,Norb):: deltab
 
-   integer(c_int32_t) i,k,l,n
+  integer(c_int32_t) i,k,l,n
   real(c_double) dprt
-   complex(c_double),dimension(Norb,Norb):: matL,matR,tmpm
+  complex(c_double),dimension(Norb,Norb):: matL,matR,tmpm
 
   if(gap_sym<0)then
      dprt=-1.0d0 !odd

@@ -1,12 +1,12 @@
 !non-linearied eliashberg equations solver
 subroutine eliashberg(delta,sigmak,hamk,uni,eig,init_delta,Smat,Cmat,olist,prt,kmap,invk,mu,temp,eps,&
-  Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,sw_sigma,m_diis) bind(C)
-   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t,c_bool
+     Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,sw_sigma,m_diis) bind(C)
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t,c_bool
   implicit none
   integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,m_diis
   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
   integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
-   logical(c_bool),intent(in):: sw_sigma
+  logical(c_bool),intent(in):: sw_sigma
   real(c_double),intent(in):: temp,eps,mu
   real(c_double),intent(in),dimension(Norb):: prt
   real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
@@ -67,9 +67,9 @@ subroutine mkgreliah_trs_nsoc(Gk,Gk0,fk,delta,Nk,Nw,Norb)
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nk,Nw,Norb
-   complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk0,fk,delta
-   complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: Gk
- 
+  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk0,fk,delta
+  complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: Gk
+
   integer(c_int32_t) i,j,l,m
   complex(c_double),dimension(Norb,Norb):: cmat1
 
@@ -79,7 +79,7 @@ subroutine mkgreliah_trs_nsoc(Gk,Gk0,fk,delta,Nk,Nw,Norb)
         ! cmat1 = I+Delta^+(k,iw) * F^+(k,iw)
         call zgemm('N','C',Norb,Norb,Norb,(1.0d0,0.0d0),delta(i,j,:,:),Norb,fk(i,j,:,:),Norb,(0.0d0,0.0d0),cmat1,Norb)
         do l=1,Norb
-            cmat1(l,l)=cmat1(l,l)+1.0d0
+           cmat1(l,l)=cmat1(l,l)+1.0d0
         end do
         ! Gk = Gk0* cmat1
         call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),Gk0(i,j,:,:),Norb,cmat1,Norb,(0.0d0,0.0d0),Gk(i,j,:,:),Norb)
@@ -103,8 +103,8 @@ subroutine mkfkeliash_trs_nsoc(fk,Gk0,Gk,delta,Nk,Nw,Norb)
      do i=1,Nk
         ! cmat1 = Delta(k,iw) * G(k,iw)
         call zgemm('N','C',Norb,Norb,Norb,(1.0d0,0.0d0),delta(i,j,:,:),Norb,Gk(i,j,:,:),Norb,(0.0d0,0.0d0),cmat1,Norb)
-                ! enforce Hermitian form used in the original implementation
-                ! fk = Gk0* cmat1
+        ! enforce Hermitian form used in the original implementation
+        ! fk = Gk0* cmat1
         call zgemm('N','N',Norb,Norb,Norb,(-1.0d0,0.0d0),Gk0(i,j,:,:),Norb,cmat1,Norb,(0.0d0,0.0d0),fk(i,j,:,:),Norb)
         do l=1,Norb
            fk(i,j,l,l)=dble(fk(i,j,l,l))
@@ -133,9 +133,9 @@ subroutine mkV_flex_nosoc(Vdelta,Vsigma,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
   Cmat_c(:,:)=cmplx(Cmat(:,:),0.0d0,kind=c_double)
   SC_c(:,:)=Smat_c(:,:)+Cmat_c(:,:)
   if(sw_pair)then
-    V0_c(:,:)=cmplx(0.5d0*(Smat(:,:)+Cmat(:,:)),0.0d0,kind=c_double) !bare Vud=(C+S)/2
+     V0_c(:,:)=cmplx(0.5d0*(Smat(:,:)+Cmat(:,:)),0.0d0,kind=c_double) !bare Vud=(C+S)/2
   else
-    V0_c(:,:)=cmplx(0.5d0*(Smat(:,:)-Cmat(:,:)),0.0d0,kind=c_double) !bare Vuu=(S-C)/2
+     V0_c(:,:)=cmplx(0.5d0*(Smat(:,:)-Cmat(:,:)),0.0d0,kind=c_double) !bare Vuu=(S-C)/2
   end if
   !$omp parallel do collapse(2) private(i,cmat1,cmat2,cmat3,cmat4,cmat5,ipiv,info,l)
   wloop:do j=1,Nw
@@ -175,34 +175,34 @@ subroutine mkV_flex_nosoc(Vdelta,Vsigma,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
 end subroutine mkV_flex_nosoc
 
 subroutine get_chi0sc(Vsigma,Vdelta,Gk,fk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,sw_pair)
-   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
-   implicit none
-   integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nk,Nw,Norb,Nkall,Nchi
-   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
-   integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
-   integer(c_int32_t),dimension(Nchi,Nchi,2)::chi_map
-   integer(c_int32_t),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
-   logical(1),intent(in):: sw_pair
-   real(c_double),intent(in):: temp
-   complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk,fk
-   complex(c_double),intent(out),dimension(Nchi,Nchi,Nw,Nk):: Vsigma,Vdelta
-  
-   integer(c_int32_t) i,j,l,m
-   complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2
-   
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  implicit none
+  integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nk,Nw,Norb,Nkall,Nchi
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
+  integer(c_int32_t),dimension(Nchi,Nchi,2)::chi_map
+  integer(c_int32_t),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
+  logical(1),intent(in):: sw_pair
+  real(c_double),intent(in):: temp
+  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk,fk
+  complex(c_double),intent(out),dimension(Nchi,Nchi,Nw,Nk):: Vsigma,Vdelta
 
-   call get_chi0_conv(Vsigma,Gk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
-   call get_chi0_conv_ff(Vdelta,fk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,sw_pair)
-   !$omp parallel do collapse(2) private(i,j,l,m,cmat1)
-   do j=1,Nw
-       do i=1,Nk
-         cmat1(:,:)=Vsigma(:,:,j,i)+Vdelta(:,:,j,i) !chi0S (RHS for first solve)
-         cmat2(:,:)=Vsigma(:,:,j,i)-Vdelta(:,:,j,i) !chi0C (RHS for second solve)
-         Vsigma(:,:,j,i)=cmat1(:,:) !cmat1=chi0S
-         Vdelta(:,:,j,i)=cmat2(:,:) !cmat2=chi0
-       end do
-   end do
-   !$omp end parallel do
+  integer(c_int32_t) i,j,l,m
+  complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2
+
+
+  call get_chi0_conv(Vsigma,Gk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+  call get_chi0_conv_ff(Vdelta,fk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,sw_pair)
+  !$omp parallel do collapse(2) private(i,j,l,m,cmat1)
+  do j=1,Nw
+     do i=1,Nk
+        cmat1(:,:)=Vsigma(:,:,j,i)+Vdelta(:,:,j,i) !chi0S (RHS for first solve)
+        cmat2(:,:)=Vsigma(:,:,j,i)-Vdelta(:,:,j,i) !chi0C (RHS for second solve)
+        Vsigma(:,:,j,i)=cmat1(:,:) !cmat1=chi0S
+        Vdelta(:,:,j,i)=cmat2(:,:) !cmat2=chi0
+     end do
+  end do
+  !$omp end parallel do
 end subroutine get_chi0sc
 
 subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,sw_pair)
@@ -225,11 +225,11 @@ subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz
   real(c_double),parameter:: eps=1.0d-9
   complex(c_double),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmp,tmpfk14,tmpfk23
   
-   if(sw_pair)then
+  if(sw_pair)then
      sgn=-1.0d0 !triplet_dz
-   else
+  else
      sgn=+1.0d0 !singlet
-   end if
+  end if
   weight=temp/dble(Nkall)
   ii(0)=0
   ij(0)=0
