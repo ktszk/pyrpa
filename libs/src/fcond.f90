@@ -171,9 +171,9 @@ subroutine calc_kn(K0,K1,K2,eig,veloc,kweight,tau,temp,mu,Nk,Norb) bind(C)
 
   real(c_double),dimension(Norb,Nk):: dfermi
   integer(c_int32_t) i,j,l,m
-   real(c_double) tmp,temp_safe
+  real(c_double) tmp,temp_safe
 
-   temp_safe=max(temp,1.0d-12)
+  temp_safe=max(temp,1.0d-12)
 
   ! -df/de = 0.25*(1-tanh^2((e-mu)/2T))/T  [numerically stable derivative of Fermi-Dirac]
   !$omp parallel

@@ -115,7 +115,7 @@ subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   real(c_double) phase
   complex(c_double) cphase
 
-   ham_k(:,:,:)=(0.0d0,0.0d0)
+  ham_k(:,:,:)=(0.0d0,0.0d0)
 
   ! H(k) = sum_R  H(R) * exp(-2pi*i * k.R)
   !$omp parallel do private(l,m,j,phase,cphase)
@@ -259,10 +259,10 @@ subroutine get_ffermi(ffermi,eig,mu,temp,Nk,Norb) bind(C)
   real(c_double),intent(out),dimension(Norb,Nk):: ffermi
 
   integer(c_int32_t) i,j
-   real(c_double) itemp,temp_safe
+  real(c_double) itemp,temp_safe
 
-   temp_safe=max(temp,1.0d-12)
-   itemp=0.5d0/temp_safe
+  temp_safe=max(temp,1.0d-12)
+  itemp=0.5d0/temp_safe
   ! f(e) = 1/(exp((e-mu)/T)+1) = 0.5 - 0.5*tanh((e-mu)/(2T))  [numerically stable form]
   !$omp parallel do private(j)
   do i=1,Nk
@@ -287,7 +287,7 @@ subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   real(c_double) phase
   complex(c_double) cphase
 
-   imk(:,:,:,:,:)=0.0d0
+  imk(:,:,:,:,:)=0.0d0
 
   !$omp parallel do private(l,m,j,k,n,phase,cphase)
   kloop: do i=1,Nk
@@ -388,7 +388,7 @@ subroutine get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   real(c_double) phase
   complex(c_double) cphase
 
-   vk(:,:,:,:)=0.0d0
+  vk(:,:,:,:)=0.0d0
 
   !$omp parallel do private(l,m,j,k,phase,cphase)
   kloop: do i=1,Nk

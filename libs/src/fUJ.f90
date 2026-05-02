@@ -266,20 +266,20 @@ subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
   real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
   complex(c_double),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
 
-   integer(c_int32_t) i,j,l,info
+  integer(c_int32_t) i,j,l,info
   integer(c_int32_t),dimension(Nchi):: ipiv
-   complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,Smat_c,Cmat_c,V0_c
+  complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,Smat_c,Cmat_c,V0_c
 
-   Smat_c(:,:)=cmplx(Smat(:,:),0.0d0,kind=c_double)
-   Cmat_c(:,:)=cmplx(Cmat(:,:),0.0d0,kind=c_double)
-   ! Bare (static) pairing vertex from Kanamori model:
-   !   singlet: V0 = (S+C)/2 = Vud  (spin-singlet ↑↓ channel)
-   !   triplet: V0 = (S-C)/2 = Vuu  (spin-triplet ↑↑ channel)
-   if(sw_pair)then
-      V0_c(:,:)=cmplx(0.5d0*(Smat(:,:)+Cmat(:,:)),0.0d0,kind=c_double) !bare Vud=(C+S)/2
-   else
-      V0_c(:,:)=cmplx(0.5d0*(Smat(:,:)-Cmat(:,:)),0.0d0,kind=c_double) !bare Vuu=(S-C)/2
-   end if
+  Smat_c(:,:)=cmplx(Smat(:,:),0.0d0,kind=c_double)
+  Cmat_c(:,:)=cmplx(Cmat(:,:),0.0d0,kind=c_double)
+  ! Bare (static) pairing vertex from Kanamori model:
+  !   singlet: V0 = (S+C)/2 = Vud  (spin-singlet ↑↓ channel)
+  !   triplet: V0 = (S-C)/2 = Vuu  (spin-triplet ↑↑ channel)
+  if(sw_pair)then
+     V0_c(:,:)=cmplx(0.5d0*(Smat(:,:)+Cmat(:,:)),0.0d0,kind=c_double) !bare Vud=(C+S)/2
+  else
+     V0_c(:,:)=cmplx(0.5d0*(Smat(:,:)-Cmat(:,:)),0.0d0,kind=c_double) !bare Vuu=(S-C)/2
+  end if
 
   !$omp parallel do collapse(2) private(i,cmat1,cmat2,cmat3,cmat4,ipiv,info,l)
   wloop:do j=1,Nw
@@ -323,19 +323,19 @@ subroutine get_vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi) bind(C,name='get_vsig
   !!@param      Nk,in: Number of k-points
   !!@param      Nw,in: Number of Matsubara frequencies
   !!@param    Nchi,in: Number of footnote of chi
-   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nk,Nw,Nchi
   real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
   complex(c_double),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
 
-   integer(c_int32_t) i,j,l,info
+  integer(c_int32_t) i,j,l,info
   integer(c_int32_t),dimension(Nchi):: ipiv
-   complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,cmat5,Smat_c,Cmat_c,SC_c
+  complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,cmat5,Smat_c,Cmat_c,SC_c
 
-   Smat_c(:,:)=cmplx(Smat(:,:),0.0d0,kind=c_double)
-   Cmat_c(:,:)=cmplx(Cmat(:,:),0.0d0,kind=c_double)
-   SC_c(:,:)=Smat_c(:,:)+Cmat_c(:,:)
+  Smat_c(:,:)=cmplx(Smat(:,:),0.0d0,kind=c_double)
+  Cmat_c(:,:)=cmplx(Cmat(:,:),0.0d0,kind=c_double)
+  SC_c(:,:)=Smat_c(:,:)+Cmat_c(:,:)
 
   !$omp parallel do collapse(2) private(i,cmat1,cmat2,cmat3,cmat4,cmat5,ipiv,info,l)
   do j=1,Nw
@@ -371,13 +371,13 @@ subroutine get_V_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
   real(c_double),intent(in),dimension(Nchi,Nchi)::sgnsig2
   real(c_double),intent(in),dimension(Nchi,Nchi):: Vmat
   complex(c_double),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
-  
-   integer(c_int32_t) i,j,l,info
-  integer(c_int32_t),dimension(Nchi):: ipiv
-   complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmatv,neg_cmatv
 
-   cmatv(:,:)=cmplx(Vmat(:,:),0.0d0,kind=c_double)
-   neg_cmatv(:,:)=-cmatv(:,:)
+  integer(c_int32_t) i,j,l,info
+  integer(c_int32_t),dimension(Nchi):: ipiv
+  complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmatv,neg_cmatv
+
+  cmatv(:,:)=cmplx(Vmat(:,:),0.0d0,kind=c_double)
+  neg_cmatv(:,:)=-cmatv(:,:)
 
   ! SOC-RPA pairing vertex: V_Δ = -V + V·χ,  χ = (I+χ₀·V)^{-1}·χ₀·V
   !$omp parallel do collapse(2) private(i,cmat1,cmat2,cmat3,ipiv,info,l)

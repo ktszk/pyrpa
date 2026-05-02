@@ -20,7 +20,7 @@ subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb) bind(C,name="gen_green0_")
   integer(c_int32_t) i,j,l,m,n
   complex(c_double) iw
 
-   Gk(:,:,:,:)=0.0d0
+  Gk(:,:,:,:)=0.0d0
 
   !$omp parallel private(l,m)
   do l=1,Norb
@@ -416,7 +416,7 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
 contains
   subroutine compare_sigma()
     integer(c_int32_t) i,j,l,m,kerr,iwerr,lerr,merr,ih,jh,idx_i,idx_j,info,n_cur
-   real(c_double) est, eps_reg
+    real(c_double) est, eps_reg
     complex(c_double) cksigm
     complex(c_double),dimension(Nk,Nw,Norb,Norb):: sigma_diis
 

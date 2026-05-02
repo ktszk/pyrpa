@@ -107,42 +107,42 @@ contains
     real(c_double),intent(in),dimension(Norb,Nk):: eig,ffermi
     complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
 
-   integer(c_int32_t) i,j,k,l,m,nchi32
-   real(c_double) temp_safe,w_eps
-   complex(c_double) weight
-   complex(c_double),dimension(Nchi):: A_vec,B_vec
-   complex(c_double),dimension(Nchi,Nchi):: chi,calc_chi
+    integer(c_int32_t) i,j,k,l,m,nchi32
+    real(c_double) temp_safe,w_eps
+    complex(c_double) weight
+    complex(c_double),dimension(Nchi):: A_vec,B_vec
+    complex(c_double),dimension(Nchi,Nchi):: chi,calc_chi
 
-   temp_safe=max(temp,1.0d-12)
-   w_eps=1.0d-12
-   nchi32=int(Nchi,c_int32_t)
-   chi(:,:)=0.0d0
-   kloop: do k=1,Nk
-      band1_loop: do l=1,Norb
-         band2_loop: do m=1,Norb
-            ! compute scalar weight once per (k,l,m)
-            if(abs(w)<w_eps .and. abs(eig(m,k)-eig(l,qshift(k)))<1.0d-9)then
-               weight=cmplx(ffermi(m,k)*(1.0d0-ffermi(m,k))/temp_safe,0.0d0,kind=c_double)
-            else if(abs(ffermi(l,qshift(k))-ffermi(m,k))>eps)then
-               weight=(ffermi(l,qshift(k))-ffermi(m,k))&
-                    /cmplx(w+eig(m,k)-eig(l,qshift(k)),idelta,kind=c_double)
-            else
-               cycle band2_loop
-            end if
-            ! A_vec(j) = uni(ol(j,1),l,qshift(k)) * conjg(uni(ol(j,2),m,k))
-            do j=1,Nchi
-               A_vec(j)=uni(ol(j,1),l,qshift(k))*conjg(uni(ol(j,2),m,k))
-            end do
-            ! B_vec(i) = conjg(uni(ol(i,1),l,qshift(k))) * uni(ol(i,2),m,k)
-            do i=1,Nchi
-               B_vec(i)=conjg(uni(ol(i,1),l,qshift(k)))*uni(ol(i,2),m,k)
-            end do
-            ! chi(i,j) += weight * B_vec(i) * A_vec(j)
-            call zgeru(nchi32,nchi32,weight,B_vec,1,A_vec,1,chi,nchi32)
-         end do band2_loop
-      end do band1_loop
-   end do kloop
-   calc_chi=chi(:,:)/Nk
+    temp_safe=max(temp,1.0d-12)
+    w_eps=1.0d-12
+    nchi32=int(Nchi,c_int32_t)
+    chi(:,:)=0.0d0
+    kloop: do k=1,Nk
+       band1_loop: do l=1,Norb
+          band2_loop: do m=1,Norb
+             ! compute scalar weight once per (k,l,m)
+             if(abs(w)<w_eps .and. abs(eig(m,k)-eig(l,qshift(k)))<1.0d-9)then
+                weight=cmplx(ffermi(m,k)*(1.0d0-ffermi(m,k))/temp_safe,0.0d0,kind=c_double)
+             else if(abs(ffermi(l,qshift(k))-ffermi(m,k))>eps)then
+                weight=(ffermi(l,qshift(k))-ffermi(m,k))&
+                     /cmplx(w+eig(m,k)-eig(l,qshift(k)),idelta,kind=c_double)
+             else
+                cycle band2_loop
+             end if
+             ! A_vec(j) = uni(ol(j,1),l,qshift(k)) * conjg(uni(ol(j,2),m,k))
+             do j=1,Nchi
+                A_vec(j)=uni(ol(j,1),l,qshift(k))*conjg(uni(ol(j,2),m,k))
+             end do
+             ! B_vec(i) = conjg(uni(ol(i,1),l,qshift(k))) * uni(ol(i,2),m,k)
+             do i=1,Nchi
+                B_vec(i)=conjg(uni(ol(i,1),l,qshift(k)))*uni(ol(i,2),m,k)
+             end do
+             ! chi(i,j) += weight * B_vec(i) * A_vec(j)
+             call zgeru(nchi32,nchi32,weight,B_vec,1,A_vec,1,chi,nchi32)
+          end do band2_loop
+       end do band1_loop
+    end do kloop
+    calc_chi=chi(:,:)/Nk
   end function calc_chi
 end module calc_irr_chi
 
