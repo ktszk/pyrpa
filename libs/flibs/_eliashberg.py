@@ -125,6 +125,91 @@ def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, 
                         byref(c_int64(arnoldi_m)))
     return delta
 
+def nonlinear_eliashberg(delta_init: np.ndarray, hamk: np.ndarray, uni: np.ndarray,
+                         eig: np.ndarray, Smat: np.ndarray, Cmat: np.ndarray,
+                         olist: np.ndarray, plist: np.ndarray, kmap: np.ndarray,
+                         invk: np.ndarray, mu: float, temp: float, gap_sym: int,
+                         Nx: int, Ny: int, Nz: int,
+                         sw_sigma: bool = False, eps: float = 1.0e-4,
+                         itemax: int = 100, m_diis: int = 5) -> tuple[np.ndarray, np.ndarray]:
+    """
+    @fn nonlinear_eliashberg
+    @brief Solve the non-linear FLEX-Eliashberg self-consistency loop (no SOC).
+    Iteratively updates the gap Δ, normal/anomalous Green's functions G/F,
+    irreducible χ_0_S = χ^GG + χ^FF, χ_0_C = χ^GG - χ^FF, and the FLEX
+    vertices V_σ, V_Δ. Pulay/DIIS extrapolation is used for Δ mixing
+    (linear mixing pp=0.3 falls back when m_diis<=1 or for the first iteration).
+    Convergence: |Δ_new - Δ|_∞ / |Δ|_∞ < eps.
+
+    @param  delta_init: Initial gap function [Norb, Norb, Nw, Nk] complex128.
+                        Caller is responsible for providing a non-zero initial Δ.
+                        Recommended sources:
+                          - flibs.get_initial_delta(...) for a symmetry-adapted seed
+                          - a converged linearized_eliashberg() output (scaled to a
+                            physical magnitude, e.g. ~1.764·T) for a fast start
+                        If the array is C-contiguous complex128 it is modified in place;
+                        otherwise a contiguous copy is created.
+    @param        hamk: k-space Hamiltonian [Nk, Norb, Norb] complex128
+    @param         uni: Eigenvector matrix at each k [Nk, Norb, Norb] complex128
+    @param         eig: Eigenvalues at each k [Nk, Norb] float64
+    @param        Smat: Spin interaction matrix [Nchi, Nchi] float64
+    @param        Cmat: Charge interaction matrix [Nchi, Nchi] float64
+    @param       olist: Orbital index pairs for chi [Nchi, 2] int64
+    @param       plist: Parity factors per orbital [Norb] float64
+    @param        kmap: Full k-grid to irreducible-grid mapping [Nkall, 3] int64
+    @param        invk: Inverse k-point list [Nkall, 3] int64
+    @param          mu: Chemical potential in eV
+    @param        temp: Temperature in eV
+    @param     gap_sym: Gap symmetry (>=0 singlet, <0 triplet)
+    @param    Nx,Ny,Nz: k-grid dimensions
+    @param    sw_sigma: Include FLEX self-energy correction in the dressed G_0 (default False)
+    @param         eps: Convergence threshold on |Δ_new-Δ|/|Δ|
+    @param      itemax: Maximum SCF iterations
+    @param      m_diis: DIIS history length (m_diis<=1 → linear mixing only; default 5)
+    @retval      delta: Converged gap function [Norb, Norb, Nw, Nk] complex128
+                        (same array as delta_init when contiguous; otherwise a new copy)
+    @retval     sigmak: FLEX self-energy [Norb, Norb, Nw, Nk] complex128
+                        (zero array when sw_sigma=False)
+    """
+    if delta_init.dtype != np.complex128 or not delta_init.flags['C_CONTIGUOUS']:
+        delta = np.ascontiguousarray(delta_init, dtype=np.complex128)
+    else:
+        delta = delta_init
+    Norb, _, Nw, Nk = delta.shape
+    Nkall, Nchi = len(kmap), len(Smat)
+    sigmak = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
+    _lib.eliashberg.argtypes = [
+        np.ctypeslib.ndpointer(dtype=np.complex128),  # delta (inout)
+        np.ctypeslib.ndpointer(dtype=np.complex128),  # sigmak (out)
+        np.ctypeslib.ndpointer(dtype=np.complex128),  # hamk
+        np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
+        np.ctypeslib.ndpointer(dtype=np.float64),     # eig
+        np.ctypeslib.ndpointer(dtype=np.float64),     # Smat
+        np.ctypeslib.ndpointer(dtype=np.float64),     # Cmat
+        np.ctypeslib.ndpointer(dtype=np.int64),       # olist
+        np.ctypeslib.ndpointer(dtype=np.float64),     # plist (= prt in Fortran)
+        np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
+        np.ctypeslib.ndpointer(dtype=np.int64),       # invk
+        POINTER(c_double), POINTER(c_double), POINTER(c_double),  # mu, temp, eps
+        POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),     # Nkall, Nk, Nw
+        POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),     # Nchi, Norb, Nx
+        POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),     # Ny, Nz, itemax
+        POINTER(c_int64),                                          # gap_sym
+        POINTER(c_bool),                                           # sw_sigma
+        POINTER(c_int64),                                          # m_diis
+    ]
+    _lib.eliashberg.restype = None
+    _lib.eliashberg(delta, sigmak, hamk, uni, eig, Smat, Cmat, olist, plist,
+                    kmap, invk,
+                    byref(c_double(mu)), byref(c_double(temp)), byref(c_double(eps)),
+                    byref(c_int64(Nkall)), byref(c_int64(Nk)), byref(c_int64(Nw)),
+                    byref(c_int64(Nchi)), byref(c_int64(Norb)), byref(c_int64(Nx)),
+                    byref(c_int64(Ny)), byref(c_int64(Nz)), byref(c_int64(itemax)),
+                    byref(c_int64(gap_sym)),
+                    byref(c_bool(sw_sigma)),
+                    byref(c_int64(m_diis)))
+    return delta, sigmak
+
 def conv_delta_orb_to_band(delta: np.ndarray, uni: np.ndarray, invk: np.ndarray,
                            plist: np.ndarray, gap_sym) -> np.ndarray:
     """
