@@ -58,7 +58,7 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,ol
   if(arnoldi_m>0)then !--- Arnoldi solver
      call solve_arnoldi(arnoldi_m)
   else !--- Power method
-  eigenval_loop:do i_eig=1,eig_max !solve eig_val using power method, 1st eig is usually large negative value
+     eigenval_loop:do i_eig=1,eig_max !solve eig_val using power method, 1st eig is usually large negative value
      call get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym)
      count=0 !count too small eigenvalue
      iter_loop:do i_iter=1, itemax !iteration
@@ -189,10 +189,27 @@ contains
 
   subroutine solve_arnoldi(m_arnoldi)
     !> Two-pass Arnoldi: pass 1 (no shift) finds lambda_-, pass 2 (shift+deflation) finds lambda_+.
+    !>
+    !> Algorithm sketch (Arnoldi factorization of operator A := apply_op):
+    !>   - Build orthonormal Krylov basis V_m = [v_0, v_1, ..., v_{m-1}] with v_0 = initial Δ.
+    !>   - Each step: w = A v_j, modified Gram-Schmidt against V(:,0..j) -> H_mat(:,j+1),
+    !>                beta = ||w_residual||, v_{j+1} = w/beta.
+    !>   - Result satisfies A V_m = V_m H_m + beta v_m e_m^T  (H_m: m x m upper Hessenberg).
+    !>   - Diagonalize H_m via ZGEEV; eigenvalues = Ritz values (approx eigenvalues of A),
+    !>     Ritz vector = V_m * y where H_m y = theta y.
+    !>   - Pass 2 replaces A with (A + shift*I) and projects out delta1 each step,
+    !>     making lambda_+ the dominant Ritz value.
     integer(c_int64_t),intent(in):: m_arnoldi
     integer(c_int32_t) :: m_dim,ip,j,ii,m_act,idx,lwork,info
     real(c_double) :: beta,shift,lambda1
     complex(c_double) :: hij
+    ! V         : Krylov basis (last index = basis vector number 0..m-1)
+    ! delta1    : Pass-1 Ritz vector for lambda_-, used as deflation direction in Pass 2
+    ! H_mat     : (m+1) x m upper Hessenberg matrix from Arnoldi factorization
+    ! A_mat     : working copy of H_mat(1:m,1:m) for ZGEEV (destroyed on output)
+    ! eigenvals : Ritz values (eigenvalues of A_mat)
+    ! VR        : right eigenvectors of A_mat (coefficients of Ritz vectors in V basis)
+    ! m_act     : actual Krylov dimension reached (may be < m_dim on lucky breakdown)
     complex(c_double),allocatable :: V(:,:,:,:,:),delta1(:,:,:,:)
     complex(c_double),allocatable :: H_mat(:,:),A_mat(:,:),eigenvals(:)
     complex(c_double),allocatable :: VL_dum(:,:),VR(:,:),zwork(:)
@@ -207,43 +224,50 @@ contains
 
     ! ===== Pass 1: no shift, find lambda_- =====================================
     H_mat=(0.0d0,0.0d0)
+    ! v_0: normalized initial gap function (already unit-norm from get_initial_delta_soc)
     call get_initial_delta_soc(V(:,:,:,:,0),init_delta,uni,kmap,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym)
     print'(A,I4,A)','Arnoldi pass 1 (no shift): Krylov dim =',m_dim,' ...'
     m_act=m_dim
+    ! ----- Arnoldi iteration: extend the Krylov basis one vector per step -----
     do j=0,m_dim-1
-       call apply_op(newdelta,V(:,:,:,:,j))
+       call apply_op(newdelta,V(:,:,:,:,j))                ! w = A v_j
+       ! modified Gram-Schmidt: orthogonalize w against v_0..v_j
        do ii=0,j
-          call get_inner(hij,V(:,:,:,:,ii),newdelta)
+          call get_inner(hij,V(:,:,:,:,ii),newdelta)        ! H_{ii,j} = <v_ii, w>
           H_mat(ii+1,j+1)=hij
           !$omp parallel workshare
-          newdelta(:,:,:,:)=newdelta(:,:,:,:)-hij*V(:,:,:,:,ii)
+          newdelta(:,:,:,:)=newdelta(:,:,:,:)-hij*V(:,:,:,:,ii)  ! w := w - H_{ii,j} v_ii
           !$omp end parallel workshare
        end do
-       call get_norm(beta,newdelta)
-       H_mat(j+2,j+1)=cmplx(beta,0.0d0,c_double)
+       call get_norm(beta,newdelta)                         ! beta = ||w_residual||
+       H_mat(j+2,j+1)=cmplx(beta,0.0d0,c_double)            ! sub-diagonal entry H_{j+1,j}
+       ! lucky breakdown: residual is essentially zero -> K_{j+1} is invariant
        if(beta<1.0d-14)then; m_act=j+1; exit; end if
        if(j<m_dim-1)then
           !$omp parallel do
           do ip=1,int(Nkall,c_int32_t)
-             V(ip,:,:,:,j+1)=newdelta(ip,:,:,:)*(1.0d0/beta)
+             V(ip,:,:,:,j+1)=newdelta(ip,:,:,:)*(1.0d0/beta)   ! v_{j+1} = w / beta
           end do
           !$omp end parallel do
        end if
     end do
-    A_mat(1:m_act,1:m_act)=H_mat(1:m_act,1:m_act)
+    ! ----- diagonalize the m_act x m_act Hessenberg block -----
+    A_mat(1:m_act,1:m_act)=H_mat(1:m_act,1:m_act)           ! ZGEEV destroys input, copy first
     call zgeev('N','V',m_act,A_mat,m_dim,eigenvals,VL_dum,1,VR,m_dim,zwork,lwork,rwork,info)
     if(info/=0)then; print*,'ZGEEV failed pass 1: info=',info; stop; end if
     print'(A)','Pass 1 Ritz values (real):'
     do ii=1,m_act
        print'(I4,F14.6)',ii,dble(eigenvals(ii))
     end do
-    idx=minloc(dble(eigenvals(1:m_act)),1)
+    idx=minloc(dble(eigenvals(1:m_act)),1)                  ! pick most negative Ritz value
     lambda1=dble(eigenvals(idx))
     print'(A,F12.6)','  lambda_- =',lambda1
-    ! early exit: if largest Ritz value >= 0.1, adopt it as lambda_+
+    ! early exit: if Pass 1 already resolved a sufficiently positive Ritz value,
+    ! it is the physical eliashberg eigenvalue lambda_+ — skip Pass 2.
     if(maxval(dble(eigenvals(1:m_act)))>=0.1d0)then
        idx=maxloc(dble(eigenvals(1:m_act)),1)
        print'(A,F12.6)','  eliash   =',dble(eigenvals(idx))
+       ! reconstruct Ritz vector x = sum_ii VR(ii,idx) * v_{ii-1}
        !$omp parallel workshare
        delta(:,:,:,:)=(0.0d0,0.0d0)
        !$omp end parallel workshare
@@ -254,12 +278,12 @@ contains
        end do
        call get_norm(beta,delta)
        !$omp parallel workshare
-       delta(:,:,:,:)=delta(:,:,:,:)*(1.0d0/beta)
+       delta(:,:,:,:)=delta(:,:,:,:)*(1.0d0/beta)            ! normalize result
        !$omp end parallel workshare
        deallocate(V,delta1,H_mat,A_mat,eigenvals,VL_dum,VR,zwork,rwork)
        return
     end if
-    ! build delta1 = Ritz vector for lambda_-, store for deflation
+    ! build delta1 = Ritz vector for lambda_- (= V_m * y_-), store for deflation in Pass 2
     !$omp parallel do
     do ip=1,int(Nkall,c_int32_t)
        delta1(ip,:,:,:)=(0.0d0,0.0d0)
@@ -275,15 +299,19 @@ contains
     call get_norm(beta,delta1)
     !$omp parallel do
     do ip=1,int(Nkall,c_int32_t)
-       delta1(ip,:,:,:)=delta1(ip,:,:,:)*(1.0d0/beta)
+       delta1(ip,:,:,:)=delta1(ip,:,:,:)*(1.0d0/beta)         ! normalize deflation vector
     end do
     !$omp end parallel do
 
     ! ===== Pass 2: shift + deflation, find lambda_+ ============================
+    ! Operator: B := (A + shift*I) restricted to span{delta1}^perp.
+    ! Spectrum mapping: eigenvalue lambda_i of A -> lambda_i + shift for B.
+    ! With shift = -lambda_-, lambda_+ + shift becomes the largest-magnitude eigenvalue,
+    ! so Arnoldi converges to it preferentially.
     shift=-lambda1   ! shift = |lambda_-| > 0; all eigenvalues become lambda_i + shift
     H_mat=(0.0d0,0.0d0)
     call get_initial_delta_soc(V(:,:,:,:,0),init_delta,uni,kmap,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym)
-    ! orthogonalize initial vector against delta1
+    ! orthogonalize initial vector against delta1, then renormalize -> v_0 in delta1^perp
     call get_inner(hij,delta1,V(:,:,:,:,0))
     !$omp parallel do
     do ip=1,int(Nkall,c_int32_t)
@@ -298,16 +326,20 @@ contains
     !$omp end parallel do
     print'(A,F10.6,A,I4,A)','Arnoldi pass 2 (shift=',shift,'): Krylov dim =',m_dim,' ...'
     m_act=m_dim
+    ! ----- Arnoldi iteration with operator B = P_{delta1^perp} (A + shift*I) -----
     do j=0,m_dim-1
-       ! w = (A + shift*I)*v_j - <delta1, (A+shift*I)*v_j>*delta1
+       ! Step (1): w = A v_j
        call apply_op(newdelta,V(:,:,:,:,j))
+       ! Step (2): w := w + shift * v_j  (apply spectral shift)
        !$omp parallel workshare
        newdelta(:,:,:,:)=newdelta(:,:,:,:)+shift*V(:,:,:,:,j)   !shift
        !$omp end parallel workshare
+       ! Step (3): project out delta1 (deflate lambda_- direction) -> w in delta1^perp
        call get_inner(hij,delta1,newdelta)                       !deflation
        !$omp parallel workshare
        newdelta(:,:,:,:)=newdelta(:,:,:,:)-hij*delta1(:,:,:,:)
        !$omp end parallel workshare
+       ! Step (4): modified Gram-Schmidt against v_0..v_j (same as Pass 1)
        do ii=0,j  !Gram-Schmidt
           call get_inner(hij,V(:,:,:,:,ii),newdelta)
           H_mat(ii+1,j+1)=hij
@@ -317,25 +349,27 @@ contains
        end do
        call get_norm(beta,newdelta)
        H_mat(j+2,j+1)=cmplx(beta,0.0d0,c_double)
-       if(beta<1.0d-14)then; m_act=j+1; exit; end if
+       if(beta<1.0d-14)then; m_act=j+1; exit; end if   ! lucky breakdown
        if(j<m_dim-1)then
           !$omp parallel do
           do ip=1,int(Nkall,c_int32_t)
-             V(ip,:,:,:,j+1)=newdelta(ip,:,:,:)*(1.0d0/beta)
+             V(ip,:,:,:,j+1)=newdelta(ip,:,:,:)*(1.0d0/beta)        ! v_{j+1} = w / beta
           end do
           !$omp end parallel do
        end if
     end do
+    ! ----- diagonalize the deflated/shifted Hessenberg matrix -----
     A_mat(1:m_act,1:m_act)=H_mat(1:m_act,1:m_act)
     call zgeev('N','V',m_act,A_mat,m_dim,eigenvals,VL_dum,1,VR,m_dim,zwork,lwork,rwork,info)
     if(info/=0)then; print*,'ZGEEV failed pass 2: info=',info; stop; end if
-    ! physical eigenvalue = Ritz value - shift (undo the shift)
+    ! physical eigenvalue = Ritz value - shift (undo the shift to get original spectrum of A)
     print'(A)','Pass 2 Ritz values - physical (real):'
     do ii=1,m_act
        print'(I4,F14.6)',ii,dble(eigenvals(ii))-shift
     end do
-    idx=maxloc(dble(eigenvals(1:m_act)),1)
+    idx=maxloc(dble(eigenvals(1:m_act)),1)                ! largest Ritz value -> lambda_+ + shift
     print'(A,F12.6)','  eliash   =',dble(eigenvals(idx))-shift
+    ! reconstruct Ritz vector for lambda_+: delta = V_m * y_+
     !$omp parallel workshare
     delta(:,:,:,:)=(0.0d0,0.0d0)
     !$omp end parallel workshare
@@ -346,7 +380,7 @@ contains
     end do
     call get_norm(beta,delta)
     !$omp parallel workshare
-    delta(:,:,:,:)=delta(:,:,:,:)*(1.0d0/beta)
+    delta(:,:,:,:)=delta(:,:,:,:)*(1.0d0/beta)               ! normalize gap function
     !$omp end parallel workshare
 
     deallocate(V,delta1,H_mat,A_mat,eigenvals,VL_dum,VR,zwork,rwork)
