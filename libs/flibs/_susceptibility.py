@@ -19,7 +19,7 @@ def get_chi0_conv(Gk: np.ndarray, kmap: np.ndarray, invk: np.ndarray, olist: np.
     """
     Nkall, Nk = len(kmap), len(Gk[0, 0, 0])
     Norb, Nchi = len(Gk), len(olist)
-    Nw = int(Gk.size / (Norb * Norb * Nk))
+    Nw = Gk.shape[2]
     chi = np.zeros((Nchi, Nchi, Nw, Nk), dtype=np.complex128)
     _lib.get_chi0_conv_.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128),
@@ -51,7 +51,7 @@ def get_chi0_sum(Gk: np.ndarray, invk: np.ndarray, klist: np.ndarray,
     """
     Nkall, Nk = len(invk), len(klist)
     Norb, Nchi = len(Gk), len(olist)
-    Nw = int(Gk.size / (Norb * Norb * Nk))
+    Nw = Gk.shape[2]
     chi = np.zeros((Nchi, Nchi, Nw, Nk), dtype=np.complex128)
     _lib.get_chi0_sum.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128),
@@ -84,7 +84,7 @@ def get_chi_irr(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, qshift: np
     @return   chi0: Irreducible susceptibility [Nw, Nchi, Nchi] complex128
     """
     Nk, Nw = len(eig), len(wlist)
-    Norb, Nchi = int(eig.size / Nk), len(olist)
+    Norb, Nchi = eig.shape[1], len(olist)
     chi = np.zeros((Nw, Nchi, Nchi), dtype=np.complex128)
     eps = idelta * 1e-3
     _lib.get_chi_irr.argtypes = [
@@ -127,7 +127,7 @@ def chis_qmap(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, klist: np.nd
     @retval    chi: Irreducible susceptibility map [Nx, Ny] complex128
     """
     Nk = len(eig)
-    Norb, Nchi = int(eig.size / Nk), len(olist)
+    Norb, Nchi = eig.shape[1], len(olist)
     chi = np.zeros((Nx, Ny), dtype=np.complex128)
     chis = np.zeros((Nx, Ny), dtype=np.complex128)
     eps = idelta * 1e-3
@@ -201,7 +201,7 @@ def get_phi_irr(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, qshift: np
     @return   phi0: Irreducible pairing susceptibility [Nw, Nchi, Nchi] complex128
     """
     Nk, Nw = len(eig), len(wlist)
-    Norb, Nchi = int(eig.size / Nk), len(olist)
+    Norb, Nchi = eig.shape[1], len(olist)
     phi = np.zeros((Nw, Nchi, Nchi), dtype=np.complex128)
     eps = idelta * 1e-3
     _lib.get_phi_irr.argtypes = [
@@ -245,7 +245,7 @@ def phi_qmap(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, klist: np.nda
     @return     phi: Pairing susceptibility map [Nx, Ny] complex128
     """
     Nk = len(eig)
-    Norb, Nchi = int(eig.size / Nk), len(olist)
+    Norb, Nchi = eig.shape[1], len(olist)
     phi = np.zeros((Nx, Ny), dtype=np.complex128)
     eps = idelta * 1e-3
     _lib.phiq_map.argtypes = [
@@ -486,6 +486,50 @@ def get_chis_chic(chi: np.ndarray, Smat: np.ndarray, Cmat: np.ndarray) -> tuple[
                        byref(c_int64(Nw)), byref(c_int64(Nchi)))
     return chis, chic
 
+def get_chi_irr_sc(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray,
+                   qshift: np.ndarray, ol: np.ndarray, wlist: np.ndarray,
+                   idelta: float, temp: float, sw_spsym: bool) -> np.ndarray:
+    """
+    @fn get_chi_irr_sc
+    @brief Compute the irreducible susceptibility in the superconducting state using BdG eigenstates.
+    @param      uni: BdG eigenvector matrices [Nk, 2*Norb, 2*Norb] complex128
+    @param      eig: BdG eigenvalues [Nk, 2*Norb] float64
+    @param   ffermi: Fermi-Dirac occupations for BdG bands [Nk, 2*Norb] float64
+    @param   qshift: Index of k+q for each k-point [Nk] int64 (from get_qshift)
+    @param       ol: Orbital index pairs for chi [Nchi, 2] int64 (Fortran-contiguous)
+    @param    wlist: Real-frequency mesh [Nw] float64
+    @param   idelta: Lorentzian broadening parameter in eV
+    @param     temp: Temperature in eV
+    @param sw_spsym: True for triplet (dz) symmetry, False for singlet
+    @return     chi: Irreducible susceptibility in SC state [Nw, Nchi, Nchi] complex128
+    """
+    Nk, Nw = len(eig), len(wlist)
+    Norb = eig.shape[1] // 2
+    Nchi = len(ol)
+    eps = idelta * 1e-3
+    chi = np.zeros((Nw, Nchi, Nchi), dtype=np.complex128)
+    ol_f = np.asfortranarray(ol)
+    _lib.get_chi_irr_sc.argtypes = [
+        np.ctypeslib.ndpointer(dtype=np.complex128),
+        np.ctypeslib.ndpointer(dtype=np.complex128),
+        np.ctypeslib.ndpointer(dtype=np.float64),
+        np.ctypeslib.ndpointer(dtype=np.float64),
+        np.ctypeslib.ndpointer(dtype=np.int64),
+        np.ctypeslib.ndpointer(dtype=np.int64),
+        np.ctypeslib.ndpointer(dtype=np.float64),
+        POINTER(c_int64), POINTER(c_int64),
+        POINTER(c_int64), POINTER(c_int64),
+        POINTER(c_double), POINTER(c_double),
+        POINTER(c_double), POINTER(c_bool),
+    ]
+    _lib.get_chi_irr_sc.restype = None
+    _lib.get_chi_irr_sc(chi, uni, eig, ffermi, qshift, ol_f, wlist,
+                        byref(c_int64(Nchi)), byref(c_int64(Norb)),
+                        byref(c_int64(Nk)), byref(c_int64(Nw)),
+                        byref(c_double(idelta)), byref(c_double(eps)),
+                        byref(c_double(temp)), byref(c_bool(sw_spsym)))
+    return chi
+
 def get_eig_or_tr_chi(chi: np.ndarray, invk: np.ndarray, sw_eig: bool) -> np.ndarray:
     """
     @fn get_eig_or_tr_chi
@@ -496,7 +540,7 @@ def get_eig_or_tr_chi(chi: np.ndarray, invk: np.ndarray, sw_eig: bool) -> np.nda
     @return  chiq: Eigenvalue or trace on the full k-grid [Nkall] complex128
     """
     Nkall, Nk = len(invk), len(chi.T)
-    Nchi = int(np.sqrt(chi.size / Nk))
+    Nchi = chi.shape[0]
     chiq = np.zeros(Nkall, dtype=np.complex128)
     _lib.get_eig_or_tr_chi.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128),

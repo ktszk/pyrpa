@@ -249,7 +249,7 @@ def remap_gap(delta0, plist, invk, gap_sym):
     @return  delta: Anomalous self-energy on full k-grid [Norb, Norb, Nw, Nkall] complex128
     """
     Nkall, Nk, Norb = len(invk), len(delta0.T), len(plist)
-    Nw = int(delta0.size / (Nk * Norb * Norb))
+    Nw = delta0.shape[2]
     delta = np.zeros((Norb, Norb, Nw, Nkall), dtype=np.complex128)
     _lib.remap_delta_.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128),

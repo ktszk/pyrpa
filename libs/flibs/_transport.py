@@ -19,7 +19,7 @@ def calc_Lij(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float, w: 
     @retval   L22: Thermal conductivity tensor [3, 3] complex128
     """
     Nk = len(eig)
-    Norb = int(eig.size / Nk)
+    Norb = eig.shape[1]
     L11 = np.zeros((3, 3), dtype=np.complex128)
     L12 = np.zeros((3, 3), dtype=np.complex128)
     L22 = np.zeros((3, 3), dtype=np.complex128)
@@ -60,7 +60,7 @@ def calc_Lij_wl(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float,
     @retval   L22: [Nw, 3, 3] complex128
     """
     Nk = len(eig)
-    Norb = int(eig.size / Nk)
+    Norb = eig.shape[1]
     Nw = len(wl)
     eps = idelta * 1e-3
     wl = np.ascontiguousarray(wl, dtype=np.float64)
@@ -103,7 +103,7 @@ def calc_Kn(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray, temp: float
     @retval    K2: Thermal transport tensor [3, 3] float64
     """
     Nk = len(eig)
-    Norb = int(eig.size / Nk)
+    Norb = eig.shape[1]
     K0 = np.zeros((3, 3), dtype=np.float64)
     K1 = np.zeros((3, 3), dtype=np.float64)
     K2 = np.zeros((3, 3), dtype=np.float64)
@@ -138,7 +138,7 @@ def calc_sigmahall(eig: np.ndarray, veloc: np.ndarray, imass: np.ndarray,
     @return sigma_hall: Hall conductivity (scalar) float64
     """
     Nk = len(eig)
-    Norb = int(eig.size / Nk)
+    Norb = eig.shape[1]
     sigma_hall = c_double(0.0)
     _lib.calc_sigma_hall.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.float64),
@@ -168,7 +168,7 @@ def calc_tdf(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray,
     @return   tdf: Transport distribution function [Nw, 3, 3] float64
     """
     Nk = len(eig)
-    Norb = int(eig.size / Nk)
+    Norb = eig.shape[1]
     tdf = np.zeros((Nw, 3, 3), dtype=np.float64)
     _lib.calc_tdf.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.float64),
@@ -196,7 +196,7 @@ def get_tau(tauw: np.ndarray, eig: np.ndarray, tau_max: float, tau_mode: int, ep
     @return    tau: k-resolved relaxation time [Nk, Norb] float64
     """
     Nk, Nw = len(eig), len(tauw)
-    Norb = int(eig.size / Nk)
+    Norb = eig.shape[1]
     tau = np.zeros((Nk, Norb), dtype=np.float64)
     _lib.get_tau.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.float64),
@@ -229,7 +229,7 @@ def calc_tau_epa(eig: np.ndarray, gavg: np.ndarray, wavg: np.ndarray,
     @return  tau: Relaxation time [Nk, Norb] float64
     """
     Nk = len(eig)
-    Norb = int(eig.size / Nk)
+    Norb = eig.shape[1]
     ngrid = len(edge)
     nmodes = len(wavg)
     nbin_max = int(np.max(nbin))

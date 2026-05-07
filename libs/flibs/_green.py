@@ -15,7 +15,7 @@ def gen_Green0(eig: np.ndarray, uni: np.ndarray,
     @return   Gk: Non-interacting Green's function [Norb, Norb, Nw, Nk] complex128
     """
     Nk = len(eig)
-    Norb = int(eig.size / Nk)
+    Norb = eig.shape[1]
     Gk = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
     _lib.gen_green0_.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128),
@@ -41,8 +41,8 @@ def gen_green(selfen: np.ndarray, hamk: np.ndarray,
     @return     Gk: Interacting Green's function [Norb, Norb, Nw, Nk] complex128
     """
     Nk = len(hamk)
-    Norb = int(np.sqrt(hamk.size / Nk))
-    Nw = int(selfen.size / (Nk * Norb * Norb))
+    Norb = hamk.shape[1]
+    Nw = selfen.shape[2]
     Gk = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
     _lib.gen_green_inv_.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128),
@@ -75,8 +75,8 @@ def gen_green_from_eig(selfen: np.ndarray, eig: np.ndarray,
     @return     Gk: Interacting Green's function [Norb, Norb, Nw, Nk] complex128
     """
     Nk = len(eig)
-    Norb = int(eig.size / Nk)
-    Nw = int(selfen.size / (Nk * Norb * Norb))
+    Norb = eig.shape[1]
+    Nw = selfen.shape[2]
     Gk = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
     _lib.gen_green_inv_from_eig.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128),
@@ -109,7 +109,7 @@ def gen_tr_Greenw_0(eig: np.ndarray, mu: float,
     @return  trGk: -Im[Tr G0(k,w+i*delta)] [Nk, Nw] float64
     """
     Nk, Nw = len(eig), len(wlist)
-    Norb = int(eig.size / Nk)
+    Norb = eig.shape[1]
     trGk = np.zeros((Nk, Nw), dtype=np.complex128)
     _lib.gen_tr_greenw_0.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128),
@@ -136,7 +136,7 @@ def gen_dos(eig: np.ndarray, uni: np.ndarray, mu: float,
     @return  pDos: Orbital-resolved pDOS -Im[G(orb,w)] [Norb, Nw] float64
     """
     Nk, Nw = len(eig), len(wlist)
-    Norb = int(eig.size / Nk)
+    Norb = eig.shape[1]
     pDos = np.zeros((Norb, Nw), dtype=np.complex128)
     _lib.gen_dos.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128),
@@ -206,7 +206,7 @@ def pade_with_trace(A: np.ndarray, iwlist: np.ndarray, wlist: np.ndarray) -> np.
     @return     B: Analytically-continued trace [Nk, Nw] complex128
     """
     Nk, Nw, Niw = len(A.T), len(wlist), len(iwlist)
-    Norb = int(np.sqrt(A.size / (Nk * Niw)))
+    Norb = A.shape[0]
     B = np.zeros((Nk, Nw), dtype=np.complex128)
     _lib.pade_with_trace.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128),

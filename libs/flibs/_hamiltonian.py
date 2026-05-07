@@ -30,7 +30,7 @@ def gen_ham(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
     """
     Nk, Nr = len(klist), len(rvec)
     assert ham_r.ndim == 3, "ham_r must be a 3‑D array"
-    Norb = int(np.sqrt(ham_r.size / Nr))
+    Norb = ham_r.shape[1]
     hamk = np.zeros((Nk, Norb, Norb), dtype=np.complex128)
     _lib.gen_ham.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128),
@@ -62,7 +62,7 @@ def get_eig(hamk: np.ndarray, Ovlk: np.ndarray | None = None,
     @retval  uni: Eigenvectors [Nk, Norb, Norb] complex128 (only returned when sw=True)
     """
     Nk = len(hamk)
-    Norb = int(np.sqrt(hamk.size / Nk))
+    Norb = hamk.shape[1]
     eig = np.zeros((Nk, Norb), dtype=np.float64)
     uni = np.zeros((Nk, Norb, Norb), dtype=np.complex128)
 
@@ -101,7 +101,7 @@ def get_ffermi(eig: np.ndarray, mu: float, temp: float) -> np.ndarray:
     @return ffermi: Fermi-Dirac occupation numbers [Nk, Norb] float64
     """
     Nk = len(eig)
-    Norb = int(eig.size / Nk)
+    Norb = eig.shape[1]
     ffermi = np.zeros((Nk, Norb), dtype=np.float64)
     _lib.get_ffermi.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.float64),
@@ -124,7 +124,7 @@ def get_vlm0(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray) -> np.ndarr
     @return   vk0: Velocity matrix elements [Nk, Norb, Norb, 3] complex128
     """
     Nk, Nr = len(klist), len(rvec)
-    Norb = int(np.sqrt(ham_r.size / Nr))
+    Norb = ham_r.shape[1]
     vk = np.zeros((Nk, Norb, Norb, 3), dtype=np.complex128)
     _lib.get_vlm0.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128),
@@ -148,7 +148,7 @@ def get_vk(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray) -> np.ndarray:
     @return   vk: Band velocities [Nk, Norb, 3] float64
     """
     Nk = len(uni)
-    Norb = int(np.sqrt(uni.size / Nk))
+    Norb = uni.shape[1]
     vk = np.zeros((Nk, Norb, 3), dtype=np.float64)
     _lib.get_veloc.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.float64),
@@ -171,7 +171,7 @@ def get_vnm(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray) -> np.ndarray:
     @return   vnm: Inter-band velocity matrix elements [Nk, Norb, Norb, 3] complex128
     """
     Nk = len(uni)
-    Norb = int(np.sqrt(uni.size / Nk))
+    Norb = uni.shape[1]
     vk = np.zeros((Nk, Norb, Norb, 3), dtype=np.complex128)
     _lib.get_vnm.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128),
@@ -224,7 +224,7 @@ def get_imass0(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray) -> np.nda
     @return imass0: Inverse mass tensor before band rotation [Nk, Norb, Norb, 3, 3] complex128
     """
     Nk, Nr = len(klist), len(rvec)
-    Norb = int(np.sqrt(ham_r.size / Nr))
+    Norb = ham_r.shape[1]
     imass0 = np.zeros((Nk, Norb, Norb, 3, 3), dtype=np.complex128)
     _lib.get_imass0.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128),
@@ -248,7 +248,7 @@ def get_imassk(imass0: np.ndarray, mrot: np.ndarray, uni: np.ndarray) -> np.ndar
     @return  imass: Band-basis inverse effective mass tensor [Nk, Norb, 3, 3] float64
     """
     Nk = len(uni)
-    Norb = int(np.sqrt(uni.size / Nk))
+    Norb = uni.shape[1]
     imass = np.zeros((Nk, Norb, 3, 3), dtype=np.float64)
     _lib.get_imassk.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.float64),
@@ -377,6 +377,27 @@ def gen_kpoint_weight(invk, Nk):
     _lib.get_kweight(weight, invk, byref(c_int64(Nk)), byref(c_int64(Nkall)))
     return weight
 
+def mkBdGhamk(hamk: np.ndarray, delta: np.ndarray) -> np.ndarray:
+    """
+    @fn mkBdGhamk
+    @brief Build the Bogoliubov-de Gennes Hamiltonian from the normal-state Hamiltonian and gap function.
+    @param   hamk: Normal-state k-space Hamiltonian [Nk, Norb, Norb] complex128
+    @param  delta: Anomalous (pairing) potential [Nk, Norb, Norb] complex128
+    @return hamBdGk: BdG Hamiltonian [Nk, 2*Norb, 2*Norb] complex128
+    """
+    Nk = len(hamk)
+    Norb = hamk.shape[1]
+    hamBdGk = np.zeros((Nk, 2 * Norb, 2 * Norb), dtype=np.complex128)
+    _lib.mkbdghamk_.argtypes = [
+        np.ctypeslib.ndpointer(dtype=np.complex128),
+        np.ctypeslib.ndpointer(dtype=np.complex128),
+        np.ctypeslib.ndpointer(dtype=np.complex128),
+        POINTER(c_int64), POINTER(c_int64),
+    ]
+    _lib.mkbdghamk_.restype = None
+    _lib.mkbdghamk_(hamBdGk, hamk, delta, byref(c_int64(Nk)), byref(c_int64(Norb)))
+    return hamBdGk
+
 def get_plist(rvec, ham_r):
     """
     @fn get_plist
@@ -386,7 +407,7 @@ def get_plist(rvec, ham_r):
     @return plist: Parity sign (+1 or -1) for each orbital [Norb] float64
     """
     Nr = len(rvec)
-    Norb = int(np.sqrt(ham_r.size / Nr))
+    Norb = ham_r.shape[1]
     Pmn = np.zeros((Norb, Norb), dtype=np.float64)
     _lib.get_parity_prop.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.float64),
