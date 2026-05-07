@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 #-*- coding:utf-8 -*-
+from enum import IntEnum
 """
 ftype: set input hamiltonian's format
 0: ham_r.txt, irvec.txt, ndegen.txt in {fname} dir
@@ -31,36 +32,36 @@ fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
 
 sw_dec_axis=False
 
-"""
-option defines calculation modes
- 0: band plot
- 1: plot Dos
- 2: write Fermi surface at kz (default: kz=0)
- 3: write 3D Fermi surface
- 4: write spectrum
- 5: calc conductivity (Boltzmann Theory)
- 6: calc conductivity (Purtubation Theory)
- 7: calc chis spectrum with symmetry line
- 8: calc chis at q-point
- 9: calc chis on xy plane at Ecut
-10: calc phi spectrum with symmetry line
-11: calc phi on xy plane at Ecut
-12: calc selfenergy using flex
-13: solve linearized eliashberg equation
-14: post process of gap functions
-15: calc carrier num.
-16: calc cycrotron mass
-17: plot dHvA frequency vs angle (not implement)
-18: mass calculation (not implement)
-19: spectrum with impurity (not implement)
-20: calc sigma_cpa (not implement)
-color_option defines the meaning of color on Fermi surfaces
- 0: band or mono color
- 1: orbital weight settled by olist
- 2: velocity size
-"""
-option=13
-color_option=2
+class CalcMode(IntEnum):
+    BAND              = 0   # band structure plot
+    DOS               = 1   # density of states plot
+    FERMI_2D          = 2   # 2D Fermi surface at kz plane (default: kz=0)
+    FERMI_3D          = 3   # 3D Fermi surface plot
+    SPECTRUM          = 4   # spectral function plot
+    CONDUCTIVITY_BT   = 5   # conductivity via Boltzmann theory
+    CONDUCTIVITY_PT   = 6   # optical conductivity via linear response theory
+    CHIS_SPECTRUM     = 7   # spin susceptibility spectrum along symmetry line
+    CHIS_QPOINT       = 8   # spin susceptibility at specified q-point
+    CHIS_QMAP         = 9   # spin susceptibility q-map on Ecut plane
+    PHI_SPECTRUM      = 10  # pairing susceptibility spectrum along symmetry line
+    PHI_QMAP          = 11  # pairing susceptibility q-map on Ecut plane
+    FLEX              = 12  # self-energy calculation using FLEX
+    ELIASHBERG        = 13  # solve linearized Eliashberg equation
+    GAP_FUNCTION      = 14  # post-process and output gap functions
+    CARRIER_NUM       = 15  # carrier number calculation
+    CYCLOTRON_MASS    = 16  # cyclotron mass calculation
+    DHVA              = 17  # dHvA frequency vs angle plot (not implemented)
+    ELECTRON_MASS     = 18  # electron mass calculation (not implemented)
+    SPECTRUM_IMPURITY = 19  # spectral function with impurity (not implemented)
+    SIGMA_CPA         = 20  # conductivity via CPA (not implemented)
+
+class ColorMode(IntEnum):
+    MONO    = 0
+    ORBITAL = 1
+    VELOCITY= 2
+
+option=CalcMode.ELIASHBERG
+color_option=ColorMode.VELOCITY
 
 Nx,Ny,Nz,Nw=32,32,2,512 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
@@ -88,6 +89,8 @@ U,J=1.2,0.15
 #0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py
 gap_sym=2
 
+#use calculation of magnetic susceptibility at superconducting state
+delta0=1.e-2 #maximum gap size for calculating susceptibility in SC state; set to 0 for normal state
 #mu0=9.85114560061123
 #k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
 #xlabel=[r'$\Gamma$','X','M']
@@ -1260,18 +1263,18 @@ def main():
             plt.colorbar()
             plt.hot()
             plt.savefig(fname=susfname,dpi=300)
-        elif option==8:
+        elif option==8: #chis at q-point
             q_point=np.array(at_point)
             chis,chis_orb,wlist=plibs.chis_q_point(q_point,eig,uni,Emax,Nw,mu,temp,Smat,klist,chiolist,delta)
             plt.plot(wlist,chis.imag)
             plt.show()
-        else:
+        else: #chis/phi qmap at ecut plane
             if option==9: #chis spectrum ecut plane
                 sus,chi0,qx,qy=plibs.chis_qmap(Nx,Ny,Ecut,mu,temp,Smat,klist,chiolist,eig,uni,idelta=1.e-3)
                 plt.contourf(qx,qy,abs(chi0.imag),100)
                 plt.colorbar()
                 plt.jet()
-                plt.show()
+                plt.savefig(fname='chi0map.png',dpi=300)
                 susfname='chismap.png'
             elif option==11:
                 sus,qx,qy=plibs.phi_qmap(Nx,Ny,Ecut,mu,temp,klist,chiolist,eig,uni,idelta=1.e-3,sw_omega=sw_omega)
@@ -1284,7 +1287,7 @@ def main():
             plt.jet()
             #plt.show()
             plt.savefig(fname=susfname,dpi=300)
-    elif option in {12,13,14}:
+    elif option in {12,13,14}: #flex/eliashberg calculations
         if sw_soc: #with soc
             try:
                 slist
@@ -1298,18 +1301,18 @@ def main():
             except NameError:
                 # Also fixed reverse index of split spins
                 invs=np.concatenate([np.arange((Norb+1)//2,Norb),np.arange((Norb+1)//2)])+1
-            if option==12:
+            if option==12: #calc self-energy using flex
                 calc_flex_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,invs,site,m_diis=m_diis_num,sw_rescale=sw_rescale_flex)
-            elif option==13:
+            elif option==13: #calc gap function
                 calc_lin_eliash_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,plist,invs,site)
-            elif option==14:
+            elif option==14: #post gap calculation, output gap function/anomalous green's function
                 output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,plist,mu,temp,sw_self,sw_soc,invs,slist,gap_sym)
         else: #without soc
             if option==12: #calc self-energy using flex
                 calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,site,m_diis=m_diis_num,sw_rescale=sw_rescale_flex)
             elif option==13: #calc gap function
                 calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,site,plist,mu,temp,gap_sym,sw_self)
-            elif option==14:
+            elif option==14: #post gap calculation, output gap function/anomalous green's function
                 output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,plist,mu,temp,sw_self)
     elif option==15: #calc carrier number
         n_carr=plibs.calc_carrier(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp)

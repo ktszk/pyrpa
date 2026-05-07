@@ -1,4 +1,4 @@
-subroutine mkBdGhamk(hamBdGk,hamk,delta,Nk,Norb)
+subroutine mkBdGhamk(hamBdGk,hamk,delta,Nk,Norb) bind(C)
   use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
   integer(c_int64_t),intent(in):: Nk,Norb
@@ -28,7 +28,7 @@ contains
     !!@param      Norb: The number of orbitals
     !!@param      Nchi: The footnote of chi
     !!@param       uni: unitary matrix
-    !!@param       eig: energies of bands
+    !!@param       eig: energies of bogoliubov quasi-particle bands
     !!@param    ffermi: fermi distribute function
     !!@param        ol: the list of the properties of orbitals at footnote of chi
     !!@param      temp: temperature
@@ -36,7 +36,7 @@ contains
     !!@param         w: frequency
     !!@param    idelta: dumping factor
     !!@param       eps: threshold of calculation value
-    !!@param   sw_spsym: symmetry flag
+    !!@param   sw_spsym: symmetry of spin space (true: triplet_dz, false: singlet)
     !!@return irr_chi_sc: irreducible susceptibility matrix
     integer(c_int64_t),intent(in):: Nk,Norb,Nchi
     integer(c_int64_t),intent(in),dimension(Nk):: qshift
@@ -89,3 +89,42 @@ contains
     irr_chi_sc=chi(:,:)/Nk
   end function irr_chi_sc
 end module calc_irr_chi_sc
+
+subroutine get_chi_irr_sc(chi,uni,eig,ffermi,qshift,ol,wl,Nchi,Norb,Nk,Nw,idelta,eps,temp,sw_spsym) bind(C)
+  !> This function obtains irreducible susceptibility at q-point
+  !!@param   chi,out: irreducible susceptibility
+  !!@param    uni,in: unitary matrix
+  !!@param    eig,in: energies of bogoliubov quasi-particle bands
+  !!@param ffermi,in: fermi distribute function
+  !!@param qshift,in: q-shifted klist
+  !!@param     ol,in: the list of the properties of orbitals at footnote of chi
+  !!@param     wl,in: the list of frequency
+  !!@param   Nchi,in: The footnote of chi
+  !!@param   Norb,in: The number of orbitals
+  !!@param     Nk,in: The number of k-points
+  !!@param     Nw,in: The number of frequency mesh
+  !!@param idelta,in: dumping factor
+  !!@param    eps,in: threshold of calculation value
+  !!@param   temp,in: temperature
+  !!@param sw_spsym,in: symmetry of spin space (true: triplet_dz, false: singlet)
+  use calc_irr_chi_sc
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
+  implicit none
+  integer(c_int64_t),intent(in):: Nk,Norb,Nw,Nchi
+  integer(c_int64_t),intent(in),dimension(Nk):: qshift
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: ol
+  logical,intent(in):: sw_spsym
+  real(c_double),intent(in):: temp,eps,idelta
+  real(c_double),intent(in),dimension(2*Norb,Nk):: eig,ffermi
+  real(c_double),intent(in),dimension(Nw):: wl
+  complex(c_double),intent(in),dimension(2*Norb,2*Norb,Nk):: uni
+  complex(c_double),intent(out),dimension(Nchi,Nchi,Nw):: chi
+
+  integer(c_int32_t) i
+ 
+  !$omp parallel do private(i)
+  wloop: do i=1,Nw
+     chi(:,:,i)=irr_chi_sc(Nk,Norb,Nchi,uni,eig,ffermi,ol,temp,qshift,wl(i),idelta,eps,sw_spsym)
+  end do wloop
+  !$omp end parallel do
+end subroutine get_chi_irr_sc

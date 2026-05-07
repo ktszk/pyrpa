@@ -846,6 +846,90 @@ def chis_q_point(q: np.ndarray, eig: np.ndarray, uni: np.ndarray, Emax: float,
     trchis,trchi0,chis_orb=flibs.get_tr_chi(chis,chi0,olist)
     return trchis,chis_orb,wlist
 
+def chis_q_point_sc(q: np.ndarray, hamk: np.ndarray, delta_k: np.ndarray, mu: float,
+                    Emax: float, Nw: int, temp: float, Smat: np.ndarray,
+                    klist: np.ndarray, olist: np.ndarray, idelta: float,
+                    sw_spsym: bool = False) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    @fn chis_q_point_sc
+    @brief Compute the spin susceptibility chi_s at a single q-point in the superconducting state.
+    Builds the BdG Hamiltonian from hamk and the gap function delta_k, diagonalizes it,
+    and calls get_chi_irr_sc to evaluate the irreducible susceptibility.
+    @param        q: Single q-vector in fractional coordinates [3]
+    @param     hamk: Normal-state k-space Hamiltonian [Nk, Norb, Norb] complex128
+    @param  delta_k: Gap function (anomalous potential) on k-mesh [Nk, Norb, Norb] complex128
+    @param       mu: Chemical potential in eV
+    @param     Emax: Maximum frequency in eV
+    @param       Nw: Number of frequency points
+    @param     temp: Temperature in eV
+    @param     Smat: Stoner interaction matrix [Nchi, Nchi] float64
+    @param    klist: k-point list [Nk, 3] float64
+    @param    olist: Orbital index pairs for susceptibility [Nchi, 2] int64 (chiolist)
+    @param   idelta: Lorentzian broadening in eV
+    @param sw_spsym: True for triplet (dz) symmetry, False for singlet
+    @retval  trchis: Trace of spin susceptibility chi_s [Nw] complex128
+    @retval chis_orb: Orbital-resolved spin susceptibility
+    @retval   wlist: Frequency mesh [Nw] float64
+    """
+    Norb = hamk.shape[1]
+    hamBdGk = flibs.mkBdGhamk(hamk - mu * np.eye(Norb), delta_k)
+    eig_BdG, uni_BdG = flibs.get_eig(hamBdGk)
+    ffermi_BdG = flibs.get_ffermi(eig_BdG, 0., temp)
+    wlist = np.linspace(0, Emax, Nw)
+    qshift = flibs.get_qshift(klist, q)
+    chi0 = flibs.get_chi_irr_sc(uni_BdG, eig_BdG, ffermi_BdG, qshift, olist, wlist, idelta, temp, sw_spsym)
+    chis = flibs.get_chis(chi0, Smat)
+    trchis, trchi0, chis_orb = flibs.get_tr_chi(chis, chi0, olist)
+    return trchis, chis_orb, wlist
+
+def chis_spectrum_sc(mu: float, temp: float, Smat: np.ndarray, hamk: np.ndarray,
+                     delta_k: np.ndarray, klist: np.ndarray, qlist: np.ndarray,
+                     olist: np.ndarray, Nw: int, Emax: float, idelta: float = 1.e-3,
+                     sw_spsym: bool = False) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    @fn chis_spectrum_sc
+    @brief Compute the spin susceptibility chi_s spectrum along a q-path in the superconducting state.
+    The BdG Hamiltonian is built and diagonalized once before the q-loop.
+    Results are also written to 'chi0_sc.dat'.
+    @param      mu: Chemical potential in eV
+    @param    temp: Temperature in eV
+    @param    Smat: Stoner interaction matrix [Nchi, Nchi] float64
+    @param    hamk: Normal-state k-space Hamiltonian [Nk, Norb, Norb] complex128
+    @param delta_k: Gap function (anomalous potential) on k-mesh [Nk, Norb, Norb] complex128
+    @param   klist: k-point list [Nk, 3] float64
+    @param   qlist: q-point path list [Nq, 3] float64
+    @param   olist: Orbital index pairs for susceptibility [Nchi, 2] int64 (chiolist)
+    @param      Nw: Number of frequency points
+    @param    Emax: Maximum frequency in eV
+    @param  idelta: Lorentzian broadening in eV
+    @param sw_spsym: True for triplet (dz) symmetry, False for singlet
+    @retval   chisq: Spin susceptibility trace at each q-point [Nq, Nw] complex128
+    @retval chis_orbq: Orbital-resolved spin susceptibility [Nq, ...]
+    @retval   wlist: Frequency mesh [Nw] float64
+    """
+    Norb = hamk.shape[1]
+    hamBdGk = flibs.mkBdGhamk(hamk - mu * np.eye(Norb), delta_k)
+    eig_BdG, uni_BdG = flibs.get_eig(hamBdGk)
+    ffermi_BdG = flibs.get_ffermi(eig_BdG, 0., temp)
+    wlist = np.linspace(0, Emax, Nw)
+    chisq = []
+    chis_orbq = []
+    with open('chi0_sc.dat', 'w') as f, open('writeq.dat', 'w') as fq:
+        for i, q in enumerate(qlist):
+            fq.write(f'{i:d} {q[0]:5.3f} {q[1]:5.3f} {q[2]:5.3f}\n')
+            fq.flush()
+            qshift = flibs.get_qshift(klist, q)
+            chi0 = flibs.get_chi_irr_sc(uni_BdG, eig_BdG, ffermi_BdG, qshift, olist, wlist, idelta, temp, sw_spsym)
+            chis = flibs.get_chis(chi0, Smat)
+            trchis, trchi0, chis_orb = flibs.get_tr_chi(chis, chi0, olist)
+            chisq.append(trchis)
+            chis_orbq.append(chis_orb)
+            for w, trchi in zip(wlist, trchi0):
+                f.write(f'{i:8.4f} {w:8.4f} {trchi.imag:9.4f} {trchi.real:9.4f}\n')
+            f.write('\n')
+            f.flush()
+    return np.array(chisq), np.array(chis_orbq), wlist
+
 def chis_qmap(Nx: int, Ny: int, Ecut: float, mu: float, temp: float, Smat: np.ndarray,
               klist: np.ndarray, olist: np.ndarray, eig: np.ndarray, uni: np.ndarray,
               idelta: float = 1.e-3) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -1006,7 +1090,8 @@ def get_initial_gap(kmap: np.ndarray, klist: np.ndarray, Norb: int, gap_sym: int
     return init_gap
 
 def calc_carrier(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray,
-                 Nx: int, Ny: int, Nz: int, fill: float, temp: float, with_spin: bool = False) -> np.ndarray:
+                 Nx: int, Ny: int, Nz: int, fill: float, temp: float,
+                 with_spin: bool = False) -> np.ndarray:
     """
     @fn calc_carrier
     @brief Calculate the carrier density (electrons/cm³) from the Fermi-Dirac distribution derivative.
@@ -1069,7 +1154,7 @@ def read_epa_output(filename: str) -> tuple[int,int,np.ndarray,np.ndarray,np.nda
     return ngrid, nmodes, edge, step, nbin, wavg, gavg
 
 def _irr_to_full_kgrid(data_irr: np.ndarray, invk: np.ndarray, kmap: np.ndarray,
-                        Nx: int, Ny: int, Nz: int) -> np.ndarray:
+                       Nx: int, Ny: int, Nz: int) -> np.ndarray:
     """
     @fn _irr_to_full_kgrid
     @brief Expand data from irreducible k-points to the full BZ using TRS symmetry.
@@ -1090,8 +1175,7 @@ def _irr_to_full_kgrid(data_irr: np.ndarray, invk: np.ndarray, kmap: np.ndarray,
     full[..., ix_arr[t], iy_arr[t], iz_arr[t]] = np.conj(data_irr[..., ik_arr[t]])
     return full
 
-def _wannier_all_nonzero(data_full: np.ndarray,
-                         Nx: int, Ny: int, Nz: int,
+def _wannier_all_nonzero(data_full: np.ndarray, Nx: int, Ny: int, Nz: int,
                          N_cut: int, zero_tol: float) -> tuple[np.ndarray, np.ndarray]:
     """
     @fn _wannier_all_nonzero
@@ -1122,9 +1206,8 @@ def _wannier_all_nonzero(data_full: np.ndarray,
     data_out  = data_R[:, :, :, ix_nz, iy_nz, iz_nz]   # (Norb, Norb, N_cut, Nr_nonzero)
     return data_out, rvec_kept
 
-def _write_wannier_dat(fname: str, data_out: np.ndarray, rvec_kept: np.ndarray,
-                       iw_grid: np.ndarray, Nw_orig: int,
-                       label: str, mu: float | None = None, temp: float | None = None) -> None:
+def _write_wannier_dat(fname: str, data_out: np.ndarray, rvec_kept: np.ndarray, iw_grid: np.ndarray,
+                       Nw_orig: int, label: str, mu: float | None = None, temp: float | None = None) -> None:
     """
     @fn _write_wannier_dat
     @brief Write Wannier-R Matsubara data as text in extended ham_r.dat format.
@@ -1167,11 +1250,9 @@ def _write_wannier_dat(fname: str, data_out: np.ndarray, rvec_kept: np.ndarray,
     print(f'{label}: Matsubara {Nw_orig} -> {N_cut} | Nr={Nr} | '
           f'{data_out.nbytes / 1e6:.1f} MB', flush=True)
 
-def output_self_wannier(sigmak: np.ndarray, mu_self: float,
-                        kmap: np.ndarray, invk: np.ndarray,
-                        Nx: int, Ny: int, Nz: int, Nw: int, temp: float,
-                        N_cut: int = 64, zero_tol: float = 1e-5,
-                        fname: str = 'self_en_wannier') -> None:
+def output_self_wannier(sigmak: np.ndarray, mu_self: float, kmap: np.ndarray, invk: np.ndarray,
+                        Nx: int, Ny: int, Nz: int, Nw: int, temp: float, N_cut: int = 64,
+                        zero_tol: float = 1e-5, fname: str = 'self_en_wannier') -> None:
     """
     @fn output_self_wannier
     @brief Convert self-energy Sigma(k, iw_n) -> Sigma(R, iw_n) in Wannier-real-space format.
@@ -1202,11 +1283,8 @@ def output_self_wannier(sigmak: np.ndarray, mu_self: float,
     _write_wannier_dat(fname, data_out, rvec_kept, iw_grid, Nw,
                        'Self-energy', mu=mu_self, temp=temp)
 
-def output_gap_wannier(gap: np.ndarray,
-                       kmap: np.ndarray, invk: np.ndarray,
-                       Nx: int, Ny: int, Nz: int, Nw: int, temp: float,
-                       N_cut: int = 64, zero_tol: float = 1e-5,
-                       fname: str = 'gap_wannier') -> None:
+def output_gap_wannier(gap: np.ndarray, kmap: np.ndarray, invk: np.ndarray, Nx: int, Ny: int, Nz: int,
+                       Nw: int, temp: float, N_cut: int = 64, zero_tol: float = 1e-5, fname: str = 'gap_wannier') -> None:
     """
     @fn output_gap_wannier
     @brief Convert gap function Delta(k, iw_n) -> Delta(R, iw_n) in Wannier-real-space format.

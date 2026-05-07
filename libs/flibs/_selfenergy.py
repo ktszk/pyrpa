@@ -57,7 +57,7 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
     """
     print("mixing rate: pp = %3.1f, DIIS m = %d" % (pp, m_diis))
     Nkall, Nk, Nchi = len(kmap), len(hamk), len(Smat)
-    Norb = int(np.sqrt(hamk.size / Nk))
+    Norb = hamk.shape[1]
     mu_self = c_double()
     sigmak = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
     _lib.mkself.argtypes = [
@@ -125,7 +125,7 @@ def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.nd
     """
     print("mixing rate: pp = %3.1f, DIIS m = %d" % (pp, m_diis))
     Nkall, Nk, Nchi = len(kmap), len(hamk), len(Vmat)
-    Norb = int(np.sqrt(hamk.size / Nk))
+    Norb = hamk.shape[1]
     mu_self = c_double()
     sigmak = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
     _lib.mkself_soc.argtypes = [

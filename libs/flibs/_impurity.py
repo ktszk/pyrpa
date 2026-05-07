@@ -16,7 +16,7 @@ def gen_imp_ham(rvec: np.ndarray, ham_r: np.ndarray, ham_i: np.ndarray,
     @return ham_imp: Impurity Hamiltonian [Norb*Nsite, Norb*Nsite] complex128
     """
     Nr, Nimp, Nsite = len(rvec), len(imp_list), len(rlist)
-    Norb = int(np.sqrt(ham_r.size / Nr))
+    Norb = ham_r.shape[1]
     ham_imp = np.zeros((Norb * Nsite, Norb * Nsite), dtype=np.complex128)
     _lib.gen_imp_ham.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128),
