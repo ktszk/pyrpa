@@ -46,7 +46,7 @@ class CalcMode(IntEnum):
     PHI_SPECTRUM      = 10  # pairing susceptibility spectrum along symmetry line
     PHI_QMAP          = 11  # pairing susceptibility q-map on Ecut plane
     FLEX              = 12  # self-energy calculation using FLEX
-    ELIASHBERG        = 13  # solve linearized Eliashberg equation
+    LIN_ELIASHBERG    = 13  # solve linearized Eliashberg equation
     GAP_FUNCTION      = 14  # post-process and output gap functions
     CARRIER_NUM       = 15  # carrier number calculation
     CYCLOTRON_MASS    = 16  # cyclotron mass calculation
@@ -54,13 +54,15 @@ class CalcMode(IntEnum):
     ELECTRON_MASS     = 18  # electron mass calculation (not implemented)
     SPECTRUM_IMPURITY = 19  # spectral function with impurity (not implemented)
     SIGMA_CPA         = 20  # conductivity via CPA (not implemented)
+    CHIS_SPECTRUM_SC  = 21  # spin susceptibility spectrum in superconducting state (not implemented)
+    CHIS_QPOINT_SC    = 22  # spin susceptibility at specified q-point in superconducting state (not implemented)
 
 class ColorMode(IntEnum):
     MONO    = 0
     ORBITAL = 1
     VELOCITY= 2
 
-option=CalcMode.ELIASHBERG
+option=CalcMode.LIN_ELIASHBERG
 color_option=ColorMode.VELOCITY
 
 Nx,Ny,Nz,Nw=32,32,2,512 #k and energy(or matsubara freq.) mesh size
@@ -77,8 +79,8 @@ tempK=500 #Kelvin
 fill= 3.02
 #site_prof=[5]
 
-Emin,Emax=-3,3
-delta=3.0e-2
+Emin,Emax=-3,.3
+delta=1.0e-3
 Ecut=1.0e-2
 tau_const=100
 #olist=[0,0,0]
@@ -132,10 +134,12 @@ try:
     abc
 except NameError:
     abc=[1.,1.,1.]
+    print('abc not found, set to 1,1,1')
 try:
     alpha_beta_gamma
 except NameError:
     alpha_beta_gamma=[90.,90.,90]
+    print('alpha_beta_gamma not found, set to 90,90,90')
 alatt=np.array(abc)
 deg=np.array(alpha_beta_gamma)
 if option in {0,4,7,12,20}:
@@ -175,7 +179,8 @@ try:
     except NameError:
         temp=tempK*kb
 except NameError:
-    pass
+    print('tempK not found')
+    exit()
 try:
     m_diis_num
 except NameError:
@@ -1053,7 +1058,7 @@ def main():
         rvec,ham_r,no,Nr=plibs.import_hoppings(fname,ftype)
         S_r=[]
     plist=flibs.get_plist(rvec,ham_r)
-    print("Effective parity of wanier functions:", plist)
+    print("Effective parity of wannier functions:", plist, flush=True)
 
     # ===== Parameter checks dependent on number of orbitals =====
     print(f"Number of orbital = {no}",flush=True)
@@ -1119,7 +1124,8 @@ def main():
            "calc self energy","solve linearized eliashberg equation",
            "gap_function","calculate carrier number","calculate cycrtron mass",
            "plot dHvA frequency","calculate electron mass","spectrum with impurity",
-           "calculate sigma_cpa"]
+           "calculate sigma_cpa",
+           "calculate chis spectrum on sc","calculate chis at q-point on sc"]
     cstr=["no color",'orbital weight','velocity size']
     if omp_check: #OMP properties
         print("OpenMP mode",flush=True)
@@ -1150,7 +1156,7 @@ def main():
     print(f"Number of orbital = {no}",flush=True)
     if (orb_dep==False) and option in {7,8,9,12,13}: #write constant U,J
         print(f'U= {U:5.2f} and J= {J:5.3f}')
-    if option in {7,8,9,10,11,12,13}:
+    if option in {7,8,9,10,11,12,13,21,22}:
         """ chiolist is the list of orbital properties of index on chi """
         try:
             chiolist
@@ -1159,7 +1165,13 @@ def main():
                 site_prof
             except NameError:
                 site_prof=[1] #one site (len(site_prof)=1)
-            chiolist,site=plibs.get_chi_orb_list(len(ham_r[0]),site_prof)        
+            chiolist,site=plibs.get_chi_orb_list(len(ham_r[0]),site_prof)
+        if option in {7,8,9,21,22}:
+            print("generate coulomb vertex matrix S")
+            if orb_dep:
+                Smat,Cmat=flibs.gen_SCmatrix_orb(chiolist,site,Umat,Jmat)
+            else:
+                Smat,Cmat=flibs.gen_SCmatrix(chiolist,site,U,J)
     if option in {0,4}:
         if sw_gen_sym:
             print('generate symmetry line',flush=True)
@@ -1242,12 +1254,6 @@ def main():
     elif option in {7,8,9,10,11}: #calc_chis_spectrum
         print("calculate electron energy",flush=True)
         Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=True)
-        if option in {7,8,9}:
-            print("generate coulomb vertex matrix S")
-            if orb_dep:
-                Smat,Cmat=flibs.gen_SCmatrix_orb(chiolist,site,Umat,Jmat)
-            else:
-                Smat,Cmat=flibs.gen_SCmatrix(chiolist,site,U,J)
         if option in {7,10}: #chis/phi spectrum with symmetry line
             print("generate qlist",flush=True)
             qlist,spa_length,xticks=plibs.mk_qlist(k_sets,Nx,Ny,Nz,bvec)
@@ -1267,6 +1273,9 @@ def main():
             q_point=np.array(at_point)
             chis,chis_orb,wlist=plibs.chis_q_point(q_point,eig,uni,Emax,Nw,mu,temp,Smat,klist,chiolist,delta)
             plt.plot(wlist,chis.imag)
+            plt.show()
+            for cso in chis_orb:
+                plt.plot(wlist,cso.imag)
             plt.show()
         else: #chis/phi qmap at ecut plane
             if option==9: #chis spectrum ecut plane
@@ -1428,6 +1437,37 @@ def main():
         np.savez('self_en', sigma_out, np.float64(mu))
         print(f"CPA Matsubara self-energy written to sigma.bin and self_en.npz"
               f" (Nk_irr={Nk_irr}, Nw={Nw})", flush=True)
+    elif option in {21,22}: #calc chis at superconducting state
+        sw_spsym=True if gap_sym<0 else False
+        klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
+        eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
+        deltaini=flibs.remap_gap(flibs.get_initial_delta(plibs.get_initial_gap(kmap,klist,len(eig.T),gap_sym),
+                                                          uni, kmap, invk, 1, gap_sym),plist,invk,gap_sym)
+        deltaini_static=np.ascontiguousarray(deltaini[:,:,0,:].transpose(2,0,1))  # [Nkall,Norb,Norb]
+        print("maximum gap = %7.4f meV"%(delta0*1e3),flush=True)
+        deltak=delta0*deltaini_static/abs(deltaini_static).max()
+        Nk, klist = plibs.gen_klist(Nx, Ny, Nz)
+        hamk = flibs.gen_ham(klist, ham_r, rvec)
+        if option==21:
+            print("generate qlist",flush=True)
+            qlist,spa_length,xticks=plibs.mk_qlist(k_sets,Nx,Ny,Nz,bvec)
+            w,sp,sus=plibs.chis_spectrum_sc(mu, temp, Smat, hamk, deltak, klist, qlist, chiolist, Nw, Emax, delta, sw_spsym)
+            print("write chis spectrum in png file",flush=True)
+            plt.contourf(sp,w,abs(sus.imag),100)
+            plt.colorbar()
+            plt.hot()
+            plt.savefig(fname='chis_sc_spec.png',dpi=300)
+        elif option==22:
+            q_point=np.array(at_point)
+            print(f"q-point is ({q_point[0]:.3f}, {q_point[1]:.3f}, {q_point[2]:.3f})",flush=True)
+            chis,chis_orb,wlist=plibs.chis_q_point_sc(q_point, hamk, deltak, mu, Emax, Nw, temp,
+                                                      Smat, klist, chiolist, delta, sw_spsym)
+            plt.plot(wlist,chis.imag)
+            plt.show()
+            for cso in chis_orb:
+                plt.plot(wlist,cso.imag)
+            plt.show()
+
 if __name__=="__main__":
     main()
 __license__="MIT"

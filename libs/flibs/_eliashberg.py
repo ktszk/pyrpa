@@ -238,6 +238,40 @@ def gen_Fk_soc(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray, invs: np.nda
                        byref(c_int64(gap_sym)))
     return Fk
 
+def get_initial_delta(init_delta: np.ndarray, uni: np.ndarray, kmap: np.ndarray,
+                      invk: np.ndarray, Nw: int, gap_sym: int) -> np.ndarray:
+    """
+    @fn get_initial_delta
+    @brief Convert a band-basis initial gap function into an orbital-basis gap function,
+    broadcast over Matsubara frequencies, and normalize.
+    Applies U * diag(init_delta) * U† at each k-point, then normalises by the total norm.
+    @param  init_delta: Band-basis initial gap amplitudes [Norb, Nk] float64
+                        (matches get_initial_gap output; C-order [Norb,Nk] == Fortran dimension(Nk,Norb))
+    @param         uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param        kmap: Full k-grid to irreducible k-point mapping [Nkall, 3] int64
+    @param        invk: Inverse k-point list [Nkall, 3] int64
+    @param          Nw: Number of Matsubara frequency points
+    @param     gap_sym: Gap symmetry index (0=s-wave diagonal, >0=singlet, <0=triplet)
+    @return      delta: Orbital-basis gap function [Norb, Norb, Nw, Nk] complex128
+    """
+    Norb, Nk = init_delta.shape
+    Nkall = len(kmap)
+    delta = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
+    _lib.get_initial_delta_.argtypes = [
+        np.ctypeslib.ndpointer(dtype=np.complex128),
+        np.ctypeslib.ndpointer(dtype=np.float64),
+        np.ctypeslib.ndpointer(dtype=np.complex128),
+        np.ctypeslib.ndpointer(dtype=np.int64),
+        np.ctypeslib.ndpointer(dtype=np.int64),
+        POINTER(c_int64), POINTER(c_int64),
+        POINTER(c_int64), POINTER(c_int64),
+        POINTER(c_int64),
+    ]
+    _lib.get_initial_delta_.restype = None
+    _lib.get_initial_delta_(delta, init_delta, uni, kmap, invk, byref(c_int64(Nkall)), byref(c_int64(Nk)),
+                            byref(c_int64(Nw)), byref(c_int64(Norb)), byref(c_int64(gap_sym)))
+    return delta
+
 def remap_gap(delta0, plist, invk, gap_sym):
     """
     @fn remap_gap
