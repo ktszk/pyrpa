@@ -388,14 +388,14 @@ def mkBdGhamk(hamk: np.ndarray, delta: np.ndarray) -> np.ndarray:
     Nk = len(hamk)
     Norb = hamk.shape[1]
     hamBdGk = np.zeros((Nk, 2 * Norb, 2 * Norb), dtype=np.complex128)
-    _lib.mkbdghamk_.argtypes = [
+    _lib.mkbdghamk.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128),
         np.ctypeslib.ndpointer(dtype=np.complex128),
         np.ctypeslib.ndpointer(dtype=np.complex128),
         POINTER(c_int64), POINTER(c_int64),
     ]
-    _lib.mkbdghamk_.restype = None
-    _lib.mkbdghamk_(hamBdGk, hamk, delta, byref(c_int64(Nk)), byref(c_int64(Norb)))
+    _lib.mkbdghamk.restype = None
+    _lib.mkbdghamk(hamBdGk, hamk, delta, byref(c_int64(Nk)), byref(c_int64(Norb)))
     return hamBdGk
 
 def get_plist(rvec, ham_r):

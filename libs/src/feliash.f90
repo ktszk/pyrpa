@@ -594,7 +594,7 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,olist,Nkal
   !$omp end parallel
 end subroutine mkdelta_nsoc
 
-subroutine get_initial_delta(delta,init_delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,gap_sym)
+subroutine get_initial_delta(delta,init_delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,gap_sym) bind(C,name="get_initial_delta_")
   !> make orbital basis initial gap function
   !!@param     delta,out: gap function
   !!@param init_delta,in: band basis initial gap function
