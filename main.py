@@ -23,49 +23,50 @@ else: monoclinic
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4nso',0,7,False
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
-fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
+#fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/FeS',2,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2_soc.input',1,0,True
-#fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
+fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
 #fname,ftype,brav,sw_soc='inputs/square_soc.hop',1,0,True
 
 sw_dec_axis=False
 
 class CalcMode(IntEnum):
-    BAND              = 0   # band structure plot
-    DOS               = 1   # density of states plot
-    FERMI_2D          = 2   # 2D Fermi surface at kz plane (default: kz=0)
-    FERMI_3D          = 3   # 3D Fermi surface plot
-    SPECTRUM          = 4   # spectral function plot
-    CONDUCTIVITY_BT   = 5   # conductivity via Boltzmann theory
-    CONDUCTIVITY_PT   = 6   # optical conductivity via linear response theory
-    CHIS_SPECTRUM     = 7   # spin susceptibility spectrum along symmetry line
-    CHIS_QPOINT       = 8   # spin susceptibility at specified q-point
-    CHIS_QMAP         = 9   # spin susceptibility q-map on Ecut plane
-    PHI_SPECTRUM      = 10  # pairing susceptibility spectrum along symmetry line
-    PHI_QMAP          = 11  # pairing susceptibility q-map on Ecut plane
-    FLEX              = 12  # self-energy calculation using FLEX
-    LIN_ELIASHBERG    = 13  # solve linearized Eliashberg equation
-    GAP_FUNCTION      = 14  # post-process and output gap functions
-    CARRIER_NUM       = 15  # carrier number calculation
-    CYCLOTRON_MASS    = 16  # cyclotron mass calculation
-    DHVA              = 17  # dHvA frequency vs angle plot (not implemented)
-    ELECTRON_MASS     = 18  # electron mass calculation (not implemented)
-    SPECTRUM_IMPURITY = 19  # spectral function with impurity (not implemented)
-    SIGMA_CPA         = 20  # conductivity via CPA (not implemented)
-    CHIS_SPECTRUM_SC  = 21  # spin susceptibility spectrum in superconducting state (not implemented)
-    CHIS_QPOINT_SC    = 22  # spin susceptibility at specified q-point in superconducting state (not implemented)
+    BAND               = 0   # band structure plot
+    DOS                = 1   # density of states plot
+    FERMI_2D           = 2   # 2D Fermi surface at kz plane (default: kz=0)
+    FERMI_3D           = 3   # 3D Fermi surface plot
+    SPECTRUM           = 4   # spectral function plot
+    CONDUCTIVITY_BT    = 5   # conductivity via Boltzmann theory
+    CONDUCTIVITY_PT    = 6   # optical conductivity via linear response theory
+    CHIS_SPECTRUM      = 7   # spin susceptibility spectrum along symmetry line
+    CHIS_QPOINT        = 8   # spin susceptibility at specified q-point
+    CHIS_QMAP          = 9   # spin susceptibility q-map on Ecut plane
+    PHI_SPECTRUM       = 10  # pairing susceptibility spectrum along symmetry line
+    PHI_QMAP           = 11  # pairing susceptibility q-map on Ecut plane
+    FLEX               = 12  # self-energy calculation using FLEX
+    LIN_ELIASHBERG     = 13  # solve linearized Eliashberg equation
+    GAP_FUNCTION       = 14  # post-process and output gap functions
+    CARRIER_NUM        = 15  # carrier number calculation
+    CYCLOTRON_MASS     = 16  # cyclotron mass calculation
+    DHVA               = 17  # dHvA frequency vs angle plot (not implemented)
+    ELECTRON_MASS      = 18  # electron mass calculation (not implemented)
+    SPECTRUM_IMPURITY  = 19  # spectral function with impurity (not implemented)
+    SIGMA_CPA          = 20  # conductivity via CPA (not implemented)
+    CHIS_SPECTRUM_SC   = 21  # spin susceptibility spectrum in superconducting state
+    CHIS_QPOINT_SC     = 22  # spin susceptibility at specified q-point in superconducting state
+    NONLIN_ELIASHBERG  = 23  # solve nonlinear Eliashberg equation (not implemented)
 
 class ColorMode(IntEnum):
     MONO    = 0
     ORBITAL = 1
     VELOCITY= 2
 
-option=CalcMode.LIN_ELIASHBERG
+option=CalcMode.NONLIN_ELIASHBERG
 color_option=ColorMode.VELOCITY
 
-Nx,Ny,Nz,Nw=32,32,2,512 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=64,64,1,1024 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
@@ -75,21 +76,21 @@ kz=0.0
 abc=[3.68,3.68,5.03]
 #alpha_beta_gamma=[90.,90.,90]
 #temp=2.0e-2 #2.59e-2
-tempK=500 #Kelvin
-fill= 3.02
+tempK=100 #Kelvin
+fill= 0.49 #3.02
 #site_prof=[5]
 
 Emin,Emax=-3,.3
 delta=1.0e-3
 Ecut=1.0e-2
 tau_const=100
-#olist=[0,0,0]
-olist=[0,[1,2],3]
+olist=[0,0,0]
+#olist=[0,[1,2],3]
 #U,J= 0.8, 0.1
 U,J=1.2,0.15
 #U,J=1.8,0.225
 #0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py
-gap_sym=2
+gap_sym=1
 
 #use calculation of magnetic susceptibility at superconducting state
 delta0=1.e-2 #maximum gap size for calculating susceptibility in SC state; set to 0 for normal state
@@ -103,10 +104,10 @@ sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 sw_omega=False #True: real freq, False: Matsubara freq.
 sw_rescale_flex=True #True: rescale self energy to make max|Sigma|~U, False: no rescaling
-sw_self=False  #True: use calculated self energy for spectrum band plot
+sw_self=True  #True: use calculated self energy for spectrum band plot
 sw_out_self=True
-sw_in_self=False
-sw_from_file=True
+sw_in_self=True
+sw_from_file=False
 #------------------------ initial parameters are above -------------------------------
 #----------------------------------main functions-------------------------------------
 #-------------------------------- import packages ------------------------------------
@@ -669,7 +670,7 @@ def output_gap_function(invk,kmap,gap,uni,plist,gap_sym,soc=False,invs=None,slis
                 with open(f'gap_{iorb+1}{jorb+1}.dat','w') as f:
                     for i,km in enumerate(kmap):
                         if km[2]==0:
-                            f.write(f'{km[0]:3} {km[1]:3} {gapb[iorb,jorb,i].real:12.8f} {gapb[iorb,jorb,i].imag:12.8f}\n')
+                            f.write(f'{km[0]:3} {km[1]:3} {gapb[iorb,jorb,i].real:15.8e} {gapb[iorb,jorb,i].imag:15.8e}\n')
                             if km[0]==Nx-1:
                                 f.write('\n')
             except IOError as e:
@@ -843,6 +844,52 @@ def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
         np.save('gap',gap)
         plibs.output_gap_wannier(gap,kmap,invk,Nx,Ny,Nz,Nw,temp)
     info=output_gap_function(invk,kmap,gap,uni,plist,gap_sym,True,invs,slist)
+
+def calc_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,chiolist,site,plist,
+                       mu:float,temp:float,gap_sym:int,sw_self:bool,eps=1.0e-4,pp=0.5,m_diis=5,sw_rescale:bool=True):
+    klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
+    ham_k=flibs.gen_ham(klist,ham_r,rvec)
+    eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
+    if orb_dep:
+        Smat,Cmat=flibs.gen_SCmatrix_orb(chiolist,site,Umat,Jmat)
+    else:
+        Smat,Cmat=flibs.gen_SCmatrix(chiolist,site,U,J)
+    if sw_self:
+        if sw_from_file:
+            try:
+                npz=np.load('self_en.npz')
+                sigmak,mu_self=npz['arr_0'],npz['arr_1']
+                print("Import sigma form self_en.npz")
+            except FileNotFoundError:
+                print("Error: 'self_en.npz' not found",flush=True)
+                return
+        else:
+            sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,chiolist,ham_k,eig,uni,
+                                        mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,pp=pp,m_diis=m_diis,sw_rescale=sw_rescale)
+        print(f'chem. pot. with self= {mu:.4f} eV',flush=True)
+        Gk=flibs.gen_green(sigmak,ham_k,mu_self,temp)
+    else:
+        Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
+    delta_init_band=plibs.get_initial_gap(kmap,klist,len(eig.T),gap_sym)
+    if True:
+        chi=flibs.get_chi0(Smat,Cmat,Gk,chiolist,kmap,invk,temp,Nx,Ny,Nz)
+        delta_init=flibs.linearized_eliashberg(chi,Gk,uni,delta_init_band,Smat,Cmat,chiolist,plist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
+    else:
+        delta_init_band=plibs.get_initial_gap(kmap,klist,len(eig.T),gap_sym)
+        delta_init=flibs.get_initial_delta(delta_init_band,uni,kmap,invk,Nw,gap_sym)
+    target_gap=1.764*temp  # Assume current temp is Tc, so Delta(0) ~ 1.764*Tc (eV units)
+    delta_max=np.abs(delta_init).max()
+    if delta_max>0.0:
+        delta_init*=target_gap/delta_max
+    else:
+        print("Warning: initial gap is zero; skip Tc-based scaling",flush=True)
+    delta,sigmak=flibs.nonlinear_eliashberg(delta_init,Gk,ham_k,Smat,Cmat,chiolist,plist,
+                                            kmap,invk,mu,temp,gap_sym,Nx,Ny,Nz,
+                                            sw_sigma=sw_self,eps=eps,m_diis=m_diis)
+    if sw_out_self:
+        np.save('gap',delta)
+        plibs.output_gap_wannier(delta,kmap,invk,Nx,Ny,Nz,Nw,temp)
+    info=output_gap_function(invk,kmap,delta,uni,plist,gap_sym)
 
 def get_carrier_num(kmesh,rvec,ham_r,S_r,mu:float,Arot):
     Nk,eig,kwieght=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,S_r,rvec,Arot)
@@ -1125,7 +1172,8 @@ def main():
            "gap_function","calculate carrier number","calculate cycrtron mass",
            "plot dHvA frequency","calculate electron mass","spectrum with impurity",
            "calculate sigma_cpa",
-           "calculate chis spectrum on sc","calculate chis at q-point on sc"]
+            "calculate chis spectrum on sc","calculate chis at q-point on sc",
+            "solve nonlinear eliashberg equation"]
     cstr=["no color",'orbital weight','velocity size']
     if omp_check: #OMP properties
         print("OpenMP mode",flush=True)
@@ -1156,7 +1204,7 @@ def main():
     print(f"Number of orbital = {no}",flush=True)
     if (orb_dep==False) and option in {7,8,9,12,13}: #write constant U,J
         print(f'U= {U:5.2f} and J= {J:5.3f}')
-    if option in {7,8,9,10,11,12,13,21,22}:
+    if option in {7,8,9,10,11,12,13,21,22,23}:
         """ chiolist is the list of orbital properties of index on chi """
         try:
             chiolist
@@ -1445,7 +1493,12 @@ def main():
                                                           uni, kmap, invk, 1, gap_sym),plist,invk,gap_sym)
         deltaini_static=np.ascontiguousarray(deltaini[:,:,0,:].transpose(2,0,1))  # [Nkall,Norb,Norb]
         print("maximum gap = %7.4f meV"%(delta0*1e3),flush=True)
-        deltak=delta0*deltaini_static/abs(deltaini_static).max()
+        gap_max=abs(deltaini_static).max()
+        if gap_max<=0.0:
+            print("Warning: initial gap is zero. Using unscaled delta",flush=True)
+            deltak=deltaini_static.copy()
+        else:
+            deltak=delta0*deltaini_static/gap_max
         Nk, klist = plibs.gen_klist(Nx, Ny, Nz)
         hamk = flibs.gen_ham(klist, ham_r, rvec)
         if option==21:
@@ -1467,6 +1520,9 @@ def main():
             for cso in chis_orb:
                 plt.plot(wlist,cso.imag)
             plt.show()
+    elif option==23:
+        calc_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,site,plist,
+                           mu,temp,gap_sym,sw_self,m_diis=m_diis_num,sw_rescale=sw_rescale_flex)
 
 if __name__=="__main__":
     main()

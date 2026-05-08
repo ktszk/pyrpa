@@ -125,8 +125,8 @@ def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, 
                         byref(c_int64(arnoldi_m)))
     return delta
 
-def nonlinear_eliashberg(delta_init: np.ndarray, hamk: np.ndarray, uni: np.ndarray,
-                         eig: np.ndarray, Smat: np.ndarray, Cmat: np.ndarray,
+def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarray,
+                         Smat: np.ndarray, Cmat: np.ndarray,
                          olist: np.ndarray, plist: np.ndarray, kmap: np.ndarray,
                          invk: np.ndarray, mu: float, temp: float, gap_sym: int,
                          Nx: int, Ny: int, Nz: int,
@@ -149,9 +149,9 @@ def nonlinear_eliashberg(delta_init: np.ndarray, hamk: np.ndarray, uni: np.ndarr
                             physical magnitude, e.g. ~1.764·T) for a fast start
                         If the array is C-contiguous complex128 it is modified in place;
                         otherwise a contiguous copy is created.
+    @param          Gk: Initial normal Green's function [Norb, Norb, Nw, Nk] complex128
+                        (typically from flibs.gen_Green0 or a converged normal-state solution)
     @param        hamk: k-space Hamiltonian [Nk, Norb, Norb] complex128
-    @param         uni: Eigenvector matrix at each k [Nk, Norb, Norb] complex128
-    @param         eig: Eigenvalues at each k [Nk, Norb] float64
     @param        Smat: Spin interaction matrix [Nchi, Nchi] float64
     @param        Cmat: Charge interaction matrix [Nchi, Nchi] float64
     @param       olist: Orbital index pairs for chi [Nchi, 2] int64
@@ -180,10 +180,9 @@ def nonlinear_eliashberg(delta_init: np.ndarray, hamk: np.ndarray, uni: np.ndarr
     sigmak = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
     _lib.eliashberg.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128),  # delta (inout)
-        np.ctypeslib.ndpointer(dtype=np.complex128),  # sigmak (out)
+        np.ctypeslib.ndpointer(dtype=np.complex128),  # sigmak (out/inout)
+        np.ctypeslib.ndpointer(dtype=np.complex128),  # Gk (inout)
         np.ctypeslib.ndpointer(dtype=np.complex128),  # hamk
-        np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
-        np.ctypeslib.ndpointer(dtype=np.float64),     # eig
         np.ctypeslib.ndpointer(dtype=np.float64),     # Smat
         np.ctypeslib.ndpointer(dtype=np.float64),     # Cmat
         np.ctypeslib.ndpointer(dtype=np.int64),       # olist
@@ -199,7 +198,7 @@ def nonlinear_eliashberg(delta_init: np.ndarray, hamk: np.ndarray, uni: np.ndarr
         POINTER(c_int64),                                          # m_diis
     ]
     _lib.eliashberg.restype = None
-    _lib.eliashberg(delta, sigmak, hamk, uni, eig, Smat, Cmat, olist, plist,
+    _lib.eliashberg(delta, sigmak, Gk, hamk, Smat, Cmat, olist, plist,
                     kmap, invk,
                     byref(c_double(mu)), byref(c_double(temp)), byref(c_double(eps)),
                     byref(c_int64(Nkall)), byref(c_int64(Nk)), byref(c_int64(Nw)),

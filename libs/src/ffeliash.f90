@@ -1,5 +1,5 @@
 !non-linear FLEX-Eliashberg equations solver (without SOC)
-subroutine eliashberg(delta,sigmak,hamk,uni,eig,Smat,Cmat,olist,prt,kmap,invk,mu,temp,eps,&
+subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,kmap,invk,mu,temp,eps,&
      Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,sw_sigma,m_diis) bind(C)
   !> Non-linear self-consistent FLEX-Eliashberg loop (no SOC).
   !>
@@ -26,8 +26,6 @@ subroutine eliashberg(delta,sigmak,hamk,uni,eig,Smat,Cmat,olist,prt,kmap,invk,mu
   !!@param      delta,inout: gap function Δ(k,iω); user-supplied initial value, overwritten with converged Δ
   !!@param     sigmak,out: self-energy Σ(k,iω); zeroed when sw_sigma=false
   !!@param       hamk,in: normal-state Hamiltonian H(k)
-  !!@param        uni,in: H(k) eigenvectors
-  !!@param        eig,in: H(k) eigenvalues
   !!@param       Smat,in: S-matrix (Stoner)
   !!@param       Cmat,in: C-matrix (charge)
   !!@param      olist,in: chi-index orbital pairs
@@ -50,10 +48,8 @@ subroutine eliashberg(delta,sigmak,hamk,uni,eig,Smat,Cmat,olist,prt,kmap,invk,mu
   real(c_double),intent(in):: temp,eps,mu
   real(c_double),intent(in),dimension(Norb):: prt
   real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
-  real(c_double),intent(in),dimension(Norb,Nk):: eig
-  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni,hamk
-  complex(c_double),intent(inout),dimension(Nk,Nw,Norb,Norb):: delta
-  complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: sigmak
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: hamk
+  complex(c_double),intent(inout),dimension(Nk,Nw,Norb,Norb):: Gk, sigmak, delta
 
   integer(c_int32_t) i_iter
   integer(c_int32_t),dimension(Nchi,Nchi,2)::chi_map
@@ -67,7 +63,7 @@ subroutine eliashberg(delta,sigmak,hamk,uni,eig,Smat,Cmat,olist,prt,kmap,invk,mu
   real(c_double),allocatable,dimension(:,:):: B_diis
   real(c_double),allocatable,dimension(:):: rhs_diis
   integer(c_int32_t),allocatable,dimension(:):: ipiv_diis
-  complex(c_double),dimension(Nk,Nw,Norb,Norb):: newdelta,fk,Gk,Gk0
+  complex(c_double),dimension(Nk,Nw,Norb,Norb):: newdelta,fk,Gk0
   complex(c_double),allocatable,dimension(:,:,:,:):: Vdelta,Vsigma
 
   ! All FLEX vertex / chi0 routines expect (Nk,Nw,Nchi,Nchi) ordering.
@@ -100,10 +96,10 @@ subroutine eliashberg(delta,sigmak,hamk,uni,eig,Smat,Cmat,olist,prt,kmap,invk,mu
   ! NOTE: caller must supply a non-zero initial delta. We DO NOT call
   ! get_initial_delta here — using e.g. a converged linear-Eliashberg gap as
   ! initial value is the recommended high-accuracy fast-start.
+  Gk0(:,:,:,:)=Gk(:,:,:,:) ! Gk0 starts as bare G_0, may be updated with Σ if sw_sigma
   call get_chi_map(chi_map,irr_chi,olist,Nchi)                          ! chi-index symmetry table for FFT loops
-  call gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb)                         ! bare normal-state G(k,iω)
   call mkfk_trs_nsoc(fk,Gk,delta,Nk,Nw,Norb)                             ! linearized seed F = -G·Δ·G^†
-  call get_chi0sc(Vsigma,Vdelta,Gk,fk,kmap,invk,irr_chi,chi_map,olist,temp,&
+  call get_chi0sc(Vsigma,Vdelta,Gk,fk,kmap,invk,irr_chi,chi_map,olist,prt,temp,&
        Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,sw_pair)                            ! Vsigma=χ_0_S, Vdelta=χ_0_C
   call ckchi_impl(Vsigma,Smat,Cmat,kmap,invk,Nk,Nkall,Nchi,Nw,maxchi0s_global)   ! SDW Stoner check on χ_0_S
   call mkV_flex_nosoc(Vdelta,Vsigma,Smat,Cmat,Nk,Nw,Nchi,sw_pair)        ! χ_0 → V_σ (Vsigma), V_Δ (Vdelta)
@@ -112,7 +108,6 @@ subroutine eliashberg(delta,sigmak,hamk,uni,eig,Smat,Cmat,olist,prt,kmap,invk,mu
      sigmak(:,:,:,:)=(0.0d0,0.0d0)
      !$omp end parallel workshare
   end if
-
   ! ===== self-consistent loop ============================================
   iter_loop: do i_iter=1,itemax
      print'(A5,I5)','iter=',i_iter
@@ -182,19 +177,17 @@ subroutine eliashberg(delta,sigmak,hamk,uni,eig,Smat,Cmat,olist,prt,kmap,invk,mu
      end if
 
      ! 4. update Σ and dressed G_0 (FLEX self-energy)
-     if(sw_sigma)then
+     if(sw_sigma)then 
         call calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,&
              Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
         call gen_green_inv(Gk0,sigmak,hamk,mu,temp,Nk,Nw,Norb)             ! Gk0 := G_0^-1 - Σ
-        call getinv(Gk0,Nk,Nw,Norb)                                         ! invert in place
-     else
-        call gen_green0(Gk0,eig,uni,mu,temp,Nk,Nw,Norb)                    ! Gk0 := bare G_0
+        call getinv(Gk0,Nk,Nw,Norb)                                        ! invert in place
      end if
      ! 5. SC Dyson: G = Gk0(I+Δ·F†), F = -Gk0·Δ·G^†
      call mkgreliah_trs_nsoc(Gk,Gk0,fk,delta,Nk,Nw,Norb)
      call mkfkeliash_trs_nsoc(fk,Gk0,Gk,delta,Nk,Nw,Norb)
      ! 6. χ_0_S, χ_0_C from new G, F
-     call get_chi0sc(Vsigma,Vdelta,Gk,fk,kmap,invk,irr_chi,chi_map,olist,temp,&
+     call get_chi0sc(Vsigma,Vdelta,Gk,fk,kmap,invk,irr_chi,chi_map,olist,prt,temp,&
           Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,sw_pair)
      call ckchi_impl(Vsigma,Smat,Cmat,kmap,invk,Nk,Nkall,Nchi,Nw,maxchi0s_global)
      ! 7. update FLEX vertices V_σ (Vsigma), V_Δ (Vdelta)
@@ -343,7 +336,7 @@ subroutine mkV_flex_nosoc(Vdelta,Vsigma,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
   !$omp end parallel do
 end subroutine mkV_flex_nosoc
 
-subroutine get_chi0sc(Vsigma,Vdelta,Gk,fk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,sw_pair)
+subroutine get_chi0sc(Vsigma,Vdelta,Gk,fk,kmap,invk,irr_chi,chi_map,olist,prt,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,sw_pair)
   !> Build SC irreducible susceptibility in the FLEX spin/charge channels.
   !>   χ^GG  = G(k+q)·G(k)              (normal bubble)
   !>   χ^FF  = -F(k+q)·F^*(k)           (anomalous bubble; sign/structure handled by sw_pair)
@@ -359,6 +352,7 @@ subroutine get_chi0sc(Vsigma,Vdelta,Gk,fk,kmap,invk,irr_chi,chi_map,olist,temp,N
   integer(c_int32_t),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
   logical(1),intent(in):: sw_pair
   real(c_double),intent(in):: temp
+  real(c_double),intent(in),dimension(Norb):: prt
   complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk,fk
   complex(c_double),intent(out),dimension(Nk,Nw,Nchi,Nchi):: Vsigma,Vdelta
 
@@ -366,7 +360,7 @@ subroutine get_chi0sc(Vsigma,Vdelta,Gk,fk,kmap,invk,irr_chi,chi_map,olist,temp,N
   complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2
 
   call get_chi0_conv(Vsigma,Gk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)            ! Vsigma <- χ^GG
-  call get_chi0_conv_ff(Vdelta,fk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,sw_pair) ! Vdelta <- χ^FF
+  call get_chi0_conv_ff(Vdelta,fk,kmap,invk,irr_chi,chi_map,olist,prt,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,sw_pair) ! Vdelta <- χ^FF
   !$omp parallel do collapse(2) private(i,j,cmat1,cmat2)
   do j=1,Nw
      do i=1,Nk
@@ -379,12 +373,12 @@ subroutine get_chi0sc(Vsigma,Vdelta,Gk,fk,kmap,invk,irr_chi,chi_map,olist,temp,N
   !$omp end parallel do
 end subroutine get_chi0sc
 
-subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,sw_pair)
+subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,prt,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,sw_pair)
   !> Anomalous bubble χ^FF(q,iω) = -Σ_k F(k+q, iω+iω') · F^*(k, iω') via real-space FFT.
   !>
   !> Algorithm:
   !>   - Map F(k,iω) to a 2*Nw frequency grid using TRS / particle-hole symmetry, with a
-  !>     spin-symmetry sign sgn = -1 (singlet, even-ω F) or +1 (triplet d_z, odd-ω F).
+  !>     spin-symmetry sign sgn = 1 (singlet, even-ω F) or -1 (triplet d_z, odd-ω F).
   !>   - tmpfk14 stores F†_{lm}(k,iω) in real space (complex-conjugate component for one leg).
   !>     tmpfk23 stores F_{lm}(k,iω) directly (other leg).
   !>   - FFT both to real space, multiply tmpfk14(r,τ)·tmpfk23(-r,-τ), inverse FFT.
@@ -398,19 +392,24 @@ subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz
   integer(c_int32_t),intent(in),dimension(Nchi*(Nchi+1)/2,2):: irr_chi
   logical(1),intent(in):: sw_pair
   real(c_double),intent(in):: temp
+  real(c_double),intent(in),dimension(Norb):: prt
   complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Fk
   complex(c_double),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
 
   integer(c_int32_t) i,j,k,l,m,n,iorb
   integer(c_int32_t) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(2*Nw)
-  real(c_double) weight,sgn
+  real(c_double) weight,sgn,dprt
   real(c_double),parameter:: eps=1.0d-9
   complex(c_double),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmp,tmpfk14,tmpfk23
   
+  ! sgn: F(-k,ω) = sgn·F^T(k,ω);  dprt: Δ(k,-ω) = dprt·Δ*(k,ω)
+  ! singlet: F(-k)=+F^T(k), even-ω gap; triplet: F(-k)=-F^T(k), odd-ω gap
   if(sw_pair)then
-     sgn=-1.0d0 !triplet_dz
+     sgn=1.0d0 !singlet Fk=F^T-k
+     dprt=1.0d0 !gap parity even freq singlet is even
   else
-     sgn=+1.0d0 !singlet
+     sgn=-1.0d0 !triplet Fk=-F^T-k
+     dprt=-1.0d0 !gap parity even freq triplet is odd
   end if
   weight=temp/dble(Nkall)
   ii(0)=0
@@ -452,15 +451,15 @@ subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz
               tmpfk14(kmap(1,i),kmap(2,i),kmap(3,i),j)=conjg(Fk(invk(1,i),j,olist(m,2),olist(l,1))) !F^+14(k,iw)
               tmpfk23(kmap(1,i),kmap(2,i),kmap(3,i),j)=Fk(invk(1,i),j,olist(l,2),olist(m,1)) !F23(k,iw)
               !-iw
-              tmpfk14(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgn*conjg(Fk(invk(1,i),j,olist(l,1),olist(m,2))) !F^+14(k,-iw)=sgnF^*14(k,iw)
-              tmpfk23(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgn*Fk(invk(1,i),j,olist(m,1),olist(l,2)) !F23(k,-iw)=sgnF32(k,iw)
+              tmpfk14(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=prt(olist(l,1))*prt(olist(m,2))*sgn*dprt*conjg(Fk(invk(1,i),j,olist(l,1),olist(m,2))) !F^+14(k,-iw)=sgnF^*14(k,iw)
+              tmpfk23(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=prt(olist(m,1))*prt(olist(l,2))*sgn*dprt*Fk(invk(1,i),j,olist(m,1),olist(l,2)) !F23(k,-iw)=sgnF32(k,iw)
            else if(invk(2,i)==1)then
               !iw
-              tmpfk14(kmap(1,i),kmap(2,i),kmap(3,i),j)=conjg(Fk(invk(1,i),j,olist(m,1),olist(l,1))) !F^+14(-k,iw)=F31(k,iw)
-              tmpfk23(kmap(1,i),kmap(2,i),kmap(3,i),j)=Fk(invk(1,i),j,olist(l,2),olist(m,2)) !F23(-k,iw)=F^24(k,iw)
+              tmpfk14(kmap(1,i),kmap(2,i),kmap(3,i),j)=conjg(Fk(invk(1,i),j,olist(m,1),olist(l,1))) !F^+14(-k,iw)=F41(k,iw)
+              tmpfk23(kmap(1,i),kmap(2,i),kmap(3,i),j)=Fk(invk(1,i),j,olist(l,2),olist(m,2)) !F23(-k,iw)=F^23(k,iw)
               !-iw
-              tmpfk14(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgn*conjg(Fk(invk(1,i),j,olist(l,1),olist(m,2))) !F^14(-k,-iw)=F^14(k,iw)
-              tmpfk23(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgn*Fk(invk(1,i),j,olist(l,2),olist(m,1)) !G23(-k,-iw)=F32(k,iw)
+              tmpfk14(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=prt(olist(l,1))*prt(olist(m,2))*sgn*dprt*conjg(Fk(invk(1,i),j,olist(l,1),olist(m,2))) !F^+14(-k,-iw)
+              tmpfk23(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=prt(olist(m,1))*prt(olist(l,2))*sgn*dprt*Fk(invk(1,i),j,olist(l,2),olist(m,1)) !F23(-k,-iw)
            end if
         end do k_loop_Gk_to_tmp
      end do w_loop_Gk_to_tmp
