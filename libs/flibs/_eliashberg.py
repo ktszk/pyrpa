@@ -130,7 +130,7 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
                          olist: np.ndarray, plist: np.ndarray, kmap: np.ndarray,
                          invk: np.ndarray, mu: float, temp: float, gap_sym: int,
                          Nx: int, Ny: int, Nz: int,
-                         sw_sigma: bool = False, eps: float = 1.0e-4,
+                         sw_sigma: bool = False, sw_Vconst: bool = False, eps: float = 1.0e-4,
                          itemax: int = 100, m_diis: int = 5) -> tuple[np.ndarray, np.ndarray]:
     """
     @fn nonlinear_eliashberg
@@ -163,6 +163,7 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
     @param     gap_sym: Gap symmetry (>=0 singlet, <0 triplet)
     @param    Nx,Ny,Nz: k-grid dimensions
     @param    sw_sigma: Include FLEX self-energy correction in the dressed G_0 (default False)
+    @param    sw_Vconst: Use constant pairing interaction instead of FLEX vertices (default False)
     @param         eps: Convergence threshold on |Δ_new-Δ|/|Δ|
     @param      itemax: Maximum SCF iterations
     @param      m_diis: DIIS history length (m_diis<=1 → linear mixing only; default 5)
@@ -193,8 +194,8 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
         POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),     # Nkall, Nk, Nw
         POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),     # Nchi, Norb, Nx
         POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),     # Ny, Nz, itemax
-        POINTER(c_int64),                                          # gap_sym
-        POINTER(c_bool),                                           # sw_sigma
+        POINTER(c_int64),                                         # gap_sym
+        POINTER(c_bool), POINTER(c_bool),                         # sw_sigma,sw_Vconst
         POINTER(c_int64),                                          # m_diis
     ]
     _lib.eliashberg.restype = None
@@ -204,8 +205,7 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
                     byref(c_int64(Nkall)), byref(c_int64(Nk)), byref(c_int64(Nw)),
                     byref(c_int64(Nchi)), byref(c_int64(Norb)), byref(c_int64(Nx)),
                     byref(c_int64(Ny)), byref(c_int64(Nz)), byref(c_int64(itemax)),
-                    byref(c_int64(gap_sym)),
-                    byref(c_bool(sw_sigma)),
+                    byref(c_int64(gap_sym)), byref(c_bool(sw_sigma)), byref(c_bool(sw_Vconst)),
                     byref(c_int64(m_diis)))
     return delta, sigmak
 

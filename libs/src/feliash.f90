@@ -539,7 +539,7 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,olist,Nkal
               else if(invk(2,i)==1)then !-k,0
                  tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vdelta(invk(1,i),1,l,m) !V^ml(-q,0)=V^lm(q,0)
               end if
-              tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=0.5d0*(Cmat(m,l)+sgn*Smat(m,l)) !Nw+1 consider w_n=>inf limit
+              tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=0.5d0*(Smat(m,l)+sgn*Cmat(m,l)) !Nw+1 consider w_n=>inf limit
            end do
            !$omp end do
            !$omp do private(i,j)
