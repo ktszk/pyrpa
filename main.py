@@ -23,11 +23,11 @@ else: monoclinic
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4nso',0,7,False
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
-#fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
+fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/FeS',2,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2_soc.input',1,0,True
-fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
+#fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
 #fname,ftype,brav,sw_soc='inputs/square_soc.hop',1,0,True
 
 sw_dec_axis=False
@@ -63,7 +63,7 @@ class ColorMode(IntEnum):
     ORBITAL = 1
     VELOCITY= 2
 
-option=CalcMode.NONLIN_ELIASHBERG
+option=CalcMode.CHIS_QPOINT_SC
 color_option=ColorMode.VELOCITY
 
 Nx,Ny,Nz,Nw=64,64,1,512 #k and energy(or matsubara freq.) mesh size
@@ -77,7 +77,7 @@ abc=[3.68,3.68,5.03]
 #alpha_beta_gamma=[90.,90.,90]
 #temp=2.0e-2 #2.59e-2
 tempK=220 #Kelvin
-fill= 0.498 #3.02
+fill= 3.02
 #site_prof=[5]
 
 Emin,Emax=-3,.3
@@ -90,16 +90,20 @@ U,J= 0.8, 0.1
 #U,J=1.2,0.15
 #U,J=1.8,0.225
 #0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py
-gap_sym=1
+gap_sym=0
 
 #use calculation of magnetic susceptibility at superconducting state
-delta0=1.e-2 #maximum gap size for calculating susceptibility in SC state; set to 0 for normal state
+#delta0=1.e-2 #maximum gap size for calculating susceptibility in SC state; set to 0 for normal state
+d0=1e-1
+delta0=[0.,d0,d0*.5,-d0,0.]
 #mu0=9.85114560061123
 #k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
 #xlabel=[r'$\Gamma$','X','M']
 #m_diis_num=2
 at_point=[ 0., .5, 0.]
 orb_dep=False  #use orbital dependence U,J
+Umat=None      #orbital-dependent U matrix (Norb x Norb); set when orb_dep=True
+Jmat=None      #orbital-dependent J matrix (Norb x Norb); set when orb_dep=True
 sw_unit=True    #set unit values unity (False) or not (True)
 sw_tdf=False
 sw_omega=False #True: real freq, False: Matsubara freq.
@@ -585,98 +589,6 @@ def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
     #ax3.plot(wlist,(sigmaS[:,0,0]+sigmaS[:,1,1]+sigmaS[:,2,2]).imag)
     plt.show()
 
-def calc_chis_spectrum(mu:float,temp:float,Smat,klist,qlist,chiolist,eig,uni,spa_length,
-                       Nw:int,Emax:float,delta:float):
-    print("calculate spn susceptibility",flush=True)
-    chisw,chisw_orb,wlist=plibs.chis_spectrum(mu,temp,Smat,klist,qlist,chiolist,eig,uni,Nw,Emax,delta)
-    w,sp=np.meshgrid(wlist,spa_length)
-    try:
-        with open('chis.dat','w') as f:
-            for ww,ssp,chis in zip(w,sp,chisw):
-                for www,sssp,chi in zip(ww,ssp,chis):
-                    f.write(f'{sssp:8.4f} {www:8.4f} {chi.imag:9.4f}\n')
-                f.write('\n')
-    except IOError as e:
-        print(f"Error: Failed to write 'chis.dat': {e}",flush=True)
-    for i,chiso in enumerate(chisw_orb.T):
-        try:
-            with open(f'chis_{i}.dat','w') as f:
-                for ww,ssp,chis in zip(w,sp,chiso.T):
-                    for www,sssp,chi in zip(ww,ssp,chis):
-                        f.write(f'{sssp:8.4f} {www:8.4f} {chi.imag:9.4f}\n')
-                    f.write('\n')
-        except IOError as e:
-            print(f"Error: Failed to write 'chis_{i}.dat': {e}",flush=True)
-            continue
-    return(w,sp,chisw)
-
-def calc_phi_spectrum(mu:float,temp:float,klist,qlist,chiolist,eig,uni,spa_length,Nw:int,Emax:float,delta:float):
-    print("calculate sc susceptibility",flush=True)
-    phiw,phiw_orb,wlist=plibs.phi_spectrum(mu,temp,klist,qlist,chiolist,eig,uni,Nw,Emax,delta)
-    w,sp=np.meshgrid(wlist,spa_length)
-    try:
-        with open('phi.dat','w') as f:
-            for ww,ssp,phi in zip(w,sp,phiw):
-                for www,sssp,ph in zip(ww,ssp,phi):
-                    f.write(f'{sssp:8.4f} {www:8.4f} {ph.imag:9.4f}\n')
-                f.write('\n')
-    except IOError as e:
-        print(f"Error: Failed to write 'phi.dat': {e}",flush=True)
-    return(w,sp,phiw)
-
-def calc_flex(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,olist,site,eps=1.0e-4,pp=0.5,m_diis=5,sw_rescale:bool=True):
-    klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
-    eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
-    ham_k=flibs.gen_ham(klist,ham_r,rvec)
-    if orb_dep:
-        Smat,Cmat=flibs.gen_SCmatrix_orb(olist,site,Umat,Jmat)
-    else:
-        Smat,Cmat=flibs.gen_SCmatrix(olist,site,U,J)
-    sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,olist,ham_k,eig,uni,mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,pp=pp,m_diis=m_diis,sw_rescale=sw_rescale)
-    if sw_out_self:
-        np.savez('self_en',sigmak,mu_self)
-        plibs.output_self_wannier(sigmak,mu_self,kmap,invk,Nx,Ny,Nz,Nw,temp)
-
-def calc_flex_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,mu:float,temp:float,olist,slist,invs,site,eps=1.0e-4,pp=0.5,m_diis=5,sw_rescale:bool=True):
-    klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
-    eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
-    ham_k=flibs.gen_ham(klist,ham_r,rvec)
-    if orb_dep:
-        Vmat=flibs.gen_Vmatrix_orb(olist,slist,site,invs,Umat,Jmat)
-    else:
-        Vmat=flibs.gen_Vmatrix(olist,slist,site,invs,U,J)
-    sigmak,mu_self=flibs.mkself_soc(Vmat,kmap,invk,invs,olist,slist,ham_k,eig,uni,mu,fill,temp,
-                                    Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,pp=pp,m_diis=m_diis,sw_rescale=sw_rescale)
-    if sw_out_self:
-        np.savez('self_en',sigmak,mu_self)
-        plibs.output_self_wannier(sigmak,mu_self,kmap,invk,Nx,Ny,Nz,Nw,temp)
-
-
-def output_gap_function(invk,kmap,gap,uni,plist,gap_sym,soc=False,invs=None,slist=None,sw_orb=False):
-    if sw_orb:
-        if soc:
-            gapb=gap[:,:,0,:]
-        else:
-            gapb=flibs.remap_gap(gap[:,:,0,:],plist,invk,gap_sym)
-    else:
-        if soc:
-            gapb=flibs.conv_delta_orb_to_band_soc(gap,uni,invk,invs,slist)
-        else:
-            gapb=flibs.conv_delta_orb_to_band(gap,uni,invk,plist,gap_sym)
-    print('output gap function')
-    for iorb in range(len(gapb)):
-        for jorb in range(len(gapb)):
-            try:
-                with open(f'gap_{iorb+1}{jorb+1}.dat','w') as f:
-                    for i,km in enumerate(kmap):
-                        if km[2]==0:
-                            f.write(f'{km[0]:3} {km[1]:3} {gapb[iorb,jorb,i].real:15.8e} {gapb[iorb,jorb,i].imag:15.8e}\n')
-                            if km[0]==Nx-1:
-                                f.write('\n')
-            except IOError as e:
-                print(f"Error: Failed to write 'gap_{iorb+1}{jorb+1}.dat': {e}",flush=True)
-                continue
-    return(0)
 
 def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,plist,mu:float,temp:float,sw_self:bool,
               sw_soc=False,invs=None,slist=None,gap_sym=0):
@@ -697,12 +609,12 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,plist,mu:float,temp:flo
         return
     if sw_soc:
         Fk=flibs.gen_Fk_soc(Gk,gap,invk,invs,slist, gap_sym)
-        no=int(len(slist)/2)
+        Norb=int(len(slist)/2)
         if gap_sym>=0:
-            Fks=Fk[:no,no:,0,:]-Fk[no:,:no,0,:]
+            Fks=Fk[:Norb,Norb:,0,:]-Fk[Norb:,:Norb,0,:]
             Fktr=np.array([f.diagonal().sum() for f in Fks.T])
         else:
-            Fkt=Fk[:no,no:,0,:]+Fk[no:,:no,0,:]
+            Fkt=Fk[:Norb,Norb:,0,:]+Fk[Norb:,:Norb,0,:]
             Fktr=np.array([f.diagonal().sum() for f in Fkt.T])
     else:
         Fk0=flibs.gen_Fk(Gk,gap,invk)
@@ -751,173 +663,8 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,plist,mu:float,temp:flo
         plt.plot(iwlist,sigmak[0,4,:,318].imag,color='b')
         #plt.plot(-iwlist,-Gk[4,0,:,318].imag,color='b')
         plt.show()
-    info=output_gap_function(invk,kmap,gap,uni,plist,gap_sym,sw_soc,invs,slist)
+    info=plibs.output_gap_function(invk,kmap,gap,uni,plist,gap_sym,Nx,sw_soc,invs,slist)
 
-def calc_lin_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,chiolist,site,plist,
-                           mu:float,temp:float,gap_sym:int,sw_self:bool,eps=1.0e-4,pp=0.5,m_diis=5,sw_rescale:bool=True):
-    klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
-    #weight=flibs.gen_kpoint_weight(invk,len(klist))
-    eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
-    if orb_dep:
-        Smat,Cmat=flibs.gen_SCmatrix_orb(chiolist,site,Umat,Jmat)
-    else:
-        Smat,Cmat=flibs.gen_SCmatrix(chiolist,site,U,J)
-    if sw_self:
-        ham_k=flibs.gen_ham(klist,ham_r,rvec)
-        if sw_from_file:
-            try:
-                npz=np.load('self_en.npz')
-                sigmak,mu_self=npz['arr_0'],npz['arr_1']
-                print("Import sigma form self_en.npz")
-            except FileNotFoundError:
-                print("Error: 'self_en.npz' not found",flush=True)
-                return
-        else:
-            sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,chiolist,ham_k,eig,uni,
-                                        mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,pp=pp,m_diis=m_diis,sw_rescale=sw_rescale)
-        print(f'chem. pot. with self= {mu:.4f} eV',flush=True)
-        Gk=flibs.gen_green(sigmak,ham_k,mu_self,temp)
-    else:
-        Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
-    init_delta=plibs.get_initial_gap(kmap,klist,len(eig.T),gap_sym)
-    sw_eig=True
-    chi=flibs.get_chi0(Smat,Cmat,Gk,chiolist,kmap,invk,temp,Nx,Ny,Nz)
-    chis,chic=flibs.get_chis_chic(chi,Smat,Cmat)
-    chisq=flibs.get_eig_or_tr_chi(chis,invk,sw_eig)
-    chicq=flibs.get_eig_or_tr_chi(chic,invk,sw_eig)
-    try:
-        with open('chis.dat','w') as f, open('chic.dat','w') as f2:
-            for i,k in enumerate(kmap):
-                if k[2]==0.0:
-                    f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chisq[i].real:11.4e}\n')
-                    f2.write(f'{k[0]:6.4f} {k[1]:6.4f} {chicq[i].real:11.4e}\n')
-    except IOError as e:
-        print(f"Error: Failed to write 'chis.dat' or 'chic.dat': {e}",flush=True)
-    gap=flibs.linearized_eliashberg(chi,Gk,uni,init_delta,Smat,Cmat,chiolist,plist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
-    if sw_out_self:
-        np.save('gap',gap)
-        plibs.output_gap_wannier(gap,kmap,invk,Nx,Ny,Nz,Nw,temp)
-    info=output_gap_function(invk,kmap,gap,uni,plist,gap_sym)
-
-def calc_lin_eliash_soc(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,
-                        mu:float,temp:float,chiolist,slist,plist,invs,site,eps=1.0e-4,pp=0.5,m_diis=5,sw_rescale:bool=True):
-    klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
-    eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
-    if orb_dep:
-        Vmat=flibs.gen_Vmatrix_orb(chiolist,slist,site,invs,Umat,Jmat)
-    else:
-        Vmat=flibs.gen_Vmatrix(chiolist,slist,site,invs,U,J)
-    if sw_self:
-        ham_k=flibs.gen_ham(klist,ham_r,rvec)
-        if sw_from_file:
-            try:
-                npz=np.load('self_en.npz')
-                sigmak,mu_self=npz['arr_0'],npz['arr_1']
-            except FileNotFoundError:
-                print("Error: 'self_en.npz' not found",flush=True)
-                return
-        else:
-            sigmak,mu_self=flibs.mkself_soc(Vmat,kmap,invk,invs,chiolist,slist,ham_k,eig,uni,mu,fill,temp,
-                                            Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,pp=pp,m_diis=m_diis,sw_rescale=sw_rescale)
-        print(f'chem. pot. with self= {mu:.4f} eV',flush=True)
-        Gk=flibs.gen_green(sigmak,ham_k,mu_self,temp)
-    else:
-        Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
-    sw_eig=True
-    chi,sgnsig,sgnsig2,invschi=flibs.get_chi0_soc(Vmat,Gk,chiolist,slist,kmap,invk,invs,temp,Nx,Ny,Nz)
-    chic,chiszz,chispm=flibs.get_chis_chic_soc(chi,Vmat,chiolist,slist,invs)
-    chiszzq=flibs.get_eig_or_tr_chi(chiszz,invk,sw_eig)
-    chispmq=flibs.get_eig_or_tr_chi(chispm,invk,sw_eig)
-    chicq=flibs.get_eig_or_tr_chi(chic,invk,sw_eig)
-    try:
-        with open('chis.dat','w') as f, open('chic.dat','w') as f2:
-            for i,k in enumerate(kmap):
-                if k[2]==0.0:
-                    f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chiszzq[i].real:11.4e} {chispmq[i].real:11.4e}\n')
-                    f2.write(f'{k[0]:6.4f} {k[1]:6.4f} {chicq[i].real:11.4e}\n')
-    except IOError as e:
-        print(f"Error: Failed to write 'chis.dat' or 'chic.dat': {e}",flush=True)
-    init_delta=plibs.get_initial_gap(kmap,klist,len(slist),gap_sym)
-    gap=flibs.linearized_eliashberg_soc(chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,plist,slist,chiolist,
-                                        kmap,invk,invs,invschi,Nx,Ny,Nz,temp,gap_sym)
-    if sw_out_self:
-        np.save('gap',gap)
-        plibs.output_gap_wannier(gap,kmap,invk,Nx,Ny,Nz,Nw,temp)
-    info=output_gap_function(invk,kmap,gap,uni,plist,gap_sym,True,invs,slist)
-
-def calc_eliashberg_eq(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,chiolist,site,plist,
-                       mu:float,temp:float,gap_sym:int,sw_self:bool,eps=1.0e-4,pp=0.5,m_diis=5,sw_rescale:bool=True):
-    klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
-    ham_k=flibs.gen_ham(klist,ham_r,rvec)
-    eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
-    if orb_dep:
-        Smat,Cmat=flibs.gen_SCmatrix_orb(chiolist,site,Umat,Jmat)
-    else:
-        Smat,Cmat=flibs.gen_SCmatrix(chiolist,site,U,J)
-    if sw_self:
-        if sw_from_file:
-            try:
-                npz=np.load('self_en.npz')
-                sigmak,mu_self=npz['arr_0'],npz['arr_1']
-                print("Import sigma form self_en.npz")
-            except FileNotFoundError:
-                print("Error: 'self_en.npz' not found",flush=True)
-                return
-        else:
-            sigmak,mu_self=flibs.mkself(Smat,Cmat,kmap,invk,chiolist,ham_k,eig,uni,
-                                        mu,fill,temp,Nw,Nx,Ny,Nz,sw_out_self,sw_in_self,eps=eps,pp=pp,m_diis=m_diis,sw_rescale=sw_rescale)
-        print(f'chem. pot. with self= {mu:.4f} eV',flush=True)
-        Gk=flibs.gen_green(sigmak,ham_k,mu_self,temp)
-    else:
-        Gk=flibs.gen_Green0(eig,uni,mu,temp,Nw)
-    delta_init_band=plibs.get_initial_gap(kmap,klist,len(eig.T),gap_sym)
-    if True:
-        chi=flibs.get_chi0(Smat,Cmat,Gk,chiolist,kmap,invk,temp,Nx,Ny,Nz)
-        delta_init=flibs.linearized_eliashberg(chi,Gk,uni,delta_init_band,Smat,Cmat,chiolist,plist,kmap,invk,Nx,Ny,Nz,temp,gap_sym)
-    else:
-        delta_init_band=plibs.get_initial_gap(kmap,klist,len(eig.T),gap_sym)
-        delta_init=flibs.get_initial_delta(delta_init_band,uni,kmap,invk,Nw,gap_sym)
-    target_gap=1.764*temp  # Assume current temp is Tc, so Delta(0) ~ 1.764*Tc (eV units)
-    delta_max=np.abs(delta_init).max()
-    if delta_max>0.0:
-        delta_init*=target_gap/delta_max
-    else:
-        print("Warning: initial gap is zero; skip Tc-based scaling",flush=True)
-    delta,sigmak=flibs.nonlinear_eliashberg(delta_init,Gk,ham_k,Smat,Cmat,chiolist,plist,
-                                            kmap,invk,mu,temp,gap_sym,Nx,Ny,Nz,
-                                            sw_sigma=sw_self,sw_Vconst=True,eps=eps,m_diis=m_diis)
-    if sw_out_self:
-        np.save('gap',delta)
-        plibs.output_gap_wannier(delta,kmap,invk,Nx,Ny,Nz,Nw,temp)
-    info=output_gap_function(invk,kmap,delta,uni,plist,gap_sym)
-
-def get_carrier_num(kmesh,rvec,ham_r,S_r,mu:float,Arot):
-    Nk,eig,kwieght=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,S_r,rvec,Arot)
-    if Nk <= 0:
-        print("Error: Number of k-points (Nk) is non-positive",flush=True)
-        return
-    fill=0.0
-    for i,en in enumerate(eig.T-mu):
-        num_hole=float(np.where(en>0)[0].size)/Nk
-        num_particle=float(np.where(en<=0)[0].size)/Nk
-        print(i+1,round(num_hole,4),round(num_particle,4),flush=True)
-        fill+=num_particle
-    print(f'sum of electrons is {fill:.4f}',flush=True)
-
-def get_mu(ham_r,S_r,rvec,Arot,temp:float,kmesh=40)->float:
-    # Parameter validation
-    if temp <= 0:
-        print("Error: Temperature (temp) is non-positive",flush=True)
-        return None
-    if kmesh <= 0:
-        print("Error: k-mesh size (kmesh) is non-positive",flush=True)
-        return None
-
-    print("calc chem. pot.",flush=True)
-    print(f"band filling = {fill:.4f}",flush=True)
-    Nk,eig,kweight=plibs.get_emesh(kmesh,kmesh,kmesh,ham_r,S_r,rvec,Arot)
-    mu=plibs.calc_mu(eig,Nk,fill,temp)
-    return mu
 
 def get_mass(mesh,rvec,ham_r,S_r,mu:float,de=3.e-6,meshkz=20):
     """
@@ -1100,31 +847,31 @@ def main():
 
     #import hamiltonian
     if ftype==3:
-        rvec,ham_r,S_r,no,Nr=plibs.import_MLO_hoppings(fname)
+        rvec,ham_r,S_r,Norb,Nr=plibs.import_MLO_hoppings(fname)
     else:
-        rvec,ham_r,no,Nr=plibs.import_hoppings(fname,ftype)
+        rvec,ham_r,Norb,Nr=plibs.import_hoppings(fname,ftype)
         S_r=[]
     plist=flibs.get_plist(rvec,ham_r)
     print("Effective parity of wannier functions:", plist, flush=True)
 
     # ===== Parameter checks dependent on number of orbitals =====
-    print(f"Number of orbital = {no}",flush=True)
+    print(f"Number of orbital = {Norb}",flush=True)
 
     # Validate olist
     for i, ol in enumerate(olist):
         if isinstance(ol, int):
-            if ol < 0 or ol >= no:
-                print(f"Error: olist[{i}]={ol} is invalid. Valid range: 0-{no-1}",flush=True)
+            if ol < 0 or ol >= Norb:
+                print(f"Error: olist[{i}]={ol} is invalid. Valid range: 0-{Norb-1}",flush=True)
                 return
         elif isinstance(ol, list):
             for j, olj in enumerate(ol):
-                if olj < 0 or olj >= no:
-                    print(f"Error: olist[{i}][{j}]={olj} is invalid. Valid range: 0-{no-1}",flush=True)
+                if olj < 0 or olj >= Norb:
+                    print(f"Error: olist[{i}][{j}]={olj} is invalid. Valid range: 0-{Norb-1}",flush=True)
                     return
 
     # Check fill does not exceed number of bands
-    if fill > no:
-        print(f"Error: filling={fill} exceeds number of bands={no}. Valid range: 0 < fill <= {no}",flush=True)
+    if fill > Norb:
+        print(f"Error: filling={fill} exceeds number of bands={Norb}. Valid range: 0 < fill <= {Norb}",flush=True)
         return
 
     if orb_dep:
@@ -1134,7 +881,7 @@ def main():
             return
         Umat_arr=np.asarray(Umat)
         Jmat_arr=np.asarray(Jmat)
-        exp_shape=(no,no)
+        exp_shape=(Norb,Norb)
         if Umat_arr.shape != exp_shape or Jmat_arr.shape != exp_shape:
             print(f"Error: Umat/Jmat shape must be {exp_shape}, got {Umat_arr.shape}/{Jmat_arr.shape}",flush=True)
             return
@@ -1201,7 +948,7 @@ def main():
     if option in {0,2,3}:
         print("color mode: "+cstr[color_option],flush=True)
     print("Hamiltonian name is "+fname,flush=True)
-    print(f"Number of orbital = {no}",flush=True)
+    print(f"Number of orbital = {Norb}",flush=True)
     if (orb_dep==False) and option in {7,8,9,14,15}: #write constant U,J
         print(f'U= {U:5.2f} and J= {J:5.3f}')
     if option in {7,8,9,10,11,12,13,14,15,23}:
@@ -1240,7 +987,7 @@ def main():
         pass
     else:
         if sw_calc_mu:
-            mu=get_mu(ham_r,S_r,rvec,Arot,temp)
+            mu=plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill)
         else:
             mu=mu0
             print('use fixed mu')
@@ -1306,11 +1053,11 @@ def main():
             print("generate qlist",flush=True)
             qlist,spa_length,xticks=plibs.mk_qlist(k_sets,Nx,Ny,Nz,bvec)
             if option==7:
-                w,sp,sus=calc_chis_spectrum(mu,temp,Smat,klist,qlist,chiolist,eig,uni,spa_length,Nw,Emax,delta)
+                w,sp,sus=plibs.calc_chis_spectrum(mu,temp,Smat,klist,qlist,chiolist,eig,uni,spa_length,Nw,Emax,delta)
                 print("write chis spectrum in png file",flush=True)
                 susfname='chis_spec.png'
             elif option==10:
-                w,sp,sus=calc_phi_spectrum(mu,temp,klist,qlist,chiolist,eig,uni,spa_length,Nw,Emax,delta)
+                w,sp,sus=plibs.calc_phi_spectrum(mu,temp,klist,qlist,chiolist,eig,uni,spa_length,Nw,Emax,delta)
                 print("write phi spectrum in png file",flush=True)
                 susfname='phi_spec.png'
             plt.contourf(sp,w,abs(sus.imag),100)
@@ -1322,7 +1069,7 @@ def main():
             chis,chis_orb,wlist=plibs.chis_q_point(q_point,eig,uni,Emax,Nw,mu,temp,Smat,klist,chiolist,delta)
             plt.plot(wlist,chis.imag)
             plt.show()
-            for cso in chis_orb:
+            for cso in chis_orb.T:
                 plt.plot(wlist,cso.imag)
             plt.show()
         else: #chis/phi qmap at ecut plane
@@ -1346,19 +1093,27 @@ def main():
             plt.savefig(fname=susfname,dpi=300)
     elif option in {12,13}: #calc chis at superconducting state
         sw_spsym=True if gap_sym<0 else False
-        klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
-        eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
-        deltaini=flibs.remap_gap(flibs.get_initial_delta(plibs.get_initial_gap(kmap,klist,len(eig.T),gap_sym),
-                                                          uni, kmap, invk, 1, gap_sym),plist,invk,gap_sym)
-        deltaini_static=np.ascontiguousarray(deltaini[:,:,0,:].transpose(2,0,1))  # [Nkall,Norb,Norb]
-        print("maximum gap = %7.4f meV"%(delta0*1e3),flush=True)
-        gap_max=abs(deltaini_static).max()
-        if gap_max<=0.0:
-            print("Warning: initial gap is zero. Using unscaled delta",flush=True)
-            deltak=deltaini_static.copy()
-        else:
-            deltak=delta0*deltaini_static/gap_max
-        Nk, klist = plibs.gen_klist(Nx, Ny, Nz)
+        if isinstance(delta0, float):
+            klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
+            eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
+            deltaini=flibs.remap_gap(flibs.get_initial_delta(plibs.get_initial_gap(klist,len(eig.T),gap_sym),
+                                                              uni, kmap, invk, 1, gap_sym),plist,invk,gap_sym)
+            deltaini_static=np.ascontiguousarray(deltaini[:,:,0,:].transpose(2,0,1))  # [Nkall,Norb,Norb]
+            print("maximum gap = %7.4f meV"%(delta0*1e3),flush=True)
+            gap_max=abs(deltaini_static).max()
+            if gap_max<=0.0:
+                print("Warning: initial gap is zero. Using unscaled delta",flush=True)
+                deltak=deltaini_static.copy()
+            else:
+                deltak=delta0*deltaini_static/gap_max
+            Nk, klist = plibs.gen_klist(Nx, Ny, Nz)
+        elif(isinstance(delta0, np.ndarray) or isinstance(delta0, list)):
+            Nk, klist = plibs.gen_klist(Nx, Ny, Nz)
+            eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
+            inigap=plibs.gap_symms(klist,Norb,gap_sym)
+            # delta0 is per-band [Norb]; broadcast over k: (inigap.T)[Nk,Norb] * delta0[Norb] → [Norb,Nk]
+            deltaini=(inigap.T*np.array(delta0,dtype=np.complex128)).T
+            deltak=flibs.get_band_to_orb_delta(deltaini,uni)
         hamk = flibs.gen_ham(klist, ham_r, rvec)
         if option==12:
             print("generate qlist",flush=True)
@@ -1376,7 +1131,7 @@ def main():
                                                       Smat, klist, chiolist, delta, sw_spsym)
             plt.plot(wlist,chis.imag)
             plt.show()
-            for cso in chis_orb:
+            for cso in chis_orb.T:
                 plt.plot(wlist,cso.imag)
             plt.show()
     elif option in {14,15,16}: #flex/eliashberg calculations
@@ -1394,23 +1149,33 @@ def main():
                 # Also fixed reverse index of split spins
                 invs=np.concatenate([np.arange((Norb+1)//2,Norb),np.arange((Norb+1)//2)])+1
             if option==14: #calc self-energy using flex
-                calc_flex_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,invs,site,m_diis=m_diis_num,sw_rescale=sw_rescale_flex)
+                plibs.calc_flex_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,invs,site,
+                                    orb_dep,U,J,fill,sw_out_self,sw_in_self,
+                                    Umat if orb_dep else None,Jmat if orb_dep else None,
+                                    m_diis=m_diis_num,sw_rescale=sw_rescale_flex)
             elif option==15: #calc gap function
-                calc_lin_eliash_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,plist,invs,site)
+                plibs.calc_lin_eliash_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,plist,invs,site,
+                                          orb_dep,U,J,fill,gap_sym,sw_self,sw_from_file,sw_out_self,sw_in_self,
+                                          Umat if orb_dep else None,Jmat if orb_dep else None)
             elif option==16: #post gap calculation, output gap function/anomalous green's function
                 output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,plist,mu,temp,sw_self,sw_soc,invs,slist,gap_sym)
         else: #without soc
             if option==14: #calc self-energy using flex
-                calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,site,m_diis=m_diis_num,sw_rescale=sw_rescale_flex)
+                plibs.calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,site,
+                                orb_dep,U,J,fill,sw_out_self,sw_in_self,
+                                Umat if orb_dep else None,Jmat if orb_dep else None,
+                                m_diis=m_diis_num,sw_rescale=sw_rescale_flex)
             elif option==15: #calc gap function
-                calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,site,plist,mu,temp,gap_sym,sw_self)
+                plibs.calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,site,plist,mu,temp,gap_sym,sw_self,
+                                             orb_dep,U,J,fill,sw_from_file,sw_out_self,sw_in_self,
+                                             Umat if orb_dep else None,Jmat if orb_dep else None)
             elif option==16: #post gap calculation, output gap function/anomalous green's function
                 output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,plist,mu,temp,sw_self)
     elif option==17: #calc carrier number
         n_carr=plibs.calc_carrier(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp)
         print(n_carr)
         print(n_carr.sum())
-        get_carrier_num(Nx,rvec,ham_r,S_r,mu,Arot)
+        plibs.get_carrier_num(Nx,rvec,ham_r,S_r,mu,Arot)
     elif option==18: #calc cycrtron mass
         get_mass(Nx,rvec,ham_r,S_r,mu)
     elif option==19: #plot dHvA frequency vs angle
@@ -1439,42 +1204,42 @@ def main():
         plt.show()
     elif option==22:
         # --- CPA calculation ---
-        mu=get_mu(ham_r,S_r,rvec,Arot,temp)
+        mu=plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill)
         print(f'Temperature = {temp:10.3e} eV ({temp/kb:.2f} K)',flush=True)
         print(f'chem. pot. = {mu:.4f} eV',flush=True)
         # VA, VB are the onsite perturbation RELATIVE to the reference onsite in hamk
         # Species A (host): no perturbation -> VA = 0
         # Species B (impurity): diagonal shift
-        VA = np.zeros((no, no), dtype=np.complex128)
-        VB = 1.0 * np.eye(no, dtype=np.complex128)
+        VA = np.zeros((Norb, Norb), dtype=np.complex128)
+        VB = 1.0 * np.eye(Norb, dtype=np.complex128)
         x_cpa = .5
         Nk, klist = plibs.gen_klist(Nx, Ny, Nz)
         hamk = flibs.gen_ham(klist, ham_r, rvec)
         # shift onsite by -mu so that w=0 corresponds to the Fermi level
-        hamk[:, range(no), range(no)] -= mu
+        hamk[:, range(Norb), range(Norb)] -= mu
         # CPA on real axis for spectrum
         wlist = np.linspace(Emin, Emax, Nw)
         zlist_real = wlist + 1j*delta
-        print(f"CPA: Norb={no}, Nk={Nk}, Nw={Nw}, x={x_cpa}",flush=True)
+        print(f"CPA: Norb={Norb}, Nk={Nk}, Nw={Nw}, x={x_cpa}",flush=True)
         sigma_cpa = flibs.solve_cpa(hamk, VA, VB, x_cpa, zlist_real, pp=0.5)
         print("CPA converged",flush=True)
         # --- spectrum along symmetry line ---
         klist_s, spa_length, xticks = plibs.mk_klist(k_sets, kmesh, bvec)
         hamk_s = flibs.gen_ham(klist_s, ham_r, rvec)
-        hamk_s[:, range(no), range(no)] -= mu
+        hamk_s[:, range(Norb), range(Norb)] -= mu
         Nks = len(klist_s)
         Akw = np.zeros((Nks, Nw))
         # A[iw,ik] = diag(zlist_real[iw]) - hamk_s[ik] - sigma_cpa[iw]
-        A_batch = (np.eye(no)[None, None, :, :] * zlist_real[:, None, None, None]
+        A_batch = (np.eye(Norb)[None, None, :, :] * zlist_real[:, None, None, None]
                    - hamk_s[None, :, :, :]
-                   - sigma_cpa[:, None, :, :])  # (Nw, Nks, no, no)
+                   - sigma_cpa[:, None, :, :])  # (Nw, Nks, Norb, Norb)
         try:
             Gk_all = np.linalg.inv(A_batch)
             Akw = (-np.trace(Gk_all, axis1=2, axis2=3).imag / np.pi).T
         except np.linalg.LinAlgError:
             print("Warning: Batch matrix inversion failed, falling back to element-wise.", flush=True)
             for iw in range(Nw):
-                zI = np.eye(no) * zlist_real[iw]
+                zI = np.eye(Norb) * zlist_real[iw]
                 sig = sigma_cpa[iw]
                 for ik in range(Nks):
                     try:
@@ -1498,17 +1263,17 @@ def main():
         plt.show()
         # --- CPA on Matsubara frequencies -> sigma.bin ---
         iwlist_mats = 1j*np.pi*temp*(2*np.arange(Nw, dtype=np.float64)+1)
-        print(f"CPA Matsubara: Norb={no}, Nk={Nk}, Nw={Nw}, x={x_cpa}", flush=True)
+        print(f"CPA Matsubara: Norb={Norb}, Nk={Nk}, Nw={Nw}, x={x_cpa}", flush=True)
         # reuse hamk (already shifted by -mu) computed above
         sigma_cpa_mats = flibs.solve_cpa(hamk, VA, VB, x_cpa, iwlist_mats, pp=0.5)
         print("CPA Matsubara converged", flush=True)
         # build (Norb, Norb, Nw, Nk_irr) array for sigma.bin
-        # sigma_cpa_mats: (Nw, no, no) -> (no, no, Nw) -> broadcast over Nk_irr
+        # sigma_cpa_mats: (Nw, Norb, Norb) -> (Norb, Norb, Nw) -> broadcast over Nk_irr
         klist_irr, kmap, invk = flibs.gen_irr_k_TRS(Nx, Ny, Nz)
         Nk_irr = len(klist_irr)
         sigma_out = np.broadcast_to(
             sigma_cpa_mats.transpose(1, 2, 0)[:, :, :, np.newaxis],
-            (no, no, Nw, Nk_irr)
+            (Norb, Norb, Nw, Nk_irr)
         ).copy()
         # write sigma.bin in Fortran unformatted format
         # records: mu (float64), mu_OLD (float64), sigmak (Nk_irr,Nw,Norb,Norb) = (Norb,Norb,Nw,Nk_irr) C-order
@@ -1521,8 +1286,11 @@ def main():
         print(f"CPA Matsubara self-energy written to sigma.bin and self_en.npz"
               f" (Nk_irr={Nk_irr}, Nw={Nw})", flush=True)
     elif option==23:
-        calc_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,site,plist,
-                           mu,temp,gap_sym,sw_self,m_diis=m_diis_num,sw_rescale=sw_rescale_flex)
+        plibs.calc_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,site,plist,
+                                 mu,temp,gap_sym,sw_self,
+                                 orb_dep,U,J,fill,sw_from_file,sw_out_self,sw_in_self,
+                                 Umat if orb_dep else None,Jmat if orb_dep else None,
+                                 m_diis=m_diis_num,sw_rescale=sw_rescale_flex)
 
 if __name__=="__main__":
     main()
