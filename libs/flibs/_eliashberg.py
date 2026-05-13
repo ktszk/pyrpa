@@ -356,6 +356,30 @@ def get_initial_delta(init_delta: np.ndarray, uni: np.ndarray, kmap: np.ndarray,
                             byref(c_int64(Nw)), byref(c_int64(Norb)), byref(c_int64(gap_sym)))
     return delta
 
+def get_band_to_orb_delta(init_delta: np.ndarray, uni: np.ndarray) -> np.ndarray:
+    """
+    @fn get_band_to_orb_delta
+    @brief Transform the gap function from band-diagonal representation to orbital basis.
+    Performs δ_orb(k) = U(k) · diag(δ_n(k)) · U†(k) for each k-point.
+    This is the inverse of the band-projection in get_initial_delta / conv_delta_orb_to_band:
+    given a band-diagonal gap it returns the full Norb×Norb orbital-basis matrix.
+    @param init_delta: Band-diagonal gap amplitudes [Norb, Nk] complex128
+                       (C-order [Norb, Nk] == Fortran dimension(Nk, Norb))
+    @param       uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @return    delta: Gap function in orbital basis [Norb, Norb, Nk] complex128
+    """
+    Norb, Nk = init_delta.shape
+    delta = np.zeros((Norb, Norb, Nk), dtype=np.complex128)
+    _lib.get_band_to_orb_delta.argtypes = [
+        np.ctypeslib.ndpointer(dtype=np.complex128),
+        np.ctypeslib.ndpointer(dtype=np.complex128),
+        np.ctypeslib.ndpointer(dtype=np.complex128),
+        POINTER(c_int64), POINTER(c_int64),
+    ]
+    _lib.get_band_to_orb_delta.restype = None
+    _lib.get_band_to_orb_delta(delta, init_delta, uni, byref(c_int64(Nk)), byref(c_int64(Norb)))
+    return delta
+
 def remap_gap(delta0, plist, invk, gap_sym):
     """
     @fn remap_gap
