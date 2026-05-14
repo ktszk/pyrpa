@@ -360,16 +360,24 @@ def get_band_to_orb_delta(init_delta: np.ndarray, uni: np.ndarray) -> np.ndarray
     """
     @fn get_band_to_orb_delta
     @brief Transform the gap function from band-diagonal representation to orbital basis.
-    Performs δ_orb(k) = U(k) · diag(δ_n(k)) · U†(k) for each k-point.
+    The eigenvector matrices returned by get_eig/get_eigs are stored as row-eigenvectors,
+    i.e. U(k) H(k) = E(k) U(k). Under this convention used with mkBdGhamk,
+    the orbital-basis pairing matrix is
+    delta_orb(k) = U(k)^T * diag(delta_n(k)) * U(k).
     This is the inverse of the band-projection in get_initial_delta / conv_delta_orb_to_band:
     given a band-diagonal gap it returns the full Norb×Norb orbital-basis matrix.
     @param init_delta: Band-diagonal gap amplitudes [Norb, Nk] complex128
                        (C-order [Norb, Nk] == Fortran dimension(Nk, Norb))
-    @param       uni: Eigenvector matrices [Nk, Norb, Norb] complex128
-    @return    delta: Gap function in orbital basis [Norb, Norb, Nk] complex128
+    @param       uni: Row-eigenvector matrices [Nk, Norb, Norb] complex128
+    @return    delta: Gap function in orbital basis [Nk, Norb, Norb] complex128
+                      (same layout as hamk from gen_ham; matches mkBdGhamk delta argument)
     """
     Norb, Nk = init_delta.shape
-    delta = np.zeros((Norb, Norb, Nk), dtype=np.complex128)
+    # Fortran routine expects init_delta(Nk,Norb), uni(Norb,Norb,Nk),
+    # and returns delta(Norb,Norb,Nk).
+    init_delta_f = np.asfortranarray(init_delta.T)
+    uni_f = np.asfortranarray(np.transpose(uni, (1, 2, 0)))
+    delta_f = np.zeros((Norb, Norb, Nk), dtype=np.complex128, order='F')
     _lib.get_band_to_orb_delta.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128),
         np.ctypeslib.ndpointer(dtype=np.complex128),
@@ -377,8 +385,8 @@ def get_band_to_orb_delta(init_delta: np.ndarray, uni: np.ndarray) -> np.ndarray
         POINTER(c_int64), POINTER(c_int64),
     ]
     _lib.get_band_to_orb_delta.restype = None
-    _lib.get_band_to_orb_delta(delta, init_delta, uni, byref(c_int64(Nk)), byref(c_int64(Norb)))
-    return delta
+    _lib.get_band_to_orb_delta(delta_f, init_delta_f, uni_f, byref(c_int64(Nk)), byref(c_int64(Norb)))
+    return np.ascontiguousarray(np.transpose(delta_f, (2, 0, 1)))
 
 def remap_gap(delta0, plist, invk, gap_sym):
     """

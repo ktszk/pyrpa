@@ -76,17 +76,18 @@ kz=0.0
 abc=[3.68,3.68,5.03]
 #alpha_beta_gamma=[90.,90.,90]
 #temp=2.0e-2 #2.59e-2
-tempK=220 #Kelvin
+tempK=300 #Kelvin
 fill= 3.02
 #site_prof=[5]
 
-Emin,Emax=-3,.3
-delta=1.0e-3
+Emin,Emax=-3,3
+delta=1.0e-2
 Ecut=1.0e-2
 tau_const=100
 olist=[0,0,0]
 #olist=[0,[1,2],3]
-U,J= 0.8, 0.1
+#U,J=0.,0.
+U,J= 0.4, 0.05
 #U,J=1.2,0.15
 #U,J=1.8,0.225
 #0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py
@@ -95,7 +96,7 @@ gap_sym=0
 #use calculation of magnetic susceptibility at superconducting state
 #delta0=1.e-2 #maximum gap size for calculating susceptibility in SC state; set to 0 for normal state
 d0=1e-1
-delta0=[0.,d0,d0*.5,-d0,0.]
+delta0=[0.,d0,d0,-d0,0.]
 #mu0=9.85114560061123
 #k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
 #xlabel=[r'$\Gamma$','X','M']
@@ -796,6 +797,54 @@ def get_dhva_band(mesh,rvec,ham_r,S_r,mu:float,theta_list,phi=0.,meshkz=20):
     plt.show()
     return all_results
 
+def calc_cpa_Akw(k_sets: list, kmesh: int, bvec: np.ndarray,
+                 ham_r: np.ndarray, rvec: np.ndarray, mu: float,
+                 sigma_cpa: np.ndarray, wlist: np.ndarray,
+                 zlist_real: np.ndarray, xlabel: list) -> np.ndarray:
+    """
+    Compute and plot the CPA spectral function A(k,w) along a symmetry-line k-path.
+    Returns Akw array of shape (Nks, Nw).
+    """
+    Norb = ham_r.shape[0]
+    Nw = len(wlist)
+    klist_s, spa_length, xticks = plibs.mk_klist(k_sets, kmesh, bvec)
+    hamk_s = flibs.gen_ham(klist_s, ham_r, rvec)
+    hamk_s[:, range(Norb), range(Norb)] -= mu
+    Nks = len(klist_s)
+    Akw = np.zeros((Nks, Nw))
+    A_batch = (np.eye(Norb)[None, None, :, :] * zlist_real[:, None, None, None]
+               - hamk_s[None, :, :, :]
+               - sigma_cpa[:, None, :, :])  # (Nw, Nks, Norb, Norb)
+    try:
+        Gk_all = np.linalg.inv(A_batch)
+        Akw = (-np.trace(Gk_all, axis1=2, axis2=3).imag / np.pi).T
+    except np.linalg.LinAlgError:
+        print("Warning: Batch matrix inversion failed, falling back to element-wise.", flush=True)
+        for iw in range(Nw):
+            zI = np.eye(Norb) * zlist_real[iw]
+            sig = sigma_cpa[iw]
+            for ik in range(Nks):
+                try:
+                    Gk = np.linalg.inv(zI - hamk_s[ik] - sig)
+                    Akw[ik, iw] = -np.trace(Gk).imag / np.pi
+                except np.linalg.LinAlgError:
+                    print(f"Warning: Matrix inversion failed at k-point {ik}, frequency index {iw}. Setting to zero.", flush=True)
+                    Akw[ik, iw] = 0.0
+    w, x = np.meshgrid(wlist, spa_length)
+    plt.contourf(x, w, Akw, 100, cmap=plt.get_cmap('hot'))
+    for xt in xticks[1:-1]:
+        plt.axvline(xt, ls='-', lw=0.25, color='white')
+    plt.xlim(0, spa_length.max())
+    plt.axhline(0., ls='--', lw=0.25, color='white')
+    plt.xticks(xticks, xlabel)
+    plt.ylabel('Energy (eV)')
+    plt.title('CPA spectrum')
+    plt.colorbar(label=r'$A(\mathbf{k},\omega)$')
+    plt.tight_layout()
+    plt.savefig('cpa_spectrum.png', dpi=150)
+    plt.show()
+    return Akw
+
 def main():
     omp_num,omp_check=flibs.omp_params()
 
@@ -1125,6 +1174,33 @@ def main():
             plt.hot()
             plt.savefig(fname='chis_sc_spec.png',dpi=300)
         elif option==13:
+            # --- BdG band structure along (0,0,0) -> (0,0.5,0) ---
+            Nk_path = 200
+            kpath_bdg = np.zeros((Nk_path, 3))
+            kpath_bdg[:, 1] = np.linspace(0, 0.5, Nk_path)
+            hamk_path = flibs.gen_ham(kpath_bdg, ham_r, rvec)
+            _, uni_path = plibs.get_eigs(kpath_bdg, ham_r, S_r, rvec)
+            inigap_path = plibs.gap_symms(kpath_bdg, Norb, gap_sym)
+            if isinstance(delta0, float):
+                scale = delta0 / gap_max if gap_max > 0 else delta0
+                deltak_path = flibs.get_band_to_orb_delta(
+                    (inigap_path * scale).astype(np.complex128), uni_path)
+            else:
+                deltak_path = flibs.get_band_to_orb_delta(
+                    (inigap_path.T * np.array(delta0, dtype=np.complex128)).T, uni_path)
+            eig_BdG_path, _ = flibs.get_eig(
+                flibs.mkBdGhamk(hamk_path - mu * np.eye(Norb), deltak_path))
+            ky = kpath_bdg[:, 1]
+            for n in range(eig_BdG_path.shape[1]):
+                plt.plot(ky, eig_BdG_path[:, n], 'b-', lw=0.5)
+            plt.axhline(0, ls='--', lw=0.5, color='gray')
+            plt.xlabel(r'$k_y \; (2\pi/a)$')
+            plt.ylabel('Energy (eV)')
+            plt.title('BdG bands  (0,0,0) → (0,0.5,0)')
+            plt.tight_layout()
+            plt.savefig('BdG_band.png', dpi=150)
+            plt.show()
+            # --- chi calculation ---
             q_point=np.array(at_point)
             print(f"q-point is ({q_point[0]:.3f}, {q_point[1]:.3f}, {q_point[2]:.3f})",flush=True)
             chis,chis_orb,wlist=plibs.chis_q_point_sc(q_point, hamk, deltak, mu, Emax, Nw, temp,
@@ -1224,43 +1300,8 @@ def main():
         sigma_cpa = flibs.solve_cpa(hamk, VA, VB, x_cpa, zlist_real, pp=0.5)
         print("CPA converged",flush=True)
         # --- spectrum along symmetry line ---
-        klist_s, spa_length, xticks = plibs.mk_klist(k_sets, kmesh, bvec)
-        hamk_s = flibs.gen_ham(klist_s, ham_r, rvec)
-        hamk_s[:, range(Norb), range(Norb)] -= mu
-        Nks = len(klist_s)
-        Akw = np.zeros((Nks, Nw))
-        # A[iw,ik] = diag(zlist_real[iw]) - hamk_s[ik] - sigma_cpa[iw]
-        A_batch = (np.eye(Norb)[None, None, :, :] * zlist_real[:, None, None, None]
-                   - hamk_s[None, :, :, :]
-                   - sigma_cpa[:, None, :, :])  # (Nw, Nks, Norb, Norb)
-        try:
-            Gk_all = np.linalg.inv(A_batch)
-            Akw = (-np.trace(Gk_all, axis1=2, axis2=3).imag / np.pi).T
-        except np.linalg.LinAlgError:
-            print("Warning: Batch matrix inversion failed, falling back to element-wise.", flush=True)
-            for iw in range(Nw):
-                zI = np.eye(Norb) * zlist_real[iw]
-                sig = sigma_cpa[iw]
-                for ik in range(Nks):
-                    try:
-                        Gk = np.linalg.inv(zI - hamk_s[ik] - sig)
-                        Akw[ik, iw] = -np.trace(Gk).imag / np.pi
-                    except np.linalg.LinAlgError:
-                        print(f"Warning: Matrix inversion failed at k-point {ik}, frequency index {iw}. Setting to zero.", flush=True)
-                        Akw[ik, iw] = 0.0
-        w, x = np.meshgrid(wlist, spa_length)
-        plt.contourf(x, w, Akw, 100, cmap=plt.get_cmap('hot'))
-        for xt in xticks[1:-1]:
-            plt.axvline(xt, ls='-', lw=0.25, color='white')
-        plt.xlim(0, spa_length.max())
-        plt.axhline(0., ls='--', lw=0.25, color='white')
-        plt.xticks(xticks, xlabel)
-        plt.ylabel('Energy (eV)')
-        plt.title('CPA spectrum')
-        plt.colorbar(label=r'$A(\mathbf{k},\omega)$')
-        plt.tight_layout()
-        plt.savefig('cpa_spectrum.png', dpi=150)
-        plt.show()
+        Akw = calc_cpa_Akw(k_sets, kmesh, bvec, ham_r, rvec, mu,
+                           sigma_cpa, wlist, zlist_real, xlabel)
         # --- CPA on Matsubara frequencies -> sigma.bin ---
         iwlist_mats = 1j*np.pi*temp*(2*np.arange(Nw, dtype=np.float64)+1)
         print(f"CPA Matsubara: Norb={Norb}, Nk={Nk}, Nw={Nw}, x={x_cpa}", flush=True)

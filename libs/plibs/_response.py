@@ -125,8 +125,7 @@ def chis_q_point_sc(q: np.ndarray, hamk: np.ndarray, delta_k: np.ndarray, mu: fl
     @retval   wlist: Frequency mesh [Nw] float64
     """
     Norb = hamk.shape[1]
-    hamBdGk = flibs.mkBdGhamk(hamk - mu * np.eye(Norb), delta_k)
-    eig_BdG, uni_BdG = flibs.get_eig(hamBdGk)
+    eig_BdG, uni_BdG = flibs.get_eig(flibs.mkBdGhamk(hamk - mu * np.eye(Norb), delta_k))
     # mu=0: chemical potential is already absorbed into hamBdGk (hamk - mu*I), so BdG
     # quasi-particle energies are measured from zero and the Fermi level is at 0.
     ffermi_BdG = flibs.get_ffermi(eig_BdG, 0., temp)
@@ -163,8 +162,7 @@ def chis_spectrum_sc(mu: float, temp: float, Smat: np.ndarray, hamk: np.ndarray,
     @retval   wlist: Frequency mesh [Nw] float64
     """
     Norb = hamk.shape[1]
-    hamBdGk = flibs.mkBdGhamk(hamk - mu * np.eye(Norb), delta_k)
-    eig_BdG, uni_BdG = flibs.get_eig(hamBdGk)
+    eig_BdG, uni_BdG = flibs.get_eig(flibs.mkBdGhamk(hamk - mu * np.eye(Norb), delta_k))
     # mu=0: chemical potential already absorbed into hamBdGk, BdG energies measured from 0.
     ffermi_BdG = flibs.get_ffermi(eig_BdG, 0., temp)
     wlist = np.linspace(0, Emax, Nw)
