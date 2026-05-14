@@ -180,19 +180,23 @@ end subroutine get_chi_irr_sc
 subroutine get_band_to_orb_delta(delta,init_delta,uni,Nk,Norb) bind(C)
   !> Transform the gap function from band-diagonal representation to orbital basis.
   !>
-  !> Performs the unitary rotation
+   !> For the row-eigenvector convention used in this codebase,
+   !>
+   !>   U(k) H(k) = E(k) U(k)
+   !>
+   !> and the orbital-basis pairing matrix is
   !>
-  !>   δ_orb(k)_{αβ} = Σ_n U_{αn}(k) δ_n(k) U*_{βn}(k)
-  !>                 = U(k) · diag( δ_n(k) ) · U†(k)
+   !>   delta_orb(k)_{ab} = sum_n U_{n,a}(k) delta_n(k) U_{n,b}(k)
+   !>                     = U(k)^T * diag(delta_n(k)) * U(k)
   !>
-  !> where δ_n(k) are the complex band-diagonal gap amplitudes and U(k) are the
-  !> Hamiltonian eigenvectors.  This is the inverse of the band-projection step in
-  !> get_initial_delta / conv_delta_orb_to_band: given a gap that is diagonal in the
-  !> band basis, it returns the full Norb×Norb matrix in the orbital basis.
+   !> where delta_n(k) are complex band-diagonal gap amplitudes and U(k) are
+   !> row-eigenvectors. This is the inverse of the band-projection step in
+   !> get_initial_delta / conv_delta_orb_to_band: given a band-diagonal gap,
+   !> it returns the full Norb x Norb matrix in orbital basis.
   !>
-  !!@param     delta,out: gap function in orbital basis [Nk, Norb, Norb] complex128
+  !!@param     delta,out: gap function in orbital basis [Norb, Norb, Nk]
   !!@param init_delta,in: band-diagonal gap amplitudes [Nk, Norb] complex128
-  !!@param       uni,in: eigenvectors of the normal-state Hamiltonian; uni(orbital, band, k) [Norb, Norb, Nk] complex128
+   !!@param       uni,in: row-eigenvectors; uni(band, orbital, k) [Norb, Norb, Nk] complex128
   !!@param        Nk,in: number of k-points
   !!@param      Norb,in: number of orbitals (= number of bands)
   use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
@@ -200,22 +204,27 @@ subroutine get_band_to_orb_delta(delta,init_delta,uni,Nk,Norb) bind(C)
   integer(c_int64_t),intent(in):: Norb,Nk
   complex(c_double),intent(in),dimension(Nk,Norb):: init_delta
   complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
-  complex(c_double),intent(out),dimension(Nk,Norb,Norb):: delta
+  complex(c_double),intent(out),dimension(Norb,Norb,Nk):: delta
 
-  integer(c_int32_t) i,l
-  complex(c_double),dimension(Norb,Norb):: tmpu
+   integer(c_int32_t) i,a,b,n
+   complex(c_double) zsum
   !$omp parallel
   !$omp workshare
   delta(:,:,:)=0.0d0
   !$omp end workshare
   !$omp end parallel
 
-  !$omp parallel do private(i,l,tmpu)
+  !$omp parallel do private(i,a,b,n,zsum)
   do i=1,Nk
-     do l=1,Norb
-        tmpu(:,l)=uni(:,l,i)*init_delta(i,l)
+     do a=1,Norb
+        do b=1,Norb
+           zsum=(0.0d0,0.0d0)
+           do n=1,Norb
+              zsum=zsum+uni(n,a,i)*init_delta(i,n)*uni(n,b,i)
+           end do
+           delta(a,b,i)=zsum
+        end do
      end do
-     call zgemm('N','C',Norb,Norb,Norb,(1.0d0,0.0d0),tmpu,Norb,uni(:,:,i),Norb,(0.0d0,0.0d0),delta(i,:,:),Norb)
   end do
   !$omp end parallel do
 end subroutine get_band_to_orb_delta
