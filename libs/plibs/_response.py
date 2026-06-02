@@ -131,7 +131,8 @@ def chis_q_point_sc(q: np.ndarray, hamk: np.ndarray, delta_k: np.ndarray, mu: fl
     ffermi_BdG = flibs.get_ffermi(eig_BdG, 0., temp)
     wlist = np.linspace(0, Emax, Nw)
     qshift = flibs.get_qshift(klist, q)
-    chi0 = flibs.get_chi_irr_sc(uni_BdG, eig_BdG, ffermi_BdG, qshift, olist, wlist, idelta, temp, sw_spsym)
+    chi0sc = flibs.get_chi_irr_sc(uni_BdG, eig_BdG, ffermi_BdG, qshift, olist, wlist, idelta, temp, sw_spsym)
+    chi0 = chi0sc[:,:,:,0]+chi0sc[:,:,:,1]
     chis = flibs.get_chis(chi0, Smat)
     trchis, trchi0, chis_orb = flibs.get_tr_chi(chis, chi0, olist)
     return trchis, chis_orb, wlist

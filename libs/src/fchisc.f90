@@ -88,7 +88,7 @@ contains
     ! P,R : matrix-element vectors for the anomalous F·F† contribution
     !       (mix upper Norb / lower Norb across k+q and k).
     complex(c_double),dimension(Nchi):: A_vec,B_vec,P_vec,R_vec
-    complex(c_double),dimension(Nchi,Nchi):: chi,irr_chi_sc
+    complex(c_double),dimension(2,Nchi,Nchi):: chi,irr_chi_sc
 
     if(sw_spsym)then
        sgn=-1.0d0 !triplet_dz: FF doubles GG -> χ_zz unsuppressed for d∥ẑ
@@ -98,7 +98,7 @@ contains
     temp_safe=max(temp,1.0d-12)   ! guard against T=0 in degenerate static limit
     w_eps=1.0d-12                 ! threshold to detect static (w≈0) branch
     nchi32=int(Nchi,c_int32_t)
-    chi(:,:)=0.0d0
+    chi(:,:,:)=0.0d0
     !$omp parallel do reduction(+:chi) private(l,m,i,weight,A_vec,B_vec,P_vec,R_vec)
     kloop: do k=1,Nk
        band1_loop: do l=1,2*Norb       ! BdG band index at k+q
@@ -126,13 +126,13 @@ contains
              end do
              ! ----- accumulate rank-1 outer products ------------------------------
              ! zgeru: chi := chi + alpha * x * y^T  (no conjugation on y)
-             call zgeru(nchi32,nchi32,weight,B_vec,1,A_vec,1,chi,nchi32)          ! G·G part
-             call zgeru(nchi32,nchi32,sgn*weight,R_vec,1,P_vec,1,chi,nchi32)      ! F·F† part
+             call zgeru(nchi32,nchi32,weight,B_vec,1,A_vec,1,chi(1,:,:),nchi32)          ! G·G part
+             call zgeru(nchi32,nchi32,sgn*weight,R_vec,1,P_vec,1,chi(2,:,:),nchi32)      ! F·F† part
           end do band2_loop
        end do band1_loop
     end do kloop
     !$omp end parallel do
-    irr_chi_sc=chi(:,:)/Nk            ! k-mesh average (matches normal-state convention)
+    irr_chi_sc(:,:,:)=chi(:,:,:)/Nk            ! k-mesh average (matches normal-state convention)
   end function irr_chi_sc
 end module calc_irr_chi_sc
 
@@ -166,13 +166,13 @@ subroutine get_chi_irr_sc(chi,uni,eig,ffermi,qshift,ol,wl,Nchi,Norb,Nk,Nw,idelta
   real(c_double),intent(in),dimension(2*Norb,Nk):: eig,ffermi
   real(c_double),intent(in),dimension(Nw):: wl
   complex(c_double),intent(in),dimension(2*Norb,2*Norb,Nk):: uni
-  complex(c_double),intent(out),dimension(Nchi,Nchi,Nw):: chi
+  complex(c_double),intent(out),dimension(2,Nchi,Nchi,Nw):: chi
 
   integer(c_int32_t) i
  
   !$omp parallel do private(i)
   wloop: do i=1,Nw
-     chi(:,:,i)=irr_chi_sc(Nk,Norb,Nchi,uni,eig,ffermi,ol,temp,qshift,wl(i),idelta,eps,sw_spsym)
+     chi(:,:,:,i)=irr_chi_sc(Nk,Norb,Nchi,uni,eig,ffermi,ol,temp,qshift,wl(i),idelta,eps,sw_spsym)
   end do wloop
   !$omp end parallel do
 end subroutine get_chi_irr_sc

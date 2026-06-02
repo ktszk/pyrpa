@@ -507,7 +507,7 @@ def get_chi_irr_sc(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray,
     Norb = eig.shape[1] // 2
     Nchi = len(ol)
     eps = idelta * 1e-3
-    chi = np.zeros((Nw, Nchi, Nchi), dtype=np.complex128)
+    chi = np.zeros((Nw, Nchi, Nchi,2), dtype=np.complex128)
     ol_f = np.asfortranarray(ol)
     _lib.get_chi_irr_sc.argtypes = [
         np.ctypeslib.ndpointer(dtype=np.complex128),
