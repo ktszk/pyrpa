@@ -23,7 +23,8 @@ else: monoclinic
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4nso',0,7,False
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
-fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
+#fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
+fname,ftype,brav,sw_soc='inputs/000AsP.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/FeS',2,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2_soc.input',1,0,True
@@ -66,7 +67,7 @@ class ColorMode(IntEnum):
 option=CalcMode.CHIS_QPOINT_SC
 color_option=ColorMode.VELOCITY
 
-Nx,Ny,Nz,Nw=64,64,1,512 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=256,256,4,200 #k and energy(or matsubara freq.) mesh size
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
@@ -76,18 +77,19 @@ kz=0.0
 abc=[3.68,3.68,5.03]
 #alpha_beta_gamma=[90.,90.,90]
 #temp=2.0e-2 #2.59e-2
-tempK=300 #Kelvin
-fill= 3.02
+tempK=100 #Kelvin
+fill= 2.9375
 #site_prof=[5]
 
-Emin,Emax=-3,3
-delta=1.0e-2
+Emin,Emax=-3,1.
+delta=5.0e-3
 Ecut=1.0e-2
 tau_const=100
 olist=[0,0,0]
 #olist=[0,[1,2],3]
 #U,J=0.,0.
-U,J= 0.4, 0.05
+U,J= 0.2, 0.025
+#U,J= 0.4, 0.05
 #U,J=1.2,0.15
 #U,J=1.8,0.225
 #0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py
@@ -95,8 +97,8 @@ gap_sym=0
 
 #use calculation of magnetic susceptibility at superconducting state
 #delta0=1.e-2 #maximum gap size for calculating susceptibility in SC state; set to 0 for normal state
-d0=1e-1
-delta0=[0.,d0,d0,-d0,0.]
+d0=1.e-1
+delta0=[0.,d0*2.,d0,-d0,0.]
 #mu0=9.85114560061123
 #k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
 #xlabel=[r'$\Gamma$','X','M']
@@ -1160,6 +1162,12 @@ def main():
             Nk, klist = plibs.gen_klist(Nx, Ny, Nz)
             eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
             inigap=plibs.gap_symms(klist,Norb,gap_sym)
+            for i,k in enumerate(klist):
+                if(abs(k[0]-k[1])<Nx/2 and abs(k[0]+k[1]+Nx)<Nx/2):
+                    pass
+                else:
+                    inigap[1,i]=inigap[1,i]*.25
+                    inigap[2,i]=inigap[2,i]*.5
             # delta0 is per-band [Norb]; broadcast over k: (inigap.T)[Nk,Norb] * delta0[Norb] → [Norb,Nk]
             deltaini=(inigap.T*np.array(delta0,dtype=np.complex128)).T
             deltak=flibs.get_band_to_orb_delta(deltaini,uni)
@@ -1173,6 +1181,7 @@ def main():
             plt.colorbar()
             plt.hot()
             plt.savefig(fname='chis_sc_spec.png',dpi=300)
+            plt.close()
         elif option==13:
             # --- BdG band structure along (0,0,0) -> (0,0.5,0) ---
             Nk_path = 200
@@ -1199,17 +1208,31 @@ def main():
             plt.title('BdG bands  (0,0,0) → (0,0.5,0)')
             plt.tight_layout()
             plt.savefig('BdG_band.png', dpi=150)
-            plt.show()
+            #plt.show()
+            plt.clf()
             # --- chi calculation ---
             q_point=np.array(at_point)
             print(f"q-point is ({q_point[0]:.3f}, {q_point[1]:.3f}, {q_point[2]:.3f})",flush=True)
             chis,chis_orb,wlist=plibs.chis_q_point_sc(q_point, hamk, deltak, mu, Emax, Nw, temp,
                                                       Smat, klist, chiolist, delta, sw_spsym)
             plt.plot(wlist,chis.imag)
-            plt.show()
+            plt.savefig('chisq.png', dpi=150)
+            plt.clf()
+            #plt.show()
+            with open(f"chis_sc.dat","w") as f:
+                for iw,ic in zip(wlist,chis):
+                    f.write(f"{iw:5.3f}, {ic.imag:12.8f}, {ic.real:12.8f}\n")
             for cso in chis_orb.T:
                 plt.plot(wlist,cso.imag)
-            plt.show()
+            #plt.show()
+            plt.savefig('chisq_orb.png', dpi=150)
+            plt.close()
+            with open(f"chis_scorb.dat",'w') as f:
+                for iw,ic in zip(wlist,chis_orb):
+                    f.write(f"{iw:5.3f}, ")
+                    for cso in ic:
+                        f.write(f"{cso.imag:12.8f}, {cso.real:12.8f} ")
+                    f.write("\n")
     elif option in {14,15,16}: #flex/eliashberg calculations
         if sw_soc: #with soc
             try:
