@@ -2,35 +2,74 @@ from ctypes import *
 import numpy as np
 from ._loader import _lib
 
-def gen_imp_ham(rvec: np.ndarray, ham_r: np.ndarray, ham_i: np.ndarray,
+# --- ctypes signatures: set once at import.
+# All Fortran entry points are subroutines, so restype is always None.
+_lib.gen_imp_ham.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    POINTER(c_double),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64)
+]
+_lib.gen_imp_ham.restype = None
+_lib.get_dft_imp_ham.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64)
+]
+_lib.get_dft_imp_ham.restype = None
+_lib.get_spectrum_spaghetti.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_double), POINTER(c_double)
+]
+_lib.get_spectrum_spaghetti.restype = None
+_lib.solve_cpa_array.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    POINTER(c_double),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    POINTER(c_double),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_double)
+]
+_lib.solve_cpa_array.restype = None
+
+def gen_imp_ham(rvec: np.ndarray, ham_r: np.ndarray, ham_i: np.ndarray, ham_ri: np.ndarray,
                 rlist: np.ndarray, imp_list: np.ndarray, eps: float = 1.0e-5) -> np.ndarray:
     """
     @fn gen_imp_ham
-    @brief Construct the real-space impurity Hamiltonian from bulk hopping blocks and impurity positions.
+    @brief Construct the real-space supercell Hamiltonian for a host crystal with embedded impurities.
     @param     rvec: Real-space displacement vectors [Nr, 3] float64
-    @param    ham_r: Real-part hopping blocks [Nr, Norb, Norb] complex128
-    @param    ham_i: Imaginary-part hopping blocks [Nr, Norb, Norb] complex128
-    @param    rlist: Impurity site positions [Nsite] float64
-    @param imp_list: Impurity orbital indices [Nimp] int64
-    @param      eps: Small tolerance for assembly
+    @param    ham_r: Host-host hopping blocks H_rr(R) [Nr, Norb, Norb] complex128
+    @param    ham_i: Impurity-impurity hopping blocks H_ii(R) [Nr, Norb, Norb] complex128
+    @param   ham_ri: Cross-species hopping blocks H_ri(R) [Nr, Norb, Norb] complex128
+    @param    rlist: Site positions in fractional coords [Nsite, 3] float64
+    @param imp_list: 0-based impurity site indices [Nimp] int64
+    @param      eps: Small tolerance for R-vector matching
     @return ham_imp: Impurity Hamiltonian [Norb*Nsite, Norb*Nsite] complex128
     """
     Nr, Nimp, Nsite = len(rvec), len(imp_list), len(rlist)
     Norb = ham_r.shape[1]
     ham_imp = np.zeros((Norb * Nsite, Norb * Nsite), dtype=np.complex128)
-    _lib.gen_imp_ham.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        POINTER(c_double),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64)
-    ]
-    _lib.gen_imp_ham.restype = c_void_p
-    _lib.gen_imp_ham(ham_imp, ham_r, rvec, ham_i, imp_list, rlist, byref(c_double(eps)),
+    _lib.gen_imp_ham(ham_imp, ham_r, rvec, ham_i, ham_ri, imp_list, rlist, byref(c_double(eps)),
                      byref(c_int64(Nimp)), byref(c_int64(Nsite)),
                      byref(c_int64(Nr)), byref(c_int64(Norb)))
     return ham_imp
@@ -47,15 +86,6 @@ def dft_imp_ham(ham_imp: np.ndarray, klist: np.ndarray, rlist: np.ndarray) -> np
     Nk, Nsite = len(klist), len(rlist)
     Norb = int(len(ham_imp) / Nsite)
     ham_k = np.zeros((Norb * Nk, Norb * Nk), dtype=np.complex128)
-    _lib.get_dft_imp_ham.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64)
-    ]
-    _lib.get_dft_imp_ham.restype = c_void_p
     _lib.get_dft_imp_ham(ham_k, ham_imp, klist, rlist, byref(c_int64(Nk)),
                          byref(c_int64(Nsite)), byref(c_int64(Norb)))
     return ham_k
@@ -77,19 +107,7 @@ def get_imp_spectrum(uni: np.ndarray, eigs: np.ndarray, mu: float, wlist: np.nda
     Nw, Nk, Nsite = len(wlist), len(klist), len(rlist)
     Norb = int(len(eigs) / Nsite)
     spectrum = np.zeros((Nk, Nw), dtype=np.complex128)
-    _lib.get_spectrum_spagehtti.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_double), POINTER(c_double)
-    ]
-    _lib.get_spectrum_spagehtti.restype = c_void_p
-    _lib.get_spectrum_spagehtti(spectrum, uni, eigs, klist, rlist, wlist,
+    _lib.get_spectrum_spaghetti(spectrum, uni, eigs, klist, rlist, wlist,
                                 byref(c_int64(Nw)), byref(c_int64(Nk)),
                                 byref(c_int64(Nsite)), byref(c_int64(Norb)),
                                 byref(c_double(mu)), byref(c_double(eta)))
@@ -128,19 +146,6 @@ def solve_cpa(hamk: np.ndarray, VA: np.ndarray, VB: np.ndarray,
         for iw in range(Nw):
             sigma_cpa[iw, :, :] = vca
 
-    _lib.solve_cpa_array.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        POINTER(c_double),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        POINTER(c_double),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_double)
-    ]
-    _lib.solve_cpa_array.restype = None
     _lib.solve_cpa_array(sigma_cpa, hamk, VA_c, VB_c,
                          byref(c_double(x)), zlist_c,
                          byref(c_double(pp)),

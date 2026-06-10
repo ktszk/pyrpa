@@ -20,6 +20,8 @@ subroutine get_iqshift(qpoint,klist,qshift,Nk) bind(C,name="get_iqshift_")
   integer(c_int64_t) :: m, h, step
   integer(c_int64_t) :: jj
   integer(c_int64_t) :: key, key_t
+  integer(c_int64_t) :: nmiss
+  logical :: found
   real(c_double) :: tmpf(3)
 
   scale_int=1048576_c_int64_t
@@ -49,7 +51,8 @@ subroutine get_iqshift(qpoint,klist,qshift,Nk) bind(C,name="get_iqshift_")
   end do
 
   ! Lookup for -k+q: compute 1-k+q = (-k+q) mod 1 (folds into [0,1))
-  !$omp parallel do private(i1,i2,i3,key_t,h,step,tmpf,j1,j2,j3)
+  nmiss = 0
+  !$omp parallel do private(i1,i2,i3,key_t,h,step,tmpf,j1,j2,j3,found) reduction(+:nmiss)
   do i=1,Nk
      tmpf(:)=1.0d0-klist(:,i)+qpoint(:)
      do j=1,3
@@ -69,15 +72,24 @@ subroutine get_iqshift(qpoint,klist,qshift,Nk) bind(C,name="get_iqshift_")
      h = mod(abs(key_t), m) + 1_c_int64_t
      step = 1_c_int64_t
      qshift(i) = 1
+     found = .false.
      do while(ht_key(h) /= -1_c_int64_t)
         if(ht_key(h) == key_t) then
            qshift(i) = ht_val(h)
+           found = .true.
            exit
         end if
         h = h + step
         if(h>m) h = h - m
      end do
+     if(.not. found) nmiss = nmiss + 1
   end do
+  !$omp end parallel do
+  if(nmiss > 0)then
+     print'(A,I0,A,I0,A)','WARNING(get_iqshift): ',nmiss,' of ',Nk,' -k+q points not found on the k-mesh.'
+     print'(A)','  klist must be a periodic [0,1) mesh without endpoints (e.g. gen_klist with sw_pp=False).'
+     print'(A)','  Missing points fall back to index 1; the resulting chi/phi is unreliable.'
+  end if
 
   deallocate(ht_key)
   deallocate(ht_val)

@@ -166,7 +166,9 @@ def gen_klist(Nx: int, Ny: int, Nz: int | None = None, sw_pp: bool = True, kz: f
         kx=np.linspace(0,1,Nx,False)
         ky=np.linspace(0,1,Ny,False)
         kz=np.linspace(0,1,Nz,False)
-    x,y,z=np.meshgrid(kx,ky,kz)
+    # indexing='ij' so that eig.reshape(Nx,Ny[,Nz]) has axes ordered (kx,ky[,kz]);
+    # the default 'xy' would swap the kx/ky axes in FS contour/marching-cubes plots
+    x,y,z=np.meshgrid(kx,ky,kz,indexing='ij')
     klist=np.array([x.ravel(),y.ravel(),z.ravel()]).T.copy()
     return len(klist),klist
 
@@ -188,16 +190,18 @@ def mk_klist(k_list: np.ndarray | list, N: int, bvec: np.ndarray) -> tuple[np.nd
     for ks,ke in zip(k_list,k_list[1:]):
         dkv=np.array(ke)-np.array(ks)
         # Arc length of segment in Cartesian reciprocal space (Angstrom^-1)
-        dkv_length=abs(dkv.dot(bvec)).sum()
+        dkv_length=np.linalg.norm(dkv.dot(bvec))
         tmp=np.linspace(ks,ke,N,False)       # N points, excluding endpoint (appended at end)
         tmp2=np.linspace(0,dkv_length,N,False)+maxsplen
-        maxsplen=tmp2.max()
+        # advance by the full segment length so consecutive segments join seamlessly
+        # (tmp2.max() would be one step short and shift every following xtick)
+        maxsplen+=dkv_length
         xticks+=[tmp2[0]]
         klist+=tmp.tolist()
         splen+=tmp2.tolist()
     klist+=[k_list[-1]]        # append the final symmetry point
-    splen+=[maxsplen+dkv_length/N]
-    xticks+=[splen[-1]]
+    splen+=[maxsplen]
+    xticks+=[maxsplen]
     return np.array(klist),np.array(splen),xticks
 
 def mk_qlist(k_set: np.ndarray | list, Nx: int, Ny: int, Nz: int, bvec: np.ndarray) -> tuple[np.ndarray, np.ndarray, list]:
@@ -222,7 +226,8 @@ def mk_qlist(k_set: np.ndarray | list, Nx: int, Ny: int, Nz: int, bvec: np.ndarr
     N=1
     for ks,ke in zip(k_set,k_set[1:]):
         dk=np.array(ke)-np.array(ks)
-        dk_length=abs(dk.dot(bvec)).sum()
+        # Arc length of segment in Cartesian reciprocal space (Angstrom^-1)
+        dk_length=np.linalg.norm(dk.dot(bvec))
         # ensure at least one division along non-zero component; use ceil to avoid zero due to truncation
         # Compute per-axis step counts; use ceil so non-zero dk always yields ≥1 point
         dN=np.asarray(np.ceil(abs(dk)*Narray),dtype=int)
@@ -238,8 +243,8 @@ def mk_qlist(k_set: np.ndarray | list, Nx: int, Ny: int, Nz: int, bvec: np.ndarr
         qlist+=tmp.tolist()
         splen+=tmp2.tolist()
     qlist+=[k_set[-1]]
-    splen+=[maxsplen+dk_length/N]
-    xticks+=[splen[-1]]
+    splen+=[maxsplen]          # maxsplen already includes the full last segment
+    xticks+=[maxsplen]
     return np.array(qlist),np.array(splen),xticks
 
 def get_ptv(alatt: np.ndarray, deg: np.ndarray, brav: int) -> tuple[np.ndarray, np.ndarray]:

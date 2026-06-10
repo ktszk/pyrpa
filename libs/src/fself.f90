@@ -475,6 +475,7 @@ contains
     ! n_cur>=2 (DIIS active): use sigma_diis directly to preserve optimal extrapolation
     esterr=0.0d0
     est=100.0d0
+    kerr=1; iwerr=1; lerr=1; merr=1  ! defaults in case all |sigma| < eps_sgm
     do l=1,Norb
        do m=1,Norb
           do j=1,Nw

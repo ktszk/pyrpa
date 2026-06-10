@@ -2,6 +2,60 @@ from ctypes import *
 import numpy as np
 from ._loader import _lib
 
+# --- ctypes signatures: set once at import.
+# All Fortran entry points are subroutines, so restype is always None.
+_lib.get_vsigma_flex_nosoc_.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
+]
+_lib.get_vsigma_flex_nosoc_.restype = None
+_lib.mkself.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    POINTER(c_double),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    POINTER(c_double), POINTER(c_double),
+    POINTER(c_double), POINTER(c_int64),
+    POINTER(c_double), POINTER(c_double), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_bool), POINTER(c_bool),
+    POINTER(c_int64),
+    POINTER(c_bool)
+]
+_lib.mkself.restype = None
+_lib.mkself_soc.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    POINTER(c_double),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    POINTER(c_double), POINTER(c_double),
+    POINTER(c_double), POINTER(c_int64),
+    POINTER(c_double), POINTER(c_double), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_bool), POINTER(c_bool),
+    POINTER(c_int64), POINTER(c_bool)
+]
+_lib.mkself_soc.restype = None
+
 def get_Vsigma_nosoc_flex(chi: np.ndarray, Smat: np.ndarray, Cmat: np.ndarray) -> np.ndarray:
     """
     @fn get_Vsigma_nosoc_flex
@@ -12,13 +66,6 @@ def get_Vsigma_nosoc_flex(chi: np.ndarray, Smat: np.ndarray, Cmat: np.ndarray) -
     @return  chi: Copy of the vertex-corrected susceptibility tensor
     """
     Nk, Nw, Nchi = len(chi), len(chi[0]), len(Smat)
-    _lib.get_vsigma_flex_nosoc_.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
-    ]
-    _lib.get_vsigma_flex_nosoc_.restype = c_void_p
     _lib.get_vsigma_flex_nosoc_(chi, Smat, Cmat, byref(c_int64(Nk)),
                                 byref(c_int64(Nw)), byref(c_int64(Nchi)))
     return chi.copy()
@@ -60,28 +107,6 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
     Norb = hamk.shape[1]
     mu_self = c_double()
     sigmak = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
-    _lib.mkself.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        POINTER(c_double),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        POINTER(c_double), POINTER(c_double),
-        POINTER(c_double), POINTER(c_int64),
-        POINTER(c_double), POINTER(c_double), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_bool), POINTER(c_bool),
-        POINTER(c_int64),
-        POINTER(c_bool)
-    ]
-    _lib.mkself.restype = c_void_p
     _lib.mkself(sigmak, byref(mu_self), Smat, Cmat, kmap, invk, olist, hamk, eig, uni,
         byref(c_double(mu)), byref(c_double(fill)), byref(c_double(temp)), byref(c_int64(scf_loop)),
         byref(c_double(pp)), byref(c_double(eps)), byref(c_int64(Nkall)), byref(c_int64(Nk)),
@@ -128,27 +153,6 @@ def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.nd
     Norb = hamk.shape[1]
     mu_self = c_double()
     sigmak = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
-    _lib.mkself_soc.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        POINTER(c_double),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        POINTER(c_double), POINTER(c_double),
-        POINTER(c_double), POINTER(c_int64),
-        POINTER(c_double), POINTER(c_double), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_bool), POINTER(c_bool),
-        POINTER(c_int64), POINTER(c_bool)
-    ]
     _lib.mkself_soc(sigmak, byref(mu_self), Vmat, kmap, invk, invs, olist, slist, hamk, eig, uni,
                byref(c_double(mu)), byref(c_double(fill)), byref(c_double(temp)), byref(c_int64(scf_loop)),
                byref(c_double(pp)), byref(c_double(eps)), byref(c_int64(Nkall)), byref(c_int64(Nk)),

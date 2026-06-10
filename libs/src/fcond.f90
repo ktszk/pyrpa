@@ -272,6 +272,7 @@ subroutine calc_tdf(tdf,eig,veloc,kweight,tau,Nw,Nk,Norb) bind(C)
   !!@param      Nw,in: The number of energy mesh
   !!@param      Nk,in: The number of k-points
   !!@param    Norb,in: The number of orbitals
+  use constant
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nk,Norb,Nw
@@ -286,28 +287,26 @@ subroutine calc_tdf(tdf,eig,veloc,kweight,tau,Nw,Nk,Norb) bind(C)
   emax=maxval(eig)
   emin=minval(eig)
   dw=(emax-emin)/dble(Nw)
-  !$omp parallel
-  !$omp workshare
-  tdf(:,:,:)=0.0d0
-  !$omp end workshare
+  ! Parallelize over the energy grid: each thread owns distinct iw slices,
+  ! so no reduction array is needed (a per-iteration reduction copy of tdf
+  ! overflows the stack for large Nw).
+  !$omp parallel do private(l,m,i,j,tmp)
   omega_loop: do iw=1,Nw
      axis1: do l=1,3
         axis2: do m=l,3
-           !$omp do private(i,j) reduction(+:tdf)
+           tmp=0.0d0
            k_loop: do i=1,Nk
               band_loop: do j=1,Norb
-                 tdf(m,l,iw)=tdf(m,l,iw)+veloc(m,j,i)*veloc(l,j,i)*tau(j,i)*kweight(i)/((iw*dw+emin-eig(j,i))**2+id*id)
+                 tmp=tmp+veloc(m,j,i)*veloc(l,j,i)*tau(j,i)*kweight(i)/((iw*dw+emin-eig(j,i))**2+id*id)
               end do band_loop
            end do k_loop
-           !$omp end do
+           ! Lorentzian delta: (1/pi)*id/((E-e)^2+id^2)
+           tdf(m,l,iw)=tmp*id/(pi*Nk)
            tdf(l,m,iw)=tdf(m,l,iw)
         end do axis2
      end do axis1
   end do omega_loop
-  !$omp workshare
-  tdf(:,:,:)=tdf(:,:,:)*id/Nk
-  !$omp end workshare
-  !$omp end parallel
+  !$omp end parallel do
 end subroutine calc_tdf
 
 subroutine get_tau(tau,tauw,eig,tau_max,eps,tau_mode,Nk,Nw,Norb) bind(C)

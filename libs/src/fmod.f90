@@ -21,6 +21,15 @@ end subroutine openmp_params
 
 ! Caches forward/backward FFTW plans across calls within a loop.
 ! Call init_fft_plans before the orbital loop and destroy_fft_plans after.
+!
+! Thread-safety contract:
+!  - The cache is a single global pair of plans: init/destroy must bracket one
+!    serial region of use and must NOT be nested or used by two loops at once.
+!  - FFTW plan creation/destruction is NOT thread-safe; all plan create/destroy
+!    calls below are serialized with a named critical section.
+!  - Executing a cached plan via dfftw_execute_dft (new-array execute) IS
+!    thread-safe, but the arrays must have the same size/alignment as the ones
+!    used at planning time.
 module fftw_plan_cache
   use,intrinsic::iso_c_binding, only:c_int64_t
   implicit none
@@ -35,17 +44,24 @@ subroutine init_fft_plans(cmat,tmp,Nx,Ny,Nz,Nw)
   complex(c_double),intent(inout),dimension(Nx,Ny,Nz,Nw):: cmat,tmp
   integer(c_int32_t),dimension(4):: Nlist
   Nlist=(/int(Nx,c_int32_t),int(Ny,c_int32_t),int(Nz,c_int32_t),int(Nw,c_int32_t)/)
+  !$omp critical(fftw_plan_ops)
+  if(plan_fwd/=0 .or. plan_bwd/=0)then
+     print*,'WARNING(init_fft_plans): plan cache already in use; overwriting (plans leak).'
+  end if
   call dfftw_plan_dft(plan_fwd,4,Nlist,cmat,tmp,-1,64)
   call dfftw_plan_dft(plan_bwd,4,Nlist,cmat,tmp, 1,64)
+  !$omp end critical(fftw_plan_ops)
 end subroutine init_fft_plans
 
 subroutine destroy_fft_plans()
   use fftw_plan_cache
   implicit none
+  !$omp critical(fftw_plan_ops)
   call dfftw_destroy_plan(plan_fwd)
   call dfftw_destroy_plan(plan_bwd)
   plan_fwd=0
   plan_bwd=0
+  !$omp end critical(fftw_plan_ops)
 end subroutine destroy_fft_plans
 
 subroutine FFT(cmat,tmp,Nx,Ny,Nz,Nw,SW)
@@ -77,14 +93,20 @@ subroutine FFT(cmat,tmp,Nx,Ny,Nz,Nw,SW)
         call dfftw_execute_dft(plan_bwd,cmat,tmp)
      end if
   else
+     ! No cached plan: plan/execute/destroy per call.
+     ! Plan creation/destruction is serialized (FFTW requires it); execution is thread-safe.
      if(SW)then
         Inv=-1
      else
         Inv=1
      end if
+     !$omp critical(fftw_plan_ops)
      call dfftw_plan_dft(plan,4,Nlist,cmat,tmp,Inv,64)
+     !$omp end critical(fftw_plan_ops)
      call dfftw_execute(plan)
+     !$omp critical(fftw_plan_ops)
      call dfftw_destroy_plan(plan)
+     !$omp end critical(fftw_plan_ops)
   end if
   if(.not. SW)then
      cmat(:,:,:,:)=tmp(:,:,:,:)/product(Nlist)
@@ -450,6 +472,7 @@ subroutine get_veloc(vk,vk0,mrot,uni,Nk,Norb) bind(C)
         end do
      end do
      !rotate axis
+     vk(:,:,i)=0.0d0
      band_loop2: do n=1,Norb
         do l=1,3
            do m=1,3

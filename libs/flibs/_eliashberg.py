@@ -2,6 +2,143 @@ from ctypes import *
 import numpy as np
 from ._loader import _lib
 
+# --- ctypes signatures: set once at import.
+# All Fortran entry points are subroutines, so restype is always None.
+_lib.lin_eliash.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    POINTER(c_double), POINTER(c_double),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64)
+]
+_lib.lin_eliash.restype = None
+_lib.lin_eliash_soc.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    POINTER(c_double), POINTER(c_double),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64)
+]
+_lib.lin_eliash_soc.restype = None
+_lib.eliashberg.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # delta (inout)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # sigmak (out/inout)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # Gk (inout)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # hamk
+    np.ctypeslib.ndpointer(dtype=np.float64),     # Smat
+    np.ctypeslib.ndpointer(dtype=np.float64),     # Cmat
+    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
+    np.ctypeslib.ndpointer(dtype=np.float64),     # plist (= prt in Fortran)
+    np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
+    np.ctypeslib.ndpointer(dtype=np.int64),       # invk
+    POINTER(c_double), POINTER(c_double), POINTER(c_double),  # mu, temp, eps
+    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),     # Nkall, Nk, Nw
+    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),     # Nchi, Norb, Nx
+    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),     # Ny, Nz, itemax
+    POINTER(c_int64),                                         # gap_sym
+    POINTER(c_bool), POINTER(c_bool),                         # sw_sigma,sw_Vconst
+    POINTER(c_int64),                                          # m_diis
+]
+_lib.eliashberg.restype = None
+_lib.conv_delta_orb_to_band.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
+]
+_lib.conv_delta_orb_to_band.restype = None
+_lib.conv_delta_orb_to_band_soc.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64)
+]
+_lib.conv_delta_orb_to_band_soc.restype = None
+_lib.mkfk_trs_nsoc_.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
+]
+_lib.mkfk_trs_nsoc_.restype = None
+_lib.mkfk_trs_soc_.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64)
+]
+_lib.mkfk_trs_soc_.restype = None
+_lib.get_initial_delta_.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64),
+]
+_lib.get_initial_delta_.restype = None
+_lib.get_band_to_orb_delta.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    POINTER(c_int64), POINTER(c_int64),
+]
+_lib.get_band_to_orb_delta.restype = None
+_lib.remap_delta_.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64)
+]
+_lib.remap_delta_.restype = None
+
 def linearized_eliashberg(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init_delta: np.ndarray,
                           Smat: np.ndarray, Cmat: np.ndarray, olist: np.ndarray, plist: np.ndarray,
                           kmap: np.ndarray, invk: np.ndarray, Nx: int, Ny: int, Nz: int,
@@ -30,27 +167,6 @@ def linearized_eliashberg(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init
     Norb, Nchi = len(Gk), len(Smat)
     Nkall, Nk, Nw = len(kmap), len(Gk[0, 0, 0]), len(Gk[0, 0])
     delta = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
-    _lib.lin_eliash.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        POINTER(c_double), POINTER(c_double),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64)
-    ]
-    _lib.lin_eliash.restype = None
     _lib.lin_eliash(delta, chi, Gk, uni, init_delta, Smat, Cmat, olist, plist, kmap, invk,
                     byref(c_double(temp)), byref(c_double(eps)), byref(c_int64(Nkall)),
                     byref(c_int64(Nk)), byref(c_int64(Nw)), byref(c_int64(Nchi)),
@@ -92,30 +208,6 @@ def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, 
     Norb, Nchi = len(slist), len(Vmat)
     Nkall, Nk, Nw = len(kmap), len(Gk[0, 0, 0]), len(Gk[0, 0])
     delta = np.zeros((Norb, Norb, Nw, Nkall), dtype=np.complex128)
-    _lib.lin_eliash_soc.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        POINTER(c_double), POINTER(c_double),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64)
-    ]
-    _lib.lin_eliash_soc.restype = None
     _lib.lin_eliash_soc(delta, chi, Gk, uni, init_delta, Vmat, sgnsig, sgnsig2, plist, olist,
                         slist, kmap, invk, invs, invschi, byref(c_double(temp)),
                         byref(c_double(eps)), byref(c_int64(Nkall)), byref(c_int64(Nk)),
@@ -179,26 +271,6 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
     Norb, _, Nw, Nk = delta.shape
     Nkall, Nchi = len(kmap), len(Smat)
     sigmak = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
-    _lib.eliashberg.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),  # delta (inout)
-        np.ctypeslib.ndpointer(dtype=np.complex128),  # sigmak (out/inout)
-        np.ctypeslib.ndpointer(dtype=np.complex128),  # Gk (inout)
-        np.ctypeslib.ndpointer(dtype=np.complex128),  # hamk
-        np.ctypeslib.ndpointer(dtype=np.float64),     # Smat
-        np.ctypeslib.ndpointer(dtype=np.float64),     # Cmat
-        np.ctypeslib.ndpointer(dtype=np.int64),       # olist
-        np.ctypeslib.ndpointer(dtype=np.float64),     # plist (= prt in Fortran)
-        np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
-        np.ctypeslib.ndpointer(dtype=np.int64),       # invk
-        POINTER(c_double), POINTER(c_double), POINTER(c_double),  # mu, temp, eps
-        POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),     # Nkall, Nk, Nw
-        POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),     # Nchi, Norb, Nx
-        POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),     # Ny, Nz, itemax
-        POINTER(c_int64),                                         # gap_sym
-        POINTER(c_bool), POINTER(c_bool),                         # sw_sigma,sw_Vconst
-        POINTER(c_int64),                                          # m_diis
-    ]
-    _lib.eliashberg.restype = None
     _lib.eliashberg(delta, sigmak, Gk, hamk, Smat, Cmat, olist, plist,
                     kmap, invk,
                     byref(c_double(mu)), byref(c_double(temp)), byref(c_double(eps)),
@@ -223,16 +295,6 @@ def conv_delta_orb_to_band(delta: np.ndarray, uni: np.ndarray, invk: np.ndarray,
     """
     Nkall, Nk, Nw, Norb = len(invk), len(uni), len(delta[0, 0]), len(delta)
     deltab = np.zeros((Norb, Norb, Nkall), dtype=np.complex128)
-    _lib.conv_delta_orb_to_band.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
-    ]
-    _lib.conv_delta_orb_to_band.restype = None
     _lib.conv_delta_orb_to_band(deltab, delta, uni, plist, invk, byref(c_int64(Norb)),
                                 byref(c_int64(Nkall)), byref(c_int64(Nk)),
                                 byref(c_int64(Nw)), byref(c_int64(gap_sym)))
@@ -252,17 +314,6 @@ def conv_delta_orb_to_band_soc(delta: np.ndarray, uni: np.ndarray, invk: np.ndar
     """
     Nkall, Nk, Nw, Norb = len(invk), len(uni), len(delta[0, 0]), len(delta)
     deltab = np.zeros((Norb, Norb, Nkall), dtype=np.complex128)
-    _lib.conv_delta_orb_to_band_soc.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64)
-    ]
-    _lib.conv_delta_orb_to_band_soc.restype = None
     _lib.conv_delta_orb_to_band_soc(deltab, delta, uni, invk, invs, slist, byref(c_int64(Norb)),
                                     byref(c_int64(Nkall)), byref(c_int64(Nk)), byref(c_int64(Nw)))
     return deltab
@@ -278,13 +329,6 @@ def gen_Fk(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray) -> np.ndarray:
     """
     Nkall, Nk, Nw, Norb = len(invk), len(Gk[0, 0, 0]), len(delta[0, 0]), len(delta)
     Fk = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
-    _lib.mkfk_trs_nsoc_.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
-    ]
-    _lib.mkfk_trs_nsoc_.restype = None
     _lib.mkfk_trs_nsoc_(Fk, Gk, delta, byref(c_int64(Nk)), byref(c_int64(Nw)), byref(c_int64(Norb)))
     return Fk
 
@@ -304,19 +348,6 @@ def gen_Fk_soc(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray, invs: np.nda
     Nkall, Nk, Nw, Norb = len(invk), len(Gk[0, 0, 0]), len(delta[0, 0]), len(delta)
     Fk = np.zeros((Norb, Norb, Nw, Nkall), dtype=np.complex128)
     sgnsig = np.array([slist]).T.dot(np.array([slist])).astype(np.float64)
-    _lib.mkfk_trs_soc_.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64)
-    ]
-    _lib.mkfk_trs_soc_.restype = None
     _lib.mkfk_trs_soc_(Fk, Gk, delta, sgnsig, slist, invk, invs, byref(c_int64(Nkall)),
                        byref(c_int64(Nk)), byref(c_int64(Nw)), byref(c_int64(Norb)),
                        byref(c_int64(gap_sym)))
@@ -341,17 +372,6 @@ def get_initial_delta(init_delta: np.ndarray, uni: np.ndarray, kmap: np.ndarray,
     Norb, Nk = init_delta.shape
     Nkall = len(kmap)
     delta = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
-    _lib.get_initial_delta_.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64),
-    ]
-    _lib.get_initial_delta_.restype = None
     _lib.get_initial_delta_(delta, init_delta, uni, kmap, invk, byref(c_int64(Nkall)), byref(c_int64(Nk)),
                             byref(c_int64(Nw)), byref(c_int64(Norb)), byref(c_int64(gap_sym)))
     return delta
@@ -378,13 +398,6 @@ def get_band_to_orb_delta(init_delta: np.ndarray, uni: np.ndarray) -> np.ndarray
     init_delta_f = np.asfortranarray(init_delta.T)
     uni_f = np.asfortranarray(np.transpose(uni, (1, 2, 0)))
     delta_f = np.zeros((Norb, Norb, Nk), dtype=np.complex128, order='F')
-    _lib.get_band_to_orb_delta.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        POINTER(c_int64), POINTER(c_int64),
-    ]
-    _lib.get_band_to_orb_delta.restype = None
     _lib.get_band_to_orb_delta(delta_f, init_delta_f, uni_f, byref(c_int64(Nk)), byref(c_int64(Norb)))
     return np.ascontiguousarray(np.transpose(delta_f, (2, 0, 1)))
 
@@ -401,16 +414,6 @@ def remap_gap(delta0, plist, invk, gap_sym):
     Nkall, Nk, Norb = len(invk), len(delta0.T), len(plist)
     Nw = delta0.shape[2]
     delta = np.zeros((Norb, Norb, Nw, Nkall), dtype=np.complex128)
-    _lib.remap_delta_.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64)
-    ]
-    _lib.remap_delta_.restype = None
     _lib.remap_delta_(delta, delta0, plist, invk, byref(c_int64(Nkall)), byref(c_int64(Nk)),
                       byref(c_int64(Nw)), byref(c_int64(Norb)), byref(c_int64(gap_sym)))
     return delta

@@ -2,6 +2,48 @@ from ctypes import *
 import numpy as np
 from ._loader import _lib
 
+# --- ctypes signatures: set once at import.
+# All Fortran entry points are subroutines, so restype is always None.
+_lib.get_scmat.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    POINTER(c_double), POINTER(c_double), POINTER(c_int64)
+]
+_lib.get_scmat.restype = None
+_lib.get_scmat_orb.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    POINTER(c_int64), POINTER(c_int64)
+]
+_lib.get_scmat_orb.restype = None
+_lib.get_vmat_soc.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    POINTER(c_double), POINTER(c_double),
+    POINTER(c_int64), POINTER(c_int64)
+]
+_lib.get_vmat_soc.restype = None
+_lib.get_vmat_soc_orb.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    POINTER(c_int64), POINTER(c_int64)
+]
+_lib.get_vmat_soc_orb.restype = None
+
 def gen_SCmatrix(olist: np.ndarray, site: np.ndarray, U: float, J: float) -> tuple[np.ndarray, np.ndarray]:
     """
     @fn gen_SCmatrix
@@ -16,14 +58,6 @@ def gen_SCmatrix(olist: np.ndarray, site: np.ndarray, U: float, J: float) -> tup
     Nchi = len(olist)
     Smat = np.zeros((Nchi, Nchi), dtype=np.float64)
     Cmat = np.zeros((Nchi, Nchi), dtype=np.float64)
-    _lib.get_scmat.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        POINTER(c_double), POINTER(c_double), POINTER(c_int64)
-    ]
-    _lib.get_scmat.restype = c_void_p
     _lib.get_scmat(Smat, Cmat, olist, site, byref(c_double(U)), byref(c_double(J)), byref(c_int64(Nchi)))
     return Smat, Cmat
 
@@ -43,16 +77,6 @@ def gen_SCmatrix_orb(olist: np.ndarray, site: np.ndarray, Umat: np.ndarray, Jmat
     Smat = np.zeros((Nchi, Nchi), dtype=np.float64)
     Cmat = np.zeros((Nchi, Nchi), dtype=np.float64)
     # Keep ctypes argument order identical to Fortran ABI: Smat, Cmat, olist, site, Umat, Jmat, Nchi, Norb.
-    _lib.get_scmat_orb.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        POINTER(c_int64), POINTER(c_int64)
-    ]
-    _lib.get_scmat_orb.restype = None
     _lib.get_scmat_orb(Smat, Cmat, olist, site, Umat, Jmat, byref(c_int64(Nchi)), byref(c_int64(Norb)))
     return Smat, Cmat
 
@@ -71,16 +95,6 @@ def gen_Vmatrix(olist: np.ndarray, slist: np.ndarray, site: np.ndarray, invs: np
     """
     Nchi, Norb = len(olist), len(slist)
     Vmat = np.zeros((Nchi, Nchi), dtype=np.float64)
-    _lib.get_vmat_soc.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        POINTER(c_double), POINTER(c_double),
-        POINTER(c_int64), POINTER(c_int64)
-    ]
-    _lib.get_vmat_soc.restype = None
     _lib.get_vmat_soc(Vmat, olist, slist, site, invs, byref(c_double(U)),
                       byref(c_double(J)), byref(c_int64(Nchi)), byref(c_int64(Norb)))
     return Vmat
@@ -100,17 +114,6 @@ def gen_Vmatrix_orb(olist: np.ndarray, slist: np.ndarray, site: np.ndarray, invs
     """
     Nchi, Norb = len(olist), len(Umat)
     Vmat = np.zeros((Nchi, Nchi), dtype=np.float64)
-    _lib.get_vmat_soc_orb.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        POINTER(c_int64), POINTER(c_int64)
-    ]
-    _lib.get_vmat_soc_orb.restype = None
     _lib.get_vmat_soc_orb(Vmat, olist, slist, site, invs, Umat, Jmat,
                           byref(c_int64(Nchi)), byref(c_int64(Norb)))
     return Vmat

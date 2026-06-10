@@ -202,16 +202,17 @@ def chis_qmap(Nx: int, Ny: int, Ecut: float, mu: float, temp: float, Smat: np.nd
     @param    eig: Eigenvalues array [Nk, Nband]
     @param    uni: Eigenvectors array [Nk, Norb, Nband]
     @param idelta: Broadening parameter (Lorentzian width) in eV
-    @retval  chis: Spin susceptibility map [Ny, Nx]
-    @retval  chi0: Bare susceptibility map [Ny, Nx]
-    @retval    qx: qx coordinate mesh [Ny, Nx]
-    @retval    qy: qy coordinate mesh [Ny, Nx]
+    @retval  chis: Spin susceptibility map [Nx, Ny]
+    @retval  chi0: Bare susceptibility map [Nx, Ny]
+    @retval    qx: qx coordinate mesh [Nx, Ny]
+    @retval    qy: qy coordinate mesh [Nx, Ny]
     """
     ffermi=flibs.get_ffermi(eig,mu,temp)
     chis,chi0=flibs.chis_qmap(uni,eig,ffermi,klist,Smat,olist,Nx,Ny,temp,Ecut,idelta)
     x0=np.linspace(0,1,Nx,False)
     y0=np.linspace(0,1,Ny,False)
-    qx,qy=np.meshgrid(x0,y0)
+    # indexing='ij' so qx,qy have shape [Nx,Ny] matching the chi maps (chi[ix,iy])
+    qx,qy=np.meshgrid(x0,y0,indexing='ij')
     return chis,chi0,qx,qy
 
 def phi_spectrum(mu: float, temp: float, klist: np.ndarray, qlist: np.ndarray, olist: np.ndarray,
@@ -266,15 +267,16 @@ def phi_qmap(Nx: int, Ny: int, Ecut: float, mu: float, temp: float, klist: np.nd
     @param     uni: Eigenvectors array [Nk, Norb, Nband]
     @param  idelta: Broadening parameter (Lorentzian width) in eV
     @param sw_omega: If True, integrate over Matsubara frequencies; if False, use static limit
-    @retval    phi: Pairing susceptibility map [Ny, Nx]
-    @retval     qx: qx coordinate mesh [Ny, Nx]
-    @retval     qy: qy coordinate mesh [Ny, Nx]
+    @retval    phi: Pairing susceptibility map [Nx, Ny]
+    @retval     qx: qx coordinate mesh [Nx, Ny]
+    @retval     qy: qy coordinate mesh [Nx, Ny]
     """
     ffermi=flibs.get_ffermi(eig,mu,temp)
     phi=flibs.phi_qmap(uni,eig,ffermi,klist,olist,Nx,Ny,mu,temp,Ecut,idelta,sw_omega)
     x0=np.linspace(0,1,Nx,False)
     y0=np.linspace(0,1,Ny,False)
-    qx,qy=np.meshgrid(x0,y0)
+    # indexing='ij' so qx,qy have shape [Nx,Ny] matching the phi map (phi[ix,iy])
+    qx,qy=np.meshgrid(x0,y0,indexing='ij')
     return phi,qx,qy
 
 def get_chi_orb_list(Norb: int, site_prof: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
