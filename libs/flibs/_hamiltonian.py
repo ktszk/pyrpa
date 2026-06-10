@@ -2,6 +2,123 @@ from ctypes import *
 import numpy as np
 from ._loader import _lib
 
+# --- ctypes signatures: set once at import.
+# All Fortran entry points are subroutines, so restype is always None.
+_lib.openmp_params.argtypes = [POINTER(c_int64),POINTER(c_bool)]
+_lib.openmp_params.restype = None
+_lib.gen_ham.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
+]
+_lib.gen_ham.restype = None
+_lib.get_eig.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    POINTER(c_int64), POINTER(c_int64)
+]
+_lib.get_eig.restype = None
+_lib.get_eig_mlo.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    POINTER(c_int64), POINTER(c_int64)
+]
+_lib.get_eig_mlo.restype = None
+_lib.get_ffermi.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    POINTER(c_double), POINTER(c_double),
+    POINTER(c_int64), POINTER(c_int64)
+]
+_lib.get_ffermi.restype = None
+_lib.get_vlm0.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
+]
+_lib.get_vlm0.restype = None
+_lib.get_veloc.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    POINTER(c_int64), POINTER(c_int64)
+]
+_lib.get_veloc.restype = None
+_lib.get_vnm.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    POINTER(c_int64), POINTER(c_int64)
+]
+_lib.get_vnm.restype = None
+_lib.get_imass0.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
+]
+_lib.get_imass0.restype = None
+_lib.get_imassk.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    POINTER(c_int64), POINTER(c_int64)
+]
+_lib.get_imassk.restype = None
+_lib.get_qshift_.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    POINTER(c_int64),
+]
+_lib.get_qshift_.restype = None
+_lib.get_iqshift_.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    POINTER(c_int64),
+]
+_lib.get_iqshift_.restype = None
+_lib.generate_irr_kpoint_inv.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64)
+]
+_lib.generate_irr_kpoint_inv.restype = None
+_lib.get_kweight.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    POINTER(c_int64), POINTER(c_int64)
+]
+_lib.get_kweight.restype = None
+_lib.mkbdghamk.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    POINTER(c_int64), POINTER(c_int64),
+]
+_lib.mkbdghamk.restype = None
+_lib.get_parity_prop.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    POINTER(c_int64), POINTER(c_int64)
+]
+_lib.get_parity_prop.restype = None
+
 def omp_params() ->tuple[int,bool]:
     """
     @fn omp_params
@@ -11,8 +128,6 @@ def omp_params() ->tuple[int,bool]:
     """
     omp_num=c_int64()
     omp_check=c_bool()
-    _lib.openmp_params.argtypes=[POINTER(c_int64),POINTER(c_bool)]
-    _lib.openmp_params.restype=None
     _lib.openmp_params(byref(omp_num),byref(omp_check))
     return omp_num.value,omp_check.value
 
@@ -32,14 +147,6 @@ def gen_ham(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
     assert ham_r.ndim == 3, "ham_r must be a 3‑D array"
     Norb = ham_r.shape[1]
     hamk = np.zeros((Nk, Norb, Norb), dtype=np.complex128)
-    _lib.gen_ham.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
-    ]
-    _lib.gen_ham.restype = None
     _lib.gen_ham(hamk, klist, ham_r, rvec,
                  byref(c_int64(Nk)), byref(c_int64(Nr)), byref(c_int64(Norb)))
     if Ovl_r is not None:
@@ -67,23 +174,8 @@ def get_eig(hamk: np.ndarray, Ovlk: np.ndarray | None = None,
     uni = np.zeros((Nk, Norb, Norb), dtype=np.complex128)
 
     if Ovlk is None:
-        _lib.get_eig.argtypes = [
-            np.ctypeslib.ndpointer(dtype=np.float64),
-            np.ctypeslib.ndpointer(dtype=np.complex128),
-            np.ctypeslib.ndpointer(dtype=np.complex128),
-            POINTER(c_int64), POINTER(c_int64)
-        ]
-        _lib.get_eig.restype = None
         _lib.get_eig(eig, uni, hamk, byref(c_int64(Nk)), byref(c_int64(Norb)))
     else:
-        _lib.get_eig_mlo.argtypes = [
-            np.ctypeslib.ndpointer(dtype=np.float64),
-            np.ctypeslib.ndpointer(dtype=np.complex128),
-            np.ctypeslib.ndpointer(dtype=np.complex128),
-            np.ctypeslib.ndpointer(dtype=np.complex128),
-            POINTER(c_int64), POINTER(c_int64)
-        ]
-        _lib.get_eig_mlo.restype = c_void_p
         _lib.get_eig_mlo(eig, uni, hamk, Ovlk, byref(c_int64(Nk)), byref(c_int64(Norb)))
 
     if sw:
@@ -103,13 +195,6 @@ def get_ffermi(eig: np.ndarray, mu: float, temp: float) -> np.ndarray:
     Nk = len(eig)
     Norb = eig.shape[1]
     ffermi = np.zeros((Nk, Norb), dtype=np.float64)
-    _lib.get_ffermi.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        POINTER(c_double), POINTER(c_double),
-        POINTER(c_int64), POINTER(c_int64)
-    ]
-    _lib.get_ffermi.restype = c_void_p
     _lib.get_ffermi(ffermi, eig, byref(c_double(mu)), byref(c_double(temp)),
                     byref(c_int64(Nk)), byref(c_int64(Norb)))
     return ffermi
@@ -126,14 +211,6 @@ def get_vlm0(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray) -> np.ndarr
     Nk, Nr = len(klist), len(rvec)
     Norb = ham_r.shape[1]
     vk = np.zeros((Nk, Norb, Norb, 3), dtype=np.complex128)
-    _lib.get_vlm0.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
-    ]
-    _lib.get_vlm0.restype = c_void_p
     _lib.get_vlm0(vk, klist, ham_r, rvec,
                   byref(c_int64(Nk)), byref(c_int64(Nr)), byref(c_int64(Norb)))
     return vk
@@ -150,14 +227,6 @@ def get_vk(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray) -> np.ndarray:
     Nk = len(uni)
     Norb = uni.shape[1]
     vk = np.zeros((Nk, Norb, 3), dtype=np.float64)
-    _lib.get_veloc.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        POINTER(c_int64), POINTER(c_int64)
-    ]
-    _lib.get_veloc.restype = c_void_p
     _lib.get_veloc(vk, vk0, mrot, uni, byref(c_int64(Nk)), byref(c_int64(Norb)))
     return vk
 
@@ -173,14 +242,6 @@ def get_vnm(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray) -> np.ndarray:
     Nk = len(uni)
     Norb = uni.shape[1]
     vk = np.zeros((Nk, Norb, Norb, 3), dtype=np.complex128)
-    _lib.get_vnm.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        POINTER(c_int64), POINTER(c_int64)
-    ]
-    _lib.get_vnm.restype = c_void_p
     _lib.get_vnm(vk, vk0, mrot, uni, byref(c_int64(Nk)), byref(c_int64(Norb)))
     return vk
 
@@ -226,14 +287,6 @@ def get_imass0(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray) -> np.nda
     Nk, Nr = len(klist), len(rvec)
     Norb = ham_r.shape[1]
     imass0 = np.zeros((Nk, Norb, Norb, 3, 3), dtype=np.complex128)
-    _lib.get_imass0.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
-    ]
-    _lib.get_imass0.restype = c_void_p
     _lib.get_imass0(imass0, klist, ham_r, rvec,
                     byref(c_int64(Nk)), byref(c_int64(Nr)), byref(c_int64(Norb)))
     return imass0
@@ -250,14 +303,6 @@ def get_imassk(imass0: np.ndarray, mrot: np.ndarray, uni: np.ndarray) -> np.ndar
     Nk = len(uni)
     Norb = uni.shape[1]
     imass = np.zeros((Nk, Norb, 3, 3), dtype=np.float64)
-    _lib.get_imassk.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        POINTER(c_int64), POINTER(c_int64)
-    ]
-    _lib.get_imassk.restype = c_void_p
     _lib.get_imassk(imass, imass0, mrot, uni, byref(c_int64(Nk)), byref(c_int64(Norb)))
     return imass
 
@@ -292,13 +337,6 @@ def get_qshift(klist: np.ndarray, qpoint: np.ndarray) -> np.ndarray:
     """
     Nk = len(klist)
     qshift = np.zeros(Nk, dtype=np.int64)
-    _lib.get_qshift_.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        POINTER(c_int64),
-    ]
-    _lib.get_qshift_.restype = c_void_p
     _lib.get_qshift_(qpoint, klist, qshift, byref(c_int64(Nk)))
     return qshift
 
@@ -312,13 +350,6 @@ def get_iqshift(klist: np.ndarray, qpoint: np.ndarray) -> np.ndarray:
     """
     Nk = len(klist)
     qshift = np.zeros(Nk, dtype=np.int64)
-    _lib.get_iqshift_.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        POINTER(c_int64),
-    ]
-    _lib.get_iqshift_.restype = c_void_p
     _lib.get_iqshift_(qpoint, klist, qshift, byref(c_int64(Nk)))
     return qshift
 
@@ -346,14 +377,6 @@ def gen_irr_k_TRS(Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, np.ndarray, np
     klist = np.zeros((Nk, 3), dtype=np.float64)
     kmap = np.zeros((Nkall, 3), dtype=np.int64)
     invk_ft_list = np.zeros((Nkall, 3), dtype=np.int64)
-    _lib.generate_irr_kpoint_inv.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64)
-    ]
-    _lib.generate_irr_kpoint_inv.restype = None
     _lib.generate_irr_kpoint_inv(klist, kmap, invk_ft_list, byref(c_int64(Nk)),
                                  byref(c_int64(Nx)), byref(c_int64(Ny)), byref(c_int64(Nz)))
     return klist, kmap, invk_ft_list
@@ -368,12 +391,6 @@ def gen_kpoint_weight(invk, Nk):
     """
     Nkall = len(invk)
     weight = np.zeros(Nk, dtype=np.float64)
-    _lib.get_kweight.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        POINTER(c_int64), POINTER(c_int64)
-    ]
-    _lib.get_kweight.restype = None
     _lib.get_kweight(weight, invk, byref(c_int64(Nk)), byref(c_int64(Nkall)))
     return weight
 
@@ -388,13 +405,6 @@ def mkBdGhamk(hamk: np.ndarray, delta: np.ndarray) -> np.ndarray:
     Nk = len(hamk)
     Norb = hamk.shape[1]
     hamBdGk = np.zeros((Nk, 2 * Norb, 2 * Norb), dtype=np.complex128)
-    _lib.mkbdghamk.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        POINTER(c_int64), POINTER(c_int64),
-    ]
-    _lib.mkbdghamk.restype = None
     _lib.mkbdghamk(hamBdGk, hamk, delta, byref(c_int64(Nk)), byref(c_int64(Norb)))
     return hamBdGk
 
@@ -409,12 +419,5 @@ def get_plist(rvec, ham_r):
     Nr = len(rvec)
     Norb = ham_r.shape[1]
     Pmn = np.zeros((Norb, Norb), dtype=np.float64)
-    _lib.get_parity_prop.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        POINTER(c_int64), POINTER(c_int64)
-    ]
-    _lib.get_parity_prop.restype = None
     _lib.get_parity_prop(Pmn, rvec, ham_r, byref(c_int64(Norb)), byref(c_int64(Nr)))
     return np.sign(Pmn[0, :])

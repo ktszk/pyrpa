@@ -11,7 +11,7 @@ from ._wannier_io import output_self_wannier, output_gap_wannier
 
 def calc_chis_spectrum(mu:float, temp:float, Smat, klist, qlist, chiolist, eig, uni, spa_length,
                        Nw:int, Emax:float, delta:float):
-    print("calculate spn susceptibility", flush=True)
+    print("calculate spin susceptibility", flush=True)
     chisw, chisw_orb, wlist = chis_spectrum(mu, temp, Smat, klist, qlist, chiolist, eig, uni, Nw, Emax, delta)
     w, sp = np.meshgrid(wlist, spa_length)
     try:
@@ -154,7 +154,7 @@ def calc_lin_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, chi
             try:
                 npz = np.load('self_en.npz')
                 sigmak, mu_self = npz['arr_0'], npz['arr_1']
-                print("Import sigma form self_en.npz")
+                print("Import sigma from self_en.npz")
             except FileNotFoundError:
                 print("Error: 'self_en.npz' not found", flush=True)
                 return
@@ -252,7 +252,7 @@ def calc_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec,
             try:
                 npz = np.load('self_en.npz')
                 sigmak, mu_self = npz['arr_0'], npz['arr_1']
-                print("Import sigma form self_en.npz")
+                print("Import sigma from self_en.npz")
             except FileNotFoundError:
                 print("Error: 'self_en.npz' not found", flush=True)
                 return

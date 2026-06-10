@@ -107,7 +107,7 @@ at_point=[ 0., .5, 0.]
 orb_dep=False  #use orbital dependence U,J
 Umat=None      #orbital-dependent U matrix (Norb x Norb); set when orb_dep=True
 Jmat=None      #orbital-dependent J matrix (Norb x Norb); set when orb_dep=True
-sw_unit=True    #set unit values unity (False) or not (True)
+sw_unit=True    #True: use physical constants (SI/eV units), False: set all constants to 1 (dimensionless test mode)
 sw_tdf=False
 sw_omega=False #True: real freq, False: Matsubara freq.
 sw_rescale_flex=True #True: rescale self energy to make max|Sigma|~U, False: no rescaling
@@ -150,7 +150,7 @@ except NameError:
     print('alpha_beta_gamma not found, set to 90,90,90')
 alatt=np.array(abc)
 deg=np.array(alpha_beta_gamma)
-if option in {0,4,7,14,22}:
+if option in {0,4,7,10,12,14,20,21,22}: #modes using k_sets/xlabel (symmetry line)
     try:
         k_sets
         xlabel
@@ -346,20 +346,33 @@ def set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist
         return fspolys,fscenters,fscolors
 
 def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu:float,ham_r,S_r,rvec,Emin:float,Emax:float,
-                  delta:float,Nw:int,sw_self=True,selfen=None):
+                  delta:float,Nw:int,sw_self=True):
     klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     wlist=np.linspace(Emin,Emax,Nw)
     if sw_self:
-        Gk0=flibs.gen_Green0(eig,uni,mu,temp,Nw)
-        iwlist=np.pi*temp*(2*np.linspace(0,Nw,Nw,False)+1)*1j
-        Gk=flibs.pade_with_trace(selfen,iwlist,wlist-1j*delta).imag
-        w,x=np.meshgrid(wlist,spa_length)
-        plt.contourf(x,w,Gk,cmap=plt.hot())
+        # Sigma is defined on the FLEX k-mesh, so evaluate it on the k-path by Fourier
+        # interpolation of the Wannier-R self-energy written by output_self_wannier.
+        try:
+            npz=np.load('self_en_wannier.npz')
+        except FileNotFoundError:
+            print("Error: 'self_en_wannier.npz' not found (run FLEX with sw_out_self=True)",flush=True)
+            return
+        sig_r,rvec_s,iw_grid=npz['sigma'],npz['rvec'],npz['iw']
+        mu_self=float(npz['mu'])
+        print(f'chem. pot. with self = {mu_self:.4f} eV',flush=True)
+        # Sigma(k) = sum_R Sigma(R) e^{-2pi i k.R}; Sigma is not Hermitian, so gen_ham cannot be reused
+        phase=np.exp(-2j*np.pi*klist.dot(rvec_s.T))                          # [Nks,Nr]
+        selfen=np.ascontiguousarray(np.einsum('mnwr,kr->mnwk',sig_r,phase))  # [Norb,Norb,Niw,Nks]
+        ham_k=flibs.gen_ham(klist,ham_r,rvec)
+        Gk_mats=flibs.gen_green(selfen,ham_k,mu_self,temp)
+        Niw=min(40,len(iw_grid))  # Pade becomes unstable with too many Matsubara points
+        # A(k,w) = -Im Tr G(k,w+i*delta)
+        Gk=-flibs.pade_with_trace(Gk_mats[:,:,:Niw,:],1j*iw_grid[:Niw],wlist+1j*delta).imag
     else:
         Gk=flibs.gen_tr_Greenw_0(eig,mu,wlist,delta)
-        w,x=np.meshgrid(wlist,spa_length)
-        plt.contourf(x,w,Gk,cmap=plt.hot())
+    w,x=np.meshgrid(wlist,spa_length)
+    plt.contourf(x,w,Gk,cmap=plt.hot())
     for x in xticks[1:-1]:
         plt.axvline(x,ls='-',lw=0.25,color='black')
     plt.xlim(0,spa_length.max())
@@ -454,8 +467,9 @@ def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
         print(f"max tau = {tau.max()} "+('fs' if sw_unit else ''),flush=True)
     if sw_tdf:
         tdf=flibs.calc_tdf(eig,vk,kweight,tau,Nw)
-        wlist=np.linspace(eig.min()-mu,eig.max()-mu,Nw)
+        # absolute-energy grid matching the calc_tdf bins: E_i = emin + i*dw (i=1..Nw)
         dw=(eig.max()-eig.min())/Nw
+        wlist=eig.min()+dw*np.arange(1,Nw+1)
         dfermi=0.25*(1.-np.tanh(0.5*(wlist-mu)/temp)**2)/temp
         K0=(dfermi*tdf.T).T.sum(axis=0)*dw
         K1=(dfermi*(wlist-mu)*tdf.T).T.sum(axis=0)*dw
@@ -473,17 +487,18 @@ def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
         K0_inv = sclin.inv(K0)
         kappa2=gsp*tau_unit*eC*kb*(K2-K1.dot(K0_inv.dot(K1)))*iNV*itemp
         Seebeck=-kb*K0_inv.dot(K1)*itemp
-        Pertier=K1.dot(K0_inv)
+        Peltier=K1.dot(K0_inv)
     except np.linalg.LinAlgError:
-        print("Error: K0 is a singular matrix. Cannot compute Seebeck coefficient and Pertier",flush=True)
+        print("Error: K0 is a singular matrix. Cannot compute Seebeck coefficient and Peltier",flush=True)
         kappa2=kappa.copy()
         Seebeck=np.zeros_like(K0)
-        Pertier=np.zeros_like(K0)
+        Peltier=np.zeros_like(K0)
 
     try:
         sigma_inv = sclin.inv(sigma*temp)
-        Lorenz=kb*kappa*sigma_inv
-        Lorenz2=kb*kappa2*sigma_inv
+        # Lorenz tensor L = kb * kappa . (sigma*T)^-1 (matrix product, not element-wise)
+        Lorenz=kb*kappa.dot(sigma_inv)
+        Lorenz2=kb*kappa2.dot(sigma_inv)
     except np.linalg.LinAlgError:
         print("Warning: sigma*temp is a singular matrix. Cannot compute Lorenz coefficient",flush=True)
         Lorenz=np.zeros_like(sigma)
@@ -505,8 +520,8 @@ def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
     print('Seebeck matrix (V/K)',flush=True)
     for seeb in Seebeck.round(10):
         print(f" {seeb[0]:10.3e} {seeb[1]:10.3e} {seeb[2]:10.3e}",flush=True)
-    print('Pertier matrix (V)',flush=True)
-    for per in Pertier.round(10):
+    print('Peltier matrix (V)',flush=True)
+    for per in Peltier.round(10):
         print(f" {per[0]:10.3e} {per[1]:10.3e} {per[2]:10.3e}",flush=True)
     print('Lorenz matrix (K22 only) (Wohm/K^2) (fe 2.44e-8)',flush=True)
     for lor in Lorenz.round(10):
@@ -522,7 +537,7 @@ def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
                          temp:float,Nw:int,delta,with_spin=False):
     '''
     calculation of linear response theory
-    electric conductivity of LRT correponds to Boltzmann then delta~O(10-1) (tau~1fs) at 300K
+    electric conductivity of LRT corresponds to Boltzmann then delta~O(10-1) (tau~1fs) at 300K
     thermal conductivity and L12 of LRT correspond to Boltzmann then delta~O(10-3) (tau~100fs) at 300K
     '''
     # Parameter validation
@@ -541,7 +556,7 @@ def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
     gsp=(1.0 if with_spin else 2.0) #spin weight
     mu=plibs.calc_mu(eig,Nk,fill,temp)
     print(f'chemical potential = {mu:.4f} eV',flush=True)
-    print(f'tempreture = {temp/kb:.3f} K',flush=True)
+    print(f'temperature = {temp/kb:.3f} K',flush=True)
     print(f'about tau = {1.e15*hbar/delta:.3f} fs',flush=True)
     print(f'delta = {delta:9.3e}',flush=True)
     L11,L12,L22,wlist=plibs.get_conductivity(mu,temp,eig,vk,Nw,Emax,delta)
@@ -567,7 +582,8 @@ def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
         print(f" {sig[0]:10.3e} {sig[1]:10.3e} {sig[2]:10.3e}",flush=True)
     print('Lorenz number (Wohm/K^2) (fe 2.44e-8)',flush=True)
     try:
-        Lorenz_matrix=(kb*kappa[0]*sclin.inv(sigma[0]*temp)).real.round(10)
+        # Lorenz tensor L = kb * kappa . (sigma*T)^-1 (matrix product, not element-wise)
+        Lorenz_matrix=(kb*kappa[0].dot(sclin.inv(sigma[0]*temp))).real.round(10)
         for lor in Lorenz_matrix:
             print(f" {lor[0]:9.2e} {lor[1]:9.2e} {lor[2]:9.2e}",flush=True)
     except np.linalg.LinAlgError:
@@ -968,7 +984,7 @@ def main():
            "calc phi spectrum with symmetry line","calc phi on xy plane at Ecut",
            "calculate chis spectrum on sc","calculate chis at q-point on sc",
            "calc self energy","solve linearized eliashberg equation",
-           "gap_function","calculate carrier number","calculate cycrtron mass",
+           "gap_function","calculate carrier number","calculate cyclotron mass",
            "plot dHvA frequency","calculate electron mass","spectrum with impurity",
            "calculate sigma_cpa",
            "solve nonlinear eliashberg equation"]
@@ -988,8 +1004,8 @@ def main():
         if gap_sym not in {-1, 0, 1, 2, 3}:
             print(f"Warning: gap_sym={gap_sym} is non-standard. Common values: -1,0,1,2,3",flush=True)
 
-    # Validate at_point for chis at q-point calculation
-    if option in {8}:  # chis at q-point
+    # Validate at_point for chis at q-point calculation (normal and SC state)
+    if option in {8,13}:  # chis at q-point
         if len(at_point) != 3:
             print(f"Error: at_point has {len(at_point)} elements. Required: 3 elements",flush=True)
             return
@@ -1157,13 +1173,21 @@ def main():
                 deltak=deltaini_static.copy()
             else:
                 deltak=delta0*deltaini_static/gap_max
-            Nk, klist = plibs.gen_klist(Nx, Ny, Nz)
+            # Full-grid klist in kmap (FFT) order: keeps deltak <-> klist index pairing
+            # consistent, and gives the [0,1) endpoint-free mesh required by get_qshift
+            klist=kmap/np.array([Nx,Ny,Nz],dtype=np.float64)
+            Nk=len(klist)
         elif(isinstance(delta0, np.ndarray) or isinstance(delta0, list)):
-            Nk, klist = plibs.gen_klist(Nx, Ny, Nz)
+            # sw_pp=False: get_qshift requires the periodic [0,1) mesh without endpoints
+            Nk, klist = plibs.gen_klist(Nx, Ny, Nz, sw_pp=False)
             eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
             inigap=plibs.gap_symms(klist,Norb,gap_sym)
             for i,k in enumerate(klist):
-                if(abs(k[0]-k[1])<Nx/2 and abs(k[0]+k[1]+Nx)<Nx/2):
+                # AFM-zone test in centered fractional coords: keep the full gap inside the
+                # M-centered diamond (|kx|+|ky|>=1/2) and damp bands 1,2 inside the
+                # Gamma-centered diamond (|kx|+|ky|<1/2).
+                kc=k-np.round(k)
+                if(abs(kc[0])+abs(kc[1])>=0.5):
                     pass
                 else:
                     inigap[1,i]=inigap[1,i]*.25
@@ -1275,7 +1299,7 @@ def main():
         print(n_carr)
         print(n_carr.sum())
         plibs.get_carrier_num(Nx,rvec,ham_r,S_r,mu,Arot)
-    elif option==18: #calc cycrtron mass
+    elif option==18: #calc cyclotron mass
         get_mass(Nx,rvec,ham_r,S_r,mu)
     elif option==19: #plot dHvA frequency vs angle
         theta_list=np.linspace(0.,90.,40)
@@ -1312,7 +1336,8 @@ def main():
         VA = np.zeros((Norb, Norb), dtype=np.complex128)
         VB = 1.0 * np.eye(Norb, dtype=np.complex128)
         x_cpa = .5
-        Nk, klist = plibs.gen_klist(Nx, Ny, Nz)
+        # sw_pp=False: periodic [0,1) mesh avoids double-counting the BZ boundary in the k-sum
+        Nk, klist = plibs.gen_klist(Nx, Ny, Nz, sw_pp=False)
         hamk = flibs.gen_ham(klist, ham_r, rvec)
         # shift onsite by -mu so that w=0 corresponds to the Fermi level
         hamk[:, range(Norb), range(Norb)] -= mu

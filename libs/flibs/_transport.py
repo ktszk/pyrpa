@@ -2,6 +2,92 @@ from ctypes import *
 import numpy as np
 from ._loader import _lib
 
+# --- ctypes signatures: set once at import.
+# All Fortran entry points are subroutines, so restype is always None.
+_lib.calc_lij.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_double),
+    POINTER(c_double), POINTER(c_double),
+    POINTER(c_double), POINTER(c_double),
+]
+_lib.calc_lij.restype = None
+_lib.calc_lij_wl.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_double),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    POINTER(c_double), POINTER(c_double),
+    POINTER(c_double),
+]
+_lib.calc_lij_wl.restype = None
+_lib.calc_kn.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    POINTER(c_double), POINTER(c_double),
+    POINTER(c_int64), POINTER(c_int64)
+]
+_lib.calc_kn.restype = None
+_lib.calc_sigma_hall.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    POINTER(c_double), POINTER(c_double),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_double)
+]
+_lib.calc_sigma_hall.restype = None
+_lib.calc_tdf.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64)
+]
+_lib.calc_tdf.restype = None
+_lib.get_tau.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    POINTER(c_double), POINTER(c_double),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64)
+]
+_lib.get_tau.restype = None
+_lib.calc_tau_epa.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    POINTER(c_double), POINTER(c_double),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64),
+    np.ctypeslib.ndpointer(dtype=np.int64),
+    POINTER(c_int64), POINTER(c_int64)
+]
+_lib.calc_tau_epa.restype = None
+
 def calc_Lij(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float, w: float,
              idelta: float, temp: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -24,19 +110,6 @@ def calc_Lij(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float, w: 
     L12 = np.zeros((3, 3), dtype=np.complex128)
     L22 = np.zeros((3, 3), dtype=np.complex128)
     eps = idelta * 1e-3
-    _lib.calc_lij.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_double),
-        POINTER(c_double), POINTER(c_double),
-        POINTER(c_double), POINTER(c_double),
-    ]
-    _lib.calc_lij.restype = c_void_p
     _lib.calc_lij(L11, L22, L12, vk, eig, ffermi, byref(c_int64(Norb)), byref(c_int64(Nk)),
                   byref(c_double(mu)), byref(c_double(w)), byref(c_double(idelta)),
                   byref(c_double(eps)), byref(c_double(temp)))
@@ -67,20 +140,6 @@ def calc_Lij_wl(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float,
     L11 = np.zeros((Nw, 3, 3), dtype=np.complex128, order='F')
     L12 = np.zeros((Nw, 3, 3), dtype=np.complex128, order='F')
     L22 = np.zeros((Nw, 3, 3), dtype=np.complex128, order='F')
-    _lib.calc_lij_wl.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.complex128),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_double),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        POINTER(c_double), POINTER(c_double),
-        POINTER(c_double),
-    ]
-    _lib.calc_lij_wl.restype = c_void_p
     _lib.calc_lij_wl(L11, L22, L12, vk, eig, ffermi,
                      byref(c_int64(Norb)), byref(c_int64(Nk)), byref(c_int64(Nw)),
                      byref(c_double(mu)), wl,
@@ -107,18 +166,6 @@ def calc_Kn(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray, temp: float
     K0 = np.zeros((3, 3), dtype=np.float64)
     K1 = np.zeros((3, 3), dtype=np.float64)
     K2 = np.zeros((3, 3), dtype=np.float64)
-    _lib.calc_kn.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        POINTER(c_double), POINTER(c_double),
-        POINTER(c_int64), POINTER(c_int64)
-    ]
-    _lib.calc_kn.restype = c_void_p
     _lib.calc_kn(K0, K1, K2, eig, veloc, kweight, tau, byref(c_double(temp)),
                  byref(c_double(mu)), byref(c_int64(Nk)), byref(c_int64(Norb)))
     return K0, K1, K2
@@ -140,17 +187,6 @@ def calc_sigmahall(eig: np.ndarray, veloc: np.ndarray, imass: np.ndarray,
     Nk = len(eig)
     Norb = eig.shape[1]
     sigma_hall = c_double(0.0)
-    _lib.calc_sigma_hall.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        POINTER(c_double), POINTER(c_double),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_double)
-    ]
-    _lib.calc_sigma_hall.restype = c_void_p
     _lib.calc_sigma_hall(eig, veloc, imass, kweight, tau, byref(c_double(temp)), byref(c_double(mu)),
                          byref(c_int64(Nk)), byref(c_int64(Norb)), byref(sigma_hall))
     return sigma_hall.value
@@ -170,16 +206,6 @@ def calc_tdf(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray,
     Nk = len(eig)
     Norb = eig.shape[1]
     tdf = np.zeros((Nw, 3, 3), dtype=np.float64)
-    _lib.calc_tdf.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64)
-    ]
-    _lib.calc_tdf.restype = c_void_p
     _lib.calc_tdf(tdf, eig, veloc, kweight, tau, byref(c_int64(Nw)),
                   byref(c_int64(Nk)), byref(c_int64(Norb)))
     return tdf
@@ -198,15 +224,6 @@ def get_tau(tauw: np.ndarray, eig: np.ndarray, tau_max: float, tau_mode: int, ep
     Nk, Nw = len(eig), len(tauw)
     Norb = eig.shape[1]
     tau = np.zeros((Nk, Norb), dtype=np.float64)
-    _lib.get_tau.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        POINTER(c_double), POINTER(c_double),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64), POINTER(c_int64)
-    ]
-    _lib.get_tau.restype = c_void_p
     _lib.get_tau(tau, tauw, eig, byref(c_double(tau_max)), byref(c_double(eps)),
                  byref(c_int64(tau_mode)), byref(c_int64(Nk)), byref(c_int64(Nw)),
                  byref(c_int64(Norb)))
@@ -235,20 +252,6 @@ def calc_tau_epa(eig: np.ndarray, gavg: np.ndarray, wavg: np.ndarray,
     nbin_max = int(np.max(nbin))
     tau = np.zeros((Nk, Norb), dtype=np.float64)
     nbin_i64 = np.ascontiguousarray(nbin, dtype=np.int64)
-    _lib.calc_tau_epa.argtypes = [
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        np.ctypeslib.ndpointer(dtype=np.float64),
-        POINTER(c_double), POINTER(c_double),
-        POINTER(c_int64), POINTER(c_int64),
-        POINTER(c_int64),
-        np.ctypeslib.ndpointer(dtype=np.int64),
-        POINTER(c_int64), POINTER(c_int64)
-    ]
-    _lib.calc_tau_epa.restype = c_void_p
     _lib.calc_tau_epa(tau, gavg, wavg, eig, edge, step,
                       byref(c_double(mu)), byref(c_double(temp)),
                       byref(c_int64(Nk)), byref(c_int64(Norb)),

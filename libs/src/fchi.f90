@@ -13,6 +13,8 @@ subroutine get_qshift(qpoint,klist,qshift,Nk) bind(C,name="get_qshift_")
   integer(c_int64_t) :: i1, i2, i3, j1, j2, j3
   integer(c_int64_t), allocatable :: ht_key(:), ht_val(:)
   integer(c_int64_t) :: key, key_t
+  integer(c_int64_t) :: nmiss
+  logical :: found
   real(c_double) :: tmpf(3)
 
   ! Hash-table approach for O(Nk) k+q lookup (vs O(Nk^2) brute force)
@@ -45,7 +47,8 @@ subroutine get_qshift(qpoint,klist,qshift,Nk) bind(C,name="get_qshift_")
   end do
 
   ! Lookup for shifted k = k + qpoint (periodic mod 1)
-  !$omp parallel do private(i1,i2,i3,key_t,h,step,tmpf,j1,j2,j3)
+  nmiss = 0
+  !$omp parallel do private(i1,i2,i3,key_t,h,step,tmpf,j1,j2,j3,found) reduction(+:nmiss)
   do i = 1, Nk
      tmpf(:) = klist(:,i) + qpoint(:)
      do j = 1, 3
@@ -65,16 +68,24 @@ subroutine get_qshift(qpoint,klist,qshift,Nk) bind(C,name="get_qshift_")
      h = mod(abs(key_t), m) + 1_c_int64_t
      step = 1_c_int64_t
      qshift(i) = 1
+     found = .false.
      do while(ht_key(h) /= -1_c_int64_t)
         if(ht_key(h) == key_t) then
            qshift(i) = ht_val(h)
+           found = .true.
            exit
         end if
         h = h + step
         if(h > m) h = h - m
      end do
+     if(.not. found) nmiss = nmiss + 1
   end do
   !$omp end parallel do
+  if(nmiss > 0)then
+     print'(A,I0,A,I0,A)','WARNING(get_qshift): ',nmiss,' of ',Nk,' k+q points not found on the k-mesh.'
+     print'(A)','  klist must be a periodic [0,1) mesh without endpoints (e.g. gen_klist with sw_pp=False).'
+     print'(A)','  Missing points fall back to index 1; the resulting chi/phi is unreliable.'
+  end if
 
   deallocate(ht_key)
   deallocate(ht_val)
@@ -358,6 +369,7 @@ subroutine ckchi_impl(chi,Smat,Cmat,kmap,invk,Nk,Nkall,Nchi,Nw,maxchi0s_out)
   Cmat_c = cmplx(Cmat, 0.0d0, kind=c_double)
   maxchi0s2=-1.0d5
   maxchi0c2=-1.0d5
+  chisk=1; chick=1; chiskall=1; chickall=1  ! defaults in case no eigenvalue exceeds the initial max
   do i=1,Nk
      chi_tmp = chi(i,1,:,:)
      call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),chi_tmp,Nchi,Smat_c,Nchi,(0.0d0,0.0d0),chi0s,Nchi)

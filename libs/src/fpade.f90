@@ -117,6 +117,7 @@ subroutine pade_with_trace(arrayin,arrayout,iwlist,wlist,Nk,Niw,Nw,Norb) bind(C)
   integer(c_int32_t) i,j,k
   complex(c_double),dimension(Nk,Nw):: tmp
 
+  arrayout(:,:)=(0.0d0,0.0d0)  ! accumulated below; do not rely on the caller zeroing it
   do i=1,Norb
      call pade_analytic_continuation_arrays(arrayin(:,:,i,i),tmp,iwlist,wlist,Nk,Niw,Nw)
      do j=1,Nk
