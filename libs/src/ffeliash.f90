@@ -1,6 +1,7 @@
 !non-linear FLEX-Eliashberg equations solver (without SOC)
 subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,kmap,invk,mu,temp,eps,&
-     Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,sw_sigma,sw_Vconst,m_diis) bind(C)
+     Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,sw_sigma,sw_Vconst,m_diis,gap_min,&
+     sw_amp_newton) bind(C)
   !> Non-linear self-consistent FLEX-Eliashberg loop (no SOC).
   !>
   !> One iteration:
@@ -40,13 +41,22 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,kmap,invk,mu,temp
   !!@param   sw_sigma,in: include FLEX self-energy correction
   !!@param   sw_Vconst,in: use constant pairing interaction
   !!@param     m_diis,in: DIIS history depth (m_diis<=1 → linear mixing only)
+  !!@param    gap_min,in: gap-collapse threshold as a fraction of the initial |Δ|max.
+  !!                      When |Δ_new|max drops below gap_min·|Δ_init|max the gap is
+  !!                      decaying toward the trivial solution (T >= Tc): stop early.
+  !!                      Set gap_min<=0 to disable the check.
+  !!@param sw_amp_newton,in: enable amplitude-direction Newton (secant) acceleration.
+  !!                      Near the bifurcated SC fixed point the slow mode is the gap
+  !!                      amplitude a; the shape is relaxed by plain fixed-point
+  !!                      (u=M[Δ]/‖M[Δ]‖) while a is driven by a secant root-find on the
+  !!                      Rayleigh gain g(a)=<Δ,M[Δ]>/<Δ,Δ>=1. Bypasses DIIS when true.
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t,c_bool
   implicit none
   integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,m_diis
   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
   integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
-  logical(c_bool),intent(in):: sw_sigma,sw_Vconst
-  real(c_double),intent(in):: temp,eps,mu
+  logical(c_bool),intent(in):: sw_sigma,sw_Vconst,sw_amp_newton
+  real(c_double),intent(in):: temp,eps,mu,gap_min
   real(c_double),intent(in),dimension(Norb):: prt
   real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
   complex(c_double),intent(in),dimension(Norb,Norb,Nk):: hamk
@@ -57,7 +67,12 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,kmap,invk,mu,temp
   integer(c_int32_t),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
   logical(1) sw_pair
   logical do_pulay
-  real(c_double) weight,maxchi0s_global,delta_diff,delta_norm
+  real(c_double) weight,maxchi0s_global,delta_diff,delta_norm,delta0_max,new_max
+  ! amplitude accelerator state (v0-anchored cubic-pitchfork solve, Phase 1)
+  integer(c_int32_t) amp_phase,npts,n_polish,n_anchor
+  real(c_double) a_cur,a_nxt,g_cur,a1,a2,g1,g2,proj,cfit,lam0
+  real(c_double),parameter:: amp_tol=2.0d-2   ! |g-1| below which the amplitude is "solved"
+  integer(c_int32_t),parameter:: n_polish_max=10   ! DIIS shape-polish steps between re-anchors
   real(c_double),parameter:: pp=0.3d0,eps_reg=1.0d-12   ! linear mixing rate / DIIS regularization
   ! DIIS state
   integer(c_int32_t) m_diis_eff,n_hist,i_hist,n_cur,ih,jh,idx_i,idx_j,info_diis
@@ -65,7 +80,7 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,kmap,invk,mu,temp
   real(c_double),allocatable,dimension(:,:):: B_diis
   real(c_double),allocatable,dimension(:):: rhs_diis
   integer(c_int32_t),allocatable,dimension(:):: ipiv_diis
-  complex(c_double),dimension(Nk,Nw,Norb,Norb):: newdelta,fk,Gk0
+  complex(c_double),dimension(Nk,Nw,Norb,Norb):: newdelta,fk,Gk0,v0
   complex(c_double),allocatable,dimension(:,:,:,:):: Vdelta,Vsigma
 
   ! All FLEX vertex / chi0 routines expect (Nk,Nw,Nchi,Nchi) ordering.
@@ -79,6 +94,15 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,kmap,invk,mu,temp
   allocate(ipiv_diis(m_diis_eff+1))
   n_hist=0
   i_hist=0
+  ! amplitude accelerator: anchor the gap shape to the (normalized) seed eigenvector v0.
+  amp_phase=1
+  npts=0
+  n_polish=0
+  n_anchor=0
+  a1=0.0d0; a2=0.0d0; g1=0.0d0; g2=0.0d0
+  a_cur=sqrt(real(sum(conjg(delta)*delta),kind=c_double))+1.0d-300  ! seed amplitude ‖Δ_init‖
+  v0(:,:,:,:)=delta(:,:,:,:)/a_cur                                  ! unit-norm gap shape
+  if(.not.sw_amp_newton) amp_phase=2   ! skip Phase 1; use DIIS throughout
 
   if(gap_sym>=0)then
      sw_pair=.true.
@@ -99,6 +123,7 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,kmap,invk,mu,temp
   ! get_initial_delta here — using e.g. a converged linear-Eliashberg gap as
   ! initial value is the recommended high-accuracy fast-start.
   Gk0(:,:,:,:)=Gk(:,:,:,:) ! Gk0 starts as bare G_0, may be updated with Σ if sw_sigma
+  delta0_max=maxval(abs(delta))+1.0d-30 ! seed |Δ|max, reference for gap-collapse (T>=Tc) check
   call get_chi_map(chi_map,irr_chi,olist,Nchi)                          ! chi-index symmetry table for FFT loops
   if(sw_Vconst)then
      ! With constant pairing interaction, we only need to compute χ_0_S, χ_0_C once at the very beginning.
@@ -132,7 +157,9 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,kmap,invk,mu,temp
      ! 2. convergence check (raw residual, before mixing)
      delta_diff=maxval(abs(newdelta-delta))
      delta_norm=maxval(abs(delta))+1.0d-30
-     print'(A,E12.4,A,E12.4)','  |Δ_new-Δ|max=',delta_diff,'  rel=',delta_diff/delta_norm
+     new_max=maxval(abs(newdelta))
+     print'(A,E12.4,A,E12.4,A,E12.4)','  |Δ_new-Δ|max=',delta_diff,'  rel=',delta_diff/delta_norm,&
+          '  |Δ_new|max=',new_max
      if(delta_diff/delta_norm<eps)then
         !$omp parallel workshare
         delta(:,:,:,:)=newdelta(:,:,:,:)
@@ -140,8 +167,78 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,kmap,invk,mu,temp
         print'(A,I5)','converged at iter=',i_iter
         exit iter_loop
      end if
+     ! 2b. gap-collapse check: Δ decaying toward the trivial solution (T >= Tc)
+     if(gap_min>0.0d0 .and. new_max<gap_min*delta0_max)then
+        !$omp parallel workshare
+        delta(:,:,:,:)=newdelta(:,:,:,:)
+        !$omp end parallel workshare
+        print'(A,E12.4,A,E12.4,A)','gap collapsed: |Δ_new|max=',new_max,' < ',gap_min*delta0_max,&
+             ' (likely T >= Tc; no SC solution), stopping'
+        exit iter_loop
+     end if
 
-     ! 3. DIIS / linear mixing update of delta
+     ! 3. adaptive re-anchor: after n_polish_max DIIS shape-polish steps, adopt the
+     !    relaxed shape as the new anchor v0 and re-solve the amplitude. This re-locks
+     !    the amplitude (which otherwise wobbles during the DIIS polish) and projects out
+     !    any negative-mode contamination, while v0 keeps improving toward the true shape.
+     if(sw_amp_newton .and. amp_phase==2 .and. n_polish>=n_polish_max)then
+        a_cur=sqrt(real(sum(conjg(delta)*delta),kind=c_double))+1.0d-300
+        !$omp parallel workshare
+        v0(:,:,:,:)=delta(:,:,:,:)/a_cur                   ! re-anchor to current relaxed shape
+        !$omp end parallel workshare
+        npts=0; a1=0.0d0; a2=0.0d0; g1=0.0d0; g2=0.0d0
+        amp_phase=1
+        n_anchor=n_anchor+1
+        print'(A,I0,A)','  re-anchor #',n_anchor,': v0 <- relaxed shape, re-solving amplitude'
+     end if
+     ! 3'. update of delta
+     if(amp_phase==1)then
+        ! ---- Phase 1: v0-anchored cubic-pitchfork amplitude solve ---------------
+        ! The gap shape is held at the linearized eigenvector v0 (Δ=a·v0), which kills
+        ! the drift toward the unphysical negative eigenmode. Only the scalar amplitude
+        ! a is solved. The v0-projected gain g(a)=<v0,M[a v0]>/a follows the pitchfork
+        ! form g(a)=λ0-c·a^2 near threshold; the SC amplitude is the root of g(a)=1,
+        ! a*=sqrt((λ0-1)/c). λ0 and c are fit from two probed amplitudes, then a jumps
+        ! to a*. Once |g-1|<amp_tol the amplitude is solved and we switch to DIIS
+        ! (Phase 2) to relax the shape (the v0-perpendicular component) to convergence.
+        ! newdelta = M[a_cur·v0]; current iterate Δ = a_cur·v0, so <v0,Δ>=a_cur.
+        proj =real(sum(conjg(v0)*newdelta),kind=c_double)
+        g_cur=proj/a_cur                                  ! gain g(a_cur) along v0
+        a2=a1; g2=g1; a1=a_cur; g1=g_cur; npts=min(npts+1,2)
+        if(npts>=2 .and. abs(a1*a1-a2*a2)>1.0d-30)then
+           cfit=(g1-g2)/(a2*a2-a1*a1)                      ! g=λ0-c·a^2  (slope in a^2)
+           lam0=g1+cfit*a1*a1
+           if(cfit>1.0d-12 .and. lam0>1.0d0)then
+              a_nxt=sqrt((lam0-1.0d0)/cfit)                ! cubic-pitchfork root g(a*)=1
+              a_nxt=min(max(a_nxt,0.3d0*a_cur),3.0d0*a_cur)
+              print'(A,F9.4,A,F9.4,A,F9.4,A,E11.4,A,E11.4)','  amp[P1 fit]: g=',g_cur,&
+                   ' lam0=',lam0,' c=',cfit,'  a=',a_cur,' -> ',a_nxt
+           else
+              a_nxt=0.5d0*a_cur                            ! no positive root (T>=Tc): shrink
+              print'(A,F9.4,A,E11.4,A,E11.4)','  amp[P1 shrink]: g=',g_cur,'  a=',a_cur,' -> ',a_nxt
+           end if
+        else
+           if(abs(g_cur-1.0d0)<0.2d0)then
+              a_nxt=0.9d0*a_cur                            ! gentle probe near solution (re-anchor)
+           else
+              a_nxt=0.6d0*a_cur                            ! probe a second amplitude
+           end if
+           print'(A,F9.4,A,E11.4,A,E11.4)','  amp[P1 probe]: g=',g_cur,'  a=',a_cur,' -> ',a_nxt
+        end if
+        if(abs(g_cur-1.0d0)<amp_tol)then
+           amp_phase=2                                     ! amplitude solved -> DIIS shape polish
+           a_nxt=a_cur
+           n_polish=0
+           n_hist=0; i_hist=0                              ! fresh DIIS history on the (re)anchored shape
+           print'(A,F9.5,A)','  amplitude solved (g=',g_cur,'); DIIS shape polish'
+        end if
+        !$omp parallel workshare
+        delta(:,:,:,:)=a_nxt*v0(:,:,:,:)                   ! force shape=v0, amplitude=a_nxt
+        !$omp end parallel workshare
+        a_cur=a_nxt
+        go to 100   ! skip DIIS block this iteration
+     end if
+     ! 3'. DIIS / linear mixing update of delta (Phase 2, or sw_amp_newton=False)
      i_hist=mod(i_hist,m_diis_eff)+1
      n_hist=min(n_hist+1,m_diis_eff)
      n_cur=n_hist
@@ -189,9 +286,11 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,kmap,invk,mu,temp
         delta(:,:,:,:)=pp*newdelta(:,:,:,:)+(1.0d0-pp)*delta(:,:,:,:)
         !$omp end parallel workshare
      end if
+     n_polish=n_polish+1   ! count DIIS shape-polish steps since last (re)anchor
 
+100  continue   ! resume point for amplitude-Newton path (skips DIIS block)
      ! 4. update Σ and dressed G_0 (FLEX self-energy)
-     if(sw_sigma)then 
+     if(sw_sigma)then
         call calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,&
              Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
         call gen_green_inv(Gk0,sigmak,hamk,mu,temp,Nk,Nw,Norb)             ! Gk0 := G_0^-1 - Σ
