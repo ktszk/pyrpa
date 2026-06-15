@@ -260,9 +260,10 @@ def calc_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec,
             sigmak, mu_self = flibs.mkself(Smat, Cmat, kmap, invk, chiolist, ham_k, eig, uni,
                                            mu, fill, temp, Nw, Nx, Ny, Nz, sw_out_self, sw_in_self,
                                            eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale)
-        print(f'chem. pot. with self= {mu:.4f} eV', flush=True)
+        print(f'chem. pot. with self= {mu_self:.4f} eV', flush=True)
         Gk = flibs.gen_green(sigmak, ham_k, mu_self, temp)
     else:
+        mu_self = mu
         Gk = flibs.gen_Green0(eig, uni, mu, temp, Nw)
     delta_init_band = get_initial_gap(klist, len(eig.T), gap_sym)
     # Use linearized Eliashberg to obtain a symmetry-correct initial gap.
@@ -282,7 +283,7 @@ def calc_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec,
     else:
         print("Warning: initial gap is zero; skip Tc-based scaling", flush=True)
     delta, sigmak = flibs.nonlinear_eliashberg(delta_init, Gk, ham_k, Smat, Cmat, chiolist, plist,
-                                               kmap, invk, mu, temp, gap_sym, Nx, Ny, Nz,
+                                               kmap, invk, mu_self, temp, gap_sym, Nx, Ny, Nz,
                                                sw_sigma=sw_self, sw_Vconst=True, eps=eps, m_diis=m_diis)
     if sw_out_self:
         np.save('gap', delta)

@@ -24,9 +24,9 @@ else: monoclinic
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
 #fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
-fname,ftype,brav,sw_soc='inputs/000AsP.input',1,0,False
+#fname,ftype,brav,sw_soc='inputs/000AsP.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/FeS',2,0,False
-#fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
+fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2_soc.input',1,0,True
 #fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
 #fname,ftype,brav,sw_soc='inputs/square_soc.hop',1,0,True
@@ -64,10 +64,12 @@ class ColorMode(IntEnum):
     ORBITAL = 1
     VELOCITY= 2
 
-option=CalcMode.CHIS_QPOINT_SC
+#option=CalcMode.CHIS_QPOINT_SC
+option=CalcMode.NONLIN_ELIASHBERG
 color_option=ColorMode.VELOCITY
 
-Nx,Ny,Nz,Nw=256,256,4,200 #k and energy(or matsubara freq.) mesh size
+#Nx,Ny,Nz,Nw=256,256,4,200 #k and energy(or matsubara freq.) mesh size
+Nx,Ny,Nz,Nw=32,32,2,512
 kmesh=200               #kmesh for spaghetti plot
 kscale=[1.0,1.0,1.0]
 kz=0.0
@@ -77,8 +79,8 @@ kz=0.0
 abc=[3.68,3.68,5.03]
 #alpha_beta_gamma=[90.,90.,90]
 #temp=2.0e-2 #2.59e-2
-tempK=100 #Kelvin
-fill= 2.9375
+tempK=85 #Kelvin
+fill= 1.0 #2.9375
 #site_prof=[5]
 
 Emin,Emax=-3,1.
@@ -88,17 +90,18 @@ tau_const=100
 olist=[0,0,0]
 #olist=[0,[1,2],3]
 #U,J=0.,0.
-U,J= 0.2, 0.025
+#U,J= 0.2, 0.025
 #U,J= 0.4, 0.05
-#U,J=1.2,0.15
+#U,J= 0.6, 0.075
+U,J=1.2,0.15
 #U,J=1.8,0.225
 #0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py
-gap_sym=0
+gap_sym=1
 
 #use calculation of magnetic susceptibility at superconducting state
 #delta0=1.e-2 #maximum gap size for calculating susceptibility in SC state; set to 0 for normal state
 d0=1.e-1
-delta0=[0.,d0*2.,d0,-d0,0.]
+delta0=[0.,d0*2.,d0*3.,-d0,0.]
 #mu0=9.85114560061123
 #k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
 #xlabel=[r'$\Gamma$','X','M']
@@ -1190,7 +1193,7 @@ def main():
                 if(abs(kc[0])+abs(kc[1])>=0.5):
                     pass
                 else:
-                    inigap[1,i]=inigap[1,i]*.25
+                    inigap[1,i]=inigap[1,i]*.5
                     inigap[2,i]=inigap[2,i]*.5
             # delta0 is per-band [Norb]; broadcast over k: (inigap.T)[Nk,Norb] * delta0[Norb] → [Norb,Nk]
             deltaini=(inigap.T*np.array(delta0,dtype=np.complex128)).T
@@ -1255,7 +1258,7 @@ def main():
                 for iw,ic in zip(wlist,chis_orb):
                     f.write(f"{iw:5.3f}, ")
                     for cso in ic:
-                        f.write(f"{cso.imag:12.8f}, {cso.real:12.8f} ")
+                        f.write(f"{cso.imag:12.8f}, ")
                     f.write("\n")
     elif option in {14,15,16}: #flex/eliashberg calculations
         if sw_soc: #with soc

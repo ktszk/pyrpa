@@ -66,7 +66,9 @@ _lib.eliashberg.argtypes = [
     POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),     # Ny, Nz, itemax
     POINTER(c_int64),                                         # gap_sym
     POINTER(c_bool), POINTER(c_bool),                         # sw_sigma,sw_Vconst
-    POINTER(c_int64),                                          # m_diis
+    POINTER(c_int64),                                         # m_diis
+    POINTER(c_double),                                        # gap_min
+    POINTER(c_bool),                                          # sw_amp_newton
 ]
 _lib.eliashberg.restype = None
 _lib.conv_delta_orb_to_band.argtypes = [
@@ -223,7 +225,9 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
                          invk: np.ndarray, mu: float, temp: float, gap_sym: int,
                          Nx: int, Ny: int, Nz: int,
                          sw_sigma: bool = False, sw_Vconst: bool = False, eps: float = 1.0e-4,
-                         itemax: int = 100, m_diis: int = 5) -> tuple[np.ndarray, np.ndarray]:
+                         itemax: int = 100, m_diis: int = 5,
+                         gap_min: float = 1.0e-2,
+                         sw_amp_newton: bool = True) -> tuple[np.ndarray, np.ndarray]:
     """
     @fn nonlinear_eliashberg
     @brief Solve the non-linear FLEX-Eliashberg self-consistency loop (no SOC).
@@ -259,6 +263,20 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
     @param         eps: Convergence threshold on |Δ_new-Δ|/|Δ|
     @param      itemax: Maximum SCF iterations
     @param      m_diis: DIIS history length (m_diis<=1 → linear mixing only; default 5)
+    @param     gap_min: Gap-collapse cutoff as a fraction of the initial |Δ|max (default 1e-2).
+                        The loop stops early once |Δ|max falls below gap_min·|Δ_init|max,
+                        i.e. the gap is decaying toward the trivial solution (T >= Tc).
+                        Set gap_min<=0 to disable the early stop.
+    @param sw_amp_newton: Enable the amplitude accelerator with adaptive anchoring (default True).
+                        Near the bifurcated SC fixed point the slow mode is the gap amplitude.
+                        The gap shape is anchored to the (normalized) seed eigenvector v0 (Δ=a·v0),
+                        which suppresses drift onto the unphysical negative eigenmode; the v0-
+                        projected gain g(a)=<v0,M[a v0]>/a follows the pitchfork form g(a)=λ0-c·a²,
+                        and the amplitude is solved by the cubic root a*=sqrt((λ0-1)/c) (Phase 1).
+                        Once |g-1|<2% it switches to DIIS to relax the shape (Phase 2), and after a
+                        few polish steps re-anchors v0 to the relaxed shape and re-solves a
+                        (adaptive anchoring), alternating until converged. Set False to use plain
+                        DIIS/linear mixing throughout (uses m_diis).
     @retval      delta: Converged gap function [Norb, Norb, Nw, Nk] complex128
                         (same array as delta_init when contiguous; otherwise a new copy)
     @retval     sigmak: FLEX self-energy [Norb, Norb, Nw, Nk] complex128
@@ -278,7 +296,8 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
                     byref(c_int64(Nchi)), byref(c_int64(Norb)), byref(c_int64(Nx)),
                     byref(c_int64(Ny)), byref(c_int64(Nz)), byref(c_int64(itemax)),
                     byref(c_int64(gap_sym)), byref(c_bool(sw_sigma)), byref(c_bool(sw_Vconst)),
-                    byref(c_int64(m_diis)))
+                    byref(c_int64(m_diis)), byref(c_double(gap_min)),
+                    byref(c_bool(sw_amp_newton)))
     return delta, sigmak
 
 def conv_delta_orb_to_band(delta: np.ndarray, uni: np.ndarray, invk: np.ndarray,
