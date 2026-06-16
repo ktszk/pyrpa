@@ -176,11 +176,21 @@ Assumes a non-zero gap function $Delta(bold(k))$ and constructs the irreducible 
 
 $ chi_0^"SC" = chi^"GG" plus.minus chi^"FF" $
 
-The dynamic spin susceptibility $chi_s^"SC" = chi_0^"SC" \/ (1 - S chi_0^"SC")$ is then obtained by RPA and plotted along the symmetry line. The maximum gap amplitude is set by `delta0` (meV scale recommended), and the initial gap symmetry by `gap_sym` (negative values for triplet). Output: `chis_sc_spec.png`.
+The dynamic spin susceptibility $chi_s^"SC" = chi_0^"SC" \/ (1 - S chi_0^"SC")$ is then obtained by RPA and plotted along the symmetry line. The initial gap symmetry is set by `gap_sym` (negative values for triplet). Output: `chis_sc_spec.png`.
+
+The initial gap amplitude `delta0` can be specified in two ways (see also the parameter reference below):
+- A single float (e.g. `delta0=1.e-2`): a single-band gap shape is generated internally and scaled to this maximum amplitude across all bands.
+- A list of per-band values of length `Norb` (e.g. `delta0=[0.,0.2,0.3,-0.1,0.]`): enables *multi-gap* mode, where each band gets its own amplitude and sign. Mixing signs lets you represent sign-changing gaps such as $s^plus.minus$, as is common in multiband (e.g. Fe-based) superconductors.
 
 === option=13: SC-State Spin Susceptibility at a $bold(q)$ Point (`CHIS_QPOINT_SC`)
 
-Same SC framework as option=12, but evaluates $chi_s^"SC"(bold(q), omega)$ at the single $bold(q)$ specified by `at_point`.
+Same SC framework as option=12, but evaluates $chi_s^"SC"(bold(q), omega)$ at the single $bold(q)$ specified by `at_point`. `delta0` is specified the same way as in option=12.
+
+This mode additionally produces:
+
+- The BdG (Bogoliubov–de Gennes) band dispersion along $bold(k) = (0,0,0) arrow.r (0,0.5,0)$ (`BdG_band.png`)
+- The orbital-traced $chi_s^"SC"(omega)$ (`chisq.png`, `chis_sc.dat`)
+- The orbital-resolved $chi_s^"SC"(omega)$ (`chisq_orb.png`, `chis_scorb.dat`)
 
 === option=14: FLEX Self-Energy (`FLEX`)
 
@@ -241,11 +251,20 @@ Solves the Coherent Potential Approximation (CPA) self-consistency for an alloy 
 
 Solves the fully nonlinear (self-consistent) SC FLEX-Eliashberg loop. Unlike the linearized solver, $Delta$ is allowed to grow to a finite amplitude below $T_c$, and the SC Dyson equations are iterated together with the FLEX self-energy and anomalous bubble.
 
-- Each iteration: $Delta_"new" = T \/ N_k sum V_Delta dot F$ → DIIS mixing → update $Sigma$ → SC Dyson updates of $G, F$ → recompute $V_sigma, V_Delta$ from $chi^"GG", chi^"FF"$
-- `m_diis_num`: DIIS history length ($>= 2$ enables Pulay extrapolation; otherwise linear mixing pp=0.3)
+The initial gap is now generated automatically inside the solver — there is no need to run option=15 beforehand to produce a `gap.npy` file.
+
+1. The linearized Eliashberg equation is first solved internally to obtain the Stoner factor $S$ and the largest eigenvalue $lambda_"eliash"$.
+   - If $S >= 1$ (SDW/CDW instability), the routine stops before entering the nonlinear loop.
+   - If $lambda_"eliash" < 1$ ($T >= T_c$, no SC instability), the routine also stops.
+   - If `sw_check_only=True`, the routine stops here and only reports $S$ and $lambda_"eliash"$ — useful for quickly scanning temperature to bracket $T_c$ without running the expensive nonlinear loop.
+2. The symmetry-correct shape from this linear eigenvector is kept, and its amplitude is rescaled to the BCS weak-coupling value $Delta_0 = 1.764 k_upright(B) T_c$ before entering the nonlinear loop.
+3. Each iteration: $Delta_"new" = T \/ N_k sum V_Delta dot F$ → amplitude-direction Newton (secant) acceleration + DIIS shape mixing (falls back to linear mixing pp=0.3 when bypassed) → update $Sigma$ → SC Dyson updates of $G, F$ → recompute $V_sigma, V_Delta$ from $chi^"GG", chi^"FF"$
+
+- `m_diis_num`: DIIS history length ($>= 2$ enables Pulay extrapolation; otherwise linear mixing)
 - `sw_self=True`: include FLEX self-energy via the $Sigma$-dressed Green's function
 - `sw_from_file=True`: read self-energy from `sigma.bin`
-- A converged linear-Eliashberg gap function is recommended as the initial $Delta$ (loaded from `gap.npy` by the caller)
+- `sw_check_only`: see "Switch Variables" below
+- Amplitude-direction Newton acceleration speeds up convergence of the gap magnitude (see the `sw_amp_newton` comments in `libs/src/ffeliash.f90`)
 - See `libs/src/ffeliash.f90` for implementation details
 
 = Color Plot Settings (`color_option`)
@@ -315,7 +334,9 @@ This section explains all parameters in the upper part of `main.py`, including t
 
 - `Ecut` (float, unit: eV): Fixed energy $omega_0$ for $bold(q)$-space susceptibility maps (option=9,11). Set near zero to probe the Fermi surface region.
 
-- `delta0` (float, unit: eV): Maximum amplitude of the initial gap function for SC-chi calculations (option=12,13). Physically corresponds to the SC gap size (typical: $10^{-3}$–$10^{-2}$ eV ≈ 1–10 meV). Setting it to 0 reduces to the normal-state calculation.
+- `delta0` (float, or a list of length `Norb`, unit: eV): Amplitude of the initial gap function for SC-chi calculations (option=12,13). Physically corresponds to the SC gap size (typical: $10^{-3}$–$10^{-2}$ eV ≈ 1–10 meV).
+  - As a float: a single internally-generated gap shape (common to all bands) is scaled to this maximum amplitude. Setting it to 0 reduces to the normal-state calculation.
+  - As a list (e.g. `delta0=[0.,0.2,0.3,-0.1,0.]`): enables multi-gap mode, where each band's amplitude and sign are set independently — use this to represent sign-changing gaps such as $s^plus.minus$.
 
 === Transport Parameters
 
@@ -337,7 +358,7 @@ This section explains all parameters in the upper part of `main.py`, including t
 
 === Initial Gap Function Symmetry (`gap_sym`)
 
-Specifies the symmetry of the initial gap function when solving the Eliashberg equation (option=13).
+Specifies the symmetry of the initial gap function when solving the Eliashberg equation (option=15,23), or when generating the initial gap shape for the SC-chi calculations (option=12,13).
 
 #table(
   columns: (auto, 1fr),
@@ -375,6 +396,8 @@ Specifies the symmetry of the initial gap function when solving the Eliashberg e
 - `sw_in_self` (bool): If `True`, the previous FLEX self-energy is loaded from `sigma.bin` as the initial guess for the iterative self-consistent loop.
 
 - `sw_from_file` (bool): If `True`, the self-energy is read from `sigma.bin` and the FLEX calculation is skipped. The Eliashberg equation is then solved directly with this pre-computed self-energy.
+
+- `sw_check_only` (bool): Used only by option=23 (nonlinear Eliashberg). If `True`, the routine stops right after the internal linearized-Eliashberg solve (reporting the Stoner factor $S$ and eigenvalue $lambda_"eliash"$) without running the nonlinear loop — handy for quickly bracketing $T_c$ via a temperature scan. Regardless of this flag, the nonlinear loop is also skipped automatically whenever $S >= 1$ or $lambda_"eliash" < 1$.
 
 - `sw_rescale_flex` (bool): For FLEX (option=14), dynamically rescale the self-energy when max$|Sigma|$ approaches `U` to prevent divergence. Useful when the Stoner factor is close to 1.
 
@@ -436,22 +459,28 @@ sw_from_file = True
 
 === Nonlinear Eliashberg (Self-Consistent SC Loop)
 
-To grow $Delta$ to a finite amplitude below the temperature where the linearized Eliashberg eigenvalue reaches $lambda approx 1$, use option=23.
+To grow $Delta$ to a finite amplitude below the temperature where the linearized Eliashberg eigenvalue reaches $lambda approx 1$, use option=23. The initial $Delta$ (symmetry shape and BCS-scaled amplitude) is generated automatically inside the solver, so there is no need to run option=15 first to produce a `gap.npy` file.
 
 ```python
-# Step 1: linear Eliashberg to obtain initial gap
-option = 15
+# First, use sw_check_only=True to locate Tc without running the nonlinear loop
+option = 23
 gap_sym = 1
-sw_out_self = True
+sw_self = True            # include FLEX self-energy
+sw_from_file = True
+sw_check_only = True
+```
 
-# Step 2: nonlinear Eliashberg loop
+The Stoner factor $S$ and eigenvalue $lambda_"eliash"$ are printed to stdout. Once you have lowered the temperature enough that $lambda_"eliash" > 1$, run the nonlinear loop with `sw_check_only=False`.
+
+```python
 option = 23
 sw_self = True            # include FLEX self-energy
 sw_from_file = True
-m_diis_num = 5            # DIIS Pulay acceleration
+sw_check_only = False
+m_diis_num = 5            # DIIS Pulay acceleration + amplitude-direction Newton acceleration
 ```
 
-The nonlinear loop reads `gap.npy` from the previous step as its initial $Delta$. At low temperatures ($T tilde.equiv T_c \/ 5$), increasing the DIIS history to 5–10 typically accelerates convergence.
+At low temperatures ($T tilde.equiv T_c \/ 5$), increasing the DIIS history to 5–10 typically accelerates convergence.
 
 === Dynamic Spin Susceptibility in the SC State
 
@@ -477,7 +506,7 @@ Setting `option = 13` instead computes $chi_s^"SC"(omega)$ at the single $bold(q
 
 - *Linear Eliashberg does not converge*: Try reducing `U`, increasing `tempK`, or using a finer mesh (`Nx, Ny, Nz`). If the eigenvalue $lambda$ exceeds 1, the system is inside the superconducting phase at that temperature.
 
-- *Nonlinear Eliashberg diverges*: Provide an initial $Delta$ from a converged linear Eliashberg run, increase `m_diis_num` to 5–10, raise `tempK`, or increase `Nw`. If the Stoner factor (printed as `SDW` in the log) exceeds 1, the system is magnetically unstable and `U` must be reduced.
+- *Nonlinear Eliashberg diverges*: Increase `m_diis_num` to 5–10, raise `tempK`, or increase `Nw`. Running with `sw_check_only=True` first to inspect the Stoner factor $S$ and eigenvalue $lambda_"eliash"$ is also useful. If $S$ exceeds 1, the system is magnetically unstable and `U` must be reduced; if $lambda_"eliash" < 1$, you are still above $T_c$ and need to lower the temperature (in either case the nonlinear loop is skipped automatically).
 
 - *FLEX self-energy diverges*: Set `sw_rescale_flex=True` or reduce `U`.
 
