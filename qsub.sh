@@ -18,11 +18,11 @@
 ##PBS -l nodes=1:ppn=16
 #Slurm settings
 #SBATCH -p salmon
-#SBATCH -J job_name
+#SBATCH -J eliash_vconst
 #SBATCH -c 16
 #SBATCH -o out.o
 #SBATCH -e out.o
 
-#export OMP_NUM_THREADS=32
+export OMP_NUM_THREADS=16
 #cd $PBS_O_WORKDIR
 python main.py

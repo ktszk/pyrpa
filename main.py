@@ -65,7 +65,7 @@ class ColorMode(IntEnum):
     VELOCITY= 2
 
 #option=CalcMode.CHIS_QPOINT_SC
-option=CalcMode.NONLIN_ELIASHBERG
+option=CalcMode.LIN_ELIASHBERG
 color_option=ColorMode.VELOCITY
 
 #Nx,Ny,Nz,Nw=256,256,4,200 #k and energy(or matsubara freq.) mesh size
@@ -118,6 +118,7 @@ sw_self=False  #True: use calculated self energy for spectrum band plot
 sw_out_self=True
 sw_in_self=False
 sw_from_file=False
+sw_check_only=False #True: stop after linear Eliashberg (also stops if Stoner factor>=1 or lambda<1)
 #------------------------ initial parameters are above -------------------------------
 #----------------------------------main functions-------------------------------------
 #-------------------------------- import packages ------------------------------------
@@ -1030,9 +1031,13 @@ def main():
                 site_prof
             except NameError:
                 site_prof=[1] #one site (len(site_prof)=1)
+            # Build the orbital-pair basis once here so every response/Eliashberg branch
+            # shares the same indexing convention when passing chi objects to Fortran.
             chiolist,site=plibs.get_chi_orb_list(len(ham_r[0]),site_prof)
         if option in {7,8,9,12,13}:
             print("generate coulomb vertex matrix S")
+            # Susceptibility branches only need the static interaction vertex; FLEX/Eliashberg
+            # rebuild their own matrices inside the dedicated solvers.
             if orb_dep:
                 Smat,Cmat=flibs.gen_SCmatrix_orb(chiolist,site,Umat,Jmat)
             else:
@@ -1102,7 +1107,8 @@ def main():
         plt.ylim(0,max(Dos.sum(axis=0))*1.2)
         plt.show()
     elif option==2: #2D Fermi surface plot
-        klist,blist=plibs.mk_kf(Nx,rvec,ham_r,S_r,RotMat,mu,kz)
+        eig2d=plibs.get_eigs_2d(Nx,rvec,ham_r,S_r,RotMat,kz)
+        klist,blist=plibs.get_kf_points(eig2d,Nx,mu,kz)
         clist=plibs.get_colors(klist,blist,ihbar*avec.T,rvec,ham_r,S_r,olist,color_option,True)
         plot_FS(clist,klist,color_option)
     elif option==3: #3D Fermi surface plot
@@ -1123,11 +1129,11 @@ def main():
             print("generate qlist",flush=True)
             qlist,spa_length,xticks=plibs.mk_qlist(k_sets,Nx,Ny,Nz,bvec)
             if option==7:
-                w,sp,sus=plibs.calc_chis_spectrum(mu,temp,Smat,klist,qlist,chiolist,eig,uni,spa_length,Nw,Emax,delta)
+                w,sp,sus=plibs.calc_path_spectrum('chis',mu,temp,klist,qlist,chiolist,eig,uni,spa_length,Nw,Emax,delta,Smat)
                 print("write chis spectrum in png file",flush=True)
                 susfname='chis_spec.png'
             elif option==10:
-                w,sp,sus=plibs.calc_phi_spectrum(mu,temp,klist,qlist,chiolist,eig,uni,spa_length,Nw,Emax,delta)
+                w,sp,sus=plibs.calc_path_spectrum('phi',mu,temp,klist,qlist,chiolist,eig,uni,spa_length,Nw,Emax,delta)
                 print("write phi spectrum in png file",flush=True)
                 susfname='phi_spec.png'
             plt.contourf(sp,w,abs(sus.imag),100)
@@ -1382,7 +1388,8 @@ def main():
                                  mu,temp,gap_sym,sw_self,
                                  orb_dep,U,J,fill,sw_from_file,sw_out_self,sw_in_self,
                                  Umat if orb_dep else None,Jmat if orb_dep else None,
-                                 m_diis=m_diis_num,sw_rescale=sw_rescale_flex)
+                                 m_diis=m_diis_num,sw_rescale=sw_rescale_flex,
+                                 sw_check_only=sw_check_only)
 
 if __name__=="__main__":
     main()

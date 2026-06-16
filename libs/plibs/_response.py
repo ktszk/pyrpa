@@ -7,6 +7,109 @@ import numpy as np
 import libs.flibs as flibs
 
 
+class _NullPathWriter:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def begin_q(self, i: int, q: np.ndarray) -> None:
+        return
+
+    def write_trace(self, i: int, wlist: np.ndarray, trace: np.ndarray) -> None:
+        return
+
+
+class _PathWriter:
+    def __init__(self, q_path: str = 'writeq.dat', trace_path: str | None = None,
+                 trace_formatter=None):
+        self.q_path = q_path
+        self.trace_path = trace_path
+        self.trace_formatter = trace_formatter or self._default_trace_formatter
+        self._qfile = None
+        self._trace_file = None
+
+    @staticmethod
+    def _default_trace_formatter(i: int, w: float, trval: complex) -> str:
+        return f'{i:8.4f} {w:8.4f} {trval.imag:9.4f} {trval.real:9.4f}\n'
+
+    def __enter__(self):
+        self._qfile = open(self.q_path, 'w')
+        if self.trace_path is not None:
+            self._trace_file = open(self.trace_path, 'w')
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._trace_file is not None:
+            self._trace_file.close()
+        if self._qfile is not None:
+            self._qfile.close()
+        return False
+
+    def begin_q(self, i: int, q: np.ndarray) -> None:
+        self._qfile.write(f'{i:d} {q[0]:5.3f} {q[1]:5.3f} {q[2]:5.3f}\n')
+        self._qfile.flush()
+
+    def write_trace(self, i: int, wlist: np.ndarray, trace: np.ndarray) -> None:
+        if self._trace_file is None:
+            return
+        for w, trval in zip(wlist, trace):
+            self._trace_file.write(self.trace_formatter(i, w, trval))
+        self._trace_file.write('\n')
+        self._trace_file.flush()
+
+
+def _solve_chis_path(qlist: np.ndarray, wlist: np.ndarray, olist: np.ndarray, Smat: np.ndarray,
+                     chi0_builder, writer=None) -> tuple[np.ndarray, np.ndarray]:
+    chisq=[]
+    chis_orbq=[]
+    writer = _NullPathWriter() if writer is None else writer
+    with writer:
+        for i,q in enumerate(qlist):
+            writer.begin_q(i, q)
+            chi0=chi0_builder(q)
+            chis=flibs.get_chis(chi0,Smat)
+            trchis,trchi0,chis_orb=flibs.get_tr_chi(chis,chi0,olist)
+            chisq.append(trchis)
+            chis_orbq.append(chis_orb)
+            writer.write_trace(i, wlist, trchi0)
+    return np.array(chisq),np.array(chis_orbq)
+
+
+def _prepare_sc_chi0_builder(hamk: np.ndarray, delta_k: np.ndarray, mu: float, temp: float,
+                             klist: np.ndarray, olist: np.ndarray, wlist: np.ndarray,
+                             idelta: float, sw_spsym: bool):
+    Norb=hamk.shape[1]
+    eig_BdG,uni_BdG=flibs.get_eig(flibs.mkBdGhamk(hamk - mu * np.eye(Norb), delta_k))
+    # mu=0: chemical potential is already absorbed into hamBdGk (hamk - mu*I), so BdG
+    # quasi-particle energies are measured from zero and the Fermi level is at 0.
+    ffermi_BdG=flibs.get_ffermi(eig_BdG,0.,temp)
+
+    def chi0_builder(q: np.ndarray) -> np.ndarray:
+        qshift=flibs.get_qshift(klist,q)
+        chi0sc=flibs.get_chi_irr_sc(uni_BdG,eig_BdG,ffermi_BdG,qshift,olist,wlist,idelta,temp,sw_spsym)
+        return chi0sc[:,:,:,0]+chi0sc[:,:,:,1]
+
+    return chi0_builder
+
+
+def _solve_phi_path(qlist: np.ndarray, wlist: np.ndarray, olist: np.ndarray, phi_builder,
+                    writer=None) -> tuple[np.ndarray, np.ndarray]:
+    phiq=[]
+    phi_orbq=[]
+    writer = _NullPathWriter() if writer is None else writer
+    with writer:
+        for i,q in enumerate(qlist):
+            writer.begin_q(i, q)
+            phi=phi_builder(q)
+            trphi,phi_orb=flibs.get_tr_phi(phi,olist)
+            phiq.append(trphi)
+            phi_orbq.append(phi_orb)
+            writer.write_trace(i, wlist, trphi)
+    return np.array(phiq),np.array(phi_orbq)
+
+
 def get_conductivity(mu: float, temp: float, eig: np.ndarray, vk: np.ndarray, Nw: int, Emax: float,
                      idelta: float = 1.e-3) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -52,23 +155,13 @@ def chis_spectrum(mu: float, temp: float, Smat: np.ndarray, klist: np.ndarray, q
     """
     ffermi=flibs.get_ffermi(eig,mu,temp)
     wlist=np.linspace(0,Emax,Nw)
-    chisq=[]
-    chis_orbq=[]
-    with open('chi0.dat','w') as f, open('writeq.dat','w') as fq:
-        for i,q in enumerate(qlist):
-            fq.write(f'{i:d} {q[0]:5.3f} {q[1]:5.3f} {q[2]:5.3f}\n')
-            fq.flush()
-            qshift=flibs.get_qshift(klist,q)
-            chi0=flibs.get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp)
-            chis=flibs.get_chis(chi0,Smat)
-            trchis,trchi0,chis_orb=flibs.get_tr_chi(chis,chi0,olist)
-            chisq.append(trchis)
-            chis_orbq.append(chis_orb)
-            for w,trchi in zip(wlist,trchi0):
-                f.write(f'{i:8.4f} {w:8.4f} {trchi.imag:9.4f} {trchi.real:9.4f}\n')
-            f.write('\n')
-            f.flush()
-    return np.array(chisq),np.array(chis_orbq),wlist
+
+    def chi0_builder(q: np.ndarray) -> np.ndarray:
+        qshift=flibs.get_qshift(klist,q)
+        return flibs.get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp)
+
+    chisq,chis_orbq=_solve_chis_path(qlist,wlist,olist,Smat,chi0_builder,_PathWriter(trace_path='chi0.dat'))
+    return chisq,chis_orbq,wlist
 
 def chis_q_point(q: np.ndarray, eig: np.ndarray, uni: np.ndarray, Emax: float,
                  Nw: int, mu: float, temp: float, Smat: np.ndarray, klist: np.ndarray,
@@ -91,13 +184,16 @@ def chis_q_point(q: np.ndarray, eig: np.ndarray, uni: np.ndarray, Emax: float,
     @retval chis_orb: Orbital-resolved spin susceptibility
     @retval   wlist: Frequency mesh array [Nw]
     """
+    qlist=np.asarray([q],dtype=np.float64)
     ffermi=flibs.get_ffermi(eig,mu,temp)
     wlist=np.linspace(0,Emax,Nw)
-    qshift=flibs.get_qshift(klist,q)
-    chi0=flibs.get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp)
-    chis=flibs.get_chis(chi0,Smat)
-    trchis,trchi0,chis_orb=flibs.get_tr_chi(chis,chi0,olist)
-    return trchis,chis_orb,wlist
+
+    def chi0_builder(qvec: np.ndarray) -> np.ndarray:
+        qshift=flibs.get_qshift(klist,qvec)
+        return flibs.get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp)
+
+    chisq,chis_orbq=_solve_chis_path(qlist,wlist,olist,Smat,chi0_builder)
+    return chisq[0],chis_orbq[0],wlist
 
 def chis_q_point_sc(q: np.ndarray, hamk: np.ndarray, delta_k: np.ndarray, mu: float,
                     Emax: float, Nw: int, temp: float, Smat: np.ndarray,
@@ -124,18 +220,11 @@ def chis_q_point_sc(q: np.ndarray, hamk: np.ndarray, delta_k: np.ndarray, mu: fl
     @retval chis_orb: Orbital-resolved spin susceptibility
     @retval   wlist: Frequency mesh [Nw] float64
     """
-    Norb = hamk.shape[1]
-    eig_BdG, uni_BdG = flibs.get_eig(flibs.mkBdGhamk(hamk - mu * np.eye(Norb), delta_k))
-    # mu=0: chemical potential is already absorbed into hamBdGk (hamk - mu*I), so BdG
-    # quasi-particle energies are measured from zero and the Fermi level is at 0.
-    ffermi_BdG = flibs.get_ffermi(eig_BdG, 0., temp)
-    wlist = np.linspace(0, Emax, Nw)
-    qshift = flibs.get_qshift(klist, q)
-    chi0sc = flibs.get_chi_irr_sc(uni_BdG, eig_BdG, ffermi_BdG, qshift, olist, wlist, idelta, temp, sw_spsym)
-    chi0 = chi0sc[:,:,:,0]+chi0sc[:,:,:,1]
-    chis = flibs.get_chis(chi0, Smat)
-    trchis, trchi0, chis_orb = flibs.get_tr_chi(chis, chi0, olist)
-    return trchis, chis_orb, wlist
+    qlist=np.asarray([q],dtype=np.float64)
+    wlist=np.linspace(0,Emax,Nw)
+    chi0_builder=_prepare_sc_chi0_builder(hamk,delta_k,mu,temp,klist,olist,wlist,idelta,sw_spsym)
+    chisq,chis_orbq=_solve_chis_path(qlist,wlist,olist,Smat,chi0_builder)
+    return chisq[0],chis_orbq[0],wlist
 
 def chis_spectrum_sc(mu: float, temp: float, Smat: np.ndarray, hamk: np.ndarray,
                      delta_k: np.ndarray, klist: np.ndarray, qlist: np.ndarray,
@@ -162,28 +251,10 @@ def chis_spectrum_sc(mu: float, temp: float, Smat: np.ndarray, hamk: np.ndarray,
     @retval chis_orbq: Orbital-resolved spin susceptibility [Nq, ...]
     @retval   wlist: Frequency mesh [Nw] float64
     """
-    Norb = hamk.shape[1]
-    eig_BdG, uni_BdG = flibs.get_eig(flibs.mkBdGhamk(hamk - mu * np.eye(Norb), delta_k))
-    # mu=0: chemical potential already absorbed into hamBdGk, BdG energies measured from 0.
-    ffermi_BdG = flibs.get_ffermi(eig_BdG, 0., temp)
-    wlist = np.linspace(0, Emax, Nw)
-    chisq = []
-    chis_orbq = []
-    with open('chi0_sc.dat', 'w') as f, open('writeq.dat', 'w') as fq:
-        for i, q in enumerate(qlist):
-            fq.write(f'{i:d} {q[0]:5.3f} {q[1]:5.3f} {q[2]:5.3f}\n')
-            fq.flush()
-            qshift = flibs.get_qshift(klist, q)
-            chi0 = flibs.get_chi_irr_sc(uni_BdG, eig_BdG, ffermi_BdG, qshift, olist, wlist, idelta, temp, sw_spsym)
-            chis = flibs.get_chis(chi0, Smat)
-            trchis, trchi0, chis_orb = flibs.get_tr_chi(chis, chi0, olist)
-            chisq.append(trchis)
-            chis_orbq.append(chis_orb)
-            for w, trchi in zip(wlist, trchi0):
-                f.write(f'{i:8.4f} {w:8.4f} {trchi.imag:9.4f} {trchi.real:9.4f}\n')
-            f.write('\n')
-            f.flush()
-    return np.array(chisq), np.array(chis_orbq), wlist
+    wlist=np.linspace(0,Emax,Nw)
+    chi0_builder=_prepare_sc_chi0_builder(hamk,delta_k,mu,temp,klist,olist,wlist,idelta,sw_spsym)
+    chisq,chis_orbq=_solve_chis_path(qlist,wlist,olist,Smat,chi0_builder,_PathWriter(trace_path='chi0_sc.dat'))
+    return chisq,chis_orbq,wlist
 
 def chis_qmap(Nx: int, Ny: int, Ecut: float, mu: float, temp: float, Smat: np.ndarray,
               klist: np.ndarray, olist: np.ndarray, eig: np.ndarray, uni: np.ndarray,
@@ -220,7 +291,8 @@ def phi_spectrum(mu: float, temp: float, klist: np.ndarray, qlist: np.ndarray, o
                  idelta: float = 1.e-3) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     @fn phi_spectrum
-    @brief Compute the pairing susceptibility phi spectrum along a q-path (anomalous susceptibility).
+        @brief Compute the pairing susceptibility phi spectrum along a q-path (anomalous susceptibility).
+            Results are also written to 'phi0.dat'.
     @param      mu: Chemical potential in eV
     @param    temp: Temperature in eV
     @param   klist: k-point list [Nk, 3]
@@ -237,18 +309,46 @@ def phi_spectrum(mu: float, temp: float, klist: np.ndarray, qlist: np.ndarray, o
     """
     ffermi=flibs.get_ffermi(eig,mu,temp)
     wlist=np.linspace(0,Emax,Nw)
-    phiq=[]
-    phi_orbq=[]
-    with open('writeq.dat','w') as fq:
-        for i,q in enumerate(qlist):
-            fq.write(f'{i:d} {q[0]:5.3f} {q[1]:5.3f} {q[2]:5.3f}\n')
-            fq.flush()
-            qshift=flibs.get_iqshift(klist,q)
-            phi=flibs.get_phi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,mu,temp)
-            trphi,phi_orb=flibs.get_tr_phi(phi,olist)
-            phiq.append(trphi)
-            phi_orbq.append(phi_orb)
-    return np.array(phiq),np.array(phi_orbq),wlist
+
+    def phi_builder(q: np.ndarray) -> np.ndarray:
+        qshift=flibs.get_iqshift(klist,q)
+        return flibs.get_phi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,mu,temp)
+
+    phiq,phi_orbq=_solve_phi_path(qlist,wlist,olist,phi_builder,
+                                  _PathWriter(trace_path='phi0.dat'))
+    return phiq,phi_orbq,wlist
+
+
+def phi_q_point(q: np.ndarray, eig: np.ndarray, uni: np.ndarray, Emax: float,
+                Nw: int, mu: float, temp: float, klist: np.ndarray,
+                olist: np.ndarray, idelta: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    @fn phi_q_point
+    @brief Compute the pairing susceptibility phi at a single q-point across a frequency mesh.
+    @param       q: Single q-vector in fractional coordinates [3]
+    @param     eig: Eigenvalues array [Nk, Nband]
+    @param     uni: Eigenvectors array [Nk, Norb, Nband]
+    @param    Emax: Maximum frequency in eV
+    @param      Nw: Number of frequency points
+    @param      mu: Chemical potential in eV
+    @param    temp: Temperature in eV
+    @param   klist: k-point list [Nk, 3]
+    @param   olist: Orbital index list for phi calculation
+    @param  idelta: Broadening parameter (Lorentzian width) in eV
+    @retval   trphi: Trace of pairing susceptibility phi [Nw]
+    @retval phi_orb: Orbital-resolved pairing susceptibility
+    @retval   wlist: Frequency mesh array [Nw]
+    """
+    qlist=np.asarray([q],dtype=np.float64)
+    ffermi=flibs.get_ffermi(eig,mu,temp)
+    wlist=np.linspace(0,Emax,Nw)
+
+    def phi_builder(qvec: np.ndarray) -> np.ndarray:
+        qshift=flibs.get_iqshift(klist,qvec)
+        return flibs.get_phi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,mu,temp)
+
+    phiq,phi_orbq=_solve_phi_path(qlist,wlist,olist,phi_builder)
+    return phiq[0],phi_orbq[0],wlist
 
 def phi_qmap(Nx: int, Ny: int, Ecut: float, mu: float, temp: float, klist: np.ndarray,
              olist: np.ndarray, eig: np.ndarray, uni: np.ndarray, idelta: float = 1.e-3,
