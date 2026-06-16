@@ -116,7 +116,8 @@ _lib.get_chi0.argtypes = [
     POINTER(c_int64), POINTER(c_int64),
     POINTER(c_int64), POINTER(c_int64),
     POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64)
+    POINTER(c_int64),
+    POINTER(c_double)  # maxchi0s_out (Stoner factor)
 ]
 _lib.get_chi0.restype = None
 _lib.get_chi0_soc.argtypes = [
@@ -411,7 +412,7 @@ def get_chis(chi0: np.ndarray, Smat: np.ndarray) -> np.ndarray:
     return chis
 
 def get_chi0(Smat: np.ndarray, Cmat: np.ndarray, Gk: np.ndarray, olist: np.ndarray,
-             kmap: np.ndarray, invk: np.ndarray, temp: float, Nx: int, Ny: int, Nz: int) -> np.ndarray:
+             kmap: np.ndarray, invk: np.ndarray, temp: float, Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, float]:
     """
     @fn get_chi0
     @brief Compute the irreducible susceptibility chi0 on the irreducible q-grid using the full BZ Green's function.
@@ -426,15 +427,17 @@ def get_chi0(Smat: np.ndarray, Cmat: np.ndarray, Gk: np.ndarray, olist: np.ndarr
     @param     Ny: Number of k-points along ky
     @param     Nz: Number of k-points along kz
     @return   chi: Irreducible susceptibility [Nchi, Nchi, Nw, Nk] complex128
+    @return stoner: Maximum Stoner factor max(eig(chi0(q,0)*S)) over q (SDW instability when >= 1)
     """
     Norb, Nchi = len(Gk), len(olist)
     Nkall, Nk, Nw = len(kmap), len(Gk[0, 0, 0]), len(Gk[0, 0])
     chi = np.zeros((Nchi, Nchi, Nw, Nk), dtype=np.complex128)
+    stoner = c_double(0.0)
     _lib.get_chi0(chi, Smat, Cmat, Gk, kmap, invk, olist, byref(c_double(temp)),
                   byref(c_int64(Nx)), byref(c_int64(Ny)), byref(c_int64(Nz)),
                   byref(c_int64(Nw)), byref(c_int64(Nk)), byref(c_int64(Nkall)),
-                  byref(c_int64(Norb)), byref(c_int64(Nchi)))
-    return chi
+                  byref(c_int64(Norb)), byref(c_int64(Nchi)), byref(stoner))
+    return chi, stoner.value
 
 def get_chi0_soc(Vmat: np.ndarray, Gk: np.ndarray, olist: np.ndarray, slist: np.ndarray,
                  kmap: np.ndarray, invk: np.ndarray, invs: np.ndarray, temp: float,

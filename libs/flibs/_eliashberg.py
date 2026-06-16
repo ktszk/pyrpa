@@ -22,7 +22,8 @@ _lib.lin_eliash.argtypes = [
     POINTER(c_int64), POINTER(c_int64),
     POINTER(c_int64), POINTER(c_int64),
     POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64)
+    POINTER(c_int64),
+    POINTER(c_double)  # lambda_out (physical Eliashberg eigenvalue)
 ]
 _lib.lin_eliash.restype = None
 _lib.lin_eliash_soc.argtypes = [
@@ -145,7 +146,7 @@ def linearized_eliashberg(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init
                           Smat: np.ndarray, Cmat: np.ndarray, olist: np.ndarray, plist: np.ndarray,
                           kmap: np.ndarray, invk: np.ndarray, Nx: int, Ny: int, Nz: int,
                           temp: float, gap_sym: int, eps: float = 1.0e-5, itemax: int = 300,
-                          arnoldi_m: int = 10) -> np.ndarray:
+                          arnoldi_m: int = 10) -> tuple[np.ndarray, float]:
     """
     @fn linearized_eliashberg
     @brief Solve the linearized Eliashberg gap equation (without SOC) to obtain the superconducting gap function.
@@ -165,17 +166,19 @@ def linearized_eliashberg(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init
     @param       eps: Convergence tolerance
     @param    itemax: Maximum number of iterations
     @return    delta: Linearized gap function [Norb, Norb, Nw, Nkall] complex128
+    @return   lambda_eliash: Physical (largest) Eliashberg eigenvalue (>1 means T<Tc)
     """
     Norb, Nchi = len(Gk), len(Smat)
     Nkall, Nk, Nw = len(kmap), len(Gk[0, 0, 0]), len(Gk[0, 0])
     delta = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
+    lambda_out = c_double(0.0)
     _lib.lin_eliash(delta, chi, Gk, uni, init_delta, Smat, Cmat, olist, plist, kmap, invk,
                     byref(c_double(temp)), byref(c_double(eps)), byref(c_int64(Nkall)),
                     byref(c_int64(Nk)), byref(c_int64(Nw)), byref(c_int64(Nchi)),
                     byref(c_int64(Norb)), byref(c_int64(Nx)), byref(c_int64(Ny)),
                     byref(c_int64(Nz)), byref(c_int64(itemax)), byref(c_int64(gap_sym)),
-                    byref(c_int64(arnoldi_m)))
-    return delta
+                    byref(c_int64(arnoldi_m)), byref(lambda_out))
+    return delta, lambda_out.value
 
 def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init_delta: np.ndarray,
                               Vmat: np.ndarray, sgnsig: np.ndarray, sgnsig2: np.ndarray, plist: np.ndarray,

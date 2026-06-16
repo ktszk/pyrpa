@@ -398,7 +398,7 @@ subroutine ckchi_impl(chi,Smat,Cmat,kmap,invk,Nk,Nkall,Nchi,Nw,maxchi0s_out)
   maxchi0s_out=maxchi0s2
 end subroutine ckchi_impl
 
-subroutine get_chi0(chi,Smat,Cmat,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi) bind(C)
+subroutine get_chi0(chi,Smat,Cmat,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,maxchi0s_out) bind(C)
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
@@ -408,14 +408,14 @@ subroutine get_chi0(chi,Smat,Cmat,Gk,kmap,invk,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,N
   real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
   complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
   complex(c_double),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
+  real(c_double),intent(out):: maxchi0s_out
 
   integer(c_int32_t),dimension(Nchi,Nchi,2)::chi_map
   integer(c_int32_t),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
-  real(c_double) dummy_maxchi0s
 
   call get_chi_map(chi_map,irr_chi,olist,Nchi)
   call get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
-  call ckchi_impl(chi,Smat,Cmat,kmap,invk,Nk,Nkall,Nchi,Nw,dummy_maxchi0s)
+  call ckchi_impl(chi,Smat,Cmat,kmap,invk,Nk,Nkall,Nchi,Nw,maxchi0s_out)
 end subroutine get_chi0
 
 subroutine get_chi_map(chi_map,irr_chi,olist,Nchi)

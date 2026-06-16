@@ -253,21 +253,6 @@ def find_extremal_kz(kz_arr: np.ndarray, S_arr: np.ndarray, band_idx: int,
             cand_kz.append(res.x)
     return cand_kz
 
-def mk_kf(mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, RotMat: np.ndarray, mu: float, kz: float) -> tuple[list, list]:
-    """
-    @fn mk_kf()
-    @brief This function obtains 2d fermi wave-number
-    @param   mesh: k-mesh
-    @param   rvec: r vector of hoppings
-    @param  ham_r: hopping parameters
-    @param    S_r: overlap integrals
-    @param RotMat: rotation matrix
-    @param     mu: chemical potential
-    @param     kz: kz value
-    """
-    eig=get_eigs_2d(mesh,rvec,ham_r,S_r,RotMat,kz)
-    return get_kf_points(eig,mesh,mu,kz)
-
 def gen_3d_surf_points(mesh: int, rvec: np.ndarray, ham_r: np.ndarray,
                        S_r: np.ndarray, mu: float, kscale: float = 1.0) -> tuple[list, list, list]:
     """

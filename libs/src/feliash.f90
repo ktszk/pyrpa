@@ -1,7 +1,8 @@
 subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,kmap,invk,temp,eps,&
-     Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,arnoldi_m) bind(C)
+     Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,arnoldi_m,lambda_out) bind(C)
   !> calculate linearized eliashberg equations with TRS without soc
   !!@param     delta,out: gap function
+  !!@param   lambda_out,out: physical (largest) Eliashberg eigenvalue
   !!@param         Gk,in: normal green function
   !!@note: invk(:,i) index validity check:
   !!        - invk(1,i) must be in range [1, Nk]
@@ -39,6 +40,7 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,kmap,invk,
   complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: delta
   complex(c_double),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
+  real(c_double),intent(out):: lambda_out
 
   integer(c_int32_t) i_iter,i_eig,i
   integer(c_int32_t),parameter:: eig_max=2
@@ -55,6 +57,7 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,kmap,invk,
   end if
   weight=temp/dble(Nkall)
   lambda1=0.0d0
+  lambda_out=0.0d0
   call get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
@@ -116,12 +119,14 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,kmap,invk,
            if(lambda_phys>0.0d0)then
               print*,'1st eigenvalue is positive: skipping 2nd loop'
               print*,'eliash=',lambda_phys
+              lambda_out=lambda_phys
               exit
            end if
            lambda1=lambda_rq !save first eigenvalue for shift in i_eig=2
            delta1(:,:,:,:)=newdelta(:,:,:,:)*inorm !store 1st eigenvector (normalized) for deflation
         else
            print*,'eliash=',lambda_phys
+           lambda_out=lambda_phys
         end if
      end do eigenval_loop
      call get_norm(norm,newdelta)
@@ -291,6 +296,7 @@ contains
     if(maxval(dble(eigenvals(1:m_act)))>=0.1d0)then
        idx=maxloc(dble(eigenvals(1:m_act)),1)
        print'(A,F12.6)','  eliash   =',dble(eigenvals(idx))
+       lambda_out=dble(eigenvals(idx))
        ! reconstruct Ritz vector x = sum_ii VR(ii,idx) * v_{ii-1}
        !$omp parallel workshare
        delta(:,:,:,:)=(0.0d0,0.0d0)
@@ -381,6 +387,7 @@ contains
     end do
     idx=maxloc(dble(eigenvals(1:m_act)),1)                ! largest Ritz value -> lambda_+ + shift
     print'(A,F12.6)','  eliash   =',dble(eigenvals(idx))-shift
+    lambda_out=dble(eigenvals(idx))-shift
     ! reconstruct Ritz vector for lambda_+: delta = V_m * y_+
     !$omp parallel workshare
     delta(:,:,:,:)=(0.0d0,0.0d0)
