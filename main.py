@@ -34,35 +34,79 @@ fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
 sw_dec_axis=False
 
 class CalcMode(IntEnum):
-    BAND               = 0   # band structure plot
-    DOS                = 1   # density of states plot
-    FERMI_2D           = 2   # 2D Fermi surface at kz plane (default: kz=0)
-    FERMI_3D           = 3   # 3D Fermi surface plot
-    SPECTRUM           = 4   # spectral function plot
-    CONDUCTIVITY_BT    = 5   # conductivity via Boltzmann theory
-    CONDUCTIVITY_PT    = 6   # optical conductivity via linear response theory
-    CHIS_SPECTRUM      = 7   # spin susceptibility spectrum along symmetry line
-    CHIS_QPOINT        = 8   # spin susceptibility at specified q-point
-    CHIS_QMAP          = 9   # spin susceptibility q-map on Ecut plane
-    PHI_SPECTRUM       = 10  # pairing susceptibility spectrum along symmetry line
-    PHI_QMAP           = 11  # pairing susceptibility q-map on Ecut plane
-    CHIS_SPECTRUM_SC   = 12  # spin susceptibility spectrum in superconducting state
-    CHIS_QPOINT_SC     = 13  # spin susceptibility at specified q-point in superconducting state
-    FLEX               = 14  # self-energy calculation using FLEX
-    LIN_ELIASHBERG     = 15  # solve linearized Eliashberg equation
-    GAP_FUNCTION       = 16  # post-process and output gap functions
-    CARRIER_NUM        = 17  # carrier number calculation
-    CYCLOTRON_MASS     = 18  # cyclotron mass calculation
-    DHVA               = 19  # dHvA frequency vs angle plot (not implemented)
-    ELECTRON_MASS      = 20  # electron mass calculation (not implemented)
-    SPECTRUM_IMPURITY  = 21  # spectral function with impurity (not implemented)
-    SIGMA_CPA          = 22  # conductivity via CPA
-    NONLIN_ELIASHBERG  = 23  # solve nonlinear Eliashberg equation (not implemented)
+    """Calculation modes. The second tuple element is the human-readable label
+    printed by main(); it is the single source of truth (replaces the old `opstr` list)."""
+    def __new__(cls,value,description):
+        obj=int.__new__(cls,value)
+        obj._value_=value
+        obj.description=description
+        return obj
+    BAND               = (0,  "calculate band structure")                  # band structure plot
+    DOS                = (1,  "calculate Dos")                              # density of states plot
+    FERMI_2D           = (2,  "plot 2D Fermi surface")                     # 2D Fermi surface at kz plane (default: kz=0)
+    FERMI_3D           = (3,  "plot 3D Fermi surface")                     # 3D Fermi surface plot
+    SPECTRUM           = (4,  "calculate spectrum")                        # spectral function plot
+    CONDUCTIVITY_BT    = (5,  "calculate conductivities using Boltzmann theory")  # conductivity via Boltzmann theory
+    CONDUCTIVITY_PT    = (6,  "calculate conductivities with linear response")    # optical conductivity via linear response theory
+    CHIS_SPECTRUM      = (7,  "calculate chis spectrum")                   # spin susceptibility spectrum along symmetry line
+    CHIS_QPOINT        = (8,  "calculate chis at q-point")                 # spin susceptibility at specified q-point
+    CHIS_QMAP          = (9,  "calculate chis qmap at Ecut")               # spin susceptibility q-map on Ecut plane
+    PHI_SPECTRUM       = (10, "calc phi spectrum with symmetry line")      # pairing susceptibility spectrum along symmetry line
+    PHI_QMAP           = (11, "calc phi on xy plane at Ecut")              # pairing susceptibility q-map on Ecut plane
+    CHIS_SPECTRUM_SC   = (12, "calculate chis spectrum on sc")             # spin susceptibility spectrum in superconducting state
+    CHIS_QPOINT_SC     = (13, "calculate chis at q-point on sc")           # spin susceptibility at specified q-point in superconducting state
+    FLEX               = (14, "calc self energy")                          # self-energy calculation using FLEX
+    LIN_ELIASHBERG     = (15, "solve linearized eliashberg equation")      # solve linearized Eliashberg equation
+    GAP_FUNCTION       = (16, "gap_function")                              # post-process and output gap functions
+    CARRIER_NUM        = (17, "calculate carrier number")                  # carrier number calculation
+    CYCLOTRON_MASS     = (18, "calculate cyclotron mass")                  # cyclotron mass calculation
+    DHVA               = (19, "plot dHvA frequency")                       # dHvA frequency vs angle plot (not implemented)
+    ELECTRON_MASS      = (20, "calculate electron mass")                   # electron mass calculation (not implemented)
+    SPECTRUM_IMPURITY  = (21, "spectrum with impurity")                    # spectral function with impurity (not implemented)
+    SIGMA_CPA          = (22, "calculate sigma_cpa")                       # conductivity via CPA
+    NONLIN_ELIASHBERG  = (23, "solve nonlinear eliashberg equation")       # solve nonlinear Eliashberg equation (not implemented)
 
 class ColorMode(IntEnum):
-    MONO    = 0
-    ORBITAL = 1
-    VELOCITY= 2
+    """Color modes for band/FS plots; second element is the printed label (replaces the old `cstr` list)."""
+    def __new__(cls,value,description):
+        obj=int.__new__(cls,value)
+        obj._value_=value
+        obj.description=description
+        return obj
+    MONO     = (0, "no color")
+    ORBITAL  = (1, "orbital weight")
+    VELOCITY = (2, "velocity size")
+
+#----- CalcMode capability groups: single source for the option-set checks in main() -----
+M=CalcMode
+# modes that need a symmetry-line k-path (k_sets / xlabel)
+MODES_SYMLINE       = frozenset({M.BAND,M.SPECTRUM,M.CHIS_SPECTRUM,M.PHI_SPECTRUM,M.CHIS_SPECTRUM_SC,
+                                 M.FLEX,M.ELECTRON_MASS,M.SPECTRUM_IMPURITY,M.SIGMA_CPA})
+# modes that need a rotation matrix (RotMat) for the 2D / extremal-orbit cut
+MODES_NEED_ROTMAT   = frozenset({M.FERMI_2D,M.CYCLOTRON_MASS})
+# FLEX / Eliashberg family (self-energy, linearized gap, post gap)
+MODES_FLEX_ELIASH   = frozenset({M.FLEX,M.LIN_ELIASHBERG,M.GAP_FUNCTION})
+# chi at a single q-point (normal & SC state)
+MODES_CHIS_QPOINT   = frozenset({M.CHIS_QPOINT,M.CHIS_QPOINT_SC})
+# modes that color-code bands/FS by orbital or velocity
+MODES_COLOR         = frozenset({M.BAND,M.FERMI_2D,M.FERMI_3D})
+# susceptibility / Eliashberg modes that build the orbital-pair basis (chiolist)
+MODES_NEED_CHI      = frozenset({M.CHIS_SPECTRUM,M.CHIS_QPOINT,M.CHIS_QMAP,M.PHI_SPECTRUM,M.PHI_QMAP,
+                                 M.CHIS_SPECTRUM_SC,M.CHIS_QPOINT_SC,M.FLEX,M.LIN_ELIASHBERG,M.NONLIN_ELIASHBERG})
+# susceptibility modes that need the static Coulomb vertex (S/C matrices)
+MODES_COULOMB_VERTEX= frozenset({M.CHIS_SPECTRUM,M.CHIS_QPOINT,M.CHIS_QMAP,M.CHIS_SPECTRUM_SC,M.CHIS_QPOINT_SC})
+# modes that print a constant U,J header
+MODES_PRINT_UJ      = frozenset({M.CHIS_SPECTRUM,M.CHIS_QPOINT,M.CHIS_QMAP,M.FLEX,M.LIN_ELIASHBERG})
+# modes that compute/define mu themselves (skip the common mu block)
+MODES_SELF_MU       = frozenset({M.CONDUCTIVITY_BT,M.CONDUCTIVITY_PT,M.SPECTRUM_IMPURITY,M.SIGMA_CPA})
+# k-mesh reporting groups
+MODES_KMESH_SYMLINE = frozenset({M.BAND,M.SPECTRUM})
+MODES_KMESH_SINGLE  = frozenset({M.FERMI_2D,M.FERMI_3D,M.CHIS_QMAP,M.PHI_QMAP,M.CARRIER_NUM,M.CYCLOTRON_MASS})
+MODES_MATSUBARA     = frozenset({M.FLEX,M.LIN_ELIASHBERG})
+# dispatch groups
+MODES_CHI_NORMAL    = frozenset({M.CHIS_SPECTRUM,M.CHIS_QPOINT,M.CHIS_QMAP,M.PHI_SPECTRUM,M.PHI_QMAP})
+MODES_CHIS_SC       = frozenset({M.CHIS_SPECTRUM_SC,M.CHIS_QPOINT_SC})
+del M
 
 #option=CalcMode.CHIS_QPOINT_SC
 option=CalcMode.LIN_ELIASHBERG
@@ -154,7 +198,7 @@ except NameError:
     print('alpha_beta_gamma not found, set to 90,90,90')
 alatt=np.array(abc)
 deg=np.array(alpha_beta_gamma)
-if option in {0,4,7,10,12,14,20,21,22}: #modes using k_sets/xlabel (symmetry line)
+if option in MODES_SYMLINE: #modes using k_sets/xlabel (symmetry line)
     try:
         k_sets
         xlabel
@@ -197,7 +241,7 @@ try:
     m_diis_num
 except NameError:
     m_diis_num=5
-if option in {2,18}:
+if option in MODES_NEED_ROTMAT:
     try:
         RotMat
         RotMat=np.array(RotMat)
@@ -980,23 +1024,10 @@ def main():
         else:
             avec=alatt*np.eye(3)
     bvec=plibs.get_bvec(avec) #set recp. lattice
-    opstr=["calculate band structure","calculate Dos","plot 2D Fermi surface",
-           "plot 3D Fermi surface","calculate spectrum",
-           "calculate conductivities using Boltzmann theory",
-           "calculate conductivities with linear response","calculate chis spectrum",
-           "calculate chis at q-point","calculate chis qmap at Ecut",
-           "calc phi spectrum with symmetry line","calc phi on xy plane at Ecut",
-           "calculate chis spectrum on sc","calculate chis at q-point on sc",
-           "calc self energy","solve linearized eliashberg equation",
-           "gap_function","calculate carrier number","calculate cyclotron mass",
-           "plot dHvA frequency","calculate electron mass","spectrum with impurity",
-           "calculate sigma_cpa",
-           "solve nonlinear eliashberg equation"]
-    cstr=["no color",'orbital weight','velocity size']
     if omp_check: #OMP properties
         print("OpenMP mode",flush=True)
         print(f"Number of OpenMP threads = {omp_num}",flush=True)
-    print(f"calc mode {option}: "+opstr[option],flush=True)
+    print(f"calc mode {int(option)}: "+option.description,flush=True)
 
     # ===== Additional input validation (lower priority) =====
     # J > U warning
@@ -1004,25 +1035,25 @@ def main():
         print(f"Warning: J={J} > U={U} is physically unusual. Please verify",flush=True)
 
     # Validate gap_sym during eliashberg/flex calculations
-    if option in {14, 15, 16}:  # eliashberg/flex calculations
+    if option in MODES_FLEX_ELIASH:  # eliashberg/flex calculations
         if gap_sym not in {-1, 0, 1, 2, 3}:
             print(f"Warning: gap_sym={gap_sym} is non-standard. Common values: -1,0,1,2,3",flush=True)
 
     # Validate at_point for chis at q-point calculation (normal and SC state)
-    if option in {8,13}:  # chis at q-point
+    if option in MODES_CHIS_QPOINT:  # chis at q-point
         if len(at_point) != 3:
             print(f"Error: at_point has {len(at_point)} elements. Required: 3 elements",flush=True)
             return
         if any(p < 0 or p > 1 for p in at_point):
             print(f"Warning: at_point={at_point} values outside [0,1] range. May not be normalized by reciprocal lattice",flush=True)
     # ==========================================
-    if option in {0,2,3}:
-        print("color mode: "+cstr[color_option],flush=True)
+    if option in MODES_COLOR:
+        print("color mode: "+color_option.description,flush=True)
     print("Hamiltonian name is "+fname,flush=True)
     print(f"Number of orbital = {Norb}",flush=True)
-    if (orb_dep==False) and option in {7,8,9,14,15}: #write constant U,J
+    if (orb_dep==False) and option in MODES_PRINT_UJ: #write constant U,J
         print(f'U= {U:5.2f} and J= {J:5.3f}')
-    if option in {7,8,9,10,11,12,13,14,15,23}:
+    if option in MODES_NEED_CHI:
         """ chiolist is the list of orbital properties of index on chi """
         try:
             chiolist
@@ -1034,7 +1065,7 @@ def main():
             # Build the orbital-pair basis once here so every response/Eliashberg branch
             # shares the same indexing convention when passing chi objects to Fortran.
             chiolist,site=plibs.get_chi_orb_list(len(ham_r[0]),site_prof)
-        if option in {7,8,9,12,13}:
+        if option in MODES_COULOMB_VERTEX:
             print("generate coulomb vertex matrix S")
             # Susceptibility branches only need the static interaction vertex; FLEX/Eliashberg
             # rebuild their own matrices inside the dedicated solvers.
@@ -1042,15 +1073,15 @@ def main():
                 Smat,Cmat=flibs.gen_SCmatrix_orb(chiolist,site,Umat,Jmat)
             else:
                 Smat,Cmat=flibs.gen_SCmatrix(chiolist,site,U,J)
-    if option in {0,4}:
+    if option in MODES_KMESH_SYMLINE:
         if sw_gen_sym:
             print('generate symmetry line',flush=True)
         print(f'kmesh = {kmesh}',flush=True)
-    elif option in {2,3,9,11,17,18}:
+    elif option in MODES_KMESH_SINGLE:
         print(f'Number of k-mesh = {Nx}',flush=True)
     else:
         print(f'k-mesh is {Nx} {Ny} {Nz}',flush=True)
-    if option in {14,15}:
+    if option in MODES_MATSUBARA:
         print(f'Number of Matsubara freq. = {Nw}',flush=True)
     print("Lattice Vector (Angstrom)",flush=True)
     for i,a in enumerate(avec):
@@ -1058,7 +1089,7 @@ def main():
     print("Reciprocal Lattice Vector (Angstrom^-1)",flush=True)
     for i,b in enumerate(bvec):
         print(f"b{i+1}: %7.4f %7.4f %7.4f"%tuple(b),flush=True)
-    if option in {5,6,21,22}: #conductivity (5,6) and impurity (21) functions calc or set mu themself
+    if option in MODES_SELF_MU: #conductivity and impurity/CPA functions calc or set mu themself
         pass
     else:
         if sw_calc_mu:
@@ -1068,12 +1099,12 @@ def main():
             print('use fixed mu')
         print(f'Temperature = {temp:10.3e} eV ({temp/kb:.2f} K)',flush=True)
         print(f'chem. pot. = {mu:.4f} eV',flush=True)
-    if option==0: #plot band
+    if option==CalcMode.BAND: #plot band
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         eig,uni0=plibs.get_eigs(klist,ham_r,S_r,rvec)
         uni=np.array([u.T for u in uni0]) #rotate uni(k,band,orb) to uni(k,orb,band)
         plot_band(eig.T-mu,spa_length,xlabel,xticks,uni.T,olist,(False if color_option==0 else True))
-    elif option==1: #plot dos
+    elif option==CalcMode.DOS: #plot dos
         Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=True)
         wlist=np.linspace(Emin,Emax,Nw,True)
         Dos=flibs.gen_dos(eig,uni,mu,wlist,delta)
@@ -1106,33 +1137,33 @@ def main():
         plt.xlim(Emin,Emax)
         plt.ylim(0,max(Dos.sum(axis=0))*1.2)
         plt.show()
-    elif option==2: #2D Fermi surface plot
+    elif option==CalcMode.FERMI_2D: #2D Fermi surface plot
         eig2d=plibs.get_eigs_2d(Nx,rvec,ham_r,S_r,RotMat,kz)
         klist,blist=plibs.get_kf_points(eig2d,Nx,mu,kz)
         clist=plibs.get_colors(klist,blist,ihbar*avec.T,rvec,ham_r,S_r,olist,color_option,True)
         plot_FS(clist,klist,color_option)
-    elif option==3: #3D Fermi surface plot
+    elif option==CalcMode.FERMI_3D: #3D Fermi surface plot
         polys,centers,blist=plibs.gen_3d_surf_points(Nx,rvec,ham_r,S_r,mu,kscale)
         fspolys,fscenters,fscolors=set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist)
         plot_3d_surf(fspolys,fscenters,fscolors,color_option,kscale,bvec)
-    elif option==4: #plot spectrum
+    elif option==CalcMode.SPECTRUM: #plot spectrum
         plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw,sw_self)
-    elif option==5: #calc conductivity
+    elif option==CalcMode.CONDUCTIVITY_BT: #calc conductivity
         get_hall_coe(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,tau_const)
         calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,tau_const)
-    elif option==6: #calc_optical conductivity
+    elif option==CalcMode.CONDUCTIVITY_PT: #calc_optical conductivity
         calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta)
-    elif option in {7,8,9,10,11}: #calc_chis_spectrum
+    elif option in MODES_CHI_NORMAL: #calc_chis_spectrum
         print("calculate electron energy",flush=True)
         Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=True)
-        if option in {7,10}: #chis/phi spectrum with symmetry line
+        if option in {CalcMode.CHIS_SPECTRUM,CalcMode.PHI_SPECTRUM}: #chis/phi spectrum with symmetry line
             print("generate qlist",flush=True)
             qlist,spa_length,xticks=plibs.mk_qlist(k_sets,Nx,Ny,Nz,bvec)
-            if option==7:
+            if option==CalcMode.CHIS_SPECTRUM:
                 w,sp,sus=plibs.calc_path_spectrum('chis',mu,temp,klist,qlist,chiolist,eig,uni,spa_length,Nw,Emax,delta,Smat)
                 print("write chis spectrum in png file",flush=True)
                 susfname='chis_spec.png'
-            elif option==10:
+            elif option==CalcMode.PHI_SPECTRUM:
                 w,sp,sus=plibs.calc_path_spectrum('phi',mu,temp,klist,qlist,chiolist,eig,uni,spa_length,Nw,Emax,delta)
                 print("write phi spectrum in png file",flush=True)
                 susfname='phi_spec.png'
@@ -1140,7 +1171,7 @@ def main():
             plt.colorbar()
             plt.hot()
             plt.savefig(fname=susfname,dpi=300)
-        elif option==8: #chis at q-point
+        elif option==CalcMode.CHIS_QPOINT: #chis at q-point
             q_point=np.array(at_point)
             chis,chis_orb,wlist=plibs.chis_q_point(q_point,eig,uni,Emax,Nw,mu,temp,Smat,klist,chiolist,delta)
             plt.plot(wlist,chis.imag)
@@ -1149,14 +1180,14 @@ def main():
                 plt.plot(wlist,cso.imag)
             plt.show()
         else: #chis/phi qmap at ecut plane
-            if option==9: #chis spectrum ecut plane
+            if option==CalcMode.CHIS_QMAP: #chis spectrum ecut plane
                 sus,chi0,qx,qy=plibs.chis_qmap(Nx,Ny,Ecut,mu,temp,Smat,klist,chiolist,eig,uni,idelta=1.e-3)
                 plt.contourf(qx,qy,abs(chi0.imag),100)
                 plt.colorbar()
                 plt.jet()
                 plt.savefig(fname='chi0map.png',dpi=300)
                 susfname='chismap.png'
-            elif option==11:
+            elif option==CalcMode.PHI_QMAP:
                 sus,qx,qy=plibs.phi_qmap(Nx,Ny,Ecut,mu,temp,klist,chiolist,eig,uni,idelta=1.e-3,sw_omega=sw_omega)
                 susfname='phimap.png'
             if sw_omega:
@@ -1167,7 +1198,7 @@ def main():
             plt.jet()
             #plt.show()
             plt.savefig(fname=susfname,dpi=300)
-    elif option in {12,13}: #calc chis at superconducting state
+    elif option in MODES_CHIS_SC: #calc chis at superconducting state
         sw_spsym=True if gap_sym<0 else False
         if isinstance(delta0, float):
             klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
@@ -1205,7 +1236,7 @@ def main():
             deltaini=(inigap.T*np.array(delta0,dtype=np.complex128)).T
             deltak=flibs.get_band_to_orb_delta(deltaini,uni)
         hamk = flibs.gen_ham(klist, ham_r, rvec)
-        if option==12:
+        if option==CalcMode.CHIS_SPECTRUM_SC:
             print("generate qlist",flush=True)
             qlist,spa_length,xticks=plibs.mk_qlist(k_sets,Nx,Ny,Nz,bvec)
             w,sp,sus=plibs.chis_spectrum_sc(mu, temp, Smat, hamk, deltak, klist, qlist, chiolist, Nw, Emax, delta, sw_spsym)
@@ -1215,7 +1246,7 @@ def main():
             plt.hot()
             plt.savefig(fname='chis_sc_spec.png',dpi=300)
             plt.close()
-        elif option==13:
+        elif option==CalcMode.CHIS_QPOINT_SC:
             # --- BdG band structure along (0,0,0) -> (0,0.5,0) ---
             Nk_path = 200
             kpath_bdg = np.zeros((Nk_path, 3))
@@ -1266,7 +1297,7 @@ def main():
                     for cso in ic:
                         f.write(f"{cso.imag:12.8f}, ")
                     f.write("\n")
-    elif option in {14,15,16}: #flex/eliashberg calculations
+    elif option in MODES_FLEX_ELIASH: #flex/eliashberg calculations
         if sw_soc: #with soc
             try:
                 slist
@@ -1280,44 +1311,44 @@ def main():
             except NameError:
                 # Also fixed reverse index of split spins
                 invs=np.concatenate([np.arange((Norb+1)//2,Norb),np.arange((Norb+1)//2)])+1
-            if option==14: #calc self-energy using flex
+            if option==CalcMode.FLEX: #calc self-energy using flex
                 plibs.calc_flex_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,invs,site,
                                     orb_dep,U,J,fill,sw_out_self,sw_in_self,
                                     Umat if orb_dep else None,Jmat if orb_dep else None,
                                     m_diis=m_diis_num,sw_rescale=sw_rescale_flex)
-            elif option==15: #calc gap function
+            elif option==CalcMode.LIN_ELIASHBERG: #calc gap function
                 plibs.calc_lin_eliash_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,plist,invs,site,
                                           orb_dep,U,J,fill,gap_sym,sw_self,sw_from_file,sw_out_self,sw_in_self,
                                           Umat if orb_dep else None,Jmat if orb_dep else None)
-            elif option==16: #post gap calculation, output gap function/anomalous green's function
+            elif option==CalcMode.GAP_FUNCTION: #post gap calculation, output gap function/anomalous green's function
                 output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,plist,mu,temp,sw_self,sw_soc,invs,slist,gap_sym)
         else: #without soc
-            if option==14: #calc self-energy using flex
+            if option==CalcMode.FLEX: #calc self-energy using flex
                 plibs.calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,site,
                                 orb_dep,U,J,fill,sw_out_self,sw_in_self,
                                 Umat if orb_dep else None,Jmat if orb_dep else None,
                                 m_diis=m_diis_num,sw_rescale=sw_rescale_flex)
-            elif option==15: #calc gap function
+            elif option==CalcMode.LIN_ELIASHBERG: #calc gap function
                 plibs.calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,site,plist,mu,temp,gap_sym,sw_self,
                                              orb_dep,U,J,fill,sw_from_file,sw_out_self,sw_in_self,
                                              Umat if orb_dep else None,Jmat if orb_dep else None)
-            elif option==16: #post gap calculation, output gap function/anomalous green's function
+            elif option==CalcMode.GAP_FUNCTION: #post gap calculation, output gap function/anomalous green's function
                 output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,plist,mu,temp,sw_self)
-    elif option==17: #calc carrier number
+    elif option==CalcMode.CARRIER_NUM: #calc carrier number
         n_carr=plibs.calc_carrier(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp)
         print(n_carr)
         print(n_carr.sum())
         plibs.get_carrier_num(Nx,rvec,ham_r,S_r,mu,Arot)
-    elif option==18: #calc cyclotron mass
+    elif option==CalcMode.CYCLOTRON_MASS: #calc cyclotron mass
         get_mass(Nx,rvec,ham_r,S_r,mu)
-    elif option==19: #plot dHvA frequency vs angle
+    elif option==CalcMode.DHVA: #plot dHvA frequency vs angle
         theta_list=np.linspace(0.,90.,40)
         get_dhva_band(Nx,rvec,ham_r,S_r,mu,theta_list)
-    elif option==20: #mass calc
+    elif option==CalcMode.ELECTRON_MASS: #mass calc
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
         mass=flibs.get_mass(klist,ham_r,rvec,avec.T*ihbar,uni)*eC/emass
-    elif option==21: #calc spectrum with impurity
+    elif option==CalcMode.SPECTRUM_IMPURITY: #calc spectrum with impurity
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         rlist=plibs.gen_rlist(Nx,Ny,Nz)
         wlist=np.linspace(Emin,Emax,Nw,True)
@@ -1334,7 +1365,7 @@ def main():
         w,k=np.meshgrid(wlist,spa_length)
         plt.contourf(k,w,abs(spectrum.imag),100)
         plt.show()
-    elif option==22:
+    elif option==CalcMode.SIGMA_CPA:
         # --- CPA calculation ---
         mu=plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill)
         print(f'Temperature = {temp:10.3e} eV ({temp/kb:.2f} K)',flush=True)
@@ -1383,7 +1414,7 @@ def main():
         np.savez('self_en', sigma_out, np.float64(mu))
         print(f"CPA Matsubara self-energy written to sigma.bin and self_en.npz"
               f" (Nk_irr={Nk_irr}, Nw={Nw})", flush=True)
-    elif option==23:
+    elif option==CalcMode.NONLIN_ELIASHBERG:
         plibs.calc_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,site,plist,
                                  mu,temp,gap_sym,sw_self,
                                  orb_dep,U,J,fill,sw_from_file,sw_out_self,sw_in_self,
