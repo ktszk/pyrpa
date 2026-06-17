@@ -249,6 +249,19 @@ if option in MODES_NEED_ROTMAT:
         print('No RotMat')
         RotMat=np.eye(3)
 #------------------------ define functions -------------------------------------------
+def print_matrix(label,mat,width=10,prec=3,ndigits=10):
+    """Print a labelled N x 3 real matrix, one row per line (transport tensors)."""
+    print(label,flush=True)
+    for row in np.asarray(mat).round(ndigits):
+        print(f" {row[0]:{width}.{prec}e} {row[1]:{width}.{prec}e} {row[2]:{width}.{prec}e}",flush=True)
+
+def flatten_orbs(seq):
+    """Flatten an olist (mix of ints and int-lists) into a flat list of orbital indices."""
+    out=[]
+    for o in seq:
+        out+=o if isinstance(o,list) else [o]
+    return out
+
 def plot_band(eig,spl,xlabel,xticks,uni,ol,color):
     def get_col(cl,ol):
         col=(np.abs(cl[ol])**2 if isinstance(ol,int)
@@ -553,33 +566,15 @@ def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
         Lorenz2=np.zeros_like(sigma)
     sigmaS=gsp*tau_unit*kb*eC*K1*iNV*itemp
     PF=sigma*Seebeck**2
-    print('sigma matrix (S/m)',flush=True)
-    for sig in sigma.round(10):
-        print(f" {sig[0]:10.3e} {sig[1]:10.3e} {sig[2]:10.3e}",flush=True)
-    print('kappa matrix (K22 only) (W/m/K)',flush=True)
-    for kap in kappa.round(10):
-        print(f" {kap[0]:10.3e} {kap[1]:10.3e} {kap[2]:10.3e}",flush=True)
-    print('kappa matrix (full) (W/m/K)',flush=True)
-    for kap in kappa2.round(10):
-        print(f" {kap[0]:10.3e} {kap[1]:10.3e} {kap[2]:10.3e}",flush=True)
-    print('sigmaS matrix (A/m/K)',flush=True)
-    for sig in sigmaS.round(10):
-        print(f" {sig[0]:10.3e} {sig[1]:10.3e} {sig[2]:10.3e}",flush=True)
-    print('Seebeck matrix (V/K)',flush=True)
-    for seeb in Seebeck.round(10):
-        print(f" {seeb[0]:10.3e} {seeb[1]:10.3e} {seeb[2]:10.3e}",flush=True)
-    print('Peltier matrix (V)',flush=True)
-    for per in Peltier.round(10):
-        print(f" {per[0]:10.3e} {per[1]:10.3e} {per[2]:10.3e}",flush=True)
-    print('Lorenz matrix (K22 only) (Wohm/K^2) (fe 2.44e-8)',flush=True)
-    for lor in Lorenz.round(10):
-        print(f" {lor[0]:9.2e} {lor[1]:9.2e} {lor[2]:9.2e}",flush=True)
-    print('Lorenz matrix? (full) (Wohm/K^2)',flush=True)
-    for lor in Lorenz2.round(10):
-        print(f" {lor[0]:9.2e} {lor[1]:9.2e} {lor[2]:9.2e}",flush=True)
-    print('Power Factor (SA/m^2/K)',flush=True)
-    for pofa in PF.round(8):
-        print(f" {pofa[0]:10.3e} {pofa[1]:10.3e} {pofa[2]:10.3e}",flush=True)
+    print_matrix('sigma matrix (S/m)',sigma)
+    print_matrix('kappa matrix (K22 only) (W/m/K)',kappa)
+    print_matrix('kappa matrix (full) (W/m/K)',kappa2)
+    print_matrix('sigmaS matrix (A/m/K)',sigmaS)
+    print_matrix('Seebeck matrix (V/K)',Seebeck)
+    print_matrix('Peltier matrix (V)',Peltier)
+    print_matrix('Lorenz matrix (K22 only) (Wohm/K^2) (fe 2.44e-8)',Lorenz,width=9,prec=2)
+    print_matrix('Lorenz matrix? (full) (Wohm/K^2)',Lorenz2,width=9,prec=2)
+    print_matrix('Power Factor (SA/m^2/K)',PF,ndigits=8)
 
 def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
                          temp:float,Nw:int,delta,with_spin=False):
@@ -619,15 +614,9 @@ def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
     except np.linalg.LinAlgError:
         print("Warning: sigma is a singular matrix. Cannot compute Seebeck coefficient",flush=True)
         Seebeck=np.zeros_like(sigma)
-    print('sigma matrix (S/m)',flush=True)
-    for sig in sigma[0].real.round(10):
-        print(f" {sig[0]:10.3e} {sig[1]:10.3e} {sig[2]:10.3e}",flush=True)
-    print('kappa matrix (L22 only) (W/m/K)',flush=True)
-    for kap in kappa[0].real.round(10):
-        print(f" {kap[0]:10.3e} {kap[1]:10.3e} {kap[2]:10.3e}",flush=True)
-    print('sigmaS matrix (A/m/K)',flush=True)
-    for sig in sigmaS[0].real.round(10):
-        print(f" {sig[0]:10.3e} {sig[1]:10.3e} {sig[2]:10.3e}",flush=True)
+    print_matrix('sigma matrix (S/m)',sigma[0].real)
+    print_matrix('kappa matrix (L22 only) (W/m/K)',kappa[0].real)
+    print_matrix('sigmaS matrix (A/m/K)',sigmaS[0].real)
     print('Lorenz number (Wohm/K^2) (fe 2.44e-8)',flush=True)
     try:
         # Lorenz tensor L = kb * kappa . (sigma*T)^-1 (matrix product, not element-wise)
@@ -636,9 +625,7 @@ def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
             print(f" {lor[0]:9.2e} {lor[1]:9.2e} {lor[2]:9.2e}",flush=True)
     except np.linalg.LinAlgError:
         print("Warning: Failed to compute Lorenz coefficient (singular matrix)",flush=True)
-    print('Seebeck coefficient matrix (V/K)',flush=True)
-    for seeb in Seebeck[0].real.round(10):
-        print(f" {seeb[0]:10.3e} {seeb[1]:10.3e} {seeb[2]:10.3e}",flush=True)
+    print_matrix('Seebeck coefficient matrix (V/K)',Seebeck[0].real)
     fig=plt.figure()
     ax=fig.add_subplot(211)
     ax.plot(wlist,sigma[:,0,0].real)
@@ -1121,17 +1108,11 @@ def main():
             plt.plot(wlist,Dos.sum(axis=0),color='black')
         elif color_option==0:
             clist=['k','r','g','b','c','m','y']
-            tmp_ol_b=[]
-            for i in range(len(olist)):
-                tmp_ol_b+=olist[i]if type(olist[i])==list else [olist[i]]
+            tmp_ol_b=flatten_orbs(olist)
             plt.fill_between(wlist,Dos[tmp_ol_b].sum(axis=0),Dos.sum(axis=0),color=clist[0])
             for i in range(len(olist)-1):
-                tmp_ol_u=[]
-                tmp_ol_b=[]
-                for j in range(i,len(olist)):
-                    tmp_ol_u+=olist[j] if type(olist[j])==list else [olist[j]]
-                for j in range(i+1,len(olist)):
-                    tmp_ol_b+=olist[j] if type(olist[j])==list else [olist[j]]
+                tmp_ol_u=flatten_orbs(olist[i:])
+                tmp_ol_b=flatten_orbs(olist[i+1:])
                 plt.fill_between(wlist,Dos[tmp_ol_b].sum(axis=0),Dos[tmp_ol_u].sum(axis=0),color=clist[i+1])
             plt.fill_between(wlist,0,Dos[tmp_ol_b].sum(axis=0),color=clist[len(olist)])
         plt.xlim(Emin,Emax)

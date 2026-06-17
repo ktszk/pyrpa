@@ -1,6 +1,6 @@
 from ctypes import *
 import numpy as np
-from ._loader import _lib
+from ._loader import _lib, i64, dbl
 
 # --- ctypes signatures: set once at import.
 # All Fortran entry points are subroutines, so restype is always None.
@@ -173,11 +173,11 @@ def linearized_eliashberg(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init
     delta = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
     lambda_out = c_double(0.0)
     _lib.lin_eliash(delta, chi, Gk, uni, init_delta, Smat, Cmat, olist, plist, kmap, invk,
-                    byref(c_double(temp)), byref(c_double(eps)), byref(c_int64(Nkall)),
-                    byref(c_int64(Nk)), byref(c_int64(Nw)), byref(c_int64(Nchi)),
-                    byref(c_int64(Norb)), byref(c_int64(Nx)), byref(c_int64(Ny)),
-                    byref(c_int64(Nz)), byref(c_int64(itemax)), byref(c_int64(gap_sym)),
-                    byref(c_int64(arnoldi_m)), byref(lambda_out))
+                    dbl(temp), dbl(eps), i64(Nkall),
+                    i64(Nk), i64(Nw), i64(Nchi),
+                    i64(Norb), i64(Nx), i64(Ny),
+                    i64(Nz), i64(itemax), i64(gap_sym),
+                    i64(arnoldi_m), byref(lambda_out))
     return delta, lambda_out.value
 
 def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init_delta: np.ndarray,
@@ -214,12 +214,12 @@ def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, 
     Nkall, Nk, Nw = len(kmap), len(Gk[0, 0, 0]), len(Gk[0, 0])
     delta = np.zeros((Norb, Norb, Nw, Nkall), dtype=np.complex128)
     _lib.lin_eliash_soc(delta, chi, Gk, uni, init_delta, Vmat, sgnsig, sgnsig2, plist, olist,
-                        slist, kmap, invk, invs, invschi, byref(c_double(temp)),
-                        byref(c_double(eps)), byref(c_int64(Nkall)), byref(c_int64(Nk)),
-                        byref(c_int64(Nw)), byref(c_int64(Nchi)), byref(c_int64(Norb)),
-                        byref(c_int64(Nx)), byref(c_int64(Ny)), byref(c_int64(Nz)),
-                        byref(c_int64(itemax)), byref(c_int64(gap_sym)),
-                        byref(c_int64(arnoldi_m)))
+                        slist, kmap, invk, invs, invschi, dbl(temp),
+                        dbl(eps), i64(Nkall), i64(Nk),
+                        i64(Nw), i64(Nchi), i64(Norb),
+                        i64(Nx), i64(Ny), i64(Nz),
+                        i64(itemax), i64(gap_sym),
+                        i64(arnoldi_m))
     return delta
 
 def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarray,
@@ -294,12 +294,12 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
     sigmak = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
     _lib.eliashberg(delta, sigmak, Gk, hamk, Smat, Cmat, olist, plist,
                     kmap, invk,
-                    byref(c_double(mu)), byref(c_double(temp)), byref(c_double(eps)),
-                    byref(c_int64(Nkall)), byref(c_int64(Nk)), byref(c_int64(Nw)),
-                    byref(c_int64(Nchi)), byref(c_int64(Norb)), byref(c_int64(Nx)),
-                    byref(c_int64(Ny)), byref(c_int64(Nz)), byref(c_int64(itemax)),
-                    byref(c_int64(gap_sym)), byref(c_bool(sw_sigma)), byref(c_bool(sw_Vconst)),
-                    byref(c_int64(m_diis)), byref(c_double(gap_min)),
+                    dbl(mu), dbl(temp), dbl(eps),
+                    i64(Nkall), i64(Nk), i64(Nw),
+                    i64(Nchi), i64(Norb), i64(Nx),
+                    i64(Ny), i64(Nz), i64(itemax),
+                    i64(gap_sym), byref(c_bool(sw_sigma)), byref(c_bool(sw_Vconst)),
+                    i64(m_diis), dbl(gap_min),
                     byref(c_bool(sw_amp_newton)))
     return delta, sigmak
 
@@ -317,9 +317,9 @@ def conv_delta_orb_to_band(delta: np.ndarray, uni: np.ndarray, invk: np.ndarray,
     """
     Nkall, Nk, Nw, Norb = len(invk), len(uni), len(delta[0, 0]), len(delta)
     deltab = np.zeros((Norb, Norb, Nkall), dtype=np.complex128)
-    _lib.conv_delta_orb_to_band(deltab, delta, uni, plist, invk, byref(c_int64(Norb)),
-                                byref(c_int64(Nkall)), byref(c_int64(Nk)),
-                                byref(c_int64(Nw)), byref(c_int64(gap_sym)))
+    _lib.conv_delta_orb_to_band(deltab, delta, uni, plist, invk, i64(Norb),
+                                i64(Nkall), i64(Nk),
+                                i64(Nw), i64(gap_sym))
     return deltab
 
 def conv_delta_orb_to_band_soc(delta: np.ndarray, uni: np.ndarray, invk: np.ndarray,
@@ -336,8 +336,8 @@ def conv_delta_orb_to_band_soc(delta: np.ndarray, uni: np.ndarray, invk: np.ndar
     """
     Nkall, Nk, Nw, Norb = len(invk), len(uni), len(delta[0, 0]), len(delta)
     deltab = np.zeros((Norb, Norb, Nkall), dtype=np.complex128)
-    _lib.conv_delta_orb_to_band_soc(deltab, delta, uni, invk, invs, slist, byref(c_int64(Norb)),
-                                    byref(c_int64(Nkall)), byref(c_int64(Nk)), byref(c_int64(Nw)))
+    _lib.conv_delta_orb_to_band_soc(deltab, delta, uni, invk, invs, slist, i64(Norb),
+                                    i64(Nkall), i64(Nk), i64(Nw))
     return deltab
 
 def gen_Fk(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray) -> np.ndarray:
@@ -351,7 +351,7 @@ def gen_Fk(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray) -> np.ndarray:
     """
     Nkall, Nk, Nw, Norb = len(invk), len(Gk[0, 0, 0]), len(delta[0, 0]), len(delta)
     Fk = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
-    _lib.mkfk_trs_nsoc_(Fk, Gk, delta, byref(c_int64(Nk)), byref(c_int64(Nw)), byref(c_int64(Norb)))
+    _lib.mkfk_trs_nsoc_(Fk, Gk, delta, i64(Nk), i64(Nw), i64(Norb))
     return Fk
 
 def gen_Fk_soc(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray, invs: np.ndarray,
@@ -370,9 +370,9 @@ def gen_Fk_soc(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray, invs: np.nda
     Nkall, Nk, Nw, Norb = len(invk), len(Gk[0, 0, 0]), len(delta[0, 0]), len(delta)
     Fk = np.zeros((Norb, Norb, Nw, Nkall), dtype=np.complex128)
     sgnsig = np.array([slist]).T.dot(np.array([slist])).astype(np.float64)
-    _lib.mkfk_trs_soc_(Fk, Gk, delta, sgnsig, slist, invk, invs, byref(c_int64(Nkall)),
-                       byref(c_int64(Nk)), byref(c_int64(Nw)), byref(c_int64(Norb)),
-                       byref(c_int64(gap_sym)))
+    _lib.mkfk_trs_soc_(Fk, Gk, delta, sgnsig, slist, invk, invs, i64(Nkall),
+                       i64(Nk), i64(Nw), i64(Norb),
+                       i64(gap_sym))
     return Fk
 
 def get_initial_delta(init_delta: np.ndarray, uni: np.ndarray, kmap: np.ndarray,
@@ -394,8 +394,8 @@ def get_initial_delta(init_delta: np.ndarray, uni: np.ndarray, kmap: np.ndarray,
     Norb, Nk = init_delta.shape
     Nkall = len(kmap)
     delta = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
-    _lib.get_initial_delta_(delta, init_delta, uni, kmap, invk, byref(c_int64(Nkall)), byref(c_int64(Nk)),
-                            byref(c_int64(Nw)), byref(c_int64(Norb)), byref(c_int64(gap_sym)))
+    _lib.get_initial_delta_(delta, init_delta, uni, kmap, invk, i64(Nkall), i64(Nk),
+                            i64(Nw), i64(Norb), i64(gap_sym))
     return delta
 
 def get_band_to_orb_delta(init_delta: np.ndarray, uni: np.ndarray) -> np.ndarray:
@@ -420,7 +420,7 @@ def get_band_to_orb_delta(init_delta: np.ndarray, uni: np.ndarray) -> np.ndarray
     init_delta_f = np.asfortranarray(init_delta.T)
     uni_f = np.asfortranarray(np.transpose(uni, (1, 2, 0)))
     delta_f = np.zeros((Norb, Norb, Nk), dtype=np.complex128, order='F')
-    _lib.get_band_to_orb_delta(delta_f, init_delta_f, uni_f, byref(c_int64(Nk)), byref(c_int64(Norb)))
+    _lib.get_band_to_orb_delta(delta_f, init_delta_f, uni_f, i64(Nk), i64(Norb))
     return np.ascontiguousarray(np.transpose(delta_f, (2, 0, 1)))
 
 def remap_gap(delta0, plist, invk, gap_sym):
@@ -436,6 +436,6 @@ def remap_gap(delta0, plist, invk, gap_sym):
     Nkall, Nk, Norb = len(invk), len(delta0.T), len(plist)
     Nw = delta0.shape[2]
     delta = np.zeros((Norb, Norb, Nw, Nkall), dtype=np.complex128)
-    _lib.remap_delta_(delta, delta0, plist, invk, byref(c_int64(Nkall)), byref(c_int64(Nk)),
-                      byref(c_int64(Nw)), byref(c_int64(Norb)), byref(c_int64(gap_sym)))
+    _lib.remap_delta_(delta, delta0, plist, invk, i64(Nkall), i64(Nk),
+                      i64(Nw), i64(Norb), i64(gap_sym))
     return delta

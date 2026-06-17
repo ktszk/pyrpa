@@ -1,6 +1,6 @@
 from ctypes import *
 import numpy as np
-from ._loader import _lib
+from ._loader import _lib, i64, dbl
 
 # --- ctypes signatures: set once at import.
 # All Fortran entry points are subroutines, so restype is always None.
@@ -69,9 +69,9 @@ def gen_imp_ham(rvec: np.ndarray, ham_r: np.ndarray, ham_i: np.ndarray, ham_ri: 
     Nr, Nimp, Nsite = len(rvec), len(imp_list), len(rlist)
     Norb = ham_r.shape[1]
     ham_imp = np.zeros((Norb * Nsite, Norb * Nsite), dtype=np.complex128)
-    _lib.gen_imp_ham(ham_imp, ham_r, rvec, ham_i, ham_ri, imp_list, rlist, byref(c_double(eps)),
-                     byref(c_int64(Nimp)), byref(c_int64(Nsite)),
-                     byref(c_int64(Nr)), byref(c_int64(Norb)))
+    _lib.gen_imp_ham(ham_imp, ham_r, rvec, ham_i, ham_ri, imp_list, rlist, dbl(eps),
+                     i64(Nimp), i64(Nsite),
+                     i64(Nr), i64(Norb))
     return ham_imp
 
 def dft_imp_ham(ham_imp: np.ndarray, klist: np.ndarray, rlist: np.ndarray) -> np.ndarray:
@@ -86,8 +86,8 @@ def dft_imp_ham(ham_imp: np.ndarray, klist: np.ndarray, rlist: np.ndarray) -> np
     Nk, Nsite = len(klist), len(rlist)
     Norb = int(len(ham_imp) / Nsite)
     ham_k = np.zeros((Norb * Nk, Norb * Nk), dtype=np.complex128)
-    _lib.get_dft_imp_ham(ham_k, ham_imp, klist, rlist, byref(c_int64(Nk)),
-                         byref(c_int64(Nsite)), byref(c_int64(Norb)))
+    _lib.get_dft_imp_ham(ham_k, ham_imp, klist, rlist, i64(Nk),
+                         i64(Nsite), i64(Norb))
     return ham_k
 
 def get_imp_spectrum(uni: np.ndarray, eigs: np.ndarray, mu: float, wlist: np.ndarray,
@@ -108,9 +108,9 @@ def get_imp_spectrum(uni: np.ndarray, eigs: np.ndarray, mu: float, wlist: np.nda
     Norb = int(len(eigs) / Nsite)
     spectrum = np.zeros((Nk, Nw), dtype=np.complex128)
     _lib.get_spectrum_spaghetti(spectrum, uni, eigs, klist, rlist, wlist,
-                                byref(c_int64(Nw)), byref(c_int64(Nk)),
-                                byref(c_int64(Nsite)), byref(c_int64(Norb)),
-                                byref(c_double(mu)), byref(c_double(eta)))
+                                i64(Nw), i64(Nk),
+                                i64(Nsite), i64(Norb),
+                                dbl(mu), dbl(eta))
     return spectrum
 
 def solve_cpa(hamk: np.ndarray, VA: np.ndarray, VB: np.ndarray,
@@ -147,9 +147,9 @@ def solve_cpa(hamk: np.ndarray, VA: np.ndarray, VB: np.ndarray,
             sigma_cpa[iw, :, :] = vca
 
     _lib.solve_cpa_array(sigma_cpa, hamk, VA_c, VB_c,
-                         byref(c_double(x)), zlist_c,
-                         byref(c_double(pp)),
-                         byref(c_int64(Nk)), byref(c_int64(Norb)),
-                         byref(c_int64(Nw)), byref(c_int64(maxiter)),
-                         byref(c_double(tol)))
+                         dbl(x), zlist_c,
+                         dbl(pp),
+                         i64(Nk), i64(Norb),
+                         i64(Nw), i64(maxiter),
+                         dbl(tol))
     return sigma_cpa

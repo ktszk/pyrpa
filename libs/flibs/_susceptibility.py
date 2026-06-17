@@ -1,6 +1,6 @@
 from ctypes import *
 import numpy as np
-from ._loader import _lib
+from ._loader import _lib, i64, dbl
 
 # --- ctypes signatures: set once at import.
 # All Fortran entry points are subroutines, so restype is always None.
@@ -245,9 +245,9 @@ def get_chi0_conv(Gk: np.ndarray, kmap: np.ndarray, invk: np.ndarray, olist: np.
     chi = np.zeros((Nchi, Nchi, Nw, Nk), dtype=np.complex128)
     chi_map, irr_chi = _get_chi_map(olist)
     _lib.get_chi0_conv_(chi, Gk, kmap, invk, irr_chi, chi_map, olist,
-                        byref(c_double(temp)), byref(c_int64(Nx)),
-                        byref(c_int64(Ny)), byref(c_int64(Nz)), byref(c_int64(Nw)), byref(c_int64(Nk)),
-                        byref(c_int64(Nkall)), byref(c_int64(Norb)), byref(c_int64(Nchi)))
+                        dbl(temp), i64(Nx),
+                        i64(Ny), i64(Nz), i64(Nw), i64(Nk),
+                        i64(Nkall), i64(Norb), i64(Nchi))
     return chi
 
 def get_chi_irr(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, qshift: np.ndarray,
@@ -269,9 +269,9 @@ def get_chi_irr(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, qshift: np
     Norb, Nchi = eig.shape[1], len(olist)
     chi = np.zeros((Nw, Nchi, Nchi), dtype=np.complex128)
     eps = idelta * 1e-3
-    _lib.get_chi_irr(chi, uni, eig, ffermi, qshift, olist, wlist, byref(c_int64(Nchi)),
-                     byref(c_int64(Norb)), byref(c_int64(Nk)), byref(c_int64(Nw)),
-                     byref(c_double(idelta)), byref(c_double(eps)), byref(c_double(temp)))
+    _lib.get_chi_irr(chi, uni, eig, ffermi, qshift, olist, wlist, i64(Nchi),
+                     i64(Norb), i64(Nk), i64(Nw),
+                     dbl(idelta), dbl(eps), dbl(temp))
     return chi
 
 def chis_qmap(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, klist: np.ndarray,
@@ -299,10 +299,10 @@ def chis_qmap(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, klist: np.nd
     chi = np.zeros((Nx, Ny), dtype=np.complex128)
     chis = np.zeros((Nx, Ny), dtype=np.complex128)
     eps = idelta * 1e-3
-    _lib.chiq_map(chis, chi, uni, eig, ffermi, klist, Smat, olist, byref(c_double(temp)),
-                  byref(c_double(ecut)), byref(c_double(idelta)), byref(c_double(eps)),
-                  byref(c_int64(Nx)), byref(c_int64(Ny)), byref(c_int64(Nk)),
-                  byref(c_int64(Norb)), byref(c_int64(Nchi)))
+    _lib.chiq_map(chis, chi, uni, eig, ffermi, klist, Smat, olist, dbl(temp),
+                  dbl(ecut), dbl(idelta), dbl(eps),
+                  i64(Nx), i64(Ny), i64(Nk),
+                  i64(Norb), i64(Nchi))
     return chis, chi
 
 def get_tr_chi(chis: np.ndarray, chi0: np.ndarray,
@@ -322,7 +322,7 @@ def get_tr_chi(chis: np.ndarray, chi0: np.ndarray,
     trchi0 = np.zeros(Nw, dtype=np.complex128)
     chis_orb = np.zeros((Nw, Norb + 2), dtype=np.complex128)
     _lib.get_tr_chi(trchis, trchi0, chis_orb, chis, chi0, olist,
-                    byref(c_int64(Nw)), byref(c_int64(Nchi)), byref(c_int64(Norb)))
+                    i64(Nw), i64(Nchi), i64(Norb))
     return trchis, trchi0, chis_orb
 
 def get_phi_irr(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, qshift: np.ndarray,
@@ -346,10 +346,10 @@ def get_phi_irr(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, qshift: np
     Norb, Nchi = eig.shape[1], len(olist)
     phi = np.zeros((Nw, Nchi, Nchi), dtype=np.complex128)
     eps = idelta * 1e-3
-    _lib.get_phi_irr(phi, uni, eig, ffermi, qshift, olist, wlist, byref(c_int64(Nchi)),
-                     byref(c_int64(Norb)), byref(c_int64(Nk)), byref(c_int64(Nw)),
-                     byref(c_double(idelta)), byref(c_double(eps)),
-                     byref(c_double(mu)), byref(c_double(temp)))
+    _lib.get_phi_irr(phi, uni, eig, ffermi, qshift, olist, wlist, i64(Nchi),
+                     i64(Norb), i64(Nk), i64(Nw),
+                     dbl(idelta), dbl(eps),
+                     dbl(mu), dbl(temp))
     return phi
 
 def phi_qmap(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, klist: np.ndarray,
@@ -376,10 +376,10 @@ def phi_qmap(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, klist: np.nda
     Norb, Nchi = eig.shape[1], len(olist)
     phi = np.zeros((Nx, Ny), dtype=np.complex128)
     eps = idelta * 1e-3
-    _lib.phiq_map(phi, uni, eig, ffermi, klist, olist, byref(c_double(mu)), byref(c_double(temp)),
-                  byref(c_double(ecut)), byref(c_double(idelta)), byref(c_double(eps)),
-                  byref(c_int64(Nx)), byref(c_int64(Ny)), byref(c_int64(Nk)),
-                  byref(c_int64(Norb)), byref(c_int64(Nchi)), byref(c_bool(sw_omega)))
+    _lib.phiq_map(phi, uni, eig, ffermi, klist, olist, dbl(mu), dbl(temp),
+                  dbl(ecut), dbl(idelta), dbl(eps),
+                  i64(Nx), i64(Ny), i64(Nk),
+                  i64(Norb), i64(Nchi), byref(c_bool(sw_omega)))
     return phi
 
 def get_tr_phi(phi: np.ndarray, olist: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -394,8 +394,8 @@ def get_tr_phi(phi: np.ndarray, olist: np.ndarray) -> tuple[np.ndarray, np.ndarr
     Nchi, Nw, Norb = len(olist), len(phi), olist.max()
     trphi = np.zeros(Nw, dtype=np.complex128)
     phi_orb = np.zeros((Nw, Norb + 2), dtype=np.complex128)
-    _lib.get_tr_phi(trphi, phi_orb, phi, olist, byref(c_int64(Nw)),
-                    byref(c_int64(Nchi)), byref(c_int64(Norb)))
+    _lib.get_tr_phi(trphi, phi_orb, phi, olist, i64(Nw),
+                    i64(Nchi), i64(Norb))
     return trphi, phi_orb
 
 def get_chis(chi0: np.ndarray, Smat: np.ndarray) -> np.ndarray:
@@ -408,7 +408,7 @@ def get_chis(chi0: np.ndarray, Smat: np.ndarray) -> np.ndarray:
     """
     Nchi, Nw = len(Smat), len(chi0)
     chis = np.zeros((Nw, Nchi, Nchi), dtype=np.complex128)
-    _lib.get_chis(chis, chi0, Smat, byref(c_int64(Nchi)), byref(c_int64(Nw)))
+    _lib.get_chis(chis, chi0, Smat, i64(Nchi), i64(Nw))
     return chis
 
 def get_chi0(Smat: np.ndarray, Cmat: np.ndarray, Gk: np.ndarray, olist: np.ndarray,
@@ -433,10 +433,10 @@ def get_chi0(Smat: np.ndarray, Cmat: np.ndarray, Gk: np.ndarray, olist: np.ndarr
     Nkall, Nk, Nw = len(kmap), len(Gk[0, 0, 0]), len(Gk[0, 0])
     chi = np.zeros((Nchi, Nchi, Nw, Nk), dtype=np.complex128)
     stoner = c_double(0.0)
-    _lib.get_chi0(chi, Smat, Cmat, Gk, kmap, invk, olist, byref(c_double(temp)),
-                  byref(c_int64(Nx)), byref(c_int64(Ny)), byref(c_int64(Nz)),
-                  byref(c_int64(Nw)), byref(c_int64(Nk)), byref(c_int64(Nkall)),
-                  byref(c_int64(Norb)), byref(c_int64(Nchi)), byref(stoner))
+    _lib.get_chi0(chi, Smat, Cmat, Gk, kmap, invk, olist, dbl(temp),
+                  i64(Nx), i64(Ny), i64(Nz),
+                  i64(Nw), i64(Nk), i64(Nkall),
+                  i64(Norb), i64(Nchi), byref(stoner))
     return chi, stoner.value
 
 def get_chi0_soc(Vmat: np.ndarray, Gk: np.ndarray, olist: np.ndarray, slist: np.ndarray,
@@ -468,9 +468,9 @@ def get_chi0_soc(Vmat: np.ndarray, Gk: np.ndarray, olist: np.ndarray, slist: np.
     sgnsig2 = np.zeros((Nchi, Nchi), dtype=np.float64)
     invschi = np.zeros(Nchi, dtype=np.int64)
     _lib.get_chi0_soc(chi, sgnsig, sgnsig2, invschi, Vmat, Gk, kmap, invk, invs, olist, slist,
-                      byref(c_double(temp)), byref(c_int64(Nx)), byref(c_int64(Ny)),
-                      byref(c_int64(Nz)), byref(c_int64(Nw)), byref(c_int64(Nk)),
-                      byref(c_int64(Nkall)), byref(c_int64(Nchi)), byref(c_int64(Norb)))
+                      dbl(temp), i64(Nx), i64(Ny),
+                      i64(Nz), i64(Nw), i64(Nk),
+                      i64(Nkall), i64(Nchi), i64(Norb))
     return chi, sgnsig, sgnsig2, invschi
 
 def get_chis_chic_soc(chi: np.ndarray, Vmat: np.ndarray, olist: np.ndarray, slist: np.ndarray,
@@ -507,8 +507,8 @@ def get_chis_chic_soc(chi: np.ndarray, Vmat: np.ndarray, olist: np.ndarray, slis
     chiszz = np.zeros((int(Nchi / 4), int(Nchi / 4), Nk), dtype=np.complex128)
     chispm = np.zeros((int(Nchi / 4), int(Nchi / 4), Nk), dtype=np.complex128)
     _lib.get_chis_chic_soc(chic, chiszz, chispm, chi, Vmat, orb_list, olist, slist, invs,
-                           byref(c_int64(Nk)), byref(c_int64(Nw)),
-                           byref(c_int64(Nchi)), byref(c_int64(Norb)))
+                           i64(Nk), i64(Nw),
+                           i64(Nchi), i64(Norb))
     return chic, chiszz, chispm
 
 def get_chis_chic(chi: np.ndarray, Smat: np.ndarray, Cmat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -524,8 +524,8 @@ def get_chis_chic(chi: np.ndarray, Smat: np.ndarray, Cmat: np.ndarray) -> tuple[
     Nk, Nw, Nchi = len(chi[0, 0, 0]), len(chi[0, 0]), len(Smat)
     chis = np.zeros((Nchi, Nchi, Nk), dtype=np.complex128)
     chic = np.zeros((Nchi, Nchi, Nk), dtype=np.complex128)
-    _lib.get_chis_chic(chis, chic, chi, Smat, Cmat, byref(c_int64(Nk)),
-                       byref(c_int64(Nw)), byref(c_int64(Nchi)))
+    _lib.get_chis_chic(chis, chic, chi, Smat, Cmat, i64(Nk),
+                       i64(Nw), i64(Nchi))
     return chis, chic
 
 def get_chi_irr_sc(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray,
@@ -552,10 +552,10 @@ def get_chi_irr_sc(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray,
     chi = np.zeros((Nw, Nchi, Nchi,2), dtype=np.complex128)
     ol_f = np.asfortranarray(ol)
     _lib.get_chi_irr_sc(chi, uni, eig, ffermi, qshift, ol_f, wlist,
-                        byref(c_int64(Nchi)), byref(c_int64(Norb)),
-                        byref(c_int64(Nk)), byref(c_int64(Nw)),
-                        byref(c_double(idelta)), byref(c_double(eps)),
-                        byref(c_double(temp)), byref(c_bool(sw_spsym)))
+                        i64(Nchi), i64(Norb),
+                        i64(Nk), i64(Nw),
+                        dbl(idelta), dbl(eps),
+                        dbl(temp), byref(c_bool(sw_spsym)))
     return chi
 
 def get_eig_or_tr_chi(chi: np.ndarray, invk: np.ndarray, sw_eig: bool) -> np.ndarray:
@@ -570,6 +570,6 @@ def get_eig_or_tr_chi(chi: np.ndarray, invk: np.ndarray, sw_eig: bool) -> np.nda
     Nkall, Nk = len(invk), len(chi.T)
     Nchi = chi.shape[0]
     chiq = np.zeros(Nkall, dtype=np.complex128)
-    _lib.get_eig_or_tr_chi(chiq, chi, invk, byref(c_int64(Nkall)), byref(c_int64(Nk)),
-                            byref(c_int64(Nchi)), byref(c_bool(sw_eig)))
+    _lib.get_eig_or_tr_chi(chiq, chi, invk, i64(Nkall), i64(Nk),
+                            i64(Nchi), byref(c_bool(sw_eig)))
     return chiq

@@ -1,6 +1,6 @@
 from ctypes import *
 import numpy as np
-from ._loader import _lib
+from ._loader import _lib, i64, dbl
 
 # --- ctypes signatures: set once at import.
 # All Fortran entry points are subroutines, so restype is always None.
@@ -92,8 +92,8 @@ def gen_Green0(eig: np.ndarray, uni: np.ndarray,
     Nk = len(eig)
     Norb = eig.shape[1]
     Gk = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
-    _lib.gen_green0_(Gk, eig, uni, byref(c_double(mu)), byref(c_double(temp)),
-                     byref(c_int64(Nk)), byref(c_int64(Nw)), byref(c_int64(Norb)))
+    _lib.gen_green0_(Gk, eig, uni, dbl(mu), dbl(temp),
+                     i64(Nk), i64(Nw), i64(Norb))
     return Gk
 
 def gen_green(selfen: np.ndarray, hamk: np.ndarray,
@@ -111,9 +111,9 @@ def gen_green(selfen: np.ndarray, hamk: np.ndarray,
     Norb = hamk.shape[1]
     Nw = selfen.shape[2]
     Gk = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
-    _lib.gen_green_inv_(Gk, selfen, hamk, byref(c_double(mu)), byref(c_double(temp)),
-                        byref(c_int64(Nk)), byref(c_int64(Nw)), byref(c_int64(Norb)))
-    _lib.getinv_(Gk, byref(c_int64(Nk)), byref(c_int64(Nw)), byref(c_int64(Norb)))
+    _lib.gen_green_inv_(Gk, selfen, hamk, dbl(mu), dbl(temp),
+                        i64(Nk), i64(Nw), i64(Norb))
+    _lib.getinv_(Gk, i64(Nk), i64(Nw), i64(Norb))
     return Gk
 
 def gen_green_from_eig(selfen: np.ndarray, eig: np.ndarray,
@@ -132,9 +132,9 @@ def gen_green_from_eig(selfen: np.ndarray, eig: np.ndarray,
     Norb = eig.shape[1]
     Nw = selfen.shape[2]
     Gk = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
-    _lib.gen_green_inv_from_eig(Gk, selfen, uni, eig, byref(c_double(mu)), byref(c_double(temp)),
-                                byref(c_int64(Nk)), byref(c_int64(Nw)), byref(c_int64(Norb)))
-    _lib.getinv_(Gk, byref(c_int64(Nk)), byref(c_int64(Nw)), byref(c_int64(Norb)))
+    _lib.gen_green_inv_from_eig(Gk, selfen, uni, eig, dbl(mu), dbl(temp),
+                                i64(Nk), i64(Nw), i64(Norb))
+    _lib.getinv_(Gk, i64(Nk), i64(Nw), i64(Norb))
     return Gk
 
 def gen_tr_Greenw_0(eig: np.ndarray, mu: float,
@@ -151,8 +151,8 @@ def gen_tr_Greenw_0(eig: np.ndarray, mu: float,
     Nk, Nw = len(eig), len(wlist)
     Norb = eig.shape[1]
     trGk = np.zeros((Nk, Nw), dtype=np.complex128)
-    _lib.gen_tr_greenw_0(trGk, wlist, eig, byref(c_double(mu)), byref(c_double(delta)),
-                         byref(c_int64(Nk)), byref(c_int64(Nw)), byref(c_int64(Norb)))
+    _lib.gen_tr_greenw_0(trGk, wlist, eig, dbl(mu), dbl(delta),
+                         i64(Nk), i64(Nw), i64(Norb))
     return -trGk.imag
 
 def gen_dos(eig: np.ndarray, uni: np.ndarray, mu: float,
@@ -170,8 +170,8 @@ def gen_dos(eig: np.ndarray, uni: np.ndarray, mu: float,
     Nk, Nw = len(eig), len(wlist)
     Norb = eig.shape[1]
     pDos = np.zeros((Norb, Nw), dtype=np.complex128)
-    _lib.gen_dos(pDos, wlist, eig, uni, byref(c_double(mu)), byref(c_double(delta)),
-                 byref(c_int64(Nk)), byref(c_int64(Nw)), byref(c_int64(Norb)))
+    _lib.gen_dos(pDos, wlist, eig, uni, dbl(mu), dbl(delta),
+                 i64(Nk), i64(Nw), i64(Norb))
     return -pDos.imag
 
 def get_a(inp_data: np.ndarray, xlist: np.ndarray) -> np.ndarray:
@@ -184,7 +184,7 @@ def get_a(inp_data: np.ndarray, xlist: np.ndarray) -> np.ndarray:
     """
     Np = len(inp_data)
     a = np.zeros(Np, dtype=np.complex128)
-    _lib.get_a_(a, xlist, inp_data, byref(c_int64(Np)))
+    _lib.get_a_(a, xlist, inp_data, i64(Np))
     return a
 
 def get_QP(a: np.ndarray, xlist: np.ndarray, wlist: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -200,7 +200,7 @@ def get_QP(a: np.ndarray, xlist: np.ndarray, wlist: np.ndarray) -> tuple[np.ndar
     Nw, Np = len(wlist), len(a)
     Q = np.zeros(Nw, dtype=np.complex128)
     P = np.zeros(Nw, dtype=np.complex128)
-    _lib.get_qp_(P, Q, a, xlist, wlist, byref(c_int64(Nw)), byref(c_int64(Np)))
+    _lib.get_qp_(P, Q, a, xlist, wlist, i64(Nw), i64(Np))
     return Q, P
 
 def pade_with_trace(A: np.ndarray, iwlist: np.ndarray, wlist: np.ndarray) -> np.ndarray:
@@ -215,6 +215,6 @@ def pade_with_trace(A: np.ndarray, iwlist: np.ndarray, wlist: np.ndarray) -> np.
     Nk, Nw, Niw = len(A.T), len(wlist), len(iwlist)
     Norb = A.shape[0]
     B = np.zeros((Nk, Nw), dtype=np.complex128)
-    _lib.pade_with_trace(A, B, iwlist, wlist, byref(c_int64(Nk)), byref(c_int64(Niw)),
-                         byref(c_int64(Nw)), byref(c_int64(Norb)))
+    _lib.pade_with_trace(A, B, iwlist, wlist, i64(Nk), i64(Niw),
+                         i64(Nw), i64(Norb))
     return B

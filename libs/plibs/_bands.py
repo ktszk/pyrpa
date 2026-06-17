@@ -47,6 +47,19 @@ def get_eigs(klist: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.nda
             else:
                 return eig,uni
 
+def _solve_mu(func, emin: float, emax: float, label: str) -> float:
+    """Bracket the chemical potential with brentq; if filling lies outside the band
+    range, clamp to the closer boundary (shared by calc_mu and calc_mu_imp)."""
+    try:
+        return scopt.brentq(func, emin, emax)
+    except ValueError:
+        # filling is outside the computed band range; clamp to the closer boundary
+        if func(emin)*func(emax) > 0:
+            mu = emin if abs(func(emin)) < abs(func(emax)) else emax
+            print(f"Warning: {label} could not bracket the chemical potential. Clamped to mu={mu:.4f} eV", flush=True)
+            return mu
+        raise
+
 def calc_mu(eig,Nk,fill:float,temp:float)-> float:
     """
     @fn calc_mu()
@@ -62,18 +75,7 @@ def calc_mu(eig,Nk,fill:float,temp:float)-> float:
     def func(mu):
         sum_fermi=flibs.get_ffermi(eig,mu,temp).sum()
         return(fill*Nk-sum_fermi)  # zero when total electrons equals target filling * Nk
-    emax=eig.max()
-    emin=eig.min()
-    try:
-        mu=scopt.brentq(func,emin,emax)
-    except ValueError:
-        # filling is outside the computed band range; clamp to the closer boundary
-        if func(emin)*func(emax) > 0:
-            mu=emin if abs(func(emin)) < abs(func(emax)) else emax
-            print(f"Warning: calc_mu could not bracket the chemical potential. Clamped to mu={mu:.4f} eV",flush=True)
-        else:
-            raise
-    return mu
+    return _solve_mu(func, eig.min(), eig.max(), 'calc_mu')
 
 def calc_mu_imp(eigs,Nsite,fill:float,temp:float)-> float:
     """
@@ -90,17 +92,7 @@ def calc_mu_imp(eigs,Nsite,fill:float,temp:float)-> float:
     itemp=1./temp
     def func(mu):
         return(fill*Nsite-0.5*(1.0-np.tanh(0.5*(eigs-mu)*itemp)).sum())
-    emax=eigs.max()
-    emin=eigs.min()
-    try:
-        mu=scopt.brentq(func,emin,emax)
-    except ValueError:
-        if func(emin)*func(emax) > 0:
-            mu=emin if abs(func(emin)) < abs(func(emax)) else emax
-            print(f"Warning: calc_mu_imp could not bracket the chemical potential. Clamped to mu={mu:.4f} eV",flush=True)
-        else:
-            raise
-    return mu
+    return _solve_mu(func, eigs.min(), eigs.max(), 'calc_mu_imp')
 
 def get_kf_points(eig: np.ndarray, mesh: int, mu: float, kz: float) -> tuple[list, list]:
     """
