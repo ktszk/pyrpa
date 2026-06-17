@@ -413,27 +413,28 @@ def get_chi_orb_list(Norb: int, site_prof: np.ndarray) -> tuple[np.ndarray, np.n
     return chiolist,site
 
 def gap_symms(klist: np.ndarray, Norb: int, gap_sym: int):
-    if gap_sym==0: #s
-        init_gap=np.ones((Norb,len(klist)),dtype=np.float64)
+    # The gap symmetry form factor depends only on k, so build one row and broadcast to all orbitals.
+    A=2*np.pi
+    kx,ky,kz=klist[:,0],klist[:,1],klist[:,2]
+    if gap_sym==0:        # s
+        row=np.ones(len(klist),dtype=np.float64)
+    elif gap_sym==1:      # dx2-y2
+        row=np.cos(A*kx)-np.cos(A*ky)
+    elif gap_sym==2:      # spm
+        row=2*np.cos(A*kx)*np.cos(A*ky)
+    elif gap_sym==3:      # dxy
+        row=2*np.sin(A*kx)*np.sin(A*ky)
+    elif gap_sym==4:      # dxz
+        row=2*np.sin(A*kx)*np.sin(A*kz)
+    elif gap_sym==5:      # dyz
+        row=2*np.sin(A*ky)*np.sin(A*kz)
+    elif gap_sym==-1:     # px
+        row=2*np.sin(A*kx)
+    elif gap_sym==-2:     # py
+        row=2*np.sin(A*ky)
     else:
-        A=2*np.pi
-        init_gap=np.zeros((Norb,len(klist)),dtype=np.float64)
-        for i in range(Norb):
-            if gap_sym==1: #dx2-y2
-                init_gap[i,:]=np.cos(A*klist[:,0])-np.cos(A*klist[:,1])
-            elif gap_sym==2: #spm
-                init_gap[i,:]=2*np.cos(A*klist[:,0])*np.cos(A*klist[:,1])
-            elif gap_sym==3: #dxy
-                init_gap[i,:]=2*np.sin(A*klist[:,0])*np.sin(A*klist[:,1])
-            elif gap_sym==4: #dxz
-                init_gap[i,:]=2*np.sin(A*klist[:,0])*np.sin(A*klist[:,2])
-            elif gap_sym==5: #dyz
-                init_gap[i,:]=2*np.sin(A*klist[:,1])*np.sin(A*klist[:,2])
-            elif gap_sym==-1: #px
-                init_gap[i,:]=2*np.sin(A*klist[:,0])
-            elif gap_sym==-2: #py
-                init_gap[i,:]=2*np.sin(A*klist[:,1])
-    return init_gap
+        row=np.zeros(len(klist),dtype=np.float64)
+    return np.tile(row,(Norb,1))
 
 def get_initial_gap(klist: np.ndarray, Norb: int, gap_sym: int) -> np.ndarray:
     """

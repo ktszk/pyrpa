@@ -1,6 +1,6 @@
 from ctypes import *
 import numpy as np
-from ._loader import _lib
+from ._loader import _lib, i64, dbl
 
 # --- ctypes signatures: set once at import.
 # All Fortran entry points are subroutines, so restype is always None.
@@ -66,8 +66,8 @@ def get_Vsigma_nosoc_flex(chi: np.ndarray, Smat: np.ndarray, Cmat: np.ndarray) -
     @return  chi: Copy of the vertex-corrected susceptibility tensor
     """
     Nk, Nw, Nchi = len(chi), len(chi[0]), len(Smat)
-    _lib.get_vsigma_flex_nosoc_(chi, Smat, Cmat, byref(c_int64(Nk)),
-                                byref(c_int64(Nw)), byref(c_int64(Nchi)))
+    _lib.get_vsigma_flex_nosoc_(chi, Smat, Cmat, i64(Nk),
+                                i64(Nw), i64(Nchi))
     return chi.copy()
 
 def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray,
@@ -108,11 +108,11 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
     mu_self = c_double()
     sigmak = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
     _lib.mkself(sigmak, byref(mu_self), Smat, Cmat, kmap, invk, olist, hamk, eig, uni,
-        byref(c_double(mu)), byref(c_double(fill)), byref(c_double(temp)), byref(c_int64(scf_loop)),
-        byref(c_double(pp)), byref(c_double(eps)), byref(c_int64(Nkall)), byref(c_int64(Nk)),
-        byref(c_int64(Nw)), byref(c_int64(Norb)), byref(c_int64(Nchi)), byref(c_int64(Nx)),
-        byref(c_int64(Ny)), byref(c_int64(Nz)), byref(c_int64(sub_sigma)), byref(c_bool(sw_out)),
-        byref(c_bool(sw_in)), byref(c_int64(m_diis)), byref(c_bool(sw_rescale)))
+        dbl(mu), dbl(fill), dbl(temp), i64(scf_loop),
+        dbl(pp), dbl(eps), i64(Nkall), i64(Nk),
+        i64(Nw), i64(Norb), i64(Nchi), i64(Nx),
+        i64(Ny), i64(Nz), i64(sub_sigma), byref(c_bool(sw_out)),
+        byref(c_bool(sw_in)), i64(m_diis), byref(c_bool(sw_rescale)))
     return sigmak, mu_self.value
 
 def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.ndarray,
@@ -154,9 +154,9 @@ def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.nd
     mu_self = c_double()
     sigmak = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
     _lib.mkself_soc(sigmak, byref(mu_self), Vmat, kmap, invk, invs, olist, slist, hamk, eig, uni,
-               byref(c_double(mu)), byref(c_double(fill)), byref(c_double(temp)), byref(c_int64(scf_loop)),
-               byref(c_double(pp)), byref(c_double(eps)), byref(c_int64(Nkall)), byref(c_int64(Nk)),
-               byref(c_int64(Nw)), byref(c_int64(Norb)), byref(c_int64(Nchi)), byref(c_int64(Nx)),
-               byref(c_int64(Ny)), byref(c_int64(Nz)), byref(c_int64(sub_sigma)), byref(c_bool(sw_out)),
-               byref(c_bool(sw_in)), byref(c_int64(m_diis)), byref(c_bool(sw_rescale)))
+               dbl(mu), dbl(fill), dbl(temp), i64(scf_loop),
+               dbl(pp), dbl(eps), i64(Nkall), i64(Nk),
+               i64(Nw), i64(Norb), i64(Nchi), i64(Nx),
+               i64(Ny), i64(Nz), i64(sub_sigma), byref(c_bool(sw_out)),
+               byref(c_bool(sw_in)), i64(m_diis), byref(c_bool(sw_rescale)))
     return sigmak, mu_self.value

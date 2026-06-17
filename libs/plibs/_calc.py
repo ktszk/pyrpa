@@ -37,6 +37,17 @@ def _prepare_soc_interaction(olist, slist, site, invs, orb_dep:bool, U:float, J:
     return flibs.gen_Vmatrix(olist, slist, site, invs, U, J)
 
 
+def _load_sigma_from_file():
+    """Load (sigmak, mu_self) from self_en.npz, or None if the file is missing."""
+    try:
+        npz = np.load('self_en.npz')
+        print("Import sigma from self_en.npz")
+        return npz['arr_0'], npz['arr_1']
+    except FileNotFoundError:
+        print("Error: 'self_en.npz' not found", flush=True)
+        return None
+
+
 def _prepare_green_state_normal(state, olist, interaction, mu:float, fill:float, temp:float,
                                 Nw:int, Nx:int, Ny:int, Nz:int, sw_self:bool,
                                 sw_from_file:bool=False, sw_out_self:bool=False, sw_in_self:bool=False,
@@ -44,13 +55,10 @@ def _prepare_green_state_normal(state, olist, interaction, mu:float, fill:float,
     Smat, Cmat = interaction
     if sw_self:
         if sw_from_file:
-            try:
-                npz = np.load('self_en.npz')
-                sigmak, mu_self = npz['arr_0'], npz['arr_1']
-                print("Import sigma from self_en.npz")
-            except FileNotFoundError:
-                print("Error: 'self_en.npz' not found", flush=True)
+            loaded = _load_sigma_from_file()
+            if loaded is None:
                 return None
+            sigmak, mu_self = loaded
         else:
             sigmak, mu_self = flibs.mkself(Smat, Cmat, state['kmap'], state['invk'], olist,
                                            state['ham_k'], state['eig'], state['uni'],
@@ -72,13 +80,10 @@ def _prepare_green_state_soc(state, olist, slist, invs, interaction, mu:float, f
     Vmat = interaction
     if sw_self:
         if sw_from_file:
-            try:
-                npz = np.load('self_en.npz')
-                sigmak, mu_self = npz['arr_0'], npz['arr_1']
-                print("Import sigma from self_en.npz")
-            except FileNotFoundError:
-                print("Error: 'self_en.npz' not found", flush=True)
+            loaded = _load_sigma_from_file()
+            if loaded is None:
                 return None
+            sigmak, mu_self = loaded
         else:
             sigmak, mu_self = flibs.mkself_soc(Vmat, state['kmap'], state['invk'], invs, olist, slist,
                                                state['ham_k'], state['eig'], state['uni'],
