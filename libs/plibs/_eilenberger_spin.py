@@ -25,6 +25,7 @@ the Pauli immunity when the d-vector is perpendicular to the field (equal-spin
 pairing) versus depairing when d || h.
 """
 import numpy as np
+from scipy.linalg import expm
 from ._eilenberger import matsubara, build_fs
 
 
@@ -156,3 +157,97 @@ def calc_spin_pauli(Nx, Ny, Nz, wc, ham_r, S_r, rvec, avec, mu, temp, coupling,
     except IOError as e:
         print(f"Error writing spin_pauli.dat: {e}", flush=True)
     return D0
+
+
+# --------------------------------------------------------------------------- #
+#  Spin-matrix Riccati for INHOMOGENEOUS systems (surface / vortex / junction)
+# --------------------------------------------------------------------------- #
+# The 2x2 spin coherence matrix a(s) obeys, along a quasiclassical trajectory,
+#     hbar v_F da/ds = Delta_hat - 2 w_n a - a Delta_hat^dag a + i h [sigma_z, a]
+# (reduces to the scalar Riccati for a singlet without Zeeman).  The conjugate
+# matrix b uses source Delta_hat^dag and -i h [sigma_z, b].  Each step is taken
+# with the *exact* fractional-linear (Mobius) propagator of the associated linear
+# spinor system M = exp(N ds/hbar v_F) -- the matrix generalization of the scalar
+# tanh step -- which is unconditionally stable for the stiff high-frequency modes.
+
+def _riccati_N(omega: complex, D: np.ndarray, h: float, is_a: bool) -> np.ndarray:
+    """4x4 generator N for the spinor system whose ratio gives the matrix Riccati
+    solution (a = u w^{-1}).  is_a: source D=Delta_hat; else source D=Delta_hat^dag."""
+    _, _, sz = _pauli()
+    src = D
+    quad = np.conj(D).T                       # a-eq: Delta^dag (so -a Delta^dag a); b-eq: Delta
+    sgn = 1.0 if is_a else -1.0
+    N = np.empty((4, 4), dtype=np.complex128)
+    N[:2, :2] = -2.0 * omega * np.eye(2) + 1j * sgn * h * sz   # P
+    N[:2, 2:] = src                                            # Q
+    N[2:, :2] = quad                                           # R
+    N[2:, 2:] = 1j * sgn * h * sz                              # S
+    return N
+
+
+def _mobius_step(a: np.ndarray, N: np.ndarray, t: float) -> np.ndarray:
+    """One exact fractional-linear step: a -> (M11 a + M12)(M21 a + M22)^{-1},
+    M = exp(N t).  Unconditionally stable (contracts to the stable Riccati root)."""
+    M = expm(N * t)
+    u = M[:2, :2] @ a + M[:2, 2:]
+    w = M[2:, :2] @ a + M[2:, 2:]
+    return u @ np.linalg.inv(w)
+
+
+def riccati_matrix_bulk(omega: complex, D: np.ndarray, is_a: bool) -> np.ndarray:
+    """Homogeneous (bulk) matrix Riccati root for unitary gaps: a = D/(omega+E),
+    E = sqrt(omega^2 + |D|^2) with |D|^2 = (D D^dag) assumed scalar*I (unitary)."""
+    DDd = D @ np.conj(D).T
+    d2 = 0.5 * np.trace(DDd).real            # |Delta|^2 (unitary: DDd = d2 * I)
+    E = np.sqrt(omega ** 2 + d2)
+    src = D if is_a else np.conj(D).T
+    return src / (omega + E)
+
+
+def integrate_riccati_matrix(omega: complex, Dpath, hvf: float, ds: float,
+                             a0: np.ndarray, h: float, is_a: bool) -> np.ndarray:
+    """Integrate the 2x2 matrix Riccati along a trajectory with the stable Mobius
+    step.  Dpath is a list/array of 2x2 gap matrices along the path.
+    @return a along the trajectory [Ns, 2, 2]
+    """
+    Ns = len(Dpath)
+    out = np.empty((Ns, 2, 2), dtype=np.complex128)
+    a = np.array(a0, dtype=np.complex128)
+    out[0] = a
+    t = ds / hvf
+    for i in range(Ns - 1):
+        Dmid = 0.5 * (Dpath[i] + Dpath[i + 1])
+        a = _mobius_step(a, _riccati_N(omega, Dmid, h, is_a), t)
+        out[i + 1] = a
+    return out
+
+
+def matrix_gf(a: np.ndarray, b: np.ndarray):
+    """Quasiclassical 2x2 g, f from the coherence matrices a, b (je convention):
+    g = (I + a b)^{-1}(I - a b),  f = (I + a b)^{-1} 2 a."""
+    I = np.eye(2, dtype=np.complex128)
+    P = np.linalg.inv(I + a @ b)
+    return P @ (I - a @ b), P @ (2.0 * a)
+
+
+def matrix_trajectory_gf(omega: complex, Dpath, hvf: float, ds: float, h: float = 0.0):
+    """
+    @fn matrix_trajectory_gf
+    @brief Spin-matrix quasiclassical g, f along one inhomogeneous 1D trajectory
+    (surface / junction / domain wall): a is integrated forward from the upstream
+    bulk root, b backward (reversed path) from the downstream bulk root, then
+    g=(I+ab)^{-1}(I-ab), f=(I+ab)^{-1}2a at every point.  Dpath = list of 2x2 gap
+    matrices Delta_hat(x) along the path.
+    @return (g, f): [Ns, 2, 2] each
+    """
+    Ns = len(Dpath)
+    a0 = riccati_matrix_bulk(omega, Dpath[0], True)        # upstream bulk (h=0 seed; relaxes)
+    a = integrate_riccati_matrix(omega, Dpath, hvf, ds, a0, h, True)
+    b0 = riccati_matrix_bulk(omega, Dpath[-1], False)      # downstream bulk
+    b_rev = integrate_riccati_matrix(omega, list(Dpath[::-1]), hvf, ds, b0, h, False)
+    b = b_rev[::-1]
+    g = np.empty((Ns, 2, 2), dtype=np.complex128)
+    f = np.empty((Ns, 2, 2), dtype=np.complex128)
+    for i in range(Ns):
+        g[i], f[i] = matrix_gf(a[i], b[i])
+    return g, f
