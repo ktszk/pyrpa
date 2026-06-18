@@ -65,6 +65,9 @@ class CalcMode(IntEnum):
     SPECTRUM_IMPURITY  = (21, "spectrum with impurity")                    # spectral function with impurity (not implemented)
     SIGMA_CPA          = (22, "calculate sigma_cpa")                       # conductivity via CPA
     NONLIN_ELIASHBERG  = (23, "solve nonlinear eliashberg equation")       # solve nonlinear Eliashberg equation (not implemented)
+    EILENBERGER        = (24, "solve quasiclassical Eilenberger equation")  # homogeneous multi-orbital Eilenberger (Matsubara)
+    EILENBERGER_SURFACE= (25, "solve surface state via Riccati Eilenberger")  # specular surface gap profile + LDOS (model FS)
+    EILENBERGER_VORTEX = (26, "solve isolated vortex via Riccati Eilenberger")  # vortex D(rho) + core LDOS (model FS)
 
 class ColorMode(IntEnum):
     """Color modes for band/FS plots; second element is the printed label (replaces the old `cstr` list)."""
@@ -98,10 +101,10 @@ MODES_COULOMB_VERTEX= frozenset({M.CHIS_SPECTRUM,M.CHIS_QPOINT,M.CHIS_QMAP,M.CHI
 # modes that print a constant U,J header
 MODES_PRINT_UJ      = frozenset({M.CHIS_SPECTRUM,M.CHIS_QPOINT,M.CHIS_QMAP,M.FLEX,M.LIN_ELIASHBERG})
 # modes that compute/define mu themselves (skip the common mu block)
-MODES_SELF_MU       = frozenset({M.CONDUCTIVITY_BT,M.CONDUCTIVITY_PT,M.SPECTRUM_IMPURITY,M.SIGMA_CPA})
+MODES_SELF_MU       = frozenset({M.CONDUCTIVITY_BT,M.CONDUCTIVITY_PT,M.SPECTRUM_IMPURITY,M.SIGMA_CPA,M.EILENBERGER_SURFACE,M.EILENBERGER_VORTEX})
 # k-mesh reporting groups
 MODES_KMESH_SYMLINE = frozenset({M.BAND,M.SPECTRUM})
-MODES_KMESH_SINGLE  = frozenset({M.FERMI_2D,M.FERMI_3D,M.CHIS_QMAP,M.PHI_QMAP,M.CARRIER_NUM,M.CYCLOTRON_MASS})
+MODES_KMESH_SINGLE  = frozenset({M.FERMI_2D,M.FERMI_3D,M.CHIS_QMAP,M.PHI_QMAP,M.CARRIER_NUM,M.CYCLOTRON_MASS,M.EILENBERGER})
 MODES_MATSUBARA     = frozenset({M.FLEX,M.LIN_ELIASHBERG})
 # dispatch groups
 MODES_CHI_NORMAL    = frozenset({M.CHIS_SPECTRUM,M.CHIS_QPOINT,M.CHIS_QMAP,M.PHI_SPECTRUM,M.PHI_QMAP})
@@ -163,6 +166,28 @@ sw_out_self=True
 sw_in_self=False
 sw_from_file=False
 sw_check_only=False #True: stop after linear Eliashberg (also stops if Stoner factor>=1 or lambda<1)
+#----- EILENBERGER (homogeneous quasiclassical) parameters -----
+eil_coupling=0.3     #dimensionless separable pairing coupling lambda (with <phi^2>_FS=1)
+eil_wc=0.5           #fixed Matsubara cutoff energy [eV] (sets the pairing scale / Tc)
+eil_imp_gamma=0.0    #non-magnetic impurity scattering strength Gamma [eV] (0=clean)
+eil_imp_c=1.0e8      #T-matrix cot(delta0): large=Born limit, 0=unitary limit
+eil_fs_width=5.0e-3  #Gaussian Fermi-surface broadening [eV]
+eil_method='normalization' #homogeneous (g,f) route: 'normalization' (fast) or 'riccati' (vortex-lattice-ready)
+eil_find_tc=False    #True: bisect for Tc at the current impurity setting
+eil_imp_sweep=False  #True: sweep Gamma and write Tc(Gamma) to eilenberger_tc.dat
+eil_imp_list=None    #array of Gamma values [eV] for the sweep (e.g. np.linspace(0,0.05,11))
+eil_pauli=False      #True: Zeeman/Maki Pauli-limiting sweep (singlet gap Delta(h), spinodal, Zeeman-split DOS)
+eil_spin=False       #True: spin-2x2 Zeeman response, singlet vs triplet d-vector (d||h Pauli-limited, d_|_h immune)
+#----- EILENBERGER inhomogeneous (surface & vortex, Riccati; model cylindrical FS) -----
+eil_pair_sym='d'         #pairing on model FS (surface & vortex): singlet 's','d'(dx2-y2),'dxy'; triplet 'px','py','p+ip'/'p-ip'(chiral)
+eil_ldos=True            #True: also compute the real-frequency LDOS (bound/core states) (surface & vortex)
+eil_surf_beta=0.785398   #surface orientation [rad]: 0=[100], pi/4(0.7854)=[110] (d-wave ZEBS)
+eil_vort_lxi=8.0         #vortex cell half-width in coherence lengths xi (isolated vortex, field=0)
+eil_vort_ngrid=81        #vortex 2D grid points per axis
+eil_field=0.0            #vortex lattice field B/Hc2 (0=isolated vortex; >0=circular-cell lattice w/ Doppler)
+eil_field_list=None      #list of B/Hc2 to sweep <N(0)>(B) on the TRUE periodic lattice (e.g. [0.04,0.08,0.16,0.32]); None=single field
+eil_kappa=100.0          #GL kappa=lambda/xi for the periodic lattice (large=extreme type-II; finite=London screening/Maxwell)
+eil_lattice='square'     #periodic vortex lattice geometry: 'square' or 'triangular'
 #------------------------ initial parameters are above -------------------------------
 #----------------------------------main functions-------------------------------------
 #-------------------------------- import packages ------------------------------------
@@ -1315,6 +1340,29 @@ def main():
                                              Umat if orb_dep else None,Jmat if orb_dep else None)
             elif option==CalcMode.GAP_FUNCTION: #post gap calculation, output gap function/anomalous green's function
                 output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,plist,mu,temp,sw_self)
+    elif option==CalcMode.EILENBERGER: #solve homogeneous quasiclassical Eilenberger equation
+        if eil_spin: #spin-2x2 Zeeman response: singlet vs triplet d-vector (d||h vs d_|_h)
+            plibs.calc_spin_pauli(Nx,Ny,Nz,eil_wc,ham_r,S_r,rvec,avec,mu,temp,eil_coupling,
+                                  gap_sym=gap_sym,fs_width=eil_fs_width,kb=kb)
+        elif eil_pauli: #Zeeman (Maki) Pauli-limiting sweep: singlet gap Delta(h), spinodal, Zeeman-split DOS
+            plibs.calc_pauli_limit(Nx,Ny,Nz,eil_wc,ham_r,S_r,rvec,avec,mu,temp,gap_sym,eil_coupling,
+                                   fs_width=eil_fs_width,kb=kb)
+        else:
+            plibs.calc_eilenberger(Nx,Ny,Nz,eil_wc,ham_r,S_r,rvec,avec,mu,temp,gap_sym,eil_coupling,
+                                   imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,fs_width=eil_fs_width,kb=kb,
+                                   method=eil_method,sw_find_tc=eil_find_tc,sw_imp_sweep=eil_imp_sweep,
+                                   imp_sweep=eil_imp_list)
+    elif option==CalcMode.EILENBERGER_SURFACE: #specular surface state via Riccati Eilenberger (model FS)
+        plibs.calc_surface(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,beta_surf=eil_surf_beta,
+                           kb=kb,sw_ldos=eil_ldos,imp_gamma=eil_imp_gamma,imp_c=eil_imp_c)
+    elif option==CalcMode.EILENBERGER_VORTEX: #vortex / vortex lattice via Riccati Eilenberger (model FS)
+        if eil_field_list is not None: #sweep B/Hc2 on the TRUE periodic lattice -> <N(0)>(B) (d~sqrt(B) Volovik)
+            plibs.calc_vortex_lattice_periodic(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,
+                                               field_list=eil_field_list,kappa=eil_kappa,lattice=eil_lattice,kb=kb)
+        else: #single field (isolated vortex if eil_field=0, else circular-cell lattice)
+            plibs.calc_vortex(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,kb=kb,sw_ldos=eil_ldos,
+                              imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,field=eil_field,
+                              Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
     elif option==CalcMode.CARRIER_NUM: #calc carrier number
         n_carr=plibs.calc_carrier(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp)
         print(n_carr)

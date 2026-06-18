@@ -14,3 +14,8 @@ from ._bands      import *
 from ._response   import *
 from ._wannier_io import *
 from ._calc     import *
+from ._eilenberger import *
+from ._eilenberger_surface import *
+from ._eilenberger_vortex import *
+from ._eilenberger_lattice import *
+from ._eilenberger_spin import *
