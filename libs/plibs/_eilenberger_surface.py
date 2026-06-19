@@ -426,6 +426,7 @@ def surface_ldos(Damp: np.ndarray, x: np.ndarray, wlist: np.ndarray, gap_sym: st
 def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
                  beta_surf: float = 0.0, kb: float = 1.0, sw_ldos: bool = True,
                  imp_gamma: float = 0.0, imp_c: float = 1.0e8, h: float = 0.0,
+                 fs_kind: str = None, fs_params=None,
                  Nbeta: int = 30, Lxi: float = 8.0, nper: int = 16):
     """
     @fn calc_surface
@@ -467,8 +468,15 @@ def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
 
     if sw_ldos:
         wlist = np.linspace(-3.0 * Dbulk, 3.0 * Dbulk, 401)
-        ldos = surface_ldos(Damp, x, wlist, gap_sym, beta_surf, ix=0, Dbulk=Dbulk, Nbeta=60,
-                            imp_gamma=imp_gamma, imp_c=imp_c, h=h)
+        if fs_kind is not None:   # model FS + Fermi velocity (clean): nf-weighted, ds=dx/|v_x|
+            from ._eilenberger_fs import build_model_fs
+            fs = build_model_fs(fs_kind, 240, params=fs_params)
+            vx2 = (fs['nf'] * fs['vhx'] ** 2).sum(); vy2 = (fs['nf'] * fs['vhy'] ** 2).sum()
+            print(f"model FS '{fs_kind}': <v_x^2>/<v_y^2>={vx2:.3f}/{vy2:.3f}", flush=True)
+            ldos = surface_ldos_fs(fs, Damp, x, wlist, gap_sym, ix=0, Dbulk=Dbulk)
+        else:
+            ldos = surface_ldos(Damp, x, wlist, gap_sym, beta_surf, ix=0, Dbulk=Dbulk, Nbeta=60,
+                                imp_gamma=imp_gamma, imp_c=imp_c, h=h)
         n0 = ldos[np.argmin(np.abs(wlist))]
         if h != 0.0:
             print(f"Zeeman h = {h:.4e} eV (spin-split surface bound state)", flush=True)
@@ -481,3 +489,59 @@ def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
         except IOError as e:
             print(f"Error: failed to write 'surface_ldos.dat': {e}", flush=True)
     return x, Damp
+
+
+def _reflection_index(fs):
+    """For each FS point i (angle theta_i), the index of its specular partner at
+    (-kx, ky) i.e. angle pi - theta_i (k_parallel conserved, k_perp flipped at a
+    surface with normal x_hat)."""
+    th = fs['th']
+    tgt = np.mod(np.pi - th, 2.0 * np.pi)
+    j = np.argmin(np.abs((th[None, :] - tgt[:, None] + np.pi) % (2.0 * np.pi) - np.pi), axis=1)
+    return j
+
+
+def surface_ldos_fs(fs, Damp, x, wlist, gap_sym, ix=0, delta=None, Dbulk=1.0, hvf=1.0,
+                    vmin_frac=0.02):
+    """
+    @fn surface_ldos_fs
+    @brief Specular-surface LDOS N(x,w)/N0 on a model Fermi surface with real Fermi
+    velocities (clean limit), generalizing surface_ldos beyond the isotropic
+    cylinder.  The trajectory runs along v_hat, the chord step scales as dx/|v_x|
+    (v_x the velocity normal component, |v_F| included), the specular partner is the
+    FS point at (-kx,ky), and the Fermi-surface average is nf-weighted.
+
+    @param   fs: model FS dict from build_model_fs (provides vx, nf, k-direction)
+    @param Damp: gap amplitude profile |Delta|(x) on the x grid [Ng]
+    @param gap_sym: pairing symmetry (form factor evaluated on the FS k-direction)
+    @param   ix: grid index for the LDOS (0 = surface)
+    @return ldos: N(x_ix, w)/N0 [Nw]
+    """
+    from ._eilenberger_fs import fs_form_factor
+    if delta is None:
+        delta = 0.02 * Dbulk
+    phi = fs_form_factor(fs, gap_sym)
+    vx, nf = fs['vx'], fs['nf']
+    refl = _reflection_index(fs)
+    Ng, Nw = len(Damp), len(wlist)
+    dx = x[1] - x[0]
+    zomega = delta - 1j * wlist
+    vmax = np.abs(vx).max()
+    gsum = np.zeros(Nw, dtype=np.complex128)
+    wsum = 0.0
+    for i in np.where(vx > vmin_frac * vmax)[0]:        # outgoing FS points (v_x>0)
+        j = int(refl[i])                                 # incoming (reflected) partner
+        ds = dx / abs(vx[i])
+        D_in = phi[j] * Damp[::-1]                        # incoming branch x=L..0
+        D_out = phi[i] * Damp                             # outgoing branch x=0..L
+        Dpath = np.concatenate([D_in, D_out])
+        ga0, _ = riccati_homogeneous(zomega, Dpath[0])
+        gamma = _integrate_vec(zomega, Dpath, hvf, ds, ga0)
+        _, gb0 = riccati_homogeneous(zomega, Dpath[-1])
+        gammat = _integrate_vec(zomega, np.conj(Dpath[::-1]), hvf, ds, gb0)[::-1]
+        g, _, _ = propagators_from_riccati(gamma, gammat)
+        g_out = g[Ng:]
+        g_in = g[:Ng][::-1]
+        gsum += nf[i] * g_out[ix] + nf[j] * g_in[ix]
+        wsum += nf[i] + nf[j]
+    return (gsum / wsum).real
