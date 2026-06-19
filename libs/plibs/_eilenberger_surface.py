@@ -344,7 +344,7 @@ def _bulk_gap_imp(coupling: float, temp: float, omega: np.ndarray, phi: np.ndarr
 def surface_ldos(Damp: np.ndarray, x: np.ndarray, wlist: np.ndarray, gap_sym: str,
                  beta_surf: float = 0.0, ix: int = 0, delta: float = None,
                  Dbulk: float = 1.0, Nbeta: int = 60, hvf: float = 1.0,
-                 imp_gamma: float = 0.0, imp_c: float = 1.0e8,
+                 imp_gamma: float = 0.0, imp_c: float = 1.0e8, h: float = 0.0,
                  eps: float = 1.0e-4, itemax: int = 200, mix: float = 0.5):
     """
     @fn surface_ldos
@@ -358,6 +358,11 @@ def surface_ldos(Damp: np.ndarray, x: np.ndarray, wlist: np.ndarray, gap_sym: st
     converged Delta(x).  Non-magnetic scattering broadens (and can split) the
     d-wave zero-energy surface bound state.
 
+    Zeeman (Maki) field h splits the spin sectors w -> w -+ h: for a unitary gap
+    with a fixed d-vector the spin-matrix Riccati block-diagonalizes into the two
+    sigma=+-1 scalar sectors, so N = (1/2) sum_sigma N(w - sigma h).  This splits
+    the d[110] zero-energy surface bound state into a peak at +-h.
+
     @param   Damp: converged gap profile [Ngrid] (from solve_surface)
     @param      x: x grid [Ngrid]
     @param  wlist: real-frequency grid [Nw]
@@ -367,6 +372,7 @@ def surface_ldos(Damp: np.ndarray, x: np.ndarray, wlist: np.ndarray, gap_sym: st
     @param  Dbulk: bulk gap (for the default broadening)
     @param  Nbeta: number of outgoing angles
     @param imp_gamma,imp_c: impurity scattering rate and T-matrix c (0=clean)
+    @param      h: Zeeman (Maki) energy mu*B (spin splitting of the LDOS)
     @return  ldos: N(x,w)/N0 [Nw]
     """
     if delta is None:
@@ -377,41 +383,49 @@ def surface_ldos(Damp: np.ndarray, x: np.ndarray, wlist: np.ndarray, gap_sym: st
     dx = x[1] - x[0]
     Ng, Nw = len(Damp), len(wlist)
     ndir = 2 * Nbeta
-    zomega = delta - 1j * wlist                       # retarded frequency [Nw]
     clean = (imp_gamma == 0.0)
     gpref = imp_gamma * (imp_c ** 2 + 1.0)
-    wt = np.tile(zomega, (Ng, 1))                     # w_tilde(x,w) [Ng,Nw]
-    sigf = np.zeros((Ng, Nw), dtype=np.complex128)
-    for it in range(1 if clean else itemax):
-        gsum_x = np.zeros((Ng, Nw), dtype=np.complex128)
-        fsum_x = np.zeros((Ng, Nw), dtype=np.complex128)
-        for ib in range(Nbeta):
+
+    def _sector(zomega):
+        """LDOS N(ix) for a given (possibly spin-shifted) retarded frequency [Nw]."""
+        wt = np.tile(zomega, (Ng, 1))
+        sigf = np.zeros((Ng, Nw), dtype=np.complex128)
+        for it in range(1 if clean else itemax):
+            gsum_x = np.zeros((Ng, Nw), dtype=np.complex128)
+            fsum_x = np.zeros((Ng, Nw), dtype=np.complex128)
+            for ib in range(Nbeta):
+                if clean:
+                    g_out, _, g_in, _ = _trajectory_gf(zomega, Damp, phi_in[ib],
+                                                       phi_out[ib], hvf, dx, cosb[ib])
+                else:
+                    g_out, f_out, g_in, f_in = _trajectory_gf(wt, Damp, phi_in[ib],
+                                                              phi_out[ib], hvf, dx, cosb[ib], sigf=sigf)
+                    fsum_x += f_out + f_in
+                gsum_x += g_out + g_in
             if clean:
-                g_out, _, g_in, _ = _trajectory_gf(zomega, Damp, phi_in[ib],
-                                                   phi_out[ib], hvf, dx, cosb[ib])
-            else:
-                g_out, f_out, g_in, f_in = _trajectory_gf(wt, Damp, phi_in[ib],
-                                                          phi_out[ib], hvf, dx, cosb[ib], sigf=sigf)
-                fsum_x += f_out + f_in
-            gsum_x += g_out + g_in
-        if clean:
-            return (gsum_x[ix] / ndir).real
-        avg_g = gsum_x / ndir
-        avg_f = fsum_x / ndir
-        Dimp = imp_c ** 2 + avg_g ** 2 + avg_f * np.conj(avg_f)
-        wt_new = zomega[None, :] + gpref * avg_g / Dimp
-        sigf_new = gpref * avg_f / Dimp
-        err = np.abs(wt_new - wt).max() / max(abs(zomega[-1]), 1e-12)
-        wt = (1.0 - mix) * wt + mix * wt_new
-        sigf = (1.0 - mix) * sigf + mix * sigf_new
-        if err < eps:
-            break
-    return (avg_g[ix]).real
+                return (gsum_x[ix] / ndir).real
+            avg_g = gsum_x / ndir
+            avg_f = fsum_x / ndir
+            Dimp = imp_c ** 2 + avg_g ** 2 + avg_f * np.conj(avg_f)
+            wt_new = zomega[None, :] + gpref * avg_g / Dimp
+            sigf_new = gpref * avg_f / Dimp
+            err = np.abs(wt_new - wt).max() / max(abs(zomega[-1]), 1e-12)
+            wt = (1.0 - mix) * wt + mix * wt_new
+            sigf = (1.0 - mix) * sigf + mix * sigf_new
+            if err < eps:
+                break
+        return avg_g[ix].real
+
+    base = delta - 1j * wlist                          # retarded frequency [Nw]
+    if h == 0.0:
+        return _sector(base)
+    # spin-resolved: w -> w - sigma h  <=>  zomega -> base + i sigma h
+    return 0.5 * (_sector(base + 1j * h) + _sector(base - 1j * h))
 
 
 def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
                  beta_surf: float = 0.0, kb: float = 1.0, sw_ldos: bool = True,
-                 imp_gamma: float = 0.0, imp_c: float = 1.0e8,
+                 imp_gamma: float = 0.0, imp_c: float = 1.0e8, h: float = 0.0,
                  Nbeta: int = 30, Lxi: float = 8.0, nper: int = 16):
     """
     @fn calc_surface
@@ -454,8 +468,10 @@ def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
     if sw_ldos:
         wlist = np.linspace(-3.0 * Dbulk, 3.0 * Dbulk, 401)
         ldos = surface_ldos(Damp, x, wlist, gap_sym, beta_surf, ix=0, Dbulk=Dbulk, Nbeta=60,
-                            imp_gamma=imp_gamma, imp_c=imp_c)
+                            imp_gamma=imp_gamma, imp_c=imp_c, h=h)
         n0 = ldos[np.argmin(np.abs(wlist))]
+        if h != 0.0:
+            print(f"Zeeman h = {h:.4e} eV (spin-split surface bound state)", flush=True)
         print(f"surface zero-energy LDOS  N(0,0)/N0 = {n0:.4f}", flush=True)
         try:
             with open('surface_ldos.dat', 'w') as fh:
