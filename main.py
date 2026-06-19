@@ -179,6 +179,9 @@ eil_imp_list=None    #array of Gamma values [eV] for the sweep (e.g. np.linspace
 eil_pauli=False      #True: Zeeman/Maki Pauli-limiting sweep (singlet gap Delta(h), spinodal, Zeeman-split DOS)
 eil_spin=False       #True: spin-2x2 Zeeman response, singlet vs triplet d-vector (d||h Pauli-limited, d_|_h immune)
 eil_lambda=False     #True: superfluid density rho_s(T)/penetration depth lambda(T) sweep (s exp-flat, d linear-in-T)
+eil_fs=False         #True: model-FS + Fermi-velocity penetration depth (anisotropic lambda_xx/lambda_yy)
+eil_fs_kind='ellipse'#model Fermi surface: 'iso', 'ellipse' (params=(mx,my)), or 'tb' (params=t)
+eil_fs_params=(1.0,0.4) #model-FS parameters (ellipse masses or tb hopping)
 #----- EILENBERGER inhomogeneous (surface & vortex, Riccati; model cylindrical FS) -----
 eil_pair_sym='d'         #pairing on model FS (surface & vortex): singlet 's','d'(dx2-y2),'dxy'; triplet 'px','py','p+ip'/'p-ip'(chiral)
 eil_ldos=True            #True: also compute the real-frequency LDOS (bound/core states) (surface & vortex)
@@ -1345,7 +1348,10 @@ def main():
             elif option==CalcMode.GAP_FUNCTION: #post gap calculation, output gap function/anomalous green's function
                 output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,plist,mu,temp,sw_self)
     elif option==CalcMode.EILENBERGER: #solve homogeneous quasiclassical Eilenberger equation
-        if eil_lambda: #superfluid density / penetration depth lambda(T) (s exp-flat, d linear-in-T)
+        if eil_fs: #model FS + Fermi velocity: anisotropic penetration depth lambda_xx/lambda_yy
+            plibs.calc_fs_penetration(eil_coupling,temp,eil_wc,kind=eil_fs_kind,gap_sym=eil_pair_sym,
+                                      params=eil_fs_params,kb=kb)
+        elif eil_lambda: #superfluid density / penetration depth lambda(T) (s exp-flat, d linear-in-T)
             plibs.calc_penetration_depth(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,kb=kb)
         elif eil_spin: #spin-2x2 Zeeman response: singlet vs triplet d-vector (d||h vs d_|_h)
             plibs.calc_spin_pauli(Nx,Ny,Nz,eil_wc,ham_r,S_r,rvec,avec,mu,temp,eil_coupling,

@@ -19,3 +19,4 @@ from ._eilenberger_surface import *
 from ._eilenberger_vortex import *
 from ._eilenberger_lattice import *
 from ._eilenberger_spin import *
+from ._eilenberger_fs import *
