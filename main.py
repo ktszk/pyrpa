@@ -185,6 +185,7 @@ eil_surf_beta=0.785398   #surface orientation [rad]: 0=[100], pi/4(0.7854)=[110]
 eil_surf_h=0.0           #Zeeman (Maki) field [eV] for the surface LDOS (splits the d[110] ZEBS into +-h)
 eil_vort_lxi=8.0         #vortex cell half-width in coherence lengths xi (isolated vortex, field=0)
 eil_vort_ngrid=81        #vortex 2D grid points per axis
+eil_vort_h=0.0           #Zeeman (Maki) field [eV] for the vortex core LDOS (spin-splits the core bound states)
 eil_field=0.0            #vortex lattice field B/Hc2 (0=isolated vortex; >0=circular-cell lattice w/ Doppler)
 eil_field_list=None      #list of B/Hc2 to sweep <N(0)>(B) on the TRUE periodic lattice (e.g. [0.04,0.08,0.16,0.32]); None=single field
 eil_kappa=100.0          #GL kappa=lambda/xi for the periodic lattice (large=extreme type-II; finite=London screening/Maxwell)
@@ -1362,7 +1363,7 @@ def main():
                                                field_list=eil_field_list,kappa=eil_kappa,lattice=eil_lattice,kb=kb)
         else: #single field (isolated vortex if eil_field=0, else circular-cell lattice)
             plibs.calc_vortex(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,kb=kb,sw_ldos=eil_ldos,
-                              imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,field=eil_field,
+                              imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,field=eil_field,h=eil_vort_h,
                               Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
     elif option==CalcMode.CARRIER_NUM: #calc carrier number
         n_carr=plibs.calc_carrier(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp)

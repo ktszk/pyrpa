@@ -355,15 +355,19 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
 def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
                   gap_sym: str, Dbulk: float, delta: float = None, nbeta: int = 36,
                   hvf: float = 1.0, imp_gamma: float = 0.0, imp_c: float = 1.0e8,
-                  field: float = 0.0, eps: float = 3.0e-3, itemax: int = 60, mix: float = 0.5):
+                  field: float = 0.0, h: float = 0.0, eps: float = 3.0e-3,
+                  itemax: int = 60, mix: float = 0.5):
     """
     @fn vortex_ldos2d
     @brief 2D local density of states N(x,y,w)/N0 from a converged Psi field, via
     the retarded Riccati equation.  Reveals the fourfold d-wave core star; with
     impurities the retarded local T-matrix self-energy is solved self-consistently
     in space; with field>0 the supercurrent Doppler shift fills states between
-    vortices (Volovik).
+    vortices (Volovik); with Zeeman h the spin sectors split w -> w -+ h (for a
+    unitary fixed-d gap, N = (1/2) sum_sigma N(w - sigma h)), splitting the core
+    bound states.
     @param field: B/Hc2 (0 = isolated vortex; >0 = circular-cell lattice Doppler shift)
+    @param     h: Zeeman (Maki) energy mu*B (spin splitting of the core LDOS)
     @return ldos: N(x,y,w)/N0 [ngrid, ngrid, Nw]
     """
     if delta is None:
@@ -375,7 +379,6 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
     X, Y = np.meshgrid(xg, xg, indexing='ij')
     beta = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
     phi = _ff_vortex(beta, gap_sym)
-    zomega = delta - 1j * wlist
     Nw = len(wlist)
     no_imp = (imp_gamma == 0.0)
     use_pos = (not no_imp) or (field > 0.0)
@@ -390,68 +393,78 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
         base.append(phi[ib] * Ai((Lx, Ly)) * np.exp(1j * np.arctan2(Ly, Lx)))
         sxyb.append((X * cb + Y * sb, -X * sb + Y * cb, Lx, Ly))
         dopp.append(_doppler_chord(Lx, Ly, Rc, cb, sb, rho_min) if field > 0.0 else None)
-    wt = np.broadcast_to(zomega, (ngrid, ngrid, Nw)).copy()
-    sigf = np.zeros((ngrid, ngrid, Nw), dtype=np.complex128)
-    for it in range(1 if no_imp else itemax):
-        gacc = np.zeros((ngrid, ngrid, Nw), dtype=np.complex128)
-        facc = np.zeros((ngrid, ngrid, Nw), dtype=np.complex128)
-        dwt = wt - zomega
-        for ib in range(nbeta):
-            sxy, bxy, Lx, Ly = sxyb[ib]
-            if not use_pos:
-                g_rot = np.empty((ngrid, ngrid, Nw), dtype=np.complex128)
-                for j in range(ngrid):
-                    g, _ = _chord_gf(zomega, base[ib][:, j], hvf, dx)
-                    g_rot[:, j] = g
-                gacc += _eval_field(g_rot, xg, sxy, bxy, fill=0.0)
-            else:
-                om_rot = np.broadcast_to(zomega, (ngrid, ngrid, Nw)).astype(np.complex128).copy()
-                if field > 0.0:
-                    om_rot = om_rot + 1j * dopp[ib][:, :, None]
-                Dtraj = np.broadcast_to(base[ib][:, :, None], (ngrid, ngrid, Nw)).copy()
-                if not no_imp:
-                    om_rot = om_rot + _eval_field(dwt, xg, Lx, Ly, fill=0.0)
-                    Dtraj = Dtraj + _eval_field(sigf, xg, Lx, Ly, fill=0.0)
-                g_rot = np.empty((ngrid, ngrid, Nw), dtype=np.complex128)
-                f_rot = np.empty((ngrid, ngrid, Nw), dtype=np.complex128)
-                for j in range(ngrid):
-                    g_rot[:, j], f_rot[:, j] = _chord_gf_pos(om_rot[:, j], Dtraj[:, j], hvf, dx)
-                gacc += _eval_field(g_rot, xg, sxy, bxy, fill=0.0)
-                if not no_imp:
-                    facc += _eval_field(f_rot, xg, sxy, bxy, fill=0.0)
-        if no_imp:
-            return (gacc / nbeta).real
-        avg_g = gacc / nbeta
-        avg_f = facc / nbeta
-        Dimp = imp_c ** 2 + avg_g ** 2 + avg_f * np.conj(avg_f)
-        wt_new = zomega + gpref * avg_g / Dimp
-        sigf_new = gpref * avg_f / Dimp
-        err = np.abs(wt_new - wt).max() / max(abs(zomega[-1]), 1e-12)
-        wt = (1.0 - mix) * wt + mix * wt_new
-        sigf = (1.0 - mix) * sigf + mix * sigf_new
-        if err < eps:
-            break
-    return (avg_g).real
+
+    def _sector(zomega):
+        """N(x,y,w) for a given (possibly spin-shifted) retarded frequency [Nw]."""
+        wt = np.broadcast_to(zomega, (ngrid, ngrid, Nw)).copy()
+        sigf = np.zeros((ngrid, ngrid, Nw), dtype=np.complex128)
+        for it in range(1 if no_imp else itemax):
+            gacc = np.zeros((ngrid, ngrid, Nw), dtype=np.complex128)
+            facc = np.zeros((ngrid, ngrid, Nw), dtype=np.complex128)
+            dwt = wt - zomega
+            for ib in range(nbeta):
+                sxy, bxy, Lx, Ly = sxyb[ib]
+                if not use_pos:
+                    g_rot = np.empty((ngrid, ngrid, Nw), dtype=np.complex128)
+                    for j in range(ngrid):
+                        g, _ = _chord_gf(zomega, base[ib][:, j], hvf, dx)
+                        g_rot[:, j] = g
+                    gacc += _eval_field(g_rot, xg, sxy, bxy, fill=0.0)
+                else:
+                    om_rot = np.broadcast_to(zomega, (ngrid, ngrid, Nw)).astype(np.complex128).copy()
+                    if field > 0.0:
+                        om_rot = om_rot + 1j * dopp[ib][:, :, None]
+                    Dtraj = np.broadcast_to(base[ib][:, :, None], (ngrid, ngrid, Nw)).copy()
+                    if not no_imp:
+                        om_rot = om_rot + _eval_field(dwt, xg, Lx, Ly, fill=0.0)
+                        Dtraj = Dtraj + _eval_field(sigf, xg, Lx, Ly, fill=0.0)
+                    g_rot = np.empty((ngrid, ngrid, Nw), dtype=np.complex128)
+                    f_rot = np.empty((ngrid, ngrid, Nw), dtype=np.complex128)
+                    for j in range(ngrid):
+                        g_rot[:, j], f_rot[:, j] = _chord_gf_pos(om_rot[:, j], Dtraj[:, j], hvf, dx)
+                    gacc += _eval_field(g_rot, xg, sxy, bxy, fill=0.0)
+                    if not no_imp:
+                        facc += _eval_field(f_rot, xg, sxy, bxy, fill=0.0)
+            if no_imp:
+                return (gacc / nbeta).real
+            avg_g = gacc / nbeta
+            avg_f = facc / nbeta
+            Dimp = imp_c ** 2 + avg_g ** 2 + avg_f * np.conj(avg_f)
+            wt_new = zomega + gpref * avg_g / Dimp
+            sigf_new = gpref * avg_f / Dimp
+            err = np.abs(wt_new - wt).max() / max(abs(zomega[-1]), 1e-12)
+            wt = (1.0 - mix) * wt + mix * wt_new
+            sigf = (1.0 - mix) * sigf + mix * sigf_new
+            if err < eps:
+                break
+        return avg_g.real
+
+    base_z = delta - 1j * wlist
+    if h == 0.0:
+        return _sector(base_z)
+    return 0.5 * (_sector(base_z + 1j * h) + _sector(base_z - 1j * h))
 
 
 def calc_vortex(coupling: float, temp: float, wc: float, gap_sym: str = 's', kb: float = 1.0,
                 sw_ldos: bool = True, imp_gamma: float = 0.0, imp_c: float = 1.0e8,
-                field: float = 0.0, Lxi: float = 8.0, ngrid: int = 81):
+                field: float = 0.0, h: float = 0.0, Lxi: float = 8.0, ngrid: int = 81):
     """
     @fn calc_vortex
     @brief Driver: self-consistent vortex profile and (optionally) LDOS.
-    Clean s-wave at zero field uses the fast axisymmetric (radial) solver; any non-s
-    pairing, finite impurity rate, or finite field (field=B/Hc2>0, circular-cell
-    vortex lattice) uses the general 2D solver and writes the zero-energy LDOS map.
+    Clean s-wave at zero field/Zeeman uses the fast axisymmetric (radial) solver;
+    any non-s pairing, finite impurity rate, finite field (field=B/Hc2>0,
+    circular-cell vortex lattice), or finite Zeeman h uses the general 2D solver
+    and writes the zero-energy LDOS map.
 
     @param  gap_sym: 's','d','dxy','px','py','p+ip'/'p-ip'
     @param  sw_ldos: also compute the real-frequency LDOS (core bound state)
     @param imp_gamma,imp_c: non-magnetic impurity scattering rate [eV] and T-matrix c
     @param    field: B/Hc2 (0 = isolated vortex; >0 = circular-cell vortex lattice)
+    @param        h: Zeeman (Maki) energy mu*B (spin splitting of the core LDOS)
     """
-    if gap_sym != 's' or imp_gamma != 0.0 or field > 0.0:
+    if gap_sym != 's' or imp_gamma != 0.0 or field > 0.0 or h != 0.0:
         return _calc_vortex_dwave(coupling, temp, wc, gap_sym, kb, sw_ldos, Lxi, ngrid,
-                                  imp_gamma, imp_c, field)
+                                  imp_gamma, imp_c, field, h)
     omega = matsubara(temp, wc)
     print("isolated-vortex quasiclassical Eilenberger (Riccati, s-wave, clean)", flush=True)
     print(f"T={temp/kb:.2f} K, lambda={coupling:.3f}, {len(omega)} Matsubara freqs, "
@@ -489,16 +502,18 @@ def calc_vortex(coupling: float, temp: float, wc: float, gap_sym: str = 's', kb:
 
 
 def _calc_vortex_dwave(coupling, temp, wc, gap_sym, kb, sw_ldos, Lxi, ngrid,
-                       imp_gamma=0.0, imp_c=1.0e8, field=0.0):
-    """Driver for the general 2D vortex (non-s pairing, impurities, and/or finite
-    field = circular-cell vortex lattice): full 2D self-consistent Psi(r), the
-    azimuthally-averaged amplitude profile, the core spectrum, and the zero-energy
-    LDOS map (the fourfold core star for d-wave)."""
+                       imp_gamma=0.0, imp_c=1.0e8, field=0.0, h=0.0):
+    """Driver for the general 2D vortex (non-s pairing, impurities, finite field =
+    circular-cell vortex lattice, and/or Zeeman h): full 2D self-consistent Psi(r),
+    the azimuthally-averaged amplitude profile, the core spectrum, and the
+    zero-energy LDOS map (the fourfold core star for d-wave; Zeeman-split core)."""
     # the 2D solver is far heavier per point than the radial one; use a coarser grid
     ng2d = min(ngrid, 49)
     omega = matsubara(temp, wc)
     imp_txt = 'clean' if imp_gamma == 0 else ('Born' if imp_c > 10 else 'unitary')
     cell_txt = f"lattice B/Hc2={field:.3f}" if field > 0 else f"isolated cell={Lxi} xi"
+    if h != 0.0:
+        cell_txt += f", Zeeman h={h:.3e} eV"
     print(f"vortex quasiclassical Eilenberger (Riccati, {gap_sym}, {imp_txt}, 2D, {cell_txt})", flush=True)
     print(f"T={temp/kb:.2f} K, lambda={coupling:.3f}, {len(omega)} Matsubara freqs, "
           f"grid={ng2d}x{ng2d}, Gamma_N={imp_gamma:.3e} eV", flush=True)
@@ -533,7 +548,7 @@ def _calc_vortex_dwave(coupling, temp, wc, gap_sym, kb, sw_ldos, Lxi, ngrid,
         # zero-energy map (shows the fourfold star) + core spectrum
         wmap = np.array([0.0])
         nmap = vortex_ldos2d(Psi, xg, xi, wmap, gap_sym, Dbulk, nbeta=48,
-                             imp_gamma=imp_gamma, imp_c=imp_c, field=field)[:, :, 0]
+                             imp_gamma=imp_gamma, imp_c=imp_c, field=field, h=h)[:, :, 0]
         print(f"core zero-bias LDOS  N(0,0)/N0 = {nmap[ic, ic]:.4f}", flush=True)
         if field > 0.0:
             mask = Rg < Redge
@@ -561,7 +576,7 @@ def _calc_vortex_dwave(coupling, temp, wc, gap_sym, kb, sw_ldos, Lxi, ngrid,
         # core spectrum N(0,0,w)
         wlist = np.linspace(-3.0 * Dbulk, 3.0 * Dbulk, 121)
         spec = vortex_ldos2d(Psi, xg, xi, wlist, gap_sym, Dbulk, nbeta=36,
-                             imp_gamma=imp_gamma, imp_c=imp_c, field=field)[ic, ic, :]
+                             imp_gamma=imp_gamma, imp_c=imp_c, field=field, h=h)[ic, ic, :]
         try:
             with open('vortex_ldos.dat', 'w') as fh:
                 fh.write("# w/Dbulk   N(core,w)/N0\n")
