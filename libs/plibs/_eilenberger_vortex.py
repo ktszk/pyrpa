@@ -240,7 +240,8 @@ def _doppler_chord(Lx, Ly, Rc, cb, sb, rho_min):
 def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str = 'd',
                    Dbulk: float = None, Lxi: float = 8.0, ngrid: int = 49, nbeta: int = 24,
                    hvf: float = 1.0, imp_gamma: float = 0.0, imp_c: float = 1.0e8,
-                   field: float = 0.0, eps: float = 2.0e-3, itemax: int = 80, mix: float = 0.3):
+                   field: float = 0.0, fs: dict = None, eps: float = 2.0e-3,
+                   itemax: int = 80, mix: float = 0.3):
     """
     @fn solve_vortex2d
     @brief Self-consistently solve the complex 2D order-parameter field Psi(r) of a
@@ -272,10 +273,17 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
     @return (xg, Psi, Dbulk, xi): grid axis, complex field [ngrid,ngrid], bulk gap, xi
     """
     no_imp = (imp_gamma == 0.0)
+    use_fs = fs is not None
+    if use_fs and (not no_imp or field > 0.0):
+        raise NotImplementedError("model-FS vortex currently supports the clean, zero-field case")
     bfull = np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False)
     if Dbulk is None:
-        Dbulk = (_bulk_gap(coupling, temp, omega, _ff_vortex(bfull, gap_sym)) if no_imp
-                 else _bulk_gap_imp(coupling, temp, omega, _ff_vortex(bfull, gap_sym), imp_gamma, imp_c))
+        if use_fs:
+            from ._eilenberger_fs import bulk_gap_fs
+            Dbulk = bulk_gap_fs(coupling, temp, omega, fs, gap_sym)
+        else:
+            Dbulk = (_bulk_gap(coupling, temp, omega, _ff_vortex(bfull, gap_sym)) if no_imp
+                     else _bulk_gap_imp(coupling, temp, omega, _ff_vortex(bfull, gap_sym), imp_gamma, imp_c))
     if Dbulk < 1.0e-6 * temp:
         xi = hvf / (np.pi * max(temp, 1e-12))
         xg = np.linspace(-Lxi * xi, Lxi * xi, ngrid)
@@ -292,8 +300,18 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
     Rg = np.sqrt(X ** 2 + Y ** 2)
     theta = np.arctan2(Y, X)                            # analytic vortex phase
     A = Dbulk * np.tanh(Rg / xi)                        # real amplitude field |Psi|
-    beta = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
-    phi = _ff_vortex(beta, gap_sym)
+    if use_fs:                                          # model FS: trajectory along v_hat, nf weights
+        from ._eilenberger_fs import fs_form_factor
+        dirs = np.arctan2(fs['vy'], fs['vx'])           # v_F direction angles
+        phi = fs_form_factor(fs, gap_sym)               # phi at the k-direction
+        hvfarr = fs['vabs']                             # |v_F| per trajectory (Riccati velocity)
+        wt_dir = fs['nf']                               # FS-average weight (sum 1)
+        nbeta = len(dirs)
+    else:                                               # isotropic cylinder (v_hat = k_hat, uniform)
+        dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
+        phi = _ff_vortex(dirs, gap_sym)
+        hvfarr = np.full(nbeta, hvf)
+        wt_dir = np.full(nbeta, 1.0 / nbeta)
     SS, BB = np.meshgrid(xg, xg, indexing='ij')        # rotated-frame sample grid (s, b)
     Nw = len(omega)
     gpref = imp_gamma * (imp_c ** 2 + 1.0)
@@ -306,7 +324,8 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
         facc = np.zeros((ngrid, ngrid, Nw), dtype=np.complex128)
         dwt = wt - omega                                # impurity deviation (->0 in bulk)
         for ib in range(nbeta):
-            cb, sb = np.cos(beta[ib]), np.sin(beta[ib])
+            cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
+            hvf_i = hvfarr[ib]
             Lx = SS * cb - BB * sb
             Ly = SS * sb + BB * cb
             base = phi[ib] * Ai((Lx, Ly)) * np.exp(1j * np.arctan2(Ly, Lx))   # phi*Psi [ns,nb]
@@ -315,9 +334,9 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
             if not use_pos:
                 sumf = np.empty((ngrid, ngrid), dtype=np.complex128)
                 for j in range(ngrid):
-                    _, f = _chord_gf(omega, base[:, j], hvf, dx)
+                    _, f = _chord_gf(omega, base[:, j], hvf_i, dx)
                     sumf[:, j] = f.sum(axis=1)
-                accf += np.conj(phi[ib]) * _eval_field(sumf, xg, sxy, bxy, fill=0.0)
+                accf += wt_dir[ib] * np.conj(phi[ib]) * _eval_field(sumf, xg, sxy, bxy, fill=0.0)
             else:
                 om_rot = np.broadcast_to(omega, (ngrid, ngrid, Nw)).astype(np.complex128).copy()
                 if field > 0.0:                          # Doppler shift along the chord
@@ -329,18 +348,18 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
                 g_rot = np.empty((ngrid, ngrid, Nw), dtype=np.complex128)
                 f_rot = np.empty((ngrid, ngrid, Nw), dtype=np.complex128)
                 for j in range(ngrid):
-                    g_rot[:, j], f_rot[:, j] = _chord_gf_pos(om_rot[:, j], Dtraj[:, j], hvf, dx)
+                    g_rot[:, j], f_rot[:, j] = _chord_gf_pos(om_rot[:, j], Dtraj[:, j], hvf_i, dx)
                 g_xy = _eval_field(g_rot, xg, sxy, bxy, fill=0.0)
                 f_xy = _eval_field(f_rot, xg, sxy, bxy, fill=0.0)
-                gacc += g_xy
-                facc += f_xy
-                accf += np.conj(phi[ib]) * f_xy.sum(axis=2)
-        A_new = np.maximum(coupling * 2.0 * temp * (accf * np.exp(-1j * theta)).real / nbeta, 0.0)
+                gacc += wt_dir[ib] * g_xy
+                facc += wt_dir[ib] * f_xy
+                accf += wt_dir[ib] * np.conj(phi[ib]) * f_xy.sum(axis=2)
+        A_new = np.maximum(coupling * 2.0 * temp * (accf * np.exp(-1j * theta)).real, 0.0)
         err = np.abs(A_new - A).max() / Dbulk
         A = (1.0 - mix) * A + mix * A_new
         if not no_imp:
-            avg_g = gacc / nbeta
-            avg_f = facc / nbeta
+            avg_g = gacc
+            avg_f = facc
             Dimp = imp_c ** 2 + avg_g ** 2 + avg_f * np.conj(avg_f)
             wt_new = omega + gpref * avg_g / Dimp
             sigf_new = gpref * avg_f / Dimp
@@ -355,7 +374,7 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
 def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
                   gap_sym: str, Dbulk: float, delta: float = None, nbeta: int = 36,
                   hvf: float = 1.0, imp_gamma: float = 0.0, imp_c: float = 1.0e8,
-                  field: float = 0.0, h: float = 0.0, eps: float = 3.0e-3,
+                  field: float = 0.0, h: float = 0.0, fs: dict = None, eps: float = 3.0e-3,
                   itemax: int = 60, mix: float = 0.5):
     """
     @fn vortex_ldos2d
@@ -377,17 +396,30 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
     rho_min = 0.5 * dx
     Rc = np.sqrt(2.0 / field) * xi if field > 0.0 else np.inf
     X, Y = np.meshgrid(xg, xg, indexing='ij')
-    beta = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
-    phi = _ff_vortex(beta, gap_sym)
     Nw = len(wlist)
     no_imp = (imp_gamma == 0.0)
     use_pos = (not no_imp) or (field > 0.0)
+    use_fs = fs is not None
+    if use_fs and use_pos:
+        raise NotImplementedError("model-FS vortex LDOS currently supports the clean, zero-field case")
+    if use_fs:
+        from ._eilenberger_fs import fs_form_factor
+        dirs = np.arctan2(fs['vy'], fs['vx'])
+        phi = fs_form_factor(fs, gap_sym)
+        hvfarr = fs['vabs']
+        wt_dir = fs['nf']
+        nbeta = len(dirs)
+    else:
+        dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
+        phi = _ff_vortex(dirs, gap_sym)
+        hvfarr = np.full(nbeta, hvf)
+        wt_dir = np.full(nbeta, 1.0 / nbeta)
     gpref = imp_gamma * (imp_c ** 2 + 1.0)
     SS, BB = np.meshgrid(xg, xg, indexing='ij')
     Ai = RegularGridInterpolator((xg, xg), np.abs(Psi), bounds_error=False, fill_value=Dbulk)
     base, sxyb, dopp = [], [], []
     for ib in range(nbeta):
-        cb, sb = np.cos(beta[ib]), np.sin(beta[ib])
+        cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
         Lx = SS * cb - BB * sb
         Ly = SS * sb + BB * cb
         base.append(phi[ib] * Ai((Lx, Ly)) * np.exp(1j * np.arctan2(Ly, Lx)))
@@ -407,9 +439,9 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
                 if not use_pos:
                     g_rot = np.empty((ngrid, ngrid, Nw), dtype=np.complex128)
                     for j in range(ngrid):
-                        g, _ = _chord_gf(zomega, base[ib][:, j], hvf, dx)
+                        g, _ = _chord_gf(zomega, base[ib][:, j], hvfarr[ib], dx)
                         g_rot[:, j] = g
-                    gacc += _eval_field(g_rot, xg, sxy, bxy, fill=0.0)
+                    gacc += wt_dir[ib] * _eval_field(g_rot, xg, sxy, bxy, fill=0.0)
                 else:
                     om_rot = np.broadcast_to(zomega, (ngrid, ngrid, Nw)).astype(np.complex128).copy()
                     if field > 0.0:
@@ -421,14 +453,14 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
                     g_rot = np.empty((ngrid, ngrid, Nw), dtype=np.complex128)
                     f_rot = np.empty((ngrid, ngrid, Nw), dtype=np.complex128)
                     for j in range(ngrid):
-                        g_rot[:, j], f_rot[:, j] = _chord_gf_pos(om_rot[:, j], Dtraj[:, j], hvf, dx)
-                    gacc += _eval_field(g_rot, xg, sxy, bxy, fill=0.0)
+                        g_rot[:, j], f_rot[:, j] = _chord_gf_pos(om_rot[:, j], Dtraj[:, j], hvfarr[ib], dx)
+                    gacc += wt_dir[ib] * _eval_field(g_rot, xg, sxy, bxy, fill=0.0)
                     if not no_imp:
-                        facc += _eval_field(f_rot, xg, sxy, bxy, fill=0.0)
+                        facc += wt_dir[ib] * _eval_field(f_rot, xg, sxy, bxy, fill=0.0)
             if no_imp:
-                return (gacc / nbeta).real
-            avg_g = gacc / nbeta
-            avg_f = facc / nbeta
+                return gacc.real
+            avg_g = gacc
+            avg_f = facc
             Dimp = imp_c ** 2 + avg_g ** 2 + avg_f * np.conj(avg_f)
             wt_new = zomega + gpref * avg_g / Dimp
             sigf_new = gpref * avg_f / Dimp
@@ -500,7 +532,7 @@ def vortex_field_profile(rgrid, Dr, Dbulk, xi, kappa, omega):
 def calc_vortex(coupling: float, temp: float, wc: float, gap_sym: str = 's', kb: float = 1.0,
                 sw_ldos: bool = True, imp_gamma: float = 0.0, imp_c: float = 1.0e8,
                 field: float = 0.0, h: float = 0.0, kappa: float = 0.0,
-                Lxi: float = 8.0, ngrid: int = 81):
+                fs_kind: str = None, fs_params=None, Lxi: float = 8.0, ngrid: int = 81):
     """
     @fn calc_vortex
     @brief Driver: self-consistent vortex profile and (optionally) LDOS.
@@ -515,9 +547,13 @@ def calc_vortex(coupling: float, temp: float, wc: float, gap_sym: str = 's', kb:
     @param    field: B/Hc2 (0 = isolated vortex; >0 = circular-cell vortex lattice)
     @param        h: Zeeman (Maki) energy mu*B (spin splitting of the core LDOS)
     """
-    if gap_sym != 's' or imp_gamma != 0.0 or field > 0.0 or h != 0.0:
+    if gap_sym != 's' or imp_gamma != 0.0 or field > 0.0 or h != 0.0 or fs_kind is not None:
+        fs = None
+        if fs_kind is not None:
+            from ._eilenberger_fs import build_model_fs
+            fs = build_model_fs(fs_kind, 64, params=fs_params)
         return _calc_vortex_dwave(coupling, temp, wc, gap_sym, kb, sw_ldos, Lxi, ngrid,
-                                  imp_gamma, imp_c, field, h)
+                                  imp_gamma, imp_c, field, h, fs)
     omega = matsubara(temp, wc)
     print("isolated-vortex quasiclassical Eilenberger (Riccati, s-wave, clean)", flush=True)
     print(f"T={temp/kb:.2f} K, lambda={coupling:.3f}, {len(omega)} Matsubara freqs, "
@@ -567,11 +603,12 @@ def calc_vortex(coupling: float, temp: float, wc: float, gap_sym: str = 's', kb:
 
 
 def _calc_vortex_dwave(coupling, temp, wc, gap_sym, kb, sw_ldos, Lxi, ngrid,
-                       imp_gamma=0.0, imp_c=1.0e8, field=0.0, h=0.0):
+                       imp_gamma=0.0, imp_c=1.0e8, field=0.0, h=0.0, fs=None):
     """Driver for the general 2D vortex (non-s pairing, impurities, finite field =
-    circular-cell vortex lattice, and/or Zeeman h): full 2D self-consistent Psi(r),
-    the azimuthally-averaged amplitude profile, the core spectrum, and the
-    zero-energy LDOS map (the fourfold core star for d-wave; Zeeman-split core)."""
+    circular-cell vortex lattice, Zeeman h, and/or a model FS with Fermi velocities):
+    full 2D self-consistent Psi(r), the azimuthally-averaged amplitude profile, the
+    core spectrum, and the zero-energy LDOS map (the fourfold core star for d-wave;
+    Zeeman-split core)."""
     # the 2D solver is far heavier per point than the radial one; use a coarser grid
     ng2d = min(ngrid, 49)
     omega = matsubara(temp, wc)
@@ -579,11 +616,13 @@ def _calc_vortex_dwave(coupling, temp, wc, gap_sym, kb, sw_ldos, Lxi, ngrid,
     cell_txt = f"lattice B/Hc2={field:.3f}" if field > 0 else f"isolated cell={Lxi} xi"
     if h != 0.0:
         cell_txt += f", Zeeman h={h:.3e} eV"
+    if fs is not None:
+        cell_txt += ", model FS+v_F"
     print(f"vortex quasiclassical Eilenberger (Riccati, {gap_sym}, {imp_txt}, 2D, {cell_txt})", flush=True)
     print(f"T={temp/kb:.2f} K, lambda={coupling:.3f}, {len(omega)} Matsubara freqs, "
           f"grid={ng2d}x{ng2d}, Gamma_N={imp_gamma:.3e} eV", flush=True)
     xg, Psi, Dbulk, xi = solve_vortex2d(coupling, temp, omega, gap_sym, Lxi=Lxi, ngrid=ng2d,
-                                        imp_gamma=imp_gamma, imp_c=imp_c, field=field)
+                                        imp_gamma=imp_gamma, imp_c=imp_c, field=field, fs=fs)
     if Dbulk <= 0.0:
         print("normal state (Dbulk=0); nothing to profile", flush=True)
         return xg, Psi
@@ -613,7 +652,7 @@ def _calc_vortex_dwave(coupling, temp, wc, gap_sym, kb, sw_ldos, Lxi, ngrid,
         # zero-energy map (shows the fourfold star) + core spectrum
         wmap = np.array([0.0])
         nmap = vortex_ldos2d(Psi, xg, xi, wmap, gap_sym, Dbulk, nbeta=48,
-                             imp_gamma=imp_gamma, imp_c=imp_c, field=field, h=h)[:, :, 0]
+                             imp_gamma=imp_gamma, imp_c=imp_c, field=field, h=h, fs=fs)[:, :, 0]
         print(f"core zero-bias LDOS  N(0,0)/N0 = {nmap[ic, ic]:.4f}", flush=True)
         if field > 0.0:
             mask = Rg < Redge
@@ -641,7 +680,7 @@ def _calc_vortex_dwave(coupling, temp, wc, gap_sym, kb, sw_ldos, Lxi, ngrid,
         # core spectrum N(0,0,w)
         wlist = np.linspace(-3.0 * Dbulk, 3.0 * Dbulk, 121)
         spec = vortex_ldos2d(Psi, xg, xi, wlist, gap_sym, Dbulk, nbeta=36,
-                             imp_gamma=imp_gamma, imp_c=imp_c, field=field, h=h)[ic, ic, :]
+                             imp_gamma=imp_gamma, imp_c=imp_c, field=field, h=h, fs=fs)[ic, ic, :]
         try:
             with open('vortex_ldos.dat', 'w') as fh:
                 fh.write("# w/Dbulk   N(core,w)/N0\n")

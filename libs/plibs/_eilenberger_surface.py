@@ -450,8 +450,13 @@ def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
           f"T={temp/kb:.2f} K, lambda={coupling:.3f}, {len(omega)} Matsubara freqs", flush=True)
     print(f"impurity: Gamma_N = {imp_gamma:.4e} eV, c = {imp_c:.3e} "
           f"({'clean' if imp_gamma == 0 else 'Born' if imp_c > 10 else 'unitary'})", flush=True)
-    x, Damp, Dbulk = solve_surface(coupling, temp, omega, gap_sym, beta_surf,
-                                   imp_gamma=imp_gamma, imp_c=imp_c, Nbeta=Nbeta, Lxi=Lxi, nper=nper)
+    if fs_kind is not None:   # FS-consistent gap self-consistency (clean, model FS)
+        from ._eilenberger_fs import build_model_fs
+        fs = build_model_fs(fs_kind, 240, params=fs_params)
+        x, Damp, Dbulk = solve_surface_fs(coupling, temp, omega, fs, gap_sym, Lxi=Lxi, nper=nper)
+    else:
+        x, Damp, Dbulk = solve_surface(coupling, temp, omega, gap_sym, beta_surf,
+                                       imp_gamma=imp_gamma, imp_c=imp_c, Nbeta=Nbeta, Lxi=Lxi, nper=nper)
     if Dbulk <= 0.0:
         print("normal state (Dbulk=0); nothing to profile", flush=True)
         return x, Damp
@@ -545,3 +550,56 @@ def surface_ldos_fs(fs, Damp, x, wlist, gap_sym, ix=0, delta=None, Dbulk=1.0, hv
         gsum += nf[i] * g_out[ix] + nf[j] * g_in[ix]
         wsum += nf[i] + nf[j]
     return (gsum / wsum).real
+
+
+def solve_surface_fs(coupling, temp, omega, fs, gap_sym, Dbulk=None, Lxi=8.0, nper=16,
+                     hvf=1.0, vmin_frac=0.02, eps=1.0e-4, itemax=300, mix=0.3):
+    """
+    @fn solve_surface_fs
+    @brief Self-consistent gap profile Delta_amp(x) at a specular surface on a model
+    Fermi surface with real Fermi velocities (clean limit) -- the FS generalization
+    of solve_surface.  Trajectory along v_hat, chord step ds=dx/|v_x|, specular
+    partner at (-kx,ky), nf-weighted gap kernel.  The surface orientation is set by
+    gap_sym on the FS k-directions (n_hat || x): 'dxy' is sign-changing (suppressed,
+    ZEBS), 'd'/'s' are not.
+    @return (x, Damp, Dbulk)
+    """
+    from ._eilenberger_fs import fs_form_factor, bulk_gap_fs
+    phi = fs_form_factor(fs, gap_sym)
+    vx, nf = fs['vx'], fs['nf']
+    refl = _reflection_index(fs)
+    vmax = np.abs(vx).max()
+    out = np.where(vx > vmin_frac * vmax)[0]
+    if Dbulk is None:
+        Dbulk = bulk_gap_fs(coupling, temp, omega, fs, gap_sym)
+    if Dbulk < 1.0e-6 * temp:
+        xi = hvf / (np.pi * max(temp, 1e-12))
+        x = np.linspace(0.0, Lxi * xi, int(Lxi * nper))
+        return x, np.zeros_like(x), 0.0
+    xi = hvf / (np.pi * Dbulk)
+    Ng = int(Lxi * nper)
+    x = np.linspace(0.0, Lxi * xi, Ng)
+    dx = x[1] - x[0]
+    Damp = Dbulk * np.tanh(x / xi)
+    for it in range(itemax):
+        acc = np.zeros(Ng, dtype=np.complex128)          # nf-weighted sum_n <phi* f>(x)
+        for i in out:
+            j = int(refl[i])
+            ds = dx / abs(vx[i])
+            D_in = phi[j] * Damp[::-1]
+            D_out = phi[i] * Damp
+            Dpath = np.concatenate([D_in, D_out])
+            ga0, _ = riccati_homogeneous(omega, Dpath[0])
+            gamma = _integrate_vec(omega, Dpath, hvf, ds, ga0)
+            _, gb0 = riccati_homogeneous(omega, Dpath[-1])
+            gammat = _integrate_vec(omega, np.conj(Dpath[::-1]), hvf, ds, gb0)[::-1]
+            _, f, _ = propagators_from_riccati(gamma, gammat)
+            f_out = f[Ng:].sum(axis=1)                    # sum over Matsubara
+            f_in = f[:Ng][::-1].sum(axis=1)
+            acc += nf[i] * np.conj(phi[i]) * f_out + nf[j] * np.conj(phi[j]) * f_in
+        Damp_new = np.maximum(coupling * 2.0 * temp * acc.real, 0.0)
+        err = np.abs(Damp_new - Damp).max() / Dbulk
+        Damp = (1.0 - mix) * Damp + mix * Damp_new
+        if err < eps:
+            break
+    return x, Damp, Dbulk
