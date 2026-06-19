@@ -445,9 +445,62 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
     return 0.5 * (_sector(base_z + 1j * h) + _sector(base_z - 1j * h))
 
 
+def vortex_field_profile(rgrid, Dr, Dbulk, xi, kappa, omega):
+    """
+    @fn vortex_field_profile
+    @brief Self-consistent (finite-kappa Maxwell) magnetic field profile B(rho) of
+    an isolated vortex from the quasiclassical local superfluid density.
+
+    The local superfluid density (from the converged gap |Delta(rho)|),
+        rho_s(rho)/rho_s_bulk = sum_n D(rho)^2/(w^2+D^2)^{3/2} / sum_n Dbulk^2/(...)
+    sets a position-dependent penetration depth lambda(rho)=kappa*xi/sqrt(rho_s),
+    which diverges at the core (where the condensate is depleted) and recovers to
+    lambda_bulk=kappa*xi far away.  The radial London equation
+        lambda(rho)^2 [-(1/rho) d/drho (rho dB/drho)] + B = const
+    (Neumann BCs, cell-averaged flux fixed) is solved as one linear system; B(rho)
+    is peaked at the core and screened over ~lambda away from it.
+    @return (rho_s_ratio, lam, Brel): all on rgrid; Brel = B(rho)/<B> (mean 1)
+    """
+    Nr = len(rgrid)
+    w2 = omega[None, :] ** 2
+    sden = lambda D: (D ** 2 / (w2 + D ** 2) ** 1.5).sum(axis=1)        # sum_n per rho
+    rs_bulk = float((Dbulk ** 2 / (omega ** 2 + Dbulk ** 2) ** 1.5).sum())
+    rho_s = sden(Dr[:, None]) / max(rs_bulk, 1e-30)                     # rho_s(rho)/rho_s_bulk
+    rho_s = np.clip(rho_s, 1e-4, None)
+    lam = kappa * xi / np.sqrt(rho_s)                                   # local penetration depth
+    # radial operator K[B] = -(1/rho) d/drho(rho dB/drho), Neumann BCs
+    dr = rgrid[1] - rgrid[0]
+    K = np.zeros((Nr, Nr))
+    for i in range(Nr):
+        rho = rgrid[i]
+        if i == 0:
+            K[0, 0] = 4.0 / dr ** 2          # -2 B'' at rho=0 (regular, B'(0)=0)
+            K[0, 1] = -4.0 / dr ** 2
+        elif i == Nr - 1:
+            rm = 0.5 * (rgrid[i] + rgrid[i - 1])
+            K[i, i] = rm / (rho * dr ** 2)    # B'(R)=0 (outer flux term drops)
+            K[i, i - 1] = -rm / (rho * dr ** 2)
+        else:
+            rp = 0.5 * (rgrid[i] + rgrid[i + 1])
+            rm = 0.5 * (rgrid[i] + rgrid[i - 1])
+            K[i, i] = (rp + rm) / (rho * dr ** 2)
+            K[i, i + 1] = -rp / (rho * dr ** 2)
+            K[i, i - 1] = -rm / (rho * dr ** 2)
+    # London eq  lambda^2 K[B] + B = S  with the vortex source S localized at the
+    # core (the phase singularity, smeared over the coherence length xi); away from
+    # the core B ~ K0(rho/lambda) -- peaked at the core, screened over lambda.
+    src = np.exp(-0.5 * (rgrid / xi) ** 2)
+    A = (lam ** 2)[:, None] * K + np.eye(Nr)
+    u = np.linalg.solve(A, src)
+    flux_mean = (u * rgrid).sum() / rgrid.sum()                        # cell flux average (2 pi rho dr)
+    Brel = u / max(flux_mean, 1e-30)                                   # B(rho)/<B>, mean=1
+    return rho_s, lam, Brel
+
+
 def calc_vortex(coupling: float, temp: float, wc: float, gap_sym: str = 's', kb: float = 1.0,
                 sw_ldos: bool = True, imp_gamma: float = 0.0, imp_c: float = 1.0e8,
-                field: float = 0.0, h: float = 0.0, Lxi: float = 8.0, ngrid: int = 81):
+                field: float = 0.0, h: float = 0.0, kappa: float = 0.0,
+                Lxi: float = 8.0, ngrid: int = 81):
     """
     @fn calc_vortex
     @brief Driver: self-consistent vortex profile and (optionally) LDOS.
@@ -482,6 +535,18 @@ def calc_vortex(coupling: float, temp: float, wc: float, gap_sym: str = 's', kb:
                 fh.write(f"{rj/xi:12.5e} {dj/Dbulk:12.5e} {dj:14.6e}\n")
     except IOError as e:
         print(f"Error: failed to write 'vortex_gap.dat': {e}", flush=True)
+
+    if kappa > 0.0:   # self-consistent finite-kappa Maxwell field profile B(rho)
+        rho_s, lam, Brel = vortex_field_profile(rgrid, Dr, Dbulk, xi, kappa, omega)
+        print(f"finite-kappa Maxwell: kappa={kappa:.1f}, lambda_bulk={kappa*xi:.4g} ({kappa*xi/xi:.1f} xi); "
+              f"B(0)/<B>={Brel[0]:.3f}  rho_s(core)/rho_s_bulk={rho_s[0]:.3f}", flush=True)
+        try:
+            with open('vortex_field.dat', 'w') as fh:
+                fh.write("# rho/xi  rho_s(rho)/rho_s_bulk  lambda(rho)/xi  B(rho)/<B>\n")
+                for rj, rsj, lj, bj in zip(rgrid, rho_s, lam, Brel):
+                    fh.write(f"{rj/xi:12.5e} {rsj:12.5e} {lj/xi:12.5e} {bj:12.5e}\n")
+        except IOError as e:
+            print(f"Error: failed to write 'vortex_field.dat': {e}", flush=True)
 
     if sw_ldos:
         wlist = np.linspace(-3.0 * Dbulk, 3.0 * Dbulk, 301)
