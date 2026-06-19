@@ -274,8 +274,9 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
     """
     no_imp = (imp_gamma == 0.0)
     use_fs = fs is not None
-    if use_fs and (not no_imp or field > 0.0):
-        raise NotImplementedError("model-FS vortex currently supports the clean, zero-field case")
+    # representative velocity scale (sets the coherence length xi); per-direction
+    # |v_F| is used in each Riccati and Doppler so the field effect is consistent
+    hvf_eff = float((fs['nf'] * fs['vabs']).sum()) if use_fs else hvf
     bfull = np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False)
     if Dbulk is None:
         if use_fs:
@@ -285,11 +286,11 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
             Dbulk = (_bulk_gap(coupling, temp, omega, _ff_vortex(bfull, gap_sym)) if no_imp
                      else _bulk_gap_imp(coupling, temp, omega, _ff_vortex(bfull, gap_sym), imp_gamma, imp_c))
     if Dbulk < 1.0e-6 * temp:
-        xi = hvf / (np.pi * max(temp, 1e-12))
+        xi = hvf_eff / (np.pi * max(temp, 1e-12))
         xg = np.linspace(-Lxi * xi, Lxi * xi, ngrid)
         return xg, np.zeros((ngrid, ngrid), dtype=np.complex128), 0.0, xi
 
-    xi = hvf / (np.pi * Dbulk)
+    xi = hvf_eff / (np.pi * Dbulk)
     Rc = np.sqrt(2.0 / field) * xi if field > 0.0 else np.inf   # WS cell radius (one flux quantum)
     R = Rc if field > 0.0 else Lxi * xi
     use_pos = (not no_imp) or (field > 0.0)                     # position-dependent w_tilde
@@ -339,8 +340,8 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
                 accf += wt_dir[ib] * np.conj(phi[ib]) * _eval_field(sumf, xg, sxy, bxy, fill=0.0)
             else:
                 om_rot = np.broadcast_to(omega, (ngrid, ngrid, Nw)).astype(np.complex128).copy()
-                if field > 0.0:                          # Doppler shift along the chord
-                    om_rot = om_rot + 1j * _doppler_chord(Lx, Ly, Rc, cb, sb, rho_min)[:, :, None]
+                if field > 0.0:                          # Doppler shift v_F.Q (scales with |v_F|)
+                    om_rot = om_rot + 1j * hvf_i * _doppler_chord(Lx, Ly, Rc, cb, sb, rho_min)[:, :, None]
                 Dtraj = np.broadcast_to(base[:, :, None], (ngrid, ngrid, Nw)).copy()
                 if not no_imp:
                     om_rot = om_rot + _eval_field(dwt, xg, Lx, Ly, fill=0.0)
@@ -400,8 +401,6 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
     no_imp = (imp_gamma == 0.0)
     use_pos = (not no_imp) or (field > 0.0)
     use_fs = fs is not None
-    if use_fs and use_pos:
-        raise NotImplementedError("model-FS vortex LDOS currently supports the clean, zero-field case")
     if use_fs:
         from ._eilenberger_fs import fs_form_factor
         dirs = np.arctan2(fs['vy'], fs['vx'])
@@ -445,7 +444,7 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
                 else:
                     om_rot = np.broadcast_to(zomega, (ngrid, ngrid, Nw)).astype(np.complex128).copy()
                     if field > 0.0:
-                        om_rot = om_rot + 1j * dopp[ib][:, :, None]
+                        om_rot = om_rot + 1j * hvfarr[ib] * dopp[ib][:, :, None]
                     Dtraj = np.broadcast_to(base[ib][:, :, None], (ngrid, ngrid, Nw)).copy()
                     if not no_imp:
                         om_rot = om_rot + _eval_field(dwt, xg, Lx, Ly, fill=0.0)
