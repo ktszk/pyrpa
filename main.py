@@ -178,6 +178,7 @@ eil_imp_sweep=False  #True: sweep Gamma and write Tc(Gamma) to eilenberger_tc.da
 eil_imp_list=None    #array of Gamma values [eV] for the sweep (e.g. np.linspace(0,0.05,11))
 eil_pauli=False      #True: Zeeman/Maki Pauli-limiting sweep (singlet gap Delta(h), spinodal, Zeeman-split DOS)
 eil_spin=False       #True: spin-2x2 Zeeman response, singlet vs triplet d-vector (d||h Pauli-limited, d_|_h immune)
+eil_lambda=False     #True: superfluid density rho_s(T)/penetration depth lambda(T) sweep (s exp-flat, d linear-in-T)
 #----- EILENBERGER inhomogeneous (surface & vortex, Riccati; model cylindrical FS) -----
 eil_pair_sym='d'         #pairing on model FS (surface & vortex): singlet 's','d'(dx2-y2),'dxy'; triplet 'px','py','p+ip'/'p-ip'(chiral)
 eil_ldos=True            #True: also compute the real-frequency LDOS (bound/core states) (surface & vortex)
@@ -1343,7 +1344,9 @@ def main():
             elif option==CalcMode.GAP_FUNCTION: #post gap calculation, output gap function/anomalous green's function
                 output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,plist,mu,temp,sw_self)
     elif option==CalcMode.EILENBERGER: #solve homogeneous quasiclassical Eilenberger equation
-        if eil_spin: #spin-2x2 Zeeman response: singlet vs triplet d-vector (d||h vs d_|_h)
+        if eil_lambda: #superfluid density / penetration depth lambda(T) (s exp-flat, d linear-in-T)
+            plibs.calc_penetration_depth(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,kb=kb)
+        elif eil_spin: #spin-2x2 Zeeman response: singlet vs triplet d-vector (d||h vs d_|_h)
             plibs.calc_spin_pauli(Nx,Ny,Nz,eil_wc,ham_r,S_r,rvec,avec,mu,temp,eil_coupling,
                                   gap_sym=gap_sym,fs_width=eil_fs_width,kb=kb)
         elif eil_pauli: #Zeeman (Maki) Pauli-limiting sweep: singlet gap Delta(h), spinodal, Zeeman-split DOS

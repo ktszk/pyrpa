@@ -556,3 +556,81 @@ def calc_eilenberger(Nx: int, Ny: int, Nz: int, wc: float, ham_r, S_r, rvec, ave
         except IOError as e:
             print(f"Error: failed to write 'eilenberger_tc.dat': {e}", flush=True)
     return damp
+
+
+# --------------------------------------------------------------------------- #
+#  Superfluid density / penetration depth (quasiclassical electrodynamic response)
+# --------------------------------------------------------------------------- #
+# The London penetration depth that screens the field (the Maxwell constitutive
+# relation, 1/lambda^2 ~ rho_s) follows from the quasiclassical superfluid density
+#   rho_s(T)/rho_s(0) = pi <v_x^2 * 2T sum_{n>=0} Delta_k^2/(w_n^2+Delta_k^2)^{3/2}>_FS / <v_x^2>_FS
+# (the bracket -> 1 as T->0).  Full-gap (s-wave) gives an exponentially flat
+# low-T rho_s; line nodes (d-wave) give the linear-in-T rho_s (and lambda(T))
+# that is the hallmark of nodal superconductors.
+
+def superfluid_density(coupling: float, temp: float, wc: float, gap_sym: str = 's',
+                       Nbeta: int = 360):
+    """
+    @fn superfluid_density
+    @brief Self-consistent bulk gap Delta(T) and normalized superfluid density
+    rho_s(T)/rho_s(0) on a model cylindrical Fermi surface (v_F || k).
+    @param gap_sym: 's','d','dxy','px','py','p+ip'/'p-ip'
+    @return (Delta, rho_ratio): bulk gap [eV] and rho_s(T)/rho_s(0) (0 if normal)
+    """
+    from ._eilenberger_surface import _bulk_gap
+    from ._eilenberger_vortex import _ff_vortex
+    omega = matsubara(temp, wc)
+    beta = np.linspace(0.0, 2.0 * np.pi, Nbeta, endpoint=False)
+    phi = _ff_vortex(beta, gap_sym)
+    vx2 = np.cos(beta) ** 2
+    Delta = _bulk_gap(coupling, temp, omega, phi)
+    if Delta <= 1.0e-6 * temp:
+        return 0.0, 0.0
+    Dk = Delta * np.abs(phi)                                  # gap magnitude per direction
+    fac = 2.0 * temp * (Dk[:, None] ** 2 /
+                        (omega[None, :] ** 2 + Dk[:, None] ** 2) ** 1.5).sum(axis=1)
+    rho_ratio = np.pi * (vx2 * fac).sum() / vx2.sum()        # -> 1 as T->0
+    return Delta, rho_ratio
+
+
+def calc_penetration_depth(coupling: float, temp: float, wc: float, gap_sym: str = 's',
+                           t_list=None, kb: float = 1.0):
+    """
+    @fn calc_penetration_depth
+    @brief Temperature sweep of the superfluid density rho_s(T)/rho_s(0) and the
+    penetration depth lambda(T)/lambda(0)=1/sqrt(rho_s(T)/rho_s(0)).  Distinguishes
+    full-gap (s-wave: exponentially flat low-T) from nodal (d-wave: linear-in-T)
+    superconductors -- the classic penetration-depth fingerprint.  Writes
+    'penetration_depth.dat'.
+    @param t_list: temperatures [eV] (default a sweep from ~0.05 Tc to Tc)
+    """
+    # estimate Tc from the linearized eigenvalue scale: bracket via Delta(T)
+    if t_list is None:
+        # geometric-ish sweep up to where the gap vanishes
+        t_hi = temp
+        # ensure t_hi below Tc (gap nonzero); else scale down
+        for _ in range(8):
+            d, _r = superfluid_density(coupling, t_hi, wc, gap_sym)
+            if d > 0:
+                break
+            t_hi *= 0.6
+        t_list = np.linspace(0.05 * t_hi, 1.05 * t_hi, 16)
+    print(f"penetration depth / superfluid density: {gap_sym}, lambda={coupling:.3f}", flush=True)
+    print("  T[K]    Delta/D0   rho_s(T)/rho_s(0)   lambda(T)/lambda(0)", flush=True)
+    rows = []
+    D0 = None
+    for T in t_list:
+        D, rho = superfluid_density(coupling, T, wc, gap_sym)
+        if D0 is None and D > 0:
+            D0 = D
+        lam = 1.0 / np.sqrt(rho) if rho > 1e-9 else np.inf
+        rows.append((T, D, rho, lam))
+        print(f"  {T/kb:6.2f}  {D/(D0 if D0 else 1):8.4f}   {rho:12.5f}     {lam:10.4f}", flush=True)
+    try:
+        with open('penetration_depth.dat', 'w') as fh:
+            fh.write("# T[eV]   Delta[eV]   rho_s(T)/rho_s(0)   lambda(T)/lambda(0)\n")
+            for T, D, rho, lam in rows:
+                fh.write(f"{T:12.6e} {D:12.6e} {rho:12.6e} {lam:12.6e}\n")
+    except IOError as e:
+        print(f"Error writing penetration_depth.dat: {e}", flush=True)
+    return rows
