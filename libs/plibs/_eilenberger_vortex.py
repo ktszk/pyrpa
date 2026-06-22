@@ -955,3 +955,90 @@ def calc_vortex_lattice_periodic(coupling, temp, wc, gap_sym='d', field_list=Non
     except IOError as e:
         print(f"Error: failed to write lattice output: {e}", flush=True)
     return results
+
+
+def vortex_current2d(Psi, xg, xi, omega, temp, gap_sym='d', nbeta=24, hvf=1.0):
+    """
+    @fn vortex_current2d
+    @brief Equilibrium charge supercurrent density j(r) of a converged vortex order
+    parameter, j(r) ~ 2 pi T sum_{w_n>0} < v_hat Im g(r,k_hat,iw_n) >_FS (arb. units;
+    prefactor 2 e N0 v_F0 dropped).  g is recomputed at the Matsubara frequencies on
+    the rotated chords (same machinery as solve_vortex2d) from the |Psi| amplitude and
+    the analytic vortex winding.
+    @param Psi: converged complex order parameter field [ngrid,ngrid] (= A e^{i theta})
+    @return (jx, jy): current-density components on the (x,y) grid [ngrid,ngrid]
+    """
+    ngrid = len(xg)
+    dx = xg[1] - xg[0]
+    X, Y = np.meshgrid(xg, xg, indexing='ij')
+    SS, BB = np.meshgrid(xg, xg, indexing='ij')
+    Nw = len(omega)
+    AmpI = RegularGridInterpolator((xg, xg), np.abs(Psi), bounds_error=False,
+                                   fill_value=float(np.abs(Psi).max()))
+    dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
+    phi = _ff_vortex(dirs, gap_sym)
+    jx = np.zeros((ngrid, ngrid))
+    jy = np.zeros((ngrid, ngrid))
+    for ib in range(nbeta):
+        cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
+        Lx = SS * cb - BB * sb
+        Ly = SS * sb + BB * cb
+        base = phi[ib] * AmpI((Lx, Ly)) * np.exp(1j * np.arctan2(Ly, Lx))
+        sxy = X * cb + Y * sb
+        bxy = -X * sb + Y * cb
+        om3 = np.broadcast_to(omega, (ngrid, ngrid, Nw)).astype(np.complex128)
+        dd3 = np.broadcast_to(base[:, :, None], (ngrid, ngrid, Nw))
+        g, _ = _chords_batch(om3, np.ascontiguousarray(dd3), hvf, dx)
+        gsum = 2.0 * temp * g.sum(axis=2)                       # 2T sum_{n>0} g  [ns,nb]
+        g_xy = _eval_field(gsum, xg, sxy, bxy, fill=0.0)        # -> (x,y)
+        jx += (1.0 / nbeta) * cb * g_xy.imag
+        jy += (1.0 / nbeta) * sb * g_xy.imag
+    return jx, jy
+
+
+def vortex_current_profile(jx, jy, xg, ntheta=72):
+    """
+    @fn vortex_current_profile
+    @brief Azimuthal (circulating) supercurrent j_phi(rho) from the 2D current field,
+    averaged on circles of radius rho: j_phi = < -jx sin(phi) + jy cos(phi) >_phi.
+    @return (rho, jphi): radius grid and the azimuthal current [Nr]
+    """
+    R = 0.5 * (xg[-1] - xg[0])
+    jxi = RegularGridInterpolator((xg, xg), jx, bounds_error=False, fill_value=0.0)
+    jyi = RegularGridInterpolator((xg, xg), jy, bounds_error=False, fill_value=0.0)
+    rho = np.linspace(0.0, 0.85 * R, len(xg) // 2)
+    th = np.linspace(0.0, 2.0 * np.pi, ntheta, endpoint=False)
+    jphi = np.empty(len(rho))
+    for k, r in enumerate(rho):
+        pts = np.stack([r * np.cos(th), r * np.sin(th)], axis=1)
+        jphi[k] = np.mean(-jxi(pts) * np.sin(th) + jyi(pts) * np.cos(th))
+    return rho, jphi
+
+
+def calc_vortex_current(coupling, temp, wc, gap_sym='d', kb=1.0, Lxi=8.0, ngrid=49, nbeta=24):
+    """
+    @fn calc_vortex_current
+    @brief Driver: converge an isolated vortex and report its circulating charge
+    supercurrent j_phi(rho) (arb. units), which vanishes at the core, peaks near a
+    coherence length, and decays outward.  Writes 'vortex_current.dat'.
+    """
+    omega = matsubara(temp, wc)
+    print(f"vortex supercurrent (Riccati Eilenberger, {gap_sym}): T={temp/kb:.2f} K, "
+          f"lambda={coupling:.3f}, grid={min(ngrid,49)}^2", flush=True)
+    xg, Psi, Dbulk, xi = solve_vortex2d(coupling, temp, omega, gap_sym, Lxi=Lxi, ngrid=min(ngrid, 49), nbeta=nbeta)
+    if Dbulk <= 0.0:
+        print("normal state (Dbulk=0); no supercurrent", flush=True)
+        return xg, None
+    jx, jy = vortex_current2d(Psi, xg, xi, omega, temp, gap_sym, nbeta=nbeta)
+    rho, jphi = vortex_current_profile(jx, jy, xg)
+    ipk = int(np.argmax(np.abs(jphi)))
+    print(f"Dbulk={Dbulk:.4e} eV, xi={xi:.4g}; peak |j_phi|={abs(jphi[ipk]):.3e} at rho/xi={rho[ipk]/xi:.2f}, "
+          f"j_phi(core)={jphi[0]:.2e}", flush=True)
+    try:
+        with open('vortex_current.dat', 'w') as fh:
+            fh.write("# rho/xi   j_phi[arb]\n")
+            for r, jp in zip(rho, jphi):
+                fh.write(f"{r/xi:10.4f} {jp:14.6e}\n")
+    except IOError as e:
+        print(f"Error writing vortex_current.dat: {e}", flush=True)
+    return rho, jphi

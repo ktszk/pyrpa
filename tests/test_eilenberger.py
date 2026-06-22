@@ -258,6 +258,47 @@ def test_lattice_volovik_field_dependence():
 
 
 # --------------------------------------------------------------------------- #
+#  condensation free energy / supercurrent (je observables)
+# --------------------------------------------------------------------------- #
+def test_condensation_energy_universal():
+    """The homogeneous condensation free energy is negative and coupling-independent:
+    dOmega(0)/Damp0^2 -> a universal constant (~ -1/4 per spin)."""
+    vals = []
+    for g in (0.45, 0.5, 0.55):
+        dO, D = E.condensation_energy(g, 1e-5, 0.3, 's')
+        assert D > 0 and dO < 0
+        vals.append(dO / D ** 2)
+    assert max(vals) - min(vals) < 5e-3            # coupling-independent
+    assert abs(np.mean(vals) - (-0.25)) < 0.02     # per-spin BCS value
+
+
+def test_condensation_energy_vanishes_at_tc():
+    """dOmega -> 0 as T -> Tc and grows in magnitude as T decreases."""
+    g, wc = 0.4, 0.3
+    Tc = E.find_tc(np.ones(240), np.ones(240), 0.0, 1e8, g, wc, 1e-5, 0.05)
+    dO_lo, _ = E.condensation_energy(g, 0.2 * Tc, wc, 's')
+    dO_hi, _ = E.condensation_energy(g, 0.95 * Tc, wc, 's')
+    assert dO_lo < dO_hi < 0                        # |dOmega| larger at low T, ->0 at Tc
+    assert abs(dO_hi) < 0.1 * abs(dO_lo)
+
+
+def test_vortex_supercurrent_circulates():
+    """The vortex supercurrent vanishes at the core, peaks near a coherence length,
+    circulates with a single sign, and decays outward."""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    xg, Psi, Db, xi = V.solve_vortex2d(0.6, T, om, 'd', Lxi=7, ngrid=31, nbeta=18)
+    jx, jy = V.vortex_current2d(Psi, xg, xi, om, T, 'd', nbeta=18)
+    rho, jphi = V.vortex_current_profile(jx, jy, xg)
+    ipk = np.argmax(np.abs(jphi))
+    assert abs(jphi[0]) < 0.05 * abs(jphi[ipk])    # ~0 at the core
+    assert 0.5 < rho[ipk] / xi < 2.5               # peak near xi
+    s = np.sign(jphi[ipk])
+    assert np.all(jphi[1:] * s > -0.02 * abs(jphi[ipk]))   # single-sign circulation
+    assert abs(jphi[-1]) < abs(jphi[ipk])          # decays outward
+
+
+# --------------------------------------------------------------------------- #
 #  model Fermi surface
 # --------------------------------------------------------------------------- #
 def test_model_fs_basics_and_cylinder_limit():

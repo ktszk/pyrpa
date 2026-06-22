@@ -749,3 +749,89 @@ def calc_fs_penetration(coupling, temp, wc, kind='ellipse', gap_sym='s', Nth=360
     except IOError as e:
         print(f"Error writing fs_penetration.dat: {e}", flush=True)
     return rows
+
+
+# =========================================================================== #
+#  Condensation free energy
+# --------------------------------------------------------------------------- #
+# Homogeneous superconducting condensation free energy (Omega_s - Omega_n)/N0 in the
+# standard quasiclassical / BCS Matsubara form,
+#   dOmega/N0 = -2 pi T sum_{w_n>0} < E_k - w_n - |Delta_k|^2/(2 E_k) >_FS,
+#   E_k = sqrt(w_n^2 + |Delta_k|^2),  |Delta_k| = Damp |phi(k)|.
+# The summand decays as |Delta|^4/w_n^3, so the sum is cutoff-convergent and the
+# result is coupling-independent: a universal ratio dOmega(0)/Damp0^2 and dOmega->0
+# at Tc.  (The *inhomogeneous* case needs the Eilenberger free-energy functional /
+# coupling-constant integration with the Riccati f -- gated on the self-consistent
+# spatial order parameter.)
+
+
+def condensation_energy(coupling, temp, wc, gap_sym='s', fs=None, Damp=None):
+    """
+    @fn condensation_energy
+    @brief Homogeneous superconducting condensation free energy (Omega_s-Omega_n)/N0
+    [eV^2] at temperature ``temp`` (coupling-independent quasiclassical Matsubara form).
+    @param gap_sym: pairing symmetry; with a model FS pass ``fs`` (else cylinder)
+    @param   Damp: bulk gap [eV] (computed self-consistently if None)
+    @return (dOmega, Damp): condensation energy per N0 [eV^2] (<=0) and the bulk gap
+    """
+    omega = matsubara(temp, wc)
+    if fs is not None:
+        phi = fs_form_factor(fs, gap_sym)
+        wnf = fs['nf']
+        if Damp is None:
+            Damp = bulk_gap_fs(coupling, temp, omega, fs, gap_sym)
+    else:
+        Nb = 240
+        beta = np.linspace(0.0, 2.0 * np.pi, Nb, endpoint=False)
+        phi = ({'s': np.ones(Nb), 'd': np.sqrt(2.0) * np.cos(2.0 * beta),
+                'dxy': np.sqrt(2.0) * np.sin(2.0 * beta)}[gap_sym]).astype(np.complex128)
+        wnf = np.full(Nb, 1.0 / Nb)
+        if Damp is None:
+            Damp = solve_gap(temp, np.ones(Nb), phi, omega, 0.0, 1e8, coupling)
+    if Damp <= 1.0e-6 * temp:
+        return 0.0, 0.0
+    Dk2 = (Damp ** 2) * (phi * np.conj(phi)).real        # |Delta_k|^2 per FS point
+    E = np.sqrt(omega[None, :] ** 2 + Dk2[:, None])      # [Nfs, Nw]
+    summand = E - omega[None, :] - Dk2[:, None] / (2.0 * E)
+    dOmega = -2.0 * np.pi * temp * (wnf[:, None] * summand).sum()   # FS-avg + 2T sum_{n>0}
+    return dOmega, Damp
+
+
+def calc_free_energy(coupling, temp, wc, gap_sym='s', fs=None, t_list=None, kb=1.0):
+    """
+    @fn calc_free_energy
+    @brief Temperature sweep of the homogeneous condensation free energy
+    (Omega_s-Omega_n)/N0 (coupling-constant integration).  Writes 'free_energy.dat'.
+    """
+    if t_list is None:
+        t_hi = temp
+        for _ in range(8):
+            D = (bulk_gap_fs(coupling, t_hi, matsubara(t_hi, wc), fs, gap_sym) if fs is not None
+                 else solve_gap(t_hi, np.ones(240),
+                                ({'s': np.ones(240), 'd': np.sqrt(2.0) * np.cos(2.0 * np.linspace(0, 2 * np.pi, 240, endpoint=False)),
+                                  'dxy': np.sqrt(2.0) * np.sin(2.0 * np.linspace(0, 2 * np.pi, 240, endpoint=False))}[gap_sym]).astype(np.complex128),
+                                matsubara(t_hi, wc), 0.0, 1e8, coupling))
+            if D > 0:
+                break
+            t_hi *= 0.6
+        t_list = np.linspace(0.05 * t_hi, 1.05 * t_hi, 16)
+    print(f"condensation free energy: {gap_sym}-wave, lambda={coupling:.3f}, "
+          f"{'model FS' if fs is not None else 'cylinder'}", flush=True)
+    print("  T[K]      Delta[eV]     dOmega/N0 [eV^2]   dOmega/Delta0^2", flush=True)
+    rows = []
+    D0 = None
+    for T in t_list:
+        dO, D = condensation_energy(coupling, T, wc, gap_sym, fs=fs)
+        if D0 is None and D > 0:
+            D0 = D
+        rows.append((T, D, dO))
+    D0 = D0 or 1.0
+    try:
+        with open('free_energy.dat', 'w') as fh:
+            fh.write("# T[eV]  Delta[eV]  dOmega/N0[eV^2]  dOmega/Delta0^2\n")
+            for T, D, dO in rows:
+                print(f"  {T/kb:7.3f}  {D:12.5e}  {dO:14.6e}   {dO/D0**2:9.4f}", flush=True)
+                fh.write(f"{T:12.6e} {D:12.6e} {dO:14.6e} {dO/D0**2:12.6e}\n")
+    except IOError as e:
+        print(f"Error writing free_energy.dat: {e}", flush=True)
+    return rows

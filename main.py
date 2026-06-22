@@ -177,6 +177,7 @@ eil_find_tc=False    #True: bisect for Tc at the current impurity setting
 eil_imp_sweep=False  #True: sweep Gamma and write Tc(Gamma) to eilenberger_tc.dat
 eil_imp_list=None    #array of Gamma values [eV] for the sweep (e.g. np.linspace(0,0.05,11))
 eil_pauli=False      #True: Zeeman/Maki Pauli-limiting sweep (singlet gap Delta(h), spinodal, Zeeman-split DOS)
+eil_free_energy=False #True: condensation free energy (Omega_s-Omega_n)/N0 vs T (coupling-independent; writes free_energy.dat)
 eil_spin=False       #True: spin-2x2 Zeeman response, singlet vs triplet d-vector (d||h Pauli-limited, d_|_h immune)
 eil_lambda=False     #True: superfluid density rho_s(T)/penetration depth lambda(T) sweep (s exp-flat, d linear-in-T)
 eil_fs=False         #True: model-FS + Fermi-velocity penetration depth (anisotropic lambda_xx/lambda_yy)
@@ -196,6 +197,7 @@ eil_vort_h=0.0           #Zeeman (Maki) field [eV] for the vortex core LDOS (spi
 eil_vort_field=False     #True: also compute the self-consistent finite-kappa Maxwell field profile B(rho) of the vortex (uses eil_kappa)
 eil_vort_fs=None         #model FS for the vortex: None=isotropic, else 'iso'/'ellipse'/'tb' (clean, zero-field; uses eil_fs_params)
 eil_vort_dvector=False   #True: self-consistent triplet d-vector TEXTURE around the vortex core (dominant p_x(e_x) winding + core-localized subdominant p_y(e_z), 2D spin-matrix Riccati; uses eil_dvec_subratio)
+eil_vort_current=False   #True: circulating charge supercurrent j_phi(rho) of an isolated vortex (writes vortex_current.dat)
 eil_field=0.0            #vortex lattice field B/Hc2 (0=isolated vortex; >0=circular-cell lattice w/ Doppler)
 eil_field_list=None      #list of B/Hc2 to sweep <N(0)>(B) on the TRUE periodic lattice (e.g. [0.04,0.08,0.16,0.32]); None=single field
 eil_kappa=100.0          #GL kappa=lambda/xi for the periodic lattice (large=extreme type-II; finite=London screening/Maxwell)
@@ -1364,6 +1366,8 @@ def main():
         elif eil_pauli: #Zeeman (Maki) Pauli-limiting sweep: singlet gap Delta(h), spinodal, Zeeman-split DOS
             plibs.calc_pauli_limit(Nx,Ny,Nz,eil_wc,ham_r,S_r,rvec,avec,mu,temp,gap_sym,eil_coupling,
                                    fs_width=eil_fs_width,kb=kb)
+        elif eil_free_energy: #condensation free energy (Omega_s-Omega_n)/N0 vs T (coupling-independent)
+            plibs.calc_free_energy(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,kb=kb)
         else:
             plibs.calc_eilenberger(Nx,Ny,Nz,eil_wc,ham_r,S_r,rvec,avec,mu,temp,gap_sym,eil_coupling,
                                    imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,fs_width=eil_fs_width,kb=kb,
@@ -1377,7 +1381,10 @@ def main():
                                kb=kb,sw_ldos=eil_ldos,imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,h=eil_surf_h,
                                fs_kind=eil_surf_fs,fs_params=eil_fs_params)
     elif option==CalcMode.EILENBERGER_VORTEX: #vortex / vortex lattice via Riccati Eilenberger (model FS)
-        if eil_vort_dvector: #self-consistent triplet d-vector texture around the vortex core (spin-matrix Riccati)
+        if eil_vort_current: #circulating charge supercurrent j_phi(rho) of an isolated vortex
+            plibs.calc_vortex_current(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,kb=kb,
+                                      Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
+        elif eil_vort_dvector: #self-consistent triplet d-vector texture around the vortex core (spin-matrix Riccati)
             plibs.calc_vortex_dvector(eil_coupling,temp,eil_wc,kb=kb,sub_ratio=eil_dvec_subratio)
         elif eil_field_list is not None: #sweep B/Hc2 on the TRUE periodic lattice -> <N(0)>(B) (d~sqrt(B) Volovik)
             plibs.calc_vortex_lattice_periodic(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,
