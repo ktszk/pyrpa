@@ -38,7 +38,8 @@ subroutine riccati_chords(g,f,om,dd,hvf,ds,Ns,Nchord,Nw) bind(C)
   real(c_double) t
   complex(c_double) D1,om1,R,Tt,gm,gt,Dmid,ommid,den
   complex(c_double),allocatable:: gamf(:,:),gamt(:,:)
-  !$omp parallel do private(i,w,t,D1,om1,R,Tt,gm,gt,Dmid,ommid,den,gamf,gamt)
+  !$omp parallel do default(none) shared(g,f,om,dd,hvf,ds,Ns,Nchord,Nw) &
+  !$omp   private(i,w,t,D1,om1,R,Tt,gm,gt,Dmid,ommid,den,gamf,gamt)
   do c=1,Nchord
      t=ds(c)/hvf
      allocate(gamf(Nw,Ns),gamt(Nw,Ns))
@@ -156,7 +157,8 @@ subroutine matrix_riccati_batch(g,f,om,Dpath,hvf,ds,h,Ns,Nw) bind(C)
   do i=1,Ns
      Dmat(:,:,i)=transpose(Dpath(:,:,i))
   end do
-  !$omp parallel do private(i,Dmid,Nmat,Mexp,a,b,aa,bb,ab,P,res)
+  !$omp parallel do default(none) shared(g,f,om,Dmat,t,sz,I2,Ns,Nw,h) &
+  !$omp   private(i,Dmid,Nmat,Mexp,a,b,aa,bb,ab,P,res)
   do iw=1,Nw
      ! forward a from upstream bulk root
      call bulk_root(om(iw),Dmat(:,:,1),.true.,a(:,:,1))
@@ -273,28 +275,34 @@ subroutine matrix_riccati_chords(g,f,om,Dpath,hvf,ds,h,Ns,Nchord,Nw) bind(C)
   complex(c_double),intent(out),dimension(2,2,Nw,Nchord,Ns):: g,f
   integer(c_int64_t) c,iw,i
   real(c_double) t
-  complex(c_double) Dmat(2,2,Ns),Dmid(2,2),Nmat(4,4),Mexp(4,4)
+  complex(c_double) Dmid(2,2),Nmat(4,4),Mexp(4,4)
   complex(c_double) a(2,2,Ns),b(2,2,Ns),aa(2,2),bb(2,2),ab(2,2),P(2,2),res(2,2)
   complex(c_double) sz(2,2),I2(2,2)
+  complex(c_double),allocatable:: Dmat(:,:,:,:)         ! (2,2,Ns,Nchord), natural (row,col)
   t=ds/hvf
   sz=reshape([(1d0,0d0),(0d0,0d0),(0d0,0d0),(-1d0,0d0)],[2,2])
   I2=reshape([(1d0,0d0),(0d0,0d0),(0d0,0d0),(1d0,0d0)],[2,2])
-  !$omp parallel do private(iw,i,Dmat,Dmid,Nmat,Mexp,a,b,aa,bb,ab,P,res)
+  allocate(Dmat(2,2,Ns,Nchord))                          ! precompute so (chord,freq) collapse
   do c=1,Nchord
      do i=1,Ns
-        Dmat(:,:,i)=transpose(Dpath(:,:,c,i))
+        Dmat(:,:,i,c)=transpose(Dpath(:,:,c,i))
      end do
+  end do
+  ! parallelize over the whole (chord, frequency) space for full load balance
+  !$omp parallel do collapse(2) default(none) shared(g,f,om,Dmat,t,sz,I2,Ns,Nchord,Nw,h) &
+  !$omp   private(i,Dmid,Nmat,Mexp,a,b,aa,bb,ab,P,res)
+  do c=1,Nchord
      do iw=1,Nw
-        call bulk_root(om(iw),Dmat(:,:,1),.true.,a(:,:,1))
+        call bulk_root(om(iw),Dmat(:,:,1,c),.true.,a(:,:,1))
         do i=1,Ns-1
-           Dmid=0.5d0*(Dmat(:,:,i)+Dmat(:,:,i+1))
+           Dmid=0.5d0*(Dmat(:,:,i,c)+Dmat(:,:,i+1,c))
            call riccati_gen(om(iw),Dmid,h,1d0,sz,Nmat)
            call expm4(Nmat*t,Mexp)
            call mobius(a(:,:,i),Mexp,a(:,:,i+1))
         end do
-        call bulk_root(om(iw),Dmat(:,:,Ns),.false.,b(:,:,Ns))
+        call bulk_root(om(iw),Dmat(:,:,Ns,c),.false.,b(:,:,Ns))
         do i=Ns,2,-1
-           Dmid=0.5d0*(Dmat(:,:,i)+Dmat(:,:,i-1))
+           Dmid=0.5d0*(Dmat(:,:,i,c)+Dmat(:,:,i-1,c))
            call riccati_gen(om(iw),Dmid,h,-1d0,sz,Nmat)
            call expm4(Nmat*t,Mexp)
            call mobius(b(:,:,i),Mexp,b(:,:,i-1))
@@ -308,4 +316,5 @@ subroutine matrix_riccati_chords(g,f,om,Dpath,hvf,ds,h,Ns,Nchord,Nw) bind(C)
         end do
      end do
   end do
+  deallocate(Dmat)
 end subroutine matrix_riccati_chords
