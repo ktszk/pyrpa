@@ -496,6 +496,72 @@ tempK = 50
 
 Setting `option = 13` instead computes $chi_s^"SC"(omega)$ at the single $bold(q)$ point given by `at_point`.
 
+= Test Suite
+
+The `tests/` directory contains regression tests for the main numerical kernels and physics benchmarks. Each test file can be run directly as a Python script, so `pytest` is optional.
+
+Before running the tests, the Fortran shared library `libs/libfmod.so` must be compiled. If it is missing, enter the `libs` directory and run `make FC=<compiler> SL=<library>`.
+
+=== How to Run
+
+Run individual test files directly:
+
+```bash
+python tests/test_eilenberger.py
+python tests/test_rpa_flex.py
+```
+
+If `pytest` is available, the whole test directory can also be run with:
+
+```bash
+pytest tests
+```
+
+=== `tests/test_eilenberger.py`
+
+This file tests the quasiclassical Eilenberger / Riccati solvers. It covers homogeneous systems, surfaces, vortices, vortex lattices, model Fermi surfaces, Pauli limiting, and triplet $d$-vector textures.
+
+Main checks:
+
+- Matsubara cutoff scaling with temperature
+- Anderson theorem and Abrikosov--Gor'kov pair breaking
+- Weak-coupling BCS ratio $2 Delta_0 / k_B T_c approx 3.53$
+- Agreement between Fortran Riccati kernels and Python reference implementations
+  - scalar `riccati_chords`
+  - spin-matrix `matrix_riccati_batch`
+  - batched chord `matrix_riccati_chords`
+- Gap suppression and zero-energy bound states at a $d$-wave surface
+- CdGM zero-energy peak at a vortex core
+- Volovik-like field dependence in a vortex lattice
+- Normalization of `build_model_fs` and the isotropic Fermi-surface limit
+- Singlet Pauli suppression and robustness of triplet equal-spin pairing
+- Triplet $d$-vector textures near surfaces and vortex cores
+
+This is a physics-oriented benchmark suite and may take several tens of seconds depending on the machine.
+
+=== `tests/test_rpa_flex.py`
+
+This file provides lightweight regression tests for the RPA / FLEX / Eliashberg building blocks outside the Eilenberger suite. It targets Fortran wrappers, RPA matrix algebra, FLEX bubble / vertex kernels, and Eliashberg smoke tests.
+
+Main checks:
+
+- Consistency of multi-site orbital-pair and site-index generation in `get_chi_orb_list`
+- Reference values of the two-orbital Kanamori-type vertex from `gen_SCmatrix`
+- Reference values of orbital-dependent `Umat`, `Jmat` vertices from `gen_SCmatrix_orb`
+- One-orbital RPA formula
+  $ chi_s = chi^0 / (1 - U chi^0) $
+- `get_chis_chic` reduces to bare $chi^0$ when `S=C=0`
+- Analytic one-orbital Green's function check for `gen_Green0`:
+  $ G^0(k,i omega_n) = 1 / (i omega_n + mu - epsilon_k) $
+- Agreement between `get_chi0` and `get_chi0_conv`
+- `get_Vsigma_nosoc_flex` returns a zero vertex at zero interaction
+- `linearized_eliashberg` returns $lambda = 0$ and finite arrays at zero interaction
+- `nonlinear_eliashberg` preserves the trivial solution $Delta=0$ for zero seed and zero interaction
+- `_load_sigma_from_file` returns `None` without crashing when `self_en.npz` is absent
+- One-orbital smoke test for `output_gap_function`
+
+This test uses a very small one-orbital model and a small $k$ mesh, so it is intended to catch RPA/FLEX API regressions quickly.
+
 = Troubleshooting
 
 - *Chemical potential does not converge*: Increase `Nx, Ny, Nz`, or slightly raise `tempK`. A coarse $bold(k)$-mesh can cause instability in the self-consistent $mu$ search.

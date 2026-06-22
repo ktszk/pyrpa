@@ -497,6 +497,74 @@ tempK = 50
 
 `option = 13` にすると `at_point` で指定した単一 $bold(q)$ 点での $chi_s^"SC"(omega)$ が得られます。
 
+= テストコード
+
+`tests/` ディレクトリには, 主要な数値カーネルと物理ベンチマークを確認するための回帰テストが含まれています。`pytest` がインストールされていない環境でも, 各テストファイルを Python スクリプトとして直接実行できます。
+
+実行前に Fortran 共有ライブラリ `libs/libfmod.so` がコンパイル済みである必要があります。未コンパイルの場合は `libs` ディレクトリで `make FC=<compiler> SL=<library>` を実行してください。
+
+=== 実行方法
+
+個別に実行する場合:
+
+```bash
+python tests/test_eilenberger.py
+python tests/test_rpa_flex.py
+```
+
+`pytest` が利用できる環境では以下でも実行できます。
+
+```bash
+pytest tests
+```
+
+=== `tests/test_eilenberger.py`
+
+準古典 Eilenberger / Riccati ソルバーのテストです。均一系, 表面, 渦糸, 渦糸格子, model Fermi surface, Pauli 制限, triplet $d$-vector texture など, Eilenberger 関連の物理ベンチマークを確認します。
+
+主な確認項目:
+
+- 松原周波数 cutoff の温度スケーリング
+- Anderson theorem と Abrikosov--Gor'kov pair breaking の再現
+- 弱結合 BCS 比 $2 Delta_0 / k_B T_c approx 3.53$
+- Fortran Riccati カーネルと Python 参照実装の一致
+  - scalar `riccati_chords`
+  - spin-matrix `matrix_riccati_batch`
+  - batched chord `matrix_riccati_chords`
+- $d$波表面でのギャップ抑制と zero-energy bound state
+- 渦糸芯での CdGM zero-energy peak
+- 渦糸格子での Volovik 型 field dependence
+- `build_model_fs` の規格化と等方 Fermi surface 極限
+- singlet Pauli 抑制と triplet equal-spin pairing の耐性
+- 表面・渦糸芯における triplet $d$-vector texture
+
+このテストは比較的物理寄りのベンチマークであり, 実行時間は環境により数十秒程度かかる場合があります。
+
+=== `tests/test_rpa_flex.py`
+
+RPA / FLEX / Eliashberg の基本部品を対象にした軽量な回帰テストです。Eilenberger 以外の Fortran wrapper, RPA 行列演算, FLEX 用 bubble / vertex, Eliashberg solver の smoke test を確認します。
+
+主な確認項目:
+
+- `get_chi_orb_list` の multi-site orbital-pair / site index の整合性
+- `gen_SCmatrix` の 2 軌道 Kanamori 型 vertex の基準値
+- `gen_SCmatrix_orb` の軌道依存 `Umat`, `Jmat` vertex の基準値
+- 1 軌道 RPA 公式
+  $ chi_s = chi^0 / (1 - U chi^0) $
+  の確認
+- `S=C=0` のとき `get_chis_chic` が bare $chi^0$ に戻ること
+- 1 軌道 tight-binding model に対する `gen_Green0` の解析式
+  $ G^0(k,i omega_n) = 1 / (i omega_n + mu - epsilon_k) $
+  の確認
+- `get_chi0` と `get_chi0_conv` の一致
+- `get_Vsigma_nosoc_flex` が相互作用ゼロでゼロ vertex を返すこと
+- `linearized_eliashberg` が相互作用ゼロで $lambda = 0$ を返し, 有限な配列を返すこと
+- `nonlinear_eliashberg` がゼロ seed / ゼロ相互作用で自明解 $Delta=0$ を保つこと
+- `_load_sigma_from_file` が `self_en.npz` 不在時にクラッシュせず `None` を返すこと
+- `output_gap_function` の 1 軌道出力 smoke test
+
+このテストは小さな 1 軌道模型と小さい $k$ メッシュを使うため, RPA/FLEX 周辺の API 破壊を素早く検出する用途に向いています。
+
 = トラブルシューティング
 
 - *化学ポテンシャルが収束しない*: `Nx, Ny, Nz` を増やすか, `tempK` を少し上げてください。
