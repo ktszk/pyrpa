@@ -501,7 +501,7 @@ def vortex_field_profile(rgrid, Dr, Dbulk, xi, kappa, omega):
 
 def calc_vortex(coupling: float, temp: float, wc: float, gap_sym: str = 's', kb: float = 1.0,
                 sw_ldos: bool = True, imp_gamma: float = 0.0, imp_c: float = 1.0e8,
-                field: float = 0.0, h: float = 0.0, kappa: float = 0.0,
+                field: float = 0.0, h: float = 0.0, kappa: float = 0.0, tilt_deg: float = 0.0,
                 fs_kind: str = None, fs_params=None, fs=None, Lxi: float = 8.0, ngrid: int = 81):
     """
     @fn calc_vortex
@@ -516,13 +516,19 @@ def calc_vortex(coupling: float, temp: float, wc: float, gap_sym: str = 's', kb:
     @param imp_gamma,imp_c: non-magnetic impurity scattering rate [eV] and T-matrix c
     @param    field: B/Hc2 (0 = isolated vortex; >0 = circular-cell vortex lattice)
     @param        h: Zeeman (Maki) energy mu*B (spin splitting of the core LDOS)
+    @param tilt_deg: field tilt theta from the c-axis (quasi-2D).  The perpendicular
+                     component B_z=B cos(theta) keeps setting the orbital vortex
+                     (Doppler) ``field``, while the Zeeman couples to the total |B|,
+                     so the effective Maki energy is h/cos(theta) -- a knob for the
+                     Pauli/orbital ratio (Pauli-limiting / FFLO with tilt).
     """
-    if gap_sym != 's' or imp_gamma != 0.0 or field > 0.0 or h != 0.0 or fs_kind is not None or fs is not None:
+    h_eff = h / np.cos(np.radians(tilt_deg)) if tilt_deg else h
+    if gap_sym != 's' or imp_gamma != 0.0 or field > 0.0 or h_eff != 0.0 or fs_kind is not None or fs is not None:
         if fs is None and fs_kind is not None:        # build a model FS (else use the prebuilt fs)
             from ._eilenberger import build_model_fs
             fs = build_model_fs(fs_kind, 64, params=fs_params)
         return _calc_vortex_dwave(coupling, temp, wc, gap_sym, kb, sw_ldos, Lxi, ngrid,
-                                  imp_gamma, imp_c, field, h, fs)
+                                  imp_gamma, imp_c, field, h_eff, fs)
     omega = matsubara(temp, wc)
     print("isolated-vortex quasiclassical Eilenberger (Riccati, s-wave, clean)", flush=True)
     print(f"T={temp/kb:.2f} K, lambda={coupling:.3f}, {len(omega)} Matsubara freqs, "
@@ -726,10 +732,11 @@ def calc_vortex_lattice(coupling: float, temp: float, wc: float, gap_sym: str = 
 # (fractional-coordinate sampling) -- the genuine 2D lattice, not a circular cell.
 
 
-def _lattice_vectors(field: float, xi: float, lattice: str = 'square'):
-    """Primitive (a1,a2) and reciprocal (b1,b2) vectors of the vortex lattice with
-    one flux quantum per cell (area S = 2 pi xi^2 / (B/Hc2)).  ai.bj = 2 pi dij."""
-    S = 2.0 * np.pi / field * xi ** 2
+def _lattice_vectors(field: float, xi: float, lattice: str = 'square', nflux: int = 1):
+    """Primitive (a1,a2) and reciprocal (b1,b2) vectors of the (super)cell holding
+    ``nflux`` flux quanta (area S = nflux * 2 pi xi^2 / (B/Hc2), so the area per vortex
+    -- hence the field -- is unchanged).  ai.bj = 2 pi dij."""
+    S = nflux * 2.0 * np.pi / field * xi ** 2
     if lattice.startswith('s'):                       # square
         a = np.sqrt(S)
         a1, a2 = np.array([a, 0.0]), np.array([0.0, a])
@@ -741,12 +748,27 @@ def _lattice_vectors(field: float, xi: float, lattice: str = 'square'):
     return a1, a2, Bm[:, 0], Bm[:, 1], S, M
 
 
-def _lattice_QB(X, Y, b1, b2, S, lam, xi, nmax=8):
+def _vortex_positions(nflux: int, a1: np.ndarray, a2: np.ndarray):
+    """Cartesian positions of the ``nflux`` vortices in the (super)cell, on a regular
+    n1 x n2 sub-grid (near-square factorization).  For nflux=1 -> the cell origin; for
+    a perfect-square nflux the sub-grid coincides with the primitive vortex lattice so
+    the structure factor reduces the supercell back to the single-vortex cell."""
+    n1 = int(round(np.sqrt(nflux)))
+    while n1 > 1 and nflux % n1 != 0:
+        n1 -= 1
+    n2 = nflux // n1
+    return [(p / n1) * a1 + (q / n2) * a2 for p in range(n1) for q in range(n2)]
+
+
+def _lattice_QB(X, Y, b1, b2, S, lam, xi, vpos, nmax=8):
     """Periodic supercurrent momentum Q(r)=(Qx,Qy) and field B(r)/Bbar on the grid,
-    from the London/Brandt Fourier sum (finite kappa via lambda)."""
+    from the London/Brandt Fourier sum (finite kappa via lambda).  ``vpos`` are the
+    Cartesian positions of the (nflux) vortices in the cell; their structure factor
+    SF(K)=sum_v e^{-iK.r_v} places them (for one centred vortex SF=1)."""
     Qx = np.zeros_like(X)
     Qy = np.zeros_like(X)
     Brel = np.ones_like(X)                            # B(r)/Bbar (K=0 term = 1)
+    nflux = len(vpos)
     pref = np.pi / S
     for m in range(-nmax, nmax + 1):
         for n in range(-nmax, nmax + 1):
@@ -754,22 +776,26 @@ def _lattice_QB(X, Y, b1, b2, S, lam, xi, nmax=8):
                 continue
             K = m * b1 + n * b2
             K2 = K @ K
+            SF = sum(np.exp(-1j * (K[0] * rv[0] + K[1] * rv[1])) for rv in vpos)  # structure factor
             F = np.exp(-0.5 * xi ** 2 * K2)           # core form factor
             scr = lam ** 2 / (1.0 + lam ** 2 * K2)
             ph = np.exp(1j * (K[0] * X + K[1] * Y))
-            Qx += (-1j * (-K[1]) * pref * F * scr * ph).real
-            Qy += (-1j * (K[0]) * pref * F * scr * ph).real
-            Brel += (F / (1.0 + lam ** 2 * K2) * ph).real
+            Qx += (-1j * (-K[1]) * pref * SF * F * scr * ph).real
+            Qy += (-1j * (K[0]) * pref * SF * F * scr * ph).real
+            Brel += (F / (1.0 + lam ** 2 * K2) * (SF / nflux) * ph).real
     return Qx, Qy, Brel
 
 
-def _nn_dist(X, Y, a1, a2, nrep=2):
-    """Distance to the nearest vortex (periodic), for the model |Delta| seed/profile."""
+def _nn_dist(X, Y, a1, a2, vpos, nrep=2):
+    """Distance to the nearest vortex (periodic over the cell), for the model |Delta|
+    seed/profile.  ``vpos`` are the in-cell vortex positions."""
     d = np.full(X.shape, np.inf)
-    for i in range(-nrep, nrep + 1):
-        for j in range(-nrep, nrep + 1):
-            Rx, Ry = i * a1[0] + j * a2[0], i * a1[1] + j * a2[1]
-            d = np.minimum(d, np.sqrt((X - Rx) ** 2 + (Y - Ry) ** 2))
+    for rv in vpos:
+        for i in range(-nrep, nrep + 1):
+            for j in range(-nrep, nrep + 1):
+                Rx = rv[0] + i * a1[0] + j * a2[0]
+                Ry = rv[1] + i * a1[1] + j * a2[1]
+                d = np.minimum(d, np.sqrt((X - Rx) ** 2 + (Y - Ry) ** 2))
     return d
 
 
@@ -793,7 +819,7 @@ def _sample_pts(interp, x, y, Minv):
 
 
 def solve_lattice(coupling, temp, omega, gap_sym='d', field=0.2, kappa=5.0,
-                  lattice='square', Dbulk=None, Ng=24, nbeta=18, hvf=1.0, fs=None):
+                  lattice='square', Dbulk=None, Ng=24, nbeta=18, hvf=1.0, fs=None, nflux=1):
     """
     @fn solve_lattice
     @brief Build the periodic vortex-lattice state: lattice geometry, periodic
@@ -815,15 +841,16 @@ def solve_lattice(coupling, temp, omega, gap_sym='d', field=0.2, kappa=5.0,
     if Dbulk <= 0:
         return None
     xi = hvf_eff / (np.pi * Dbulk)
-    a1, a2, b1, b2, S, M = _lattice_vectors(field, xi, lattice)
+    a1, a2, b1, b2, S, M = _lattice_vectors(field, xi, lattice, nflux)
+    vpos = _vortex_positions(nflux, a1, a2)           # in-cell vortex positions
     Minv = np.linalg.inv(M)
     lam = kappa * xi
     fax = (np.arange(Ng) + 0.5) / Ng                  # cell-centered fractional grid
     F1, F2 = np.meshgrid(fax, fax, indexing='ij')
     X = F1 * a1[0] + F2 * a2[0]
     Y = F1 * a1[1] + F2 * a2[1]
-    Qx, Qy, Brel = _lattice_QB(X, Y, b1, b2, S, lam, xi)
-    dnn = _nn_dist(X, Y, a1, a2)
+    Qx, Qy, Brel = _lattice_QB(X, Y, b1, b2, S, lam, xi, vpos)
+    dnn = _nn_dist(X, Y, a1, a2, vpos)
     absD = Dbulk * np.tanh(dnn / xi)
     return dict(F1=F1, F2=F2, X=X, Y=Y, absD=absD, Qx=Qx, Qy=Qy, Brel=Brel,
                 Minv=Minv, a1=a1, a2=a2, S=S, xi=xi, Dbulk=Dbulk,
@@ -896,7 +923,7 @@ def lattice_dos(state, gap_sym, wlist, coupling=None, temp=None, omega=None,
 
 def calc_vortex_lattice_periodic(coupling, temp, wc, gap_sym='d', field_list=None,
                                  kappa=5.0, lattice='square', kb=1.0, Ng=20, nbeta=16,
-                                 fs_kind=None, fs_params=None, fs=None):
+                                 fs_kind=None, fs_params=None, fs=None, nflux=1):
     """
     @fn calc_vortex_lattice_periodic
     @brief Driver: true periodic vortex lattice (Doppler/London, finite kappa).
@@ -913,13 +940,14 @@ def calc_vortex_lattice_periodic(coupling, temp, wc, gap_sym='d', field_list=Non
         from ._eilenberger import build_model_fs
         fs = build_model_fs(fs_kind, 120, params=fs_params)
     print(f"periodic vortex lattice (Doppler/London): {gap_sym}, {lattice}, kappa={kappa}, "
-          f"lambda={coupling:.3f}, T={temp/kb:.2f} K"
-          f"{', model FS+v_F: '+fs_kind if fs is not None else ''}", flush=True)
+          f"lambda={coupling:.3f}, T={temp/kb:.2f} K, {nflux} vortices/cell"
+          f"{', FS+v_F' if fs is not None else ''}", flush=True)
     results = []
     last = None
     for b in field_list:
         st = solve_lattice(coupling, temp, omega, gap_sym=gap_sym, field=b, kappa=kappa,
-                           lattice=lattice, Ng=Ng, nbeta=nbeta, fs=fs)
+                           lattice=lattice, Ng=Ng * (1 if nflux == 1 else int(round(nflux ** 0.5))),
+                           nbeta=nbeta, fs=fs, nflux=nflux)
         if st is None or st['Dbulk'] <= 0:
             print(f"  B/Hc2={b:.3f}: normal", flush=True)
             continue

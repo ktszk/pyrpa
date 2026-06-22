@@ -245,6 +245,34 @@ def test_vortex_core_peak():
     assert n0 > 5.0                            # core bound-state peak
 
 
+def test_multivortex_supercell_reduces():
+    """A regular n^2-flux supercell of the periodic lattice reproduces the single-
+    vortex cell DOS (the structure factor selects the primitive reciprocal lattice)."""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    n0 = []
+    for nfl, Ng in ((1, 14), (4, 28)):
+        st = V.solve_lattice(0.6, T, om, gap_sym='d', field=0.2, kappa=5.0, Ng=Ng, nbeta=12, nflux=nfl)
+        assert abs(st['S'] / nfl - V.solve_lattice(0.6, T, om, gap_sym='d', field=0.2,
+                   kappa=5.0, Ng=14, nbeta=12, nflux=1)['S']) < 1e-6 * st['S']   # area/vortex fixed
+        n0.append(float(V.lattice_dos(st, 'd', np.array([0.0]), nbeta=48, delta=0.02 * st['Dbulk'])[0]))
+    assert abs(n0[0] - n0[1]) < 0.03 * n0[0]            # same DOS as the primitive cell
+
+
+def test_field_tilt_enhances_zeeman():
+    """A field tilt away from the c-axis raises the effective Maki energy (h/cos theta),
+    splitting the s-wave vortex-core zero-energy peak: N(core,0) decreases with tilt."""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    xg, Psi, Db, xi = V.solve_vortex2d(0.6, T, om, 's', Lxi=7, ngrid=29, nbeta=14, field=0.1)
+    ic = len(xg) // 2
+    h0 = 1.0e-3
+    n_lo = V.vortex_ldos2d(Psi, xg, xi, np.array([0.0]), 's', Db, nbeta=24, field=0.1, h=h0)[ic, ic, 0]
+    n_hi = V.vortex_ldos2d(Psi, xg, xi, np.array([0.0]), 's', Db, nbeta=24, field=0.1,
+                           h=h0 / np.cos(np.radians(60.0)))[ic, ic, 0]
+    assert n_hi < 0.8 * n_lo                            # tilt (larger h_eff) splits the core peak
+
+
 def test_lattice_volovik_field_dependence():
     """The spatially-averaged zero-energy DOS of a d-wave vortex lattice grows with
     field (Volovik)."""
