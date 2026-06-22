@@ -188,7 +188,7 @@ eil_pair_sym='d'         #pairing on model FS/cylinder (surface & vortex): singl
 eil_ldos=True            #True: also compute the real-frequency LDOS (bound/core states) (surface & vortex)
 eil_surf_beta=0.785398   #surface orientation [rad]: 0=[100], pi/4(0.7854)=[110] (d-wave ZEBS)
 eil_surf_h=0.0           #Zeeman (Maki) field [eV] for the surface LDOS (splits the d[110] ZEBS into +-h)
-eil_surf_fs=None         #model FS for the surface LDOS: None=isotropic cylinder, else 'iso'/'ellipse'/'tb' (uses eil_fs_params)
+eil_surf_fs=None         #FS for the surface: None=isotropic cylinder, 'iso'/'ellipse'/'tb' (model, eil_fs_params), or 'wannier' (loaded band's FS+v_F; symmetry/multiband from gap_sym,delta0)
 eil_surf_dvector=False   #True: self-consistent triplet d-vector TEXTURE at the surface (dominant p_x(e_x) + subdominant p_y(e_z), spin-matrix Riccati)
 eil_dvec_subratio=0.9    #subdominant/dominant coupling ratio for the d-vector texture (~0.85 is the bulk threshold)
 eil_vort_lxi=8.0         #vortex cell half-width in coherence lengths xi (isolated vortex, field=0)
@@ -1379,9 +1379,16 @@ def main():
         if eil_surf_dvector: #self-consistent triplet d-vector texture (spin-matrix Riccati)
             plibs.calc_surface_dvector(eil_coupling,temp,eil_wc,kb=kb,sub_ratio=eil_dvec_subratio,sw_ldos=eil_ldos)
         else:
-            plibs.calc_surface(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,beta_surf=eil_surf_beta,
+            if eil_surf_fs=='wannier': #real Wannier-band FS + v_F (gap symmetry/multiband from gap_sym,delta0)
+                sfs=plibs.build_wannier_fs(rvec,ham_r,S_r,avec,
+                                           plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill),
+                                           gap_sym=gap_sym,delta0=delta0)
+                sfk,sgs=None,gap_sym
+            else:
+                sfs,sfk,sgs=None,eil_surf_fs,eil_pair_sym
+            plibs.calc_surface(eil_coupling,temp,eil_wc,gap_sym=sgs,beta_surf=eil_surf_beta,
                                kb=kb,sw_ldos=eil_ldos,imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,h=eil_surf_h,
-                               fs_kind=eil_surf_fs,fs_params=eil_fs_params)
+                               fs_kind=sfk,fs_params=eil_fs_params,fs=sfs)
     elif option==CalcMode.EILENBERGER_VORTEX: #vortex / vortex lattice via Riccati Eilenberger (model FS)
         if eil_vort_fs=='wannier': #real Wannier-band FS + Fermi velocities (mu from filling)
             eil_fs_obj=plibs.build_wannier_fs(rvec,ham_r,S_r,avec,

@@ -365,7 +365,7 @@ def surface_ldos(Damp: np.ndarray, x: np.ndarray, wlist: np.ndarray, gap_sym: st
 def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
                  beta_surf: float = 0.0, kb: float = 1.0, sw_ldos: bool = True,
                  imp_gamma: float = 0.0, imp_c: float = 1.0e8, h: float = 0.0,
-                 fs_kind: str = None, fs_params=None,
+                 fs_kind: str = None, fs_params=None, fs=None,
                  Nbeta: int = 30, Lxi: float = 8.0, nper: int = 16):
     """
     @fn calc_surface
@@ -389,10 +389,12 @@ def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
           f"T={temp/kb:.2f} K, lambda={coupling:.3f}, {len(omega)} Matsubara freqs", flush=True)
     print(f"impurity: Gamma_N = {imp_gamma:.4e} eV, c = {imp_c:.3e} "
           f"({'clean' if imp_gamma == 0 else 'Born' if imp_c > 10 else 'unitary'})", flush=True)
-    if fs_kind is not None:   # FS-consistent gap self-consistency (clean, model FS)
+    fsobj = fs                # prebuilt FS (e.g. build_wannier_fs) overrides fs_kind
+    if fsobj is None and fs_kind is not None:   # model FS from a name
         from ._eilenberger import build_model_fs
-        fs = build_model_fs(fs_kind, 240, params=fs_params)
-        x, Damp, Dbulk = solve_surface_fs(coupling, temp, omega, fs, gap_sym, Lxi=Lxi, nper=nper)
+        fsobj = build_model_fs(fs_kind, 240, params=fs_params)
+    if fsobj is not None:     # FS-consistent gap self-consistency (clean, model or Wannier FS)
+        x, Damp, Dbulk = solve_surface_fs(coupling, temp, omega, fsobj, gap_sym, Lxi=Lxi, nper=nper)
     else:
         x, Damp, Dbulk = solve_surface(coupling, temp, omega, gap_sym, beta_surf,
                                        imp_gamma=imp_gamma, imp_c=imp_c, Nbeta=Nbeta, Lxi=Lxi, nper=nper)
@@ -412,12 +414,11 @@ def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
 
     if sw_ldos:
         wlist = np.linspace(-3.0 * Dbulk, 3.0 * Dbulk, 401)
-        if fs_kind is not None:   # model FS + Fermi velocity (clean): nf-weighted, ds=dx/|v_x|
-            from ._eilenberger import build_model_fs
-            fs = build_model_fs(fs_kind, 240, params=fs_params)
-            vx2 = (fs['nf'] * fs['vhx'] ** 2).sum(); vy2 = (fs['nf'] * fs['vhy'] ** 2).sum()
-            print(f"model FS '{fs_kind}': <v_x^2>/<v_y^2>={vx2:.3f}/{vy2:.3f}", flush=True)
-            ldos = surface_ldos_fs(fs, Damp, x, wlist, gap_sym, ix=0, Dbulk=Dbulk)
+        if fsobj is not None:     # model or Wannier FS + Fermi velocity (clean): nf-weighted, ds=dx/|v_x|
+            vx2 = (fsobj['nf'] * fsobj['vhx'] ** 2).sum(); vy2 = (fsobj['nf'] * fsobj['vhy'] ** 2).sum()
+            print(f"FS '{fs_kind or 'wannier'}': {len(fsobj['kx'])} pts, "
+                  f"<v_x^2>/<v_y^2>={vx2:.3f}/{vy2:.3f}", flush=True)
+            ldos = surface_ldos_fs(fsobj, Damp, x, wlist, gap_sym, ix=0, Dbulk=Dbulk)
         else:
             ldos = surface_ldos(Damp, x, wlist, gap_sym, beta_surf, ix=0, Dbulk=Dbulk, Nbeta=60,
                                 imp_gamma=imp_gamma, imp_c=imp_c, h=h)
@@ -436,12 +437,23 @@ def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
 
 
 def _reflection_index(fs):
-    """For each FS point i (angle theta_i), the index of its specular partner at
-    (-kx, ky) i.e. angle pi - theta_i (k_parallel conserved, k_perp flipped at a
-    surface with normal x_hat)."""
-    th = fs['th']
-    tgt = np.mod(np.pi - th, 2.0 * np.pi)
-    j = np.argmin(np.abs((th[None, :] - tgt[:, None] + np.pi) % (2.0 * np.pi) - np.pi), axis=1)
+    """For each FS point i, the index of its specular partner at a surface with
+    normal x_hat: the point with the same parallel momentum k_y and the opposite v_x
+    sign (k_parallel conserved, k_perp flipped).  Works for a general -- e.g. real
+    Wannier -- Fermi surface (matched within the same band if 'band' is present), not
+    only an angle-parametrized model FS."""
+    ky, vx = fs['ky'], fs['vx']
+    band = fs.get('band')
+    sgn = np.sign(vx)
+    N = len(ky)
+    j = np.arange(N)
+    for i in range(N):
+        cand = sgn != sgn[i]                         # opposite v_x branch
+        if band is not None:
+            cand = cand & (band == band[i])
+        idx = np.where(cand)[0]
+        if idx.size:
+            j[i] = idx[np.argmin(np.abs(ky[idx] - ky[i]))]
     return j
 
 

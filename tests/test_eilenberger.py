@@ -408,6 +408,30 @@ def test_gap_sym_index_and_delta0():
     assert abs((fs2['nf'] * abs(fs2['phi']) ** 2).sum() - 1.0) < 1e-9
 
 
+def test_wannier_surface_zebs():
+    """The specular surface works on a real Wannier FS (general-FS reflection): on the
+    square lattice [100] surface the sign-changing dxy gap is suppressed with a
+    zero-energy bound state, while the even d_{x^2-y^2} gap stays flat with none."""
+    import libs.plibs as p
+    hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       'inputs', 'square.hop')
+    if not os.path.exists(hop):
+        return
+    rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
+    avec = np.eye(3)
+    mu = -1.0
+    om = E.matsubara(5e-4, 0.5)
+    res = {}
+    for gs in (3, 1):                                 # dxy (sign-changing), d (even)
+        fw = E.build_wannier_fs(rvec, ham_r, [], avec, mu, mesh=100, gap_sym=gs)
+        x, D, Db = S.solve_surface_fs(0.5, 5e-4, om, fw, gs, Lxi=7, nper=6)
+        w = np.linspace(-Db, Db, 31)
+        ld = S.surface_ldos_fs(fw, D, x, w, gs, ix=0, Dbulk=Db)
+        res[gs] = (D[0] / Db, ld[np.argmin(np.abs(w))])
+    assert res[3][0] < 0.1 and res[3][1] > 5.0        # dxy: suppressed + ZEBS
+    assert res[1][0] > 0.8 and res[1][1] < 1.0        # d: flat + no ZEBS
+
+
 def test_chiral_pip_gap_sym_minus3():
     """gap_sym = -3 is the chiral p+ip state: a complex form factor (px + i py) that
     is fully gapped (|phi| > 0 everywhere)."""
