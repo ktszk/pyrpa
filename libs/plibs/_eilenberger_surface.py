@@ -386,7 +386,7 @@ def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
     print(f"impurity: Gamma_N = {imp_gamma:.4e} eV, c = {imp_c:.3e} "
           f"({'clean' if imp_gamma == 0 else 'Born' if imp_c > 10 else 'unitary'})", flush=True)
     if fs_kind is not None:   # FS-consistent gap self-consistency (clean, model FS)
-        from ._eilenberger_fs import build_model_fs
+        from ._eilenberger import build_model_fs
         fs = build_model_fs(fs_kind, 240, params=fs_params)
         x, Damp, Dbulk = solve_surface_fs(coupling, temp, omega, fs, gap_sym, Lxi=Lxi, nper=nper)
     else:
@@ -409,7 +409,7 @@ def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
     if sw_ldos:
         wlist = np.linspace(-3.0 * Dbulk, 3.0 * Dbulk, 401)
         if fs_kind is not None:   # model FS + Fermi velocity (clean): nf-weighted, ds=dx/|v_x|
-            from ._eilenberger_fs import build_model_fs
+            from ._eilenberger import build_model_fs
             fs = build_model_fs(fs_kind, 240, params=fs_params)
             vx2 = (fs['nf'] * fs['vhx'] ** 2).sum(); vy2 = (fs['nf'] * fs['vhy'] ** 2).sum()
             print(f"model FS '{fs_kind}': <v_x^2>/<v_y^2>={vx2:.3f}/{vy2:.3f}", flush=True)
@@ -457,7 +457,7 @@ def surface_ldos_fs(fs, Damp, x, wlist, gap_sym, ix=0, delta=None, Dbulk=1.0, hv
     @param   ix: grid index for the LDOS (0 = surface)
     @return ldos: N(x_ix, w)/N0 [Nw]
     """
-    from ._eilenberger_fs import fs_form_factor
+    from ._eilenberger import fs_form_factor
     if delta is None:
         delta = 0.02 * Dbulk
     phi = fs_form_factor(fs, gap_sym)
@@ -488,7 +488,7 @@ def solve_surface_fs(coupling, temp, omega, fs, gap_sym, Dbulk=None, Lxi=8.0, np
     ZEBS), 'd'/'s' are not.
     @return (x, Damp, Dbulk)
     """
-    from ._eilenberger_fs import fs_form_factor, bulk_gap_fs
+    from ._eilenberger import fs_form_factor, bulk_gap_fs
     phi = fs_form_factor(fs, gap_sym)
     vx, nf = fs['vx'], fs['nf']
     refl = _reflection_index(fs)
