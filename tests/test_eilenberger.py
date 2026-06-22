@@ -375,6 +375,39 @@ def test_wannier_fs_matches_model_tb():
     assert abs(Dw - Dm) / Dm < 0.01
 
 
+def test_gap_sym_index_and_delta0():
+    """The gap symmetry can be set by the pyrpa integer gap_sym index (lattice
+    harmonics via gap_symms, baked into the FS), and delta0 sets per-band gap
+    amplitudes and signs (s+- = opposite signs on different sheets)."""
+    import libs.plibs as p
+    hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       'inputs', 'square.hop')
+    if not os.path.exists(hop):
+        return
+    rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
+    avec = np.eye(3)
+    mu = -1.0
+    fs_s = E.build_wannier_fs(rvec, ham_r, [], avec, mu, mesh=200, gap_sym=0)   # s
+    fs_d = E.build_wannier_fs(rvec, ham_r, [], avec, mu, mesh=200, gap_sym=1)   # dx2-y2
+    # phi is baked, normalized to <|phi|^2>=1, and returned by fs_form_factor
+    assert 'phi' in fs_s
+    assert abs((fs_s['nf'] * abs(fs_s['phi']) ** 2).sum() - 1.0) < 1e-9
+    assert np.allclose(E.fs_form_factor(fs_s, 0), fs_s['phi'])
+    assert fs_s['phi'].real.min() > 0.5                       # s: nodeless (one sign)
+    assert fs_d['phi'].real.min() < -0.3 and fs_d['phi'].real.max() > 0.3   # d: sign-changing
+    # delta0 per-band ratio + sign on a synthetic two-band FS
+    n = len(fs_s['kx'])
+    fs2 = E.build_wannier_fs(rvec, ham_r, [], avec, mu, mesh=160)
+    m = len(fs2['kx'])
+    fs2['band'] = np.where(np.arange(m) < m // 2, 0, 1)
+    E.set_fs_gap(fs2, 0, delta0=[1.0, -2.0])
+    b0 = fs2['phi'].real[fs2['band'] == 0]
+    b1 = fs2['phi'].real[fs2['band'] == 1]
+    assert b0.mean() > 0 and b1.mean() < 0                    # opposite signs (s+-)
+    assert abs(abs(b1.mean()) / abs(b0.mean()) - 2.0) < 0.05  # |delta0| ratio 2
+    assert abs((fs2['nf'] * abs(fs2['phi']) ** 2).sum() - 1.0) < 1e-9
+
+
 # --------------------------------------------------------------------------- #
 #  spin: Pauli limiting vs triplet immunity
 # --------------------------------------------------------------------------- #

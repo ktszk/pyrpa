@@ -1385,21 +1385,22 @@ def main():
     elif option==CalcMode.EILENBERGER_VORTEX: #vortex / vortex lattice via Riccati Eilenberger (model FS)
         if eil_vort_fs=='wannier': #real Wannier-band FS + Fermi velocities (mu from filling)
             eil_fs_obj=plibs.build_wannier_fs(rvec,ham_r,S_r,avec,
-                                              plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill))
-            eil_fs_kw=None
+                                              plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill),
+                                              gap_sym=gap_sym,delta0=delta0) #symmetry/multiband from gap_sym,delta0
+            eil_fs_kw,eil_gs=None,gap_sym       #the (int) gap_sym is baked into fs['phi']
         else:
-            eil_fs_obj,eil_fs_kw=None,eil_vort_fs
+            eil_fs_obj,eil_fs_kw,eil_gs=None,eil_vort_fs,eil_pair_sym
         if eil_vort_current: #circulating charge supercurrent j_phi(rho) of an isolated vortex
-            plibs.calc_vortex_current(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,kb=kb,
+            plibs.calc_vortex_current(eil_coupling,temp,eil_wc,gap_sym=eil_gs,kb=kb,
                                       Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
         elif eil_vort_dvector: #self-consistent triplet d-vector texture around the vortex core (spin-matrix Riccati)
             plibs.calc_vortex_dvector(eil_coupling,temp,eil_wc,kb=kb,sub_ratio=eil_dvec_subratio)
         elif eil_field_list is not None: #sweep B/Hc2 on the TRUE periodic lattice -> <N(0)>(B) (d~sqrt(B) Volovik)
-            plibs.calc_vortex_lattice_periodic(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,
+            plibs.calc_vortex_lattice_periodic(eil_coupling,temp,eil_wc,gap_sym=eil_gs,
                                                field_list=eil_field_list,kappa=eil_kappa,lattice=eil_lattice,kb=kb,
                                                fs_kind=eil_fs_kw,fs_params=eil_fs_params,fs=eil_fs_obj,nflux=eil_nvortex)
         else: #single field (isolated vortex if eil_field=0, else circular-cell lattice)
-            plibs.calc_vortex(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,kb=kb,sw_ldos=eil_ldos,
+            plibs.calc_vortex(eil_coupling,temp,eil_wc,gap_sym=eil_gs,kb=kb,sw_ldos=eil_ldos,
                               imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,field=eil_field,h=eil_vort_h,
                               kappa=(eil_kappa if eil_vort_field else 0.0),tilt_deg=eil_vort_tilt,
                               fs_kind=eil_fs_kw,fs_params=eil_fs_params,fs=eil_fs_obj,

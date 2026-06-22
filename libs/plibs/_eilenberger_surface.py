@@ -46,7 +46,11 @@ def form_factor(beta: np.ndarray, gap_sym: str, beta_surf: float = 0.0) -> np.nd
     @note Triplet states are treated in the single (pseudo-)spin sector with a
           fixed d-vector: the equal-spin chiral state p+ip = e^{i beta} is fully
           gapped in the bulk and carries topological edge / core states.
+          ``gap_sym`` may also be an integer (gap_symms index, mapped to the
+          continuum harmonic: 0 s, 1 d, 2 s+-, 3 dxy, -1 px, -2 py).
     """
+    if isinstance(gap_sym, (int, np.integer)):
+        gap_sym = {0: 's', 1: 'd', 2: 's', 3: 'dxy', -1: 'px', -2: 'py'}.get(int(gap_sym), 's')
     a = beta - beta_surf
     if gap_sym == 's':
         return np.ones_like(beta)

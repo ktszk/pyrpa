@@ -642,10 +642,29 @@ def build_model_fs(kind: str = 'iso', Nth: int = 360, mu: float = None, params=N
                 vhx=vx / vabs, vhy=vy / vabs, nf=nf)
 
 
-def fs_form_factor(fs: dict, gap_sym: str) -> np.ndarray:
-    """Pairing form factor phi at each FS point (function of the k-direction),
-    normalized to the nf-weighted <|phi|^2> = 1.  Matches the gap symmetries used
-    elsewhere (s, d=d_{x^2-y^2}, dxy, px, py, chiral p+ip/p-ip)."""
+_INT_GAP_STR = {0: 's', 1: 'd', 2: 's', 3: 'dxy', -1: 'px', -2: 'py'}   # int -> continuum phi
+
+
+def fs_form_factor(fs: dict, gap_sym) -> np.ndarray:
+    """Pairing form factor phi at each FS point, normalized to nf-weighted <|phi|^2>=1.
+
+    If the FS dict already carries a precomputed ``phi`` (e.g. a Wannier multiband FS
+    built with a gap_sym/delta0; the per-band amplitudes and signs are baked in), it is
+    returned directly.  Otherwise phi is built from ``gap_sym``: a STRING uses the
+    continuum angular harmonics (s, d, dxy, px, py, chiral p+ip/p-ip); an INTEGER uses
+    the same index convention as the rest of pyrpa (gap_symms: 0 s, 1 d_{x^2-y^2},
+    2 s+-, 3 dxy, -1 px, -2 py) -- on a lattice FS (key 'kf') via the lattice harmonics,
+    otherwise via the continuum angle."""
+    if 'phi' in fs:
+        return fs['phi']
+    if isinstance(gap_sym, (int, np.integer)):
+        if 'kf' in fs:                                   # lattice harmonic on the real FS
+            phi = gap_symms(fs['kf'], 1, int(gap_sym))[0].astype(np.complex128)
+            norm = np.sqrt((fs['nf'] * np.abs(phi) ** 2).sum())
+            return phi / norm if norm > 0 else phi
+        gap_sym = _INT_GAP_STR.get(int(gap_sym))         # continuum fallback (model FS)
+        if gap_sym is None:
+            raise ValueError("gap_sym index has no 2D continuum form factor")
     a = np.arctan2(fs['ky'], fs['kx'])
     if gap_sym == 's':
         phi = np.ones_like(a, dtype=np.complex128)
@@ -665,6 +684,22 @@ def fs_form_factor(fs: dict, gap_sym: str) -> np.ndarray:
         raise ValueError(f"unknown gap_sym: {gap_sym}")
     norm = np.sqrt((fs['nf'] * np.abs(phi) ** 2).sum())
     return phi / norm if norm > 0 else phi
+
+
+def set_fs_gap(fs: dict, gap_sym, delta0=None):
+    """Bake the pairing form factor into a (Wannier) FS dict: phi = gap_symms(k,gap_sym)
+    with per-band amplitude and sign from ``delta0`` (indexed by fs['band']), normalized
+    to nf-weighted <|phi|^2>=1.  Stores fs['phi'] and returns fs.
+    @param gap_sym: integer symmetry index (gap_symms convention)
+    @param  delta0: per-band gap amplitudes/signs (None = uniform 1); array indexed by band
+    """
+    phi = gap_symms(fs['kf'], 1, int(gap_sym))[0].astype(np.complex128)
+    if delta0 is not None:
+        d0 = np.asarray(delta0, dtype=np.float64)
+        phi = phi * d0[fs['band']]                       # band-resolved ratio + sign
+    norm = np.sqrt((fs['nf'] * np.abs(phi) ** 2).sum())
+    fs['phi'] = phi / norm if norm > 0 else phi
+    return fs
 
 
 def bulk_gap_fs(coupling, temp, omega, fs, gap_sym, eps=1e-8, itemax=500, mix=0.5):
@@ -837,7 +872,8 @@ def calc_free_energy(coupling, temp, wc, gap_sym='s', fs=None, t_list=None, kb=1
     return rows
 
 
-def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, band=None, RotMat=None):
+def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, band=None, RotMat=None,
+                     gap_sym=None, delta0=None):
     """
     @fn build_wannier_fs
     @brief Build the Fermi surface (with Fermi velocities) of a REAL Wannier tight-
@@ -849,7 +885,12 @@ def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, band=None, Ro
     @param avec: lattice vectors (velocity metric; Cartesian k = 2 pi * fractional)
     @param   mu: chemical potential [eV];  mesh: 2D k-mesh;  kz: fixed k_z slice
     @param band: keep only this band index (None = all FS sheets)
-    @return dict th,kx,ky,vx,vy,vabs,vhx,vhy,nf  (Cartesian in-plane k; nf sums to 1)
+    @param gap_sym: if given (integer index, gap_symms convention), bake in the pairing
+                    form factor phi(k) via set_fs_gap (lattice harmonics on the real FS)
+    @param  delta0: per-band gap amplitudes/signs (indexed by band) for a multiband gap
+                    (e.g. s+- with opposite signs on different sheets); None = uniform
+    @return dict th,kx,ky,kf,band,vx,vy,vabs,vhx,vhy,nf [,phi]  (Cartesian in-plane k,
+            kf = fractional k, band = per-point band index; nf sums to 1)
     """
     from ._bands import get_eigs_2d, get_kf_points, get_eigs
     from .. import flibs
@@ -857,7 +898,7 @@ def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, band=None, Ro
         RotMat = np.eye(3)
     eig2d = get_eigs_2d(mesh, rvec, ham_r, S_r, RotMat, kz)
     kf, fsband = get_kf_points(eig2d, mesh, mu, kz)
-    kxs, kys, vxs, vys, nfs = [], [], [], [], []
+    kxs, kys, vxs, vys, nfs, kfs, bnd = [], [], [], [], [], [], []
     for contlist, b in zip(kf, fsband):
         if band is not None and b != band:
             continue
@@ -877,6 +918,7 @@ def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, band=None, Ro
             kxs.append(kc[:, 0]); kys.append(kc[:, 1])
             vxs.append(v[:, 0]); vys.append(v[:, 1])
             nfs.append(dl / np.maximum(vab, 1e-12))
+            kfs.append(pts); bnd.append(np.full(len(pts), b, dtype=int))
     if not kxs:
         raise ValueError("no Fermi surface at this mu/kz")
     kx = np.concatenate(kxs); ky = np.concatenate(kys)
@@ -884,5 +926,9 @@ def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, band=None, Ro
     nf = np.concatenate(nfs)
     vabs = np.sqrt(vx ** 2 + vy ** 2)
     nf = nf / nf.sum()
-    return dict(th=np.arctan2(ky, kx), kx=kx, ky=ky, vx=vx, vy=vy, vabs=vabs,
-                vhx=vx / vabs, vhy=vy / vabs, nf=nf)
+    fs = dict(th=np.arctan2(ky, kx), kx=kx, ky=ky, kf=np.concatenate(kfs),
+              band=np.concatenate(bnd), vx=vx, vy=vy, vabs=vabs,
+              vhx=vx / vabs, vhy=vy / vabs, nf=nf)
+    if gap_sym is not None:
+        set_fs_gap(fs, gap_sym, delta0)                # bake phi (per-band ratio/sign)
+    return fs

@@ -171,11 +171,17 @@ def vortex_ldos(Dr: np.ndarray, rgrid: np.ndarray, xi: float, wlist: np.ndarray,
     return rho_out, gavg.real
 
 
-def _ff_vortex(beta: np.ndarray, gap_sym: str) -> np.ndarray:
+_INT_GAP_STR = {0: 's', 1: 'd', 2: 's', 3: 'dxy', -1: 'px', -2: 'py'}   # gap_symms index -> continuum
+
+
+def _ff_vortex(beta: np.ndarray, gap_sym) -> np.ndarray:
     """Pairing form factor phi_d(k_hat) vs the v_F direction beta, normalized so
     <phi^2> = 1 over the full circle.  For a d-wave vortex the gap a trajectory
     sees is phi(beta) * Psi(r), so the trajectory direction enters explicitly and
-    the rotational symmetry of the s-wave vortex is reduced to fourfold."""
+    the rotational symmetry of the s-wave vortex is reduced to fourfold.  ``gap_sym``
+    may be a string or an integer (gap_symms index, mapped to the continuum harmonic)."""
+    if isinstance(gap_sym, (int, np.integer)):
+        gap_sym = _INT_GAP_STR.get(int(gap_sym), 's')
     if gap_sym == 's':
         return np.ones_like(beta)
     if gap_sym == 'd':
