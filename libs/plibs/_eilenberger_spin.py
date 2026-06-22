@@ -483,3 +483,140 @@ def calc_surface_dvector(coupling, temp, wc, kb=1.0, Lxi=8.0, nper=8, Nbeta=16,
         except IOError as e:
             print(f"Error writing surface_dvector_ldos.dat: {e}", flush=True)
     return x, Damp
+
+
+# --------------------------------------------------------------------------- #
+#  d-vector TEXTURE around a vortex (2D spin-matrix Riccati)
+# --------------------------------------------------------------------------- #
+def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0),
+                           Dbulk=None, Lxi=7.0, ngrid=33, nbeta=16, hvf=1.0,
+                           eps=4.0e-3, itemax=40, mix=0.4):
+    """
+    @fn solve_vortex2d_dvector
+    @brief Self-consistent d-vector TEXTURE around an isolated vortex of a
+    multi-component unitary triplet, via the 2x2 spin-matrix Riccati on the 2D plane
+    (the vortex analogue of solve_surface_dvector).  Each spin component a has an
+    orbital form factor phi_a(beta), a spin matrix Shat_a, a coupling lambda_a and a
+    phase WINDING m_a; its complex amplitude field A_a(r) (winding removed) is solved
+    self-consistently, Delta_hat(r,k) = sum_a phi_a(k) A_a(r) e^{i m_a theta} Shat_a.
+    The dominant (m=1) component vanishes and is pair-broken in the core; a subdominant
+    with a different winding (default m=0, core-localized) survives there, so the net
+    d-vector reorients in spin space across the core -- the d-vector texture.  (For
+    equal windings the axisymmetric profiles coincide and there is no radial texture.)
+    @return (xg, A [Ncomp, ngrid, ngrid] complex, Dbulk [Ncomp], xi)
+    """
+    from scipy.interpolate import RegularGridInterpolator
+    from ._eilenberger_vortex import _eval_field
+    try:
+        from ..flibs import matrix_riccati_chords as _fort_mc
+        have_mc = True
+    except Exception:
+        have_mc = False
+    if channels is None:
+        channels = _default_dvector_channels()
+    nc = len(channels)
+    lam = np.asarray(couplings, dtype=float)
+    Smats = [S for _, _, S in channels]
+    Sd = [np.conj(S).T for S in Smats]
+    trSS = [np.trace(Sd[a] @ Smats[a]).real for a in range(nc)]
+    phitil = [ch[1] for ch in channels]
+    om = np.concatenate([omega, -omega])
+    if Dbulk is None:                                   # full-circle bulk amplitudes
+        nb0 = 24
+        bb = np.linspace(-0.5 * np.pi * 0.94, 0.5 * np.pi * 0.94, nb0)
+        Dbulk = _bulk_dvector(lam, temp, om, bb, 1.0 / (2.0 * nb0), phitil)
+    Dref = float(np.max(Dbulk))
+    xi = hvf / (np.pi * Dref)
+    R = Lxi * xi
+    xg = np.linspace(-R, R, ngrid)
+    dx = xg[1] - xg[0]
+    X, Y = np.meshgrid(xg, xg, indexing='ij')
+    Rg = np.sqrt(X ** 2 + Y ** 2)
+    theta = np.arctan2(Y, X)
+    SS, BB = np.meshgrid(xg, xg, indexing='ij')
+    dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
+    wt_dir = 1.0 / nbeta
+    phid = np.array([phitil[a](dirs) for a in range(nc)])      # [nc, nbeta]
+    mwind = np.asarray(windings, dtype=int)
+    # seed: winding-1 components vanish at the core (tanh); core-localized (m=0)
+    # subcritical components get a small core-peaked seed so they can nucleate
+    A = np.empty((nc, ngrid, ngrid), dtype=np.complex128)
+    for a in range(nc):
+        if Dbulk[a] > 1.0e-3 * Dref:
+            A[a] = Dbulk[a] * (np.tanh(Rg / xi) if mwind[a] != 0 else 1.0)
+        else:
+            A[a] = 0.15 * Dref / np.cosh(Rg / xi)      # core-localized nucleation seed
+    ewind = np.exp(1j * theta)
+    for it in range(itemax):
+        Ai = [RegularGridInterpolator((xg, xg), A[a], bounds_error=False,
+                                      fill_value=complex(Dbulk[a])) for a in range(nc)]
+        accf = np.zeros((nc, ngrid, ngrid), dtype=np.complex128)
+        for ib in range(nbeta):
+            cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
+            Lx = SS * cb - BB * sb
+            Ly = SS * sb + BB * cb
+            thr = np.exp(1j * np.arctan2(Ly, Lx))
+            sxy = X * cb + Y * sb
+            bxy = -X * sb + Y * cb
+            Dpath = np.zeros((ngrid, ngrid, 2, 2), dtype=np.complex128)
+            for a in range(nc):
+                amp = phid[a, ib] * Ai[a]((Lx, Ly)) * thr ** mwind[a]   # [ns,nb]
+                Dpath += amp[:, :, None, None] * Smats[a]
+            if have_mc:
+                _, fch = _fort_mc(om, Dpath, hvf, dx, 0.0)          # [ns,nb,Nw,2,2]
+            else:
+                fch = np.empty((ngrid, ngrid, len(om), 2, 2), dtype=np.complex128)
+                for j in range(ngrid):
+                    _, fch[:, j] = _mat_batch(om, Dpath[:, j], hvf, dx, 0.0)
+            for a in range(nc):
+                fa = np.einsum('ij,snwji->sn', Sd[a], fch) / trSS[a]   # summed over freq
+                accf[a] += wt_dir * np.conj(phid[a, ib]) * _eval_field(fa, xg, sxy, bxy, fill=0.0)
+        err = 0.0
+        for a in range(nc):
+            A_new = (lam[a] * temp) * (accf[a] * np.conj(ewind) ** mwind[a])   # remove winding
+            err = max(err, np.abs(A_new - A[a]).max() / Dref)
+            A[a] = (1.0 - mix) * A[a] + mix * A_new
+        if err < eps:
+            break
+    return xg, A, Dbulk, xi
+
+
+def calc_vortex_dvector(coupling, temp, wc, kb=1.0, Lxi=7.0, ngrid=33, nbeta=16,
+                        sub_ratio=0.95):
+    """
+    @fn calc_vortex_dvector
+    @brief Driver: self-consistent d-vector texture around an isolated vortex of a
+    triplet superconductor (dominant p_x(e_x) + subdominant p_y(e_z), 2D spin-matrix
+    Riccati).  The dominant component winds and is pair-broken in the core; the
+    subdominant is relatively enhanced there, so the net d-vector tilt
+    theta_d(r) = atan2(|A_pz|,|A_px|) reorients across the core.  Reports the radial
+    texture (along +x) and writes 'vortex_dvector.dat'.
+    """
+    omega = matsubara(temp, wc)
+    couplings = (coupling, coupling * sub_ratio)
+    print("d-vector texture around a vortex (triplet p_x + subdominant p_y, 2D spin-matrix Riccati)", flush=True)
+    print(f"T={temp/kb:.2f} K, lambda_px={couplings[0]:.3f}, lambda_py={couplings[1]:.3f}, "
+          f"{len(omega)} Matsubara freqs, grid={ngrid}x{ngrid}, nbeta={nbeta}", flush=True)
+    xg, A, Dbulk, xi = solve_vortex2d_dvector(couplings, temp, omega, Lxi=Lxi,
+                                              ngrid=ngrid, nbeta=nbeta)
+    Dref = float(np.max(np.abs(Dbulk)))
+    if Dref <= 0.0:
+        print("normal state (Dbulk=0); nothing to profile", flush=True)
+        return xg, A
+    ic = ngrid // 2
+    r = xg[ic:]                                          # radial cut along +x (y=0)
+    apx = np.abs(A[0, ic:, ic])
+    apz = np.abs(A[1, ic:, ic])
+    theta = np.degrees(np.arctan2(apz, np.maximum(apx, 1e-12)))
+    print(f"Dbulk(px,pz) = ({Dbulk[0].real:.4e}, {Dbulk[1].real:.4e}) eV,  xi = {xi:.4g}", flush=True)
+    print(f"  core r=0:  |A_px|/Db={apx[0]/Dref:.3f}  |A_pz|/Db={apz[0]/Dref:.3f}  theta_d={theta[0]:.1f} deg", flush=True)
+    print(f"  bulk r=R:  |A_px|/Db={apx[-1]/Dref:.3f}  |A_pz|/Db={apz[-1]/Dref:.3f}  theta_d={theta[-1]:.1f} deg", flush=True)
+    print(f"  TEXTURE: d-vector tilt theta_d {theta[-1]:.1f} deg (bulk) -> {theta[0]:.1f} deg (core)", flush=True)
+    try:
+        with open('vortex_dvector.dat', 'w') as fh:
+            fh.write("# r/xi  |A_px|/Db  |A_pz|/Db  theta_d[deg]\n")
+            for j in range(len(r)):
+                fh.write(f"{r[j]/xi:10.4f} {apx[j]/Dref:12.5e} {apz[j]/Dref:12.5e} {theta[j]:9.3f}\n")
+    except IOError as e:
+        print(f"Error writing vortex_dvector.dat: {e}", flush=True)
+    return xg, A

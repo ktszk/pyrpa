@@ -250,3 +250,61 @@ subroutine inv2(A,Ai)
   Ai(1,2)=-A(1,2)/det
   Ai(2,1)=-A(2,1)/det
 end subroutine inv2
+
+
+subroutine matrix_riccati_chords(g,f,om,Dpath,hvf,ds,h,Ns,Nchord,Nw) bind(C)
+!> matrix_riccati_chords
+!> Like matrix_riccati_batch but for MANY trajectories (chords): the 2x2 spin-matrix
+!> Riccati g, f along each chord, batched over frequencies, OpenMP over chords.  Used
+!> by the 2D vortex d-vector solver (one call per Fermi-surface direction).
+!!@param   g,out: normal 2x2 propagator [Ns,Nchord,Nw,2,2] complex128
+!!@param   f,out: anomalous 2x2 propagator [Ns,Nchord,Nw,2,2] complex128
+!!@param  om, in: (renormalized) frequencies [Nw] complex128
+!!@param Dpath,in: 2x2 gap matrix along each chord [Ns,Nchord,2,2] complex128
+!!@param hvf,ds,h: hbar|v_F|, arc-length step, Zeeman energy
+!!@param Ns,Nchord,Nw,in: points per chord, chords, frequencies
+  use,intrinsic:: iso_c_binding, only: c_int64_t,c_double
+  implicit none
+  integer(c_int64_t),intent(in):: Ns,Nchord,Nw
+  real(c_double),intent(in):: hvf,ds,h
+  complex(c_double),intent(in),dimension(Nw):: om
+  complex(c_double),intent(in),dimension(2,2,Nchord,Ns):: Dpath
+  complex(c_double),intent(out),dimension(2,2,Nw,Nchord,Ns):: g,f
+  integer(c_int64_t) c,iw,i
+  real(c_double) t
+  complex(c_double) Dmat(2,2,Ns),Dmid(2,2),Nmat(4,4),Mexp(4,4)
+  complex(c_double) a(2,2,Ns),b(2,2,Ns),aa(2,2),bb(2,2),ab(2,2),P(2,2),res(2,2)
+  complex(c_double) sz(2,2),I2(2,2)
+  t=ds/hvf
+  sz=reshape([(1d0,0d0),(0d0,0d0),(0d0,0d0),(-1d0,0d0)],[2,2])
+  I2=reshape([(1d0,0d0),(0d0,0d0),(0d0,0d0),(1d0,0d0)],[2,2])
+  !$omp parallel do private(iw,i,Dmat,Dmid,Nmat,Mexp,a,b,aa,bb,ab,P,res)
+  do c=1,Nchord
+     do i=1,Ns
+        Dmat(:,:,i)=transpose(Dpath(:,:,c,i))
+     end do
+     do iw=1,Nw
+        call bulk_root(om(iw),Dmat(:,:,1),.true.,a(:,:,1))
+        do i=1,Ns-1
+           Dmid=0.5d0*(Dmat(:,:,i)+Dmat(:,:,i+1))
+           call riccati_gen(om(iw),Dmid,h,1d0,sz,Nmat)
+           call expm4(Nmat*t,Mexp)
+           call mobius(a(:,:,i),Mexp,a(:,:,i+1))
+        end do
+        call bulk_root(om(iw),Dmat(:,:,Ns),.false.,b(:,:,Ns))
+        do i=Ns,2,-1
+           Dmid=0.5d0*(Dmat(:,:,i)+Dmat(:,:,i-1))
+           call riccati_gen(om(iw),Dmid,h,-1d0,sz,Nmat)
+           call expm4(Nmat*t,Mexp)
+           call mobius(b(:,:,i),Mexp,b(:,:,i-1))
+        end do
+        do i=1,Ns
+           aa=a(:,:,i); bb=b(:,:,i)
+           ab=matmul(aa,bb)
+           call inv2(I2+ab,P)
+           res=matmul(P,I2-ab);  g(:,:,iw,c,i)=transpose(res)
+           res=matmul(P,2d0*aa); f(:,:,iw,c,i)=transpose(res)
+        end do
+     end do
+  end do
+end subroutine matrix_riccati_chords

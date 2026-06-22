@@ -47,6 +47,38 @@ def matrix_riccati_batch(om: np.ndarray, Dpath: np.ndarray, hvf: float, ds: floa
     return g, f
 
 
+_lib.matrix_riccati_chords.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),   # g   (out) [Ns,Nchord,Nw,2,2]
+    np.ctypeslib.ndpointer(dtype=np.complex128),   # f   (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),   # om  (in)  [Nw]
+    np.ctypeslib.ndpointer(dtype=np.complex128),   # Dpath (in) [Ns,Nchord,2,2]
+    POINTER(c_double), POINTER(c_double), POINTER(c_double),   # hvf, ds, h
+    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),      # Ns, Nchord, Nw
+]
+_lib.matrix_riccati_chords.restype = None
+
+
+def matrix_riccati_chords(om: np.ndarray, Dpath: np.ndarray, hvf: float, ds: float, h: float = 0.0):
+    """
+    @fn matrix_riccati_chords
+    @brief 2x2 spin-matrix g, f along many chords, batched over frequencies (Fortran,
+    OpenMP over chords).  For the 2D vortex d-vector solver: one call per FS direction.
+    @param om: frequencies [Nw] complex128
+    @param Dpath: 2x2 gap matrix along each chord [Ns, Nchord, 2, 2] complex128
+    @param hvf, ds, h: hbar|v_F|, arc-length step, Zeeman energy
+    @return (g, f): 2x2 propagators [Ns, Nchord, Nw, 2, 2] complex128
+    """
+    om = np.ascontiguousarray(om, dtype=np.complex128)
+    Dpath = np.ascontiguousarray(Dpath, dtype=np.complex128)
+    Ns, Nchord = Dpath.shape[0], Dpath.shape[1]
+    Nw = om.shape[0]
+    g = np.empty((Ns, Nchord, Nw, 2, 2), dtype=np.complex128)
+    f = np.empty((Ns, Nchord, Nw, 2, 2), dtype=np.complex128)
+    _lib.matrix_riccati_chords(g, f, om, Dpath, dbl(hvf), dbl(ds), dbl(h),
+                               i64(Ns), i64(Nchord), i64(Nw))
+    return g, f
+
+
 def riccati_chords(om: np.ndarray, dd: np.ndarray, hvf: float, ds: float):
     """
     @fn riccati_chords
