@@ -75,6 +75,51 @@ def _ref_chord(om, dd, hvf, ds):
     return (1.0 - gamma * gammat) / den, 2.0 * gamma / den   # g, f
 
 
+def _ref_matrix_traj(omega, Dpath, hvf, ds, h):
+    """Pure-Python reference for the 2x2 spin-matrix Mobius Riccati along one path
+    (the deleted matrix_trajectory_gf), to guard the Fortran matrix kernel."""
+    from scipy.linalg import expm
+    sz = np.array([[1, 0], [0, -1]], dtype=np.complex128)
+    I2 = np.eye(2, dtype=np.complex128)
+    Ns = len(Dpath)
+    t = ds / hvf
+
+    def gen(D, sgn):
+        N = np.empty((4, 4), dtype=np.complex128)
+        N[:2, :2] = -2.0 * omega * I2 + 1j * sgn * h * sz
+        N[:2, 2:] = D
+        N[2:, :2] = np.conj(D).T
+        N[2:, 2:] = 1j * sgn * h * sz
+        return N
+
+    def root(D, is_a):
+        d2 = 0.5 * np.trace(D @ np.conj(D).T).real
+        E = np.sqrt(omega ** 2 + d2)
+        return (D if is_a else np.conj(D).T) / (omega + E)
+
+    def step(a, D, sgn):
+        M = expm(gen(D, sgn) * t)
+        u = M[:2, :2] @ a + M[:2, 2:]
+        w = M[2:, :2] @ a + M[2:, 2:]
+        return u @ np.linalg.inv(w)
+
+    a = np.empty((Ns, 2, 2), dtype=np.complex128)
+    b = np.empty((Ns, 2, 2), dtype=np.complex128)
+    a[0] = root(Dpath[0], True)
+    for i in range(Ns - 1):
+        a[i + 1] = step(a[i], 0.5 * (Dpath[i] + Dpath[i + 1]), 1.0)
+    b[Ns - 1] = root(Dpath[-1], False)
+    for i in range(Ns - 1, 0, -1):
+        b[i - 1] = step(b[i], 0.5 * (Dpath[i] + Dpath[i - 1]), -1.0)
+    g = np.empty((Ns, 2, 2), dtype=np.complex128)
+    f = np.empty((Ns, 2, 2), dtype=np.complex128)
+    for i in range(Ns):
+        P = np.linalg.inv(I2 + a[i] @ b[i])
+        g[i] = P @ (I2 - a[i] @ b[i])
+        f[i] = P @ (2.0 * a[i])
+    return g, f
+
+
 # --------------------------------------------------------------------------- #
 #  homogeneous
 # --------------------------------------------------------------------------- #
@@ -134,7 +179,7 @@ def test_riccati_chords_matches_reference():
 
 
 def test_matrix_riccati_matches_python():
-    """Fortran 2x2 matrix Mobius kernel == the Python matrix_trajectory_gf (to ~1e-12),
+    """Fortran 2x2 matrix Mobius kernel == the pure-Python reference (to ~1e-11),
     including a finite Zeeman field."""
     rng = np.random.default_rng(2)
     ch = SP._default_dvector_channels()
@@ -147,9 +192,13 @@ def test_matrix_riccati_matches_python():
     for h in (0.0, 2e-3):
         gF, fF = F.matrix_riccati_batch(om.astype(complex), Dpath, 1.0, 0.6, h)
         for iw, wn in enumerate(om):
-            gp, fp = SP.matrix_trajectory_gf(complex(wn), Dpath, 1.0, 0.6, h)
+            gp, fp = _ref_matrix_traj(complex(wn), Dpath, 1.0, 0.6, h)
             assert np.abs(gF[:, iw] - gp).max() < 1e-11
             assert np.abs(fF[:, iw] - fp).max() < 1e-11
+    # the batched-chords kernel must agree with the single-trajectory kernel
+    gB, fB = F.matrix_riccati_batch(om.astype(complex), Dpath, 1.0, 0.6, 0.0)
+    gC, fC = F.matrix_riccati_chords(om.astype(complex), Dpath[:, None], 1.0, 0.6, 0.0)
+    assert np.abs(gC[:, 0] - gB).max() < 1e-13
 
 
 # --------------------------------------------------------------------------- #
