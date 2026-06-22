@@ -195,7 +195,7 @@ eil_vort_lxi=8.0         #vortex cell half-width in coherence lengths xi (isolat
 eil_vort_ngrid=81        #vortex 2D grid points per axis
 eil_vort_h=0.0           #Zeeman (Maki) field [eV] for the vortex core LDOS (spin-splits the core bound states)
 eil_vort_field=False     #True: also compute the self-consistent finite-kappa Maxwell field profile B(rho) of the vortex (uses eil_kappa)
-eil_vort_fs=None         #model FS for the vortex: None=isotropic, else 'iso'/'ellipse'/'tb' (clean, zero-field; uses eil_fs_params)
+eil_vort_fs=None         #FS for the vortex: None=isotropic, 'iso'/'ellipse'/'tb' (model, uses eil_fs_params), or 'wannier' (the loaded Wannier band's FS + v_F)
 eil_vort_dvector=False   #True: self-consistent triplet d-vector TEXTURE around the vortex core (dominant p_x(e_x) winding + core-localized subdominant p_y(e_z), 2D spin-matrix Riccati; uses eil_dvec_subratio)
 eil_vort_current=False   #True: circulating charge supercurrent j_phi(rho) of an isolated vortex (writes vortex_current.dat)
 eil_field=0.0            #vortex lattice field B/Hc2 (0=isolated vortex; >0=circular-cell lattice w/ Doppler)
@@ -1381,6 +1381,12 @@ def main():
                                kb=kb,sw_ldos=eil_ldos,imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,h=eil_surf_h,
                                fs_kind=eil_surf_fs,fs_params=eil_fs_params)
     elif option==CalcMode.EILENBERGER_VORTEX: #vortex / vortex lattice via Riccati Eilenberger (model FS)
+        if eil_vort_fs=='wannier': #real Wannier-band FS + Fermi velocities (mu from filling)
+            eil_fs_obj=plibs.build_wannier_fs(rvec,ham_r,S_r,avec,
+                                              plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill))
+            eil_fs_kw=None
+        else:
+            eil_fs_obj,eil_fs_kw=None,eil_vort_fs
         if eil_vort_current: #circulating charge supercurrent j_phi(rho) of an isolated vortex
             plibs.calc_vortex_current(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,kb=kb,
                                       Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
@@ -1389,12 +1395,12 @@ def main():
         elif eil_field_list is not None: #sweep B/Hc2 on the TRUE periodic lattice -> <N(0)>(B) (d~sqrt(B) Volovik)
             plibs.calc_vortex_lattice_periodic(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,
                                                field_list=eil_field_list,kappa=eil_kappa,lattice=eil_lattice,kb=kb,
-                                               fs_kind=eil_vort_fs,fs_params=eil_fs_params)
+                                               fs_kind=eil_fs_kw,fs_params=eil_fs_params,fs=eil_fs_obj)
         else: #single field (isolated vortex if eil_field=0, else circular-cell lattice)
             plibs.calc_vortex(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,kb=kb,sw_ldos=eil_ldos,
                               imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,field=eil_field,h=eil_vort_h,
                               kappa=(eil_kappa if eil_vort_field else 0.0),
-                              fs_kind=eil_vort_fs,fs_params=eil_fs_params,
+                              fs_kind=eil_fs_kw,fs_params=eil_fs_params,fs=eil_fs_obj,
                               Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
     elif option==CalcMode.CARRIER_NUM: #calc carrier number
         n_carr=plibs.calc_carrier(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp)

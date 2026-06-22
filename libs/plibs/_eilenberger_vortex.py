@@ -502,7 +502,7 @@ def vortex_field_profile(rgrid, Dr, Dbulk, xi, kappa, omega):
 def calc_vortex(coupling: float, temp: float, wc: float, gap_sym: str = 's', kb: float = 1.0,
                 sw_ldos: bool = True, imp_gamma: float = 0.0, imp_c: float = 1.0e8,
                 field: float = 0.0, h: float = 0.0, kappa: float = 0.0,
-                fs_kind: str = None, fs_params=None, Lxi: float = 8.0, ngrid: int = 81):
+                fs_kind: str = None, fs_params=None, fs=None, Lxi: float = 8.0, ngrid: int = 81):
     """
     @fn calc_vortex
     @brief Driver: self-consistent vortex profile and (optionally) LDOS.
@@ -517,9 +517,8 @@ def calc_vortex(coupling: float, temp: float, wc: float, gap_sym: str = 's', kb:
     @param    field: B/Hc2 (0 = isolated vortex; >0 = circular-cell vortex lattice)
     @param        h: Zeeman (Maki) energy mu*B (spin splitting of the core LDOS)
     """
-    if gap_sym != 's' or imp_gamma != 0.0 or field > 0.0 or h != 0.0 or fs_kind is not None:
-        fs = None
-        if fs_kind is not None:
+    if gap_sym != 's' or imp_gamma != 0.0 or field > 0.0 or h != 0.0 or fs_kind is not None or fs is not None:
+        if fs is None and fs_kind is not None:        # build a model FS (else use the prebuilt fs)
             from ._eilenberger import build_model_fs
             fs = build_model_fs(fs_kind, 64, params=fs_params)
         return _calc_vortex_dwave(coupling, temp, wc, gap_sym, kb, sw_ldos, Lxi, ngrid,
@@ -897,20 +896,20 @@ def lattice_dos(state, gap_sym, wlist, coupling=None, temp=None, omega=None,
 
 def calc_vortex_lattice_periodic(coupling, temp, wc, gap_sym='d', field_list=None,
                                  kappa=5.0, lattice='square', kb=1.0, Ng=20, nbeta=16,
-                                 fs_kind=None, fs_params=None):
+                                 fs_kind=None, fs_params=None, fs=None):
     """
     @fn calc_vortex_lattice_periodic
     @brief Driver: true periodic vortex lattice (Doppler/London, finite kappa).
     Sweeps B/Hc2, self-consistently solves |Delta(r)| and reports the spatially-
     averaged zero-energy DOS <N(0)>/N0(B) (s-wave ~B cores; d-wave ~sqrt(B) Volovik),
     and writes the field profile B(r)/Bbar for the largest field.  With ``fs_kind``
-    the trajectories run on a model Fermi surface with real Fermi velocities.
+    (model FS) or a prebuilt ``fs`` (e.g. build_wannier_fs) the trajectories run on a
+    Fermi surface with real Fermi velocities.
     """
     omega = matsubara(temp, wc)
     if field_list is None:
         field_list = [0.05, 0.1, 0.2, 0.4]
-    fs = None
-    if fs_kind is not None:
+    if fs is None and fs_kind is not None:
         from ._eilenberger import build_model_fs
         fs = build_model_fs(fs_kind, 120, params=fs_params)
     print(f"periodic vortex lattice (Doppler/London): {gap_sym}, {lattice}, kappa={kappa}, "

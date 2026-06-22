@@ -835,3 +835,54 @@ def calc_free_energy(coupling, temp, wc, gap_sym='s', fs=None, t_list=None, kb=1
     except IOError as e:
         print(f"Error writing free_energy.dat: {e}", flush=True)
     return rows
+
+
+def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, band=None, RotMat=None):
+    """
+    @fn build_wannier_fs
+    @brief Build the Fermi surface (with Fermi velocities) of a REAL Wannier tight-
+    binding model for the quasiclassical trajectory solvers -- the band-structure
+    counterpart of build_model_fs.  The FS contour at mu is extracted from the 2D band
+    mesh (get_kf_points), the group velocity v_F = grad_k eps is the Wannier band
+    velocity (get_veloc), and the DOS weight is nf = dl/|v_F| (arc length over speed).
+    @param rvec,ham_r,S_r: Wannier R-vectors, hopping, overlap (S_r=[] for orthogonal)
+    @param avec: lattice vectors (velocity metric; Cartesian k = 2 pi * fractional)
+    @param   mu: chemical potential [eV];  mesh: 2D k-mesh;  kz: fixed k_z slice
+    @param band: keep only this band index (None = all FS sheets)
+    @return dict th,kx,ky,vx,vy,vabs,vhx,vhy,nf  (Cartesian in-plane k; nf sums to 1)
+    """
+    from ._bands import get_eigs_2d, get_kf_points, get_eigs
+    from .. import flibs
+    if RotMat is None:
+        RotMat = np.eye(3)
+    eig2d = get_eigs_2d(mesh, rvec, ham_r, S_r, RotMat, kz)
+    kf, fsband = get_kf_points(eig2d, mesh, mu, kz)
+    kxs, kys, vxs, vys, nfs = [], [], [], [], []
+    for contlist, b in zip(kf, fsband):
+        if band is not None and b != band:
+            continue
+        for cont in contlist:                          # one connected FS piece
+            pts = np.ascontiguousarray(cont, dtype=np.float64)   # [Np,3] fractional
+            if len(pts) < 2:
+                continue
+            _, uni = get_eigs(pts, ham_r, S_r, rvec)
+            vk = flibs.get_veloc(pts, ham_r, rvec, avec.T, uni).real    # [Np,Norb,3]
+            v = vk[:, b, :]
+            kc = 2.0 * np.pi * pts[:, :2]              # Cartesian in-plane k (a=1)
+            seg = np.sqrt((np.diff(kc, axis=0) ** 2).sum(axis=1))      # piece segments
+            dl = np.zeros(len(pts))
+            dl[:-1] += 0.5 * seg
+            dl[1:] += 0.5 * seg
+            vab = np.sqrt(v[:, 0] ** 2 + v[:, 1] ** 2)
+            kxs.append(kc[:, 0]); kys.append(kc[:, 1])
+            vxs.append(v[:, 0]); vys.append(v[:, 1])
+            nfs.append(dl / np.maximum(vab, 1e-12))
+    if not kxs:
+        raise ValueError("no Fermi surface at this mu/kz")
+    kx = np.concatenate(kxs); ky = np.concatenate(kys)
+    vx = np.concatenate(vxs); vy = np.concatenate(vys)
+    nf = np.concatenate(nfs)
+    vabs = np.sqrt(vx ** 2 + vy ** 2)
+    nf = nf / nf.sum()
+    return dict(th=np.arctan2(ky, kx), kx=kx, ky=ky, vx=vx, vy=vy, vabs=vabs,
+                vhx=vx / vabs, vhy=vy / vabs, nf=nf)

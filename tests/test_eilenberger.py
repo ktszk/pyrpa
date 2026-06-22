@@ -315,6 +315,38 @@ def test_model_fs_basics_and_cylinder_limit():
     assert abs(D_fs - D_cyl) / D_cyl < 0.02
 
 
+def test_wannier_fs_matches_model_tb():
+    """The real Wannier FS of the 1-orbital square lattice (inputs/square.hop) matches
+    the analytic 'tb' model FS: same velocity convention, C4 isotropy, FS shape, and
+    (decisively) the same d-wave bulk gap."""
+    import libs.plibs as p
+    hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       'inputs', 'square.hop')
+    if not os.path.exists(hop):
+        return                                          # skip if the input is absent
+    rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
+    avec = np.eye(3)
+    mu = -1.0
+    fw = E.build_wannier_fs(rvec, ham_r, [], avec, mu, mesh=240)
+    fm = E.build_model_fs('tb', Nth=240, mu=mu, params=1.0)
+    assert abs(fw['nf'].sum() - 1.0) < 1e-12
+    # velocity convention: square analytic v_cart = (2 sin kx, 2 sin ky)
+    i = len(fw['kx']) // 5
+    assert abs(fw['vx'][i] - 2 * np.sin(fw['kx'][i])) < 1e-6
+    assert abs(fw['vy'][i] - 2 * np.sin(fw['ky'][i])) < 1e-6
+    # FS shape cos kx + cos ky = 0.5, and C4 isotropy
+    res = np.cos(fw['kx']) + np.cos(fw['ky'])
+    assert abs(res.mean() - 0.5) < 1e-3 and res.std() < 1e-3
+    vx2 = (fw['nf'] * fw['vhx'] ** 2).sum()
+    vy2 = (fw['nf'] * fw['vhy'] ** 2).sum()
+    assert abs(vx2 / vy2 - 1.0) < 1e-3
+    # decisive: same d-wave bulk gap as the model FS (same band physics)
+    om = E.matsubara(8e-4, 0.5)
+    Dw = E.bulk_gap_fs(0.6, 8e-4, om, fw, 'd')
+    Dm = E.bulk_gap_fs(0.6, 8e-4, om, fm, 'd')
+    assert abs(Dw - Dm) / Dm < 0.01
+
+
 # --------------------------------------------------------------------------- #
 #  spin: Pauli limiting vs triplet immunity
 # --------------------------------------------------------------------------- #
