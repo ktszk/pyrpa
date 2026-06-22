@@ -50,7 +50,7 @@ def form_factor(beta: np.ndarray, gap_sym: str, beta_surf: float = 0.0) -> np.nd
           continuum harmonic: 0 s, 1 d, 2 s+-, 3 dxy, -1 px, -2 py).
     """
     if isinstance(gap_sym, (int, np.integer)):
-        gap_sym = {0: 's', 1: 'd', 2: 's', 3: 'dxy', -1: 'px', -2: 'py'}.get(int(gap_sym), 's')
+        gap_sym = {0: 's', 1: 'd', 2: 's', 3: 'dxy', -1: 'px', -2: 'py', -3: 'p+ip'}.get(int(gap_sym), 's')
     a = beta - beta_surf
     if gap_sym == 's':
         return np.ones_like(beta)

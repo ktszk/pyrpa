@@ -432,6 +432,8 @@ def gap_symms(klist: np.ndarray, Norb: int, gap_sym: int):
         row=2*np.sin(A*kx)
     elif gap_sym==-2:     # py
         row=2*np.sin(A*ky)
+    elif gap_sym==-3:     # p+ip (chiral, complex): px + i py
+        row=2*np.sin(A*kx)+2j*np.sin(A*ky)
     else:
         row=np.zeros(len(klist),dtype=np.float64)
     return np.tile(row,(Norb,1))
@@ -442,13 +444,13 @@ def get_initial_gap(klist: np.ndarray, Norb: int, gap_sym: int) -> np.ndarray:
     @brief Generate an initial gap function with the specified pairing symmetry for gap equation iteration.
     @param   klist: k-point list in fractional coordinates [Nk, 3]
     @param    Norb: Number of orbitals in the Hamiltonian
-    @param gap_sym: Symmetry index: 0=s, 1=dx2-y2, 2=s+-, 3=dxy, -1=px, -2=py
+    @param gap_sym: Symmetry index: 0=s, 1=dx2-y2, 2=s+-, 3=dxy, 4=dxz, 5=dyz, -1=px, -2=py, -3=p+ip
     @return init_gap: Initial gap function array [Norb, Nk]
     """
     if gap_sym>=0:
-        gapsym=['s','dx2-y2','spm','dxy']
+        gapsym=['s','dx2-y2','spm','dxy','dxz','dyz']
         print('gap symmetry is '+gapsym[gap_sym])
     else:
-        gapsym=['s','px','py']
+        gapsym=['s','px','py','p+ip']
         print('gap symmetry is '+gapsym[-gap_sym])
     return gap_symms(klist,Norb,gap_sym)

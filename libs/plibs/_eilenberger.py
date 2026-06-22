@@ -80,8 +80,9 @@ def build_fs(eig: np.ndarray, klist: np.ndarray, mu: float, gap_sym: int,
     mask = w > w_cut * w.max()
     wf = w[mask]
     phif = phi[mask]
-    # normalize so that <phi^2>_FS = 1  -> lambda is the dimensionless coupling
-    norm = np.sqrt(_fs_average(phif ** 2, wf))
+    # normalize so that <|phi|^2>_FS = 1 -> lambda is the dimensionless coupling
+    # (|phi|^2, not phi^2, so complex/chiral form factors normalize correctly too)
+    norm = np.sqrt(_fs_average(np.abs(phif) ** 2, wf))
     if norm > 0:
         phif = phif / norm
     return wf, phif
@@ -241,7 +242,7 @@ def gap_kernel(f: np.ndarray, phif: np.ndarray, wf: np.ndarray, temp: float,
     @param coupling: dimensionless pairing coupling lambda
     @return  Damp: updated (scalar) gap amplitude
     """
-    phif_w_avg = _fs_average(phif[:, None] * f, wf)   # [Nw]
+    phif_w_avg = _fs_average(np.conj(phif)[:, None] * f, wf)   # <phi* f> (conj for chiral)
     return coupling * 2.0 * temp * np.sum(phif_w_avg).real
 
 
@@ -642,7 +643,7 @@ def build_model_fs(kind: str = 'iso', Nth: int = 360, mu: float = None, params=N
                 vhx=vx / vabs, vhy=vy / vabs, nf=nf)
 
 
-_INT_GAP_STR = {0: 's', 1: 'd', 2: 's', 3: 'dxy', -1: 'px', -2: 'py'}   # int -> continuum phi
+_INT_GAP_STR = {0: 's', 1: 'd', 2: 's', 3: 'dxy', -1: 'px', -2: 'py', -3: 'p+ip'}   # int -> continuum phi
 
 
 def fs_form_factor(fs: dict, gap_sym) -> np.ndarray:

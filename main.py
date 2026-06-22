@@ -184,7 +184,7 @@ eil_fs=False         #True: model-FS + Fermi-velocity penetration depth (anisotr
 eil_fs_kind='ellipse'#model Fermi surface: 'iso', 'ellipse' (params=(mx,my)), or 'tb' (params=t)
 eil_fs_params=(1.0,0.4) #model-FS parameters (ellipse masses or tb hopping)
 #----- EILENBERGER inhomogeneous (surface & vortex, Riccati; model cylindrical FS) -----
-eil_pair_sym='d'         #pairing on model FS (surface & vortex): singlet 's','d'(dx2-y2),'dxy'; triplet 'px','py','p+ip'/'p-ip'(chiral)
+eil_pair_sym='d'         #pairing on model FS/cylinder (surface & vortex): singlet 's','d'(dx2-y2),'dxy'; triplet 'px','py','p+ip'/'p-ip'(chiral). The Wannier-FS path uses the global gap_sym index (0 s,1 dx2-y2,2 s+-,3 dxy,-1 px,-2 py,-3 p+ip)
 eil_ldos=True            #True: also compute the real-frequency LDOS (bound/core states) (surface & vortex)
 eil_surf_beta=0.785398   #surface orientation [rad]: 0=[100], pi/4(0.7854)=[110] (d-wave ZEBS)
 eil_surf_h=0.0           #Zeeman (Maki) field [eV] for the surface LDOS (splits the d[110] ZEBS into +-h)

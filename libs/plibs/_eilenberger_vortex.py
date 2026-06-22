@@ -171,7 +171,7 @@ def vortex_ldos(Dr: np.ndarray, rgrid: np.ndarray, xi: float, wlist: np.ndarray,
     return rho_out, gavg.real
 
 
-_INT_GAP_STR = {0: 's', 1: 'd', 2: 's', 3: 'dxy', -1: 'px', -2: 'py'}   # gap_symms index -> continuum
+_INT_GAP_STR = {0: 's', 1: 'd', 2: 's', 3: 'dxy', -1: 'px', -2: 'py', -3: 'p+ip'}   # gap_symms index -> continuum
 
 
 def _ff_vortex(beta: np.ndarray, gap_sym) -> np.ndarray:

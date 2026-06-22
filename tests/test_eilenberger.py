@@ -408,6 +408,26 @@ def test_gap_sym_index_and_delta0():
     assert abs((fs2['nf'] * abs(fs2['phi']) ** 2).sum() - 1.0) < 1e-9
 
 
+def test_chiral_pip_gap_sym_minus3():
+    """gap_sym = -3 is the chiral p+ip state: a complex form factor (px + i py) that
+    is fully gapped (|phi| > 0 everywhere)."""
+    from libs.plibs._response import gap_symms
+    kl = np.array([[0.25, 0.0, 0.0], [0.0, 0.25, 0.0]])
+    row = gap_symms(kl, 1, -3)[0]
+    assert np.iscomplexobj(row)
+    assert abs(row[0] - 2.0) < 1e-9 and abs(row[1] - 2.0j) < 1e-9   # px + i py
+    import libs.plibs as p
+    hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       'inputs', 'square.hop')
+    if not os.path.exists(hop):
+        return
+    rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
+    fw = E.build_wannier_fs(rvec, ham_r, [], np.eye(3), -1.0, mesh=200, gap_sym=-3)
+    assert np.iscomplexobj(fw['phi'])
+    assert abs((fw['nf'] * abs(fw['phi']) ** 2).sum() - 1.0) < 1e-9
+    assert abs(fw['phi']).min() > 0.3                 # chiral: fully gapped (no nodes)
+
+
 # --------------------------------------------------------------------------- #
 #  spin: Pauli limiting vs triplet immunity
 # --------------------------------------------------------------------------- #
