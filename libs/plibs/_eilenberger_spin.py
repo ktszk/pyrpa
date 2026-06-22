@@ -28,6 +28,26 @@ import numpy as np
 from scipy.linalg import expm
 from ._eilenberger import matsubara, build_fs
 
+try:                                       # optional Fortran acceleration of the 2x2 matrix Riccati
+    from ..flibs import matrix_riccati_batch as _fort_mat
+    _HAVE_FORT = True
+except Exception:
+    _HAVE_FORT = False
+
+
+def _mat_batch(om, Dpath, hvf, ds, h):
+    """g, f [Ns, Nw, 2, 2] along one trajectory for all frequencies: Fortran if
+    available, else a Python loop over matrix_trajectory_gf."""
+    if _HAVE_FORT:
+        return _fort_mat(np.ascontiguousarray(om, dtype=np.complex128),
+                         np.ascontiguousarray(Dpath, dtype=np.complex128), hvf, ds, h)
+    Ns, Nw = len(Dpath), len(om)
+    g = np.empty((Ns, Nw, 2, 2), dtype=np.complex128)
+    f = np.empty((Ns, Nw, 2, 2), dtype=np.complex128)
+    for iw, wn in enumerate(om):
+        g[:, iw], f[:, iw] = matrix_trajectory_gf(complex(wn), Dpath, hvf, ds, h)
+    return g, f
+
 
 def _pauli():
     sx = np.array([[0, 1], [1, 0]], dtype=np.complex128)
@@ -348,14 +368,13 @@ def solve_surface_dvector(couplings, temp, omega, channels=None, Dbulk=None,
             for a in range(nc):
                 amp_path = np.concatenate([fi[a, ib] * Damp[a][::-1], fo[a, ib] * Damp[a]])
                 Dpath += amp_path[:, None, None] * Smats[a]
-            for wn in om:                                            # loop Matsubara
-                _, f = matrix_trajectory_gf(wn, Dpath, hvf, ds, h=0.0)
-                f_out = f[Ng:]
-                f_in = f[:Ng][::-1]
-                for a in range(nc):
-                    po = np.einsum('ij,xji->x', Sd[a], f_out) / trSS[a]
-                    pi_ = np.einsum('ij,xji->x', Sd[a], f_in) / trSS[a]
-                    acc[a] += w * (np.conj(fo[a, ib]) * po + np.conj(fi[a, ib]) * pi_)
+            _, fmat = _mat_batch(om, Dpath, hvf, ds, 0.0)          # [2Ng, Nw, 2, 2]
+            f_out = fmat[Ng:]
+            f_in = fmat[:Ng][::-1]
+            for a in range(nc):
+                po = np.einsum('ij,xwji->x', Sd[a], f_out) / trSS[a]   # summed over freq
+                pi_ = np.einsum('ij,xwji->x', Sd[a], f_in) / trSS[a]
+                acc[a] += w * (np.conj(fo[a, ib]) * po + np.conj(fi[a, ib]) * pi_)
         Damp_new = (lam[:, None] * temp) * acc            # complex (allows TRSB phase)
         err = np.abs(Damp_new - Damp).max() / Dref
         Damp = (1.0 - mix) * Damp + mix * Damp_new
@@ -393,21 +412,17 @@ def surface_dvector_ldos(x, Damp, wlist, channels=None, Dbulk=None, delta=None,
     fo = np.array([phitil[a](beta) for a in range(nc)])
     fi = np.array([phitil[a](np.pi - beta) for a in range(nc)])
     Nw = len(wlist)
+    zw = delta - 1j * wlist                                     # retarded continuation [Nw]
     ldos = np.zeros(Nw)
-    for iw, wr in enumerate(wlist):
-        zw = delta - 1j * wr                                    # retarded continuation
-        g0 = 0.0
-        for ib in range(Nbeta):
-            ds = dx / cosb[ib]
-            Dpath = np.zeros((2 * Ng, 2, 2), dtype=np.complex128)
-            for a in range(nc):
-                amp_path = np.concatenate([fi[a, ib] * Damp[a][::-1], fo[a, ib] * Damp[a]])
-                Dpath += amp_path[:, None, None] * Smats[a]
-            g, _ = matrix_trajectory_gf(zw, Dpath, hvf, ds, h=0.0)
-            g_out0 = g[Ng]                                      # outgoing branch at x=0
-            g_in0 = g[Ng - 1]                                   # incoming branch at x=0
-            g0 += w * (np.trace(g_out0) + np.trace(g_in0)).real / 2.0
-        ldos[iw] = g0
+    for ib in range(Nbeta):                                     # batch all frequencies per direction
+        ds = dx / cosb[ib]
+        Dpath = np.zeros((2 * Ng, 2, 2), dtype=np.complex128)
+        for a in range(nc):
+            amp_path = np.concatenate([fi[a, ib] * Damp[a][::-1], fo[a, ib] * Damp[a]])
+            Dpath += amp_path[:, None, None] * Smats[a]
+        g, _ = _mat_batch(zw, Dpath, hvf, ds, 0.0)             # [2Ng, Nw, 2, 2]
+        tr0 = np.einsum('wii->w', g[Ng]) + np.einsum('wii->w', g[Ng - 1])  # x=0 both branches
+        ldos += w * tr0.real / 2.0
     return ldos
 
 
