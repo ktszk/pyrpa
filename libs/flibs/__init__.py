@@ -10,6 +10,7 @@ Functions are organized in submodules by physical topic:
   _eliashberg   : Linearized Eliashberg equation, gap function utilities
   _transport    : Boltzmann transport, conductivity, TDF
   _impurity     : Impurity Hamiltonian, CPA
+  _eilenberger  : Quasiclassical Eilenberger / Riccati trajectory hot loops
 """
 from ._hamiltonian   import *
 from ._green         import *
@@ -19,3 +20,4 @@ from ._selfenergy    import *
 from ._eliashberg    import *
 from ._transport     import *
 from ._impurity      import *
+from ._eilenberger    import *

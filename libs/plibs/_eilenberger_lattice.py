@@ -35,7 +35,7 @@ import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 from ._eilenberger import matsubara, riccati_homogeneous, propagators_from_riccati
 from ._eilenberger_surface import _integrate_vec, _bulk_gap
-from ._eilenberger_vortex import _ff_vortex
+from ._eilenberger_vortex import _ff_vortex, _chords_batch
 
 
 def _lattice_vectors(field: float, xi: float, lattice: str = 'square'):
@@ -202,17 +202,17 @@ def lattice_dos(state, gap_sym, wlist, coupling=None, temp=None, omega=None,
     gsum = np.zeros(Nw, dtype=np.complex128)           # nf-weighted FS+spatial average
     for ib in range(nbeta):
         cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
-        gdir = np.zeros(Nw, dtype=np.complex128)
-        for b in bgrid:
-            x = sgrid * cb - b * sb
-            y = sgrid * sb + b * cb
-            Dl = phi[ib] * _sample_pts(Di, x, y, Minv)            # phi(beta)*|Delta(r)| along chord
-            dop = hvfarr[ib] * (cb * _sample_pts(Qix, x, y, Minv)
-                                + sb * _sample_pts(Qiy, x, y, Minv))   # v_F.Q (~|v_F|)
-            om = zomega[None, :] + 1j * dop[:, None]               # [ns, Nw]
-            g, _ = _chord(om, (Dl[:, None] + 0.0j) * np.ones((1, Nw)), hvfarr[ib], ds)
-            gdir += g[central].sum(axis=0)
-        gsum += wt_dir[ib] * gdir / (nb * ncen)        # spatial mean per direction, nf-weighted
+        # batch all offsets b for this direction: chord = axis ns, chords = nb offsets
+        x = sgrid[:, None] * cb - bgrid[None, :] * sb           # [ns, nb]
+        y = sgrid[:, None] * sb + bgrid[None, :] * cb
+        Dl = phi[ib] * _sample_pts(Di, x, y, Minv)              # [ns, nb]
+        dop = hvfarr[ib] * (cb * _sample_pts(Qix, x, y, Minv)
+                            + sb * _sample_pts(Qiy, x, y, Minv))
+        om3 = zomega[None, None, :] + 1j * dop[:, :, None]      # [ns, nb, Nw]
+        dd3 = np.broadcast_to(Dl[:, :, None] + 0.0j, (ns, nb, Nw))
+        g, _ = _chords_batch(np.ascontiguousarray(om3), np.ascontiguousarray(dd3), hvfarr[ib], ds)
+        gdir = g[central].sum(axis=(0, 1))                      # sum over central s and offsets
+        gsum += wt_dir[ib] * gdir / (nb * ncen)                # spatial mean per direction, nf-weighted
     return gsum.real
 
 

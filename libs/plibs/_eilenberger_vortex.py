@@ -31,6 +31,25 @@ from scipy.interpolate import RegularGridInterpolator
 from ._eilenberger import riccati_homogeneous, propagators_from_riccati, matsubara
 from ._eilenberger_surface import _integrate_vec, _bulk_gap, _bulk_gap_imp
 
+try:                                       # optional Fortran acceleration of the chord loops
+    from ..flibs import riccati_chords as _fort_chords
+    _HAVE_FORT = True
+except Exception:
+    _HAVE_FORT = False
+
+
+def _chords_batch(om3: np.ndarray, dd3: np.ndarray, hvf: float, ds: float):
+    """Batched g, f over all chords [Ns, Nchord, Nw]: Fortran if available, else a
+    Python fallback over the chords (mirrors _chord_gf_pos)."""
+    if _HAVE_FORT:
+        return _fort_chords(om3, dd3, hvf, ds)
+    Ns, Nc, Nw = om3.shape
+    g = np.empty((Ns, Nc, Nw), dtype=np.complex128)
+    f = np.empty((Ns, Nc, Nw), dtype=np.complex128)
+    for j in range(Nc):
+        g[:, j, :], f[:, j, :] = _chord_gf_pos(om3[:, j, :], dd3[:, j, :], hvf, ds)
+    return g, f
+
 
 def _chord_gf(omega: np.ndarray, Dchord: np.ndarray, hvf: float, ds: float):
     """Quasiclassical g, f along one straight chord (vectorized over frequency).
@@ -333,10 +352,10 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
             sxy = X * cb + Y * sb
             bxy = -X * sb + Y * cb
             if not use_pos:
-                sumf = np.empty((ngrid, ngrid), dtype=np.complex128)
-                for j in range(ngrid):
-                    _, f = _chord_gf(omega, base[:, j], hvf_i, dx)
-                    sumf[:, j] = f.sum(axis=1)
+                om3 = np.broadcast_to(omega, (ngrid, ngrid, Nw)).astype(np.complex128)
+                dd3 = np.broadcast_to(base[:, :, None], (ngrid, ngrid, Nw))
+                _, f3 = _chords_batch(om3, np.ascontiguousarray(dd3), hvf_i, dx)
+                sumf = f3.sum(axis=2)
                 accf += wt_dir[ib] * np.conj(phi[ib]) * _eval_field(sumf, xg, sxy, bxy, fill=0.0)
             else:
                 om_rot = np.broadcast_to(omega, (ngrid, ngrid, Nw)).astype(np.complex128).copy()
@@ -346,10 +365,7 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
                 if not no_imp:
                     om_rot = om_rot + _eval_field(dwt, xg, Lx, Ly, fill=0.0)
                     Dtraj = Dtraj + _eval_field(sigf, xg, Lx, Ly, fill=0.0)
-                g_rot = np.empty((ngrid, ngrid, Nw), dtype=np.complex128)
-                f_rot = np.empty((ngrid, ngrid, Nw), dtype=np.complex128)
-                for j in range(ngrid):
-                    g_rot[:, j], f_rot[:, j] = _chord_gf_pos(om_rot[:, j], Dtraj[:, j], hvf_i, dx)
+                g_rot, f_rot = _chords_batch(om_rot, Dtraj, hvf_i, dx)
                 g_xy = _eval_field(g_rot, xg, sxy, bxy, fill=0.0)
                 f_xy = _eval_field(f_rot, xg, sxy, bxy, fill=0.0)
                 gacc += wt_dir[ib] * g_xy
@@ -436,10 +452,9 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
             for ib in range(nbeta):
                 sxy, bxy, Lx, Ly = sxyb[ib]
                 if not use_pos:
-                    g_rot = np.empty((ngrid, ngrid, Nw), dtype=np.complex128)
-                    for j in range(ngrid):
-                        g, _ = _chord_gf(zomega, base[ib][:, j], hvfarr[ib], dx)
-                        g_rot[:, j] = g
+                    om3 = np.broadcast_to(zomega, (ngrid, ngrid, Nw)).astype(np.complex128)
+                    dd3 = np.broadcast_to(base[ib][:, :, None], (ngrid, ngrid, Nw))
+                    g_rot, _ = _chords_batch(om3, np.ascontiguousarray(dd3), hvfarr[ib], dx)
                     gacc += wt_dir[ib] * _eval_field(g_rot, xg, sxy, bxy, fill=0.0)
                 else:
                     om_rot = np.broadcast_to(zomega, (ngrid, ngrid, Nw)).astype(np.complex128).copy()
@@ -449,10 +464,7 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
                     if not no_imp:
                         om_rot = om_rot + _eval_field(dwt, xg, Lx, Ly, fill=0.0)
                         Dtraj = Dtraj + _eval_field(sigf, xg, Lx, Ly, fill=0.0)
-                    g_rot = np.empty((ngrid, ngrid, Nw), dtype=np.complex128)
-                    f_rot = np.empty((ngrid, ngrid, Nw), dtype=np.complex128)
-                    for j in range(ngrid):
-                        g_rot[:, j], f_rot[:, j] = _chord_gf_pos(om_rot[:, j], Dtraj[:, j], hvfarr[ib], dx)
+                    g_rot, f_rot = _chords_batch(om_rot, Dtraj, hvfarr[ib], dx)
                     gacc += wt_dir[ib] * _eval_field(g_rot, xg, sxy, bxy, fill=0.0)
                     if not no_imp:
                         facc += wt_dir[ib] * _eval_field(f_rot, xg, sxy, bxy, fill=0.0)
