@@ -1373,7 +1373,8 @@ def main():
     elif option==CalcMode.EILENBERGER_VORTEX: #vortex / vortex lattice via Riccati Eilenberger (model FS)
         if eil_field_list is not None: #sweep B/Hc2 on the TRUE periodic lattice -> <N(0)>(B) (d~sqrt(B) Volovik)
             plibs.calc_vortex_lattice_periodic(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,
-                                               field_list=eil_field_list,kappa=eil_kappa,lattice=eil_lattice,kb=kb)
+                                               field_list=eil_field_list,kappa=eil_kappa,lattice=eil_lattice,kb=kb,
+                                               fs_kind=eil_vort_fs,fs_params=eil_fs_params)
         else: #single field (isolated vortex if eil_field=0, else circular-cell lattice)
             plibs.calc_vortex(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,kb=kb,sw_ldos=eil_ldos,
                               imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,field=eil_field,h=eil_vort_h,

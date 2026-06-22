@@ -115,21 +115,28 @@ def _sample_pts(interp, x, y, Minv):
 
 
 def solve_lattice(coupling, temp, omega, gap_sym='d', field=0.2, kappa=5.0,
-                  lattice='square', Dbulk=None, Ng=24, nbeta=18, hvf=1.0):
+                  lattice='square', Dbulk=None, Ng=24, nbeta=18, hvf=1.0, fs=None):
     """
     @fn solve_lattice
     @brief Build the periodic vortex-lattice state: lattice geometry, periodic
     supercurrent Q(r) and field B(r)/Bbar (London, finite kappa), and the amplitude
     |Delta(r)| (model Dbulk*tanh(d_nn/xi); self-consistency is a refinement that the
     DOS does not require).  Returns a state dict consumed by ``lattice_dos``.
+    With a model FS (``fs``) the coherence length uses the representative velocity
+    hvf_eff = <|v_F|>_nf so the geometry is |v_F|-consistent.
     @return dict (F1,F2,X,Y,absD,Qx,Qy,Brel,Minv,a1,a2,S,xi,Dbulk,acell,lam)
     """
     bfull = np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False)
+    hvf_eff = float((fs['nf'] * fs['vabs']).sum()) if fs is not None else hvf
     if Dbulk is None:
-        Dbulk = _bulk_gap(coupling, temp, omega, _ff_vortex(bfull, gap_sym))
+        if fs is not None:
+            from ._eilenberger_fs import bulk_gap_fs
+            Dbulk = bulk_gap_fs(coupling, temp, omega, fs, gap_sym)
+        else:
+            Dbulk = _bulk_gap(coupling, temp, omega, _ff_vortex(bfull, gap_sym))
     if Dbulk <= 0:
         return None
-    xi = hvf / (np.pi * Dbulk)
+    xi = hvf_eff / (np.pi * Dbulk)
     a1, a2, b1, b2, S, M = _lattice_vectors(field, xi, lattice)
     Minv = np.linalg.inv(M)
     lam = kappa * xi
@@ -146,12 +153,14 @@ def solve_lattice(coupling, temp, omega, gap_sym='d', field=0.2, kappa=5.0,
 
 
 def lattice_dos(state, gap_sym, wlist, coupling=None, temp=None, omega=None,
-                delta=None, nbeta=24, hvf=1.0, Ls_cell=1.5, ds_xi=0.3):
+                delta=None, nbeta=24, hvf=1.0, fs=None, Ls_cell=1.5, ds_xi=0.3):
     """
     @fn lattice_dos
     @brief Spatially-averaged density of states N(w)/N0 of the vortex lattice from a
     converged state, via the retarded Doppler Riccati, averaged over trajectories
-    (directions and offsets) -- which samples the whole cell.
+    (directions and offsets) -- which samples the whole cell.  With a model FS
+    (``fs``) the trajectory direction is v_hat, the Riccati velocity is |v_F| per
+    direction, the Doppler v_F.Q scales with |v_F|, and the FS average is nf-weighted.
     @return N(w)/N0 [Nw]
     """
     Dbulk = state['Dbulk']
@@ -163,8 +172,18 @@ def lattice_dos(state, gap_sym, wlist, coupling=None, temp=None, omega=None,
         delta = 0.03 * Dbulk
     zomega = delta - 1j * wlist
     Nw = len(wlist)
-    beta = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
-    phi = _ff_vortex(beta, gap_sym)                   # gap a trajectory sees = phi(beta)*|Delta(r)|
+    if fs is not None:                                # model FS: v_hat directions, nf weights
+        from ._eilenberger_fs import fs_form_factor
+        dirs = np.arctan2(fs['vy'], fs['vx'])
+        phi = fs_form_factor(fs, gap_sym)
+        hvfarr = fs['vabs']
+        wt_dir = fs['nf']
+        nbeta = len(dirs)
+    else:                                             # isotropic cylinder (v_hat = k_hat, uniform)
+        dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
+        phi = _ff_vortex(dirs, gap_sym)               # gap a trajectory sees = phi(beta)*|Delta(r)|
+        hvfarr = np.full(nbeta, hvf)
+        wt_dir = np.full(nbeta, 1.0 / nbeta)
     Di = _periodic_interp(state['absD'], Ng)
     Qix = _periodic_interp(state['Qx'], Ng)
     Qiy = _periodic_interp(state['Qy'], Ng)
@@ -176,50 +195,59 @@ def lattice_dos(state, gap_sym, wlist, coupling=None, temp=None, omega=None,
     # forgotten the inflow boundary condition); a long periodic chord covers the
     # whole unit cell (square or rhombic) uniformly
     central = np.abs(sgrid) <= (Ls - 3.0 * xi)
+    ncen = central.sum()
     # offsets b across the cell (perpendicular), to sample the 2D cell
     nb = max(12, Ng)
     bgrid = (np.arange(nb) + 0.5) / nb * acell - 0.5 * acell
-    gsum = np.zeros(Nw, dtype=np.complex128)
-    cnt = 0
+    gsum = np.zeros(Nw, dtype=np.complex128)           # nf-weighted FS+spatial average
     for ib in range(nbeta):
-        cb, sb = np.cos(beta[ib]), np.sin(beta[ib])
+        cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
+        gdir = np.zeros(Nw, dtype=np.complex128)
         for b in bgrid:
             x = sgrid * cb - b * sb
             y = sgrid * sb + b * cb
             Dl = phi[ib] * _sample_pts(Di, x, y, Minv)            # phi(beta)*|Delta(r)| along chord
-            dop = cb * _sample_pts(Qix, x, y, Minv) + sb * _sample_pts(Qiy, x, y, Minv)
+            dop = hvfarr[ib] * (cb * _sample_pts(Qix, x, y, Minv)
+                                + sb * _sample_pts(Qiy, x, y, Minv))   # v_F.Q (~|v_F|)
             om = zomega[None, :] + 1j * dop[:, None]               # [ns, Nw]
-            g, _ = _chord(om, (Dl[:, None] + 0.0j) * np.ones((1, Nw)), hvf, ds)
-            gsum += g[central].sum(axis=0)
-            cnt += central.sum()
-    return (gsum / cnt).real
+            g, _ = _chord(om, (Dl[:, None] + 0.0j) * np.ones((1, Nw)), hvfarr[ib], ds)
+            gdir += g[central].sum(axis=0)
+        gsum += wt_dir[ib] * gdir / (nb * ncen)        # spatial mean per direction, nf-weighted
+    return gsum.real
 
 
 def calc_vortex_lattice_periodic(coupling, temp, wc, gap_sym='d', field_list=None,
-                                 kappa=5.0, lattice='square', kb=1.0, Ng=20, nbeta=16):
+                                 kappa=5.0, lattice='square', kb=1.0, Ng=20, nbeta=16,
+                                 fs_kind=None, fs_params=None):
     """
     @fn calc_vortex_lattice_periodic
     @brief Driver: true periodic vortex lattice (Doppler/London, finite kappa).
     Sweeps B/Hc2, self-consistently solves |Delta(r)| and reports the spatially-
     averaged zero-energy DOS <N(0)>/N0(B) (s-wave ~B cores; d-wave ~sqrt(B) Volovik),
-    and writes the field profile B(r)/Bbar for the largest field.
+    and writes the field profile B(r)/Bbar for the largest field.  With ``fs_kind``
+    the trajectories run on a model Fermi surface with real Fermi velocities.
     """
     omega = matsubara(temp, wc)
     if field_list is None:
         field_list = [0.05, 0.1, 0.2, 0.4]
+    fs = None
+    if fs_kind is not None:
+        from ._eilenberger_fs import build_model_fs
+        fs = build_model_fs(fs_kind, 120, params=fs_params)
     print(f"periodic vortex lattice (Doppler/London): {gap_sym}, {lattice}, kappa={kappa}, "
-          f"lambda={coupling:.3f}, T={temp/kb:.2f} K", flush=True)
+          f"lambda={coupling:.3f}, T={temp/kb:.2f} K"
+          f"{', model FS+v_F: '+fs_kind if fs is not None else ''}", flush=True)
     results = []
     last = None
     for b in field_list:
         st = solve_lattice(coupling, temp, omega, gap_sym=gap_sym, field=b, kappa=kappa,
-                           lattice=lattice, Ng=Ng, nbeta=nbeta)
+                           lattice=lattice, Ng=Ng, nbeta=nbeta, fs=fs)
         if st is None or st['Dbulk'] <= 0:
             print(f"  B/Hc2={b:.3f}: normal", flush=True)
             continue
         # the gap-node sampling needs a fine FS-angle grid for d-wave; small broadening
         n0 = float(lattice_dos(st, gap_sym, np.array([0.0]), nbeta=max(nbeta, 60),
-                               delta=0.012 * st['Dbulk'])[0])
+                               delta=0.012 * st['Dbulk'], fs=fs)[0])
         a_xi = st['acell'] / st['xi']
         bmin, bmax = st['Brel'].min(), st['Brel'].max()
         results.append((b, n0))
