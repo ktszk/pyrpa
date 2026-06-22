@@ -364,16 +364,63 @@ def solve_surface_dvector(couplings, temp, omega, channels=None, Dbulk=None,
     return x, Damp, Dbulk
 
 
+def surface_dvector_ldos(x, Damp, wlist, channels=None, Dbulk=None, delta=None,
+                         Nbeta=16, hvf=1.0, cos_min=0.06):
+    """
+    @fn surface_dvector_ldos
+    @brief Surface local density of states N(x=0, w)/N0 of a converged d-vector
+    texture state, via the retarded 2x2 spin-matrix Riccati (w -> w + i delta).
+    The sign-changing dominant component gives a zero-energy surface bound state
+    (Andreev/ZEBS of the triplet edge); the subdominant / d-vector texture splits
+    or shifts it.  Angle-averaged over the trajectory directions.
+    @param x, Damp: grid and converged complex amplitudes [Ncomp, Ng] from solve_surface_dvector
+    @return N(0, w)/N0 [Nw]
+    """
+    if channels is None:
+        channels = _default_dvector_channels()
+    nc = len(channels)
+    Smats = [S for _, _, S in channels]
+    phitil = [ch[1] for ch in channels]
+    Ng = Damp.shape[1]
+    Dref = float(np.max(np.abs(Damp))) if Dbulk is None else float(np.max(np.abs(Dbulk)))
+    if delta is None:
+        delta = 0.03 * Dref
+    dx = x[1] - x[0]
+    bmax = 0.5 * np.pi * (1.0 - cos_min)
+    beta = np.linspace(-bmax, bmax, Nbeta)
+    cosb = np.cos(beta)
+    w = 1.0 / (2.0 * Nbeta)
+    fo = np.array([phitil[a](beta) for a in range(nc)])
+    fi = np.array([phitil[a](np.pi - beta) for a in range(nc)])
+    Nw = len(wlist)
+    ldos = np.zeros(Nw)
+    for iw, wr in enumerate(wlist):
+        zw = delta - 1j * wr                                    # retarded continuation
+        g0 = 0.0
+        for ib in range(Nbeta):
+            ds = dx / cosb[ib]
+            Dpath = np.zeros((2 * Ng, 2, 2), dtype=np.complex128)
+            for a in range(nc):
+                amp_path = np.concatenate([fi[a, ib] * Damp[a][::-1], fo[a, ib] * Damp[a]])
+                Dpath += amp_path[:, None, None] * Smats[a]
+            g, _ = matrix_trajectory_gf(zw, Dpath, hvf, ds, h=0.0)
+            g_out0 = g[Ng]                                      # outgoing branch at x=0
+            g_in0 = g[Ng - 1]                                   # incoming branch at x=0
+            g0 += w * (np.trace(g_out0) + np.trace(g_in0)).real / 2.0
+        ldos[iw] = g0
+    return ldos
+
+
 def calc_surface_dvector(coupling, temp, wc, kb=1.0, Lxi=8.0, nper=8, Nbeta=16,
-                         sub_ratio=0.9):
+                         sub_ratio=0.9, sw_ldos=True):
     """
     @fn calc_surface_dvector
     @brief Driver: self-consistent d-vector texture at a specular surface of a
     triplet superconductor.  The bulk orders in the dominant p_x channel (spin e_x,
     orbital cos(b), sign-changing at an x-surface, lambda); a subdominant p_y channel
-    (spin e_y, orbital sin(b), even, lambda*sub_ratio) is also retained.  The dominant
+    (spin e_z, orbital sin(b), even, lambda*sub_ratio) is also retained.  The dominant
     p_x is pair-broken at the surface, so the (relatively enhanced) p_y component
-    rotates the net d-vector toward e_y -- the d-vector texture.  Reports the spatial
+    rotates the net d-vector toward e_z -- the d-vector texture.  Reports the spatial
     component amplitudes and the rotation angle theta_d(x) = atan2(|Dpy|,|Dpx|), the
     relative phase (90 deg = time-reversal-broken p_x + i p_y surface state), and
     writes 'surface_dvector.dat'.
@@ -407,4 +454,17 @@ def calc_surface_dvector(coupling, temp, wc, kb=1.0, Lxi=8.0, nper=8, Nbeta=16,
                          f"{theta[j]:9.3f} {relph[j]:9.3f}\n")
     except IOError as e:
         print(f"Error writing surface_dvector.dat: {e}", flush=True)
+    if sw_ldos:                                                # spectroscopic signature
+        wlist = np.linspace(-2.0 * Dref, 2.0 * Dref, 121)
+        ldos = surface_dvector_ldos(x, Damp, wlist, Dbulk=Dbulk, Nbeta=Nbeta)
+        i0 = np.argmin(np.abs(wlist))
+        print(f"  surface LDOS: N(0,0)/N0 = {ldos[i0]:.3f} "
+              f"(sign-changing dominant -> zero-energy surface bound state)", flush=True)
+        try:
+            with open('surface_dvector_ldos.dat', 'w') as fh:
+                fh.write("# w/Dbulk   N(0,w)/N0\n")
+                for wr, n in zip(wlist, ldos):
+                    fh.write(f"{wr/Dref:12.5e} {n:12.5e}\n")
+        except IOError as e:
+            print(f"Error writing surface_dvector_ldos.dat: {e}", flush=True)
     return x, Damp

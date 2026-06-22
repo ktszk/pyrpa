@@ -1370,7 +1370,7 @@ def main():
                                    imp_sweep=eil_imp_list)
     elif option==CalcMode.EILENBERGER_SURFACE: #specular surface state via Riccati Eilenberger (model FS)
         if eil_surf_dvector: #self-consistent triplet d-vector texture (spin-matrix Riccati)
-            plibs.calc_surface_dvector(eil_coupling,temp,eil_wc,kb=kb,sub_ratio=eil_dvec_subratio)
+            plibs.calc_surface_dvector(eil_coupling,temp,eil_wc,kb=kb,sub_ratio=eil_dvec_subratio,sw_ldos=eil_ldos)
         else:
             plibs.calc_surface(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,beta_surf=eil_surf_beta,
                                kb=kb,sw_ldos=eil_ldos,imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,h=eil_surf_h,
