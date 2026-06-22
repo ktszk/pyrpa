@@ -8,7 +8,8 @@ _lib.riccati_chords.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.complex128),   # f   (out)
     np.ctypeslib.ndpointer(dtype=np.complex128),   # om  (in)
     np.ctypeslib.ndpointer(dtype=np.complex128),   # dd  (in)
-    POINTER(c_double), POINTER(c_double),          # hvf, ds
+    POINTER(c_double),                             # hvf
+    np.ctypeslib.ndpointer(dtype=np.float64),      # ds  (in) [Nchord]
     POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),   # Ns, Nchord, Nw
 ]
 _lib.riccati_chords.restype = None
@@ -79,22 +80,25 @@ def matrix_riccati_chords(om: np.ndarray, Dpath: np.ndarray, hvf: float, ds: flo
     return g, f
 
 
-def riccati_chords(om: np.ndarray, dd: np.ndarray, hvf: float, ds: float):
+def riccati_chords(om: np.ndarray, dd: np.ndarray, hvf: float, ds):
     """
     @fn riccati_chords
     @brief Scalar quasiclassical g, f along many chords via the stable tanh-step
-    Riccati (Fortran).  Drop-in batched replacement for the per-chord Python
-    _chord_gf / _chord_gf_pos loops in the surface / vortex / lattice solvers.
+    Riccati (Fortran).  The single batched chord kernel for the surface / vortex /
+    lattice solvers (forward gamma + backward gamma-tilde + g,f combine).
     @param om: (renormalized) frequency along each chord [Ns, Nchord, Nw] complex128
     @param dd: order parameter along each chord [Ns, Nchord, Nw] complex128
-    @param hvf: hbar |v_F|;  ds: arc-length step
+    @param hvf: hbar |v_F|
+    @param ds: arc-length step, scalar or per-chord [Nchord] (e.g. dx/|cos beta|)
     @return (g, f): propagators [Ns, Nchord, Nw] complex128
     """
     om = np.ascontiguousarray(om, dtype=np.complex128)
     dd = np.ascontiguousarray(dd, dtype=np.complex128)
     Ns, Nchord, Nw = om.shape
+    ds_arr = (np.full(Nchord, float(ds)) if np.isscalar(ds)
+              else np.ascontiguousarray(ds, dtype=np.float64))
     g = np.empty((Ns, Nchord, Nw), dtype=np.complex128)
     f = np.empty((Ns, Nchord, Nw), dtype=np.complex128)
-    _lib.riccati_chords(g, f, om, dd, dbl(hvf), dbl(ds),
+    _lib.riccati_chords(g, f, om, dd, dbl(hvf), ds_arr,
                         i64(Ns), i64(Nchord), i64(Nw))
     return g, f

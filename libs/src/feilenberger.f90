@@ -23,23 +23,24 @@ subroutine riccati_chords(g,f,om,dd,hvf,ds,Ns,Nchord,Nw) bind(C)
 !!@param   om, in: (renormalized) frequency along each chord [Ns,Nchord,Nw] complex128
 !!@param   dd, in: order parameter along each chord [Ns,Nchord,Nw] complex128
 !!@param  hvf, in: hbar |v_F|
-!!@param   ds, in: arc-length step
+!!@param   ds, in: arc-length step per chord [Nchord] (e.g. dx/|cos beta|)
 !!@param   Ns, in: points per chord
 !!@param Nchord,in: number of chords
 !!@param   Nw, in: number of frequencies
   use,intrinsic:: iso_c_binding, only: c_int64_t,c_double
   implicit none
   integer(c_int64_t),intent(in):: Ns,Nchord,Nw
-  real(c_double),intent(in):: hvf,ds
+  real(c_double),intent(in):: hvf
+  real(c_double),intent(in),dimension(Nchord):: ds
   complex(c_double),intent(in),dimension(Nw,Nchord,Ns):: om,dd
   complex(c_double),intent(out),dimension(Nw,Nchord,Ns):: g,f
   integer(c_int64_t) c,i,w
   real(c_double) t
   complex(c_double) D1,om1,R,Tt,gm,gt,Dmid,ommid,den
   complex(c_double),allocatable:: gamf(:,:),gamt(:,:)
-  t=ds/hvf
-  !$omp parallel do private(i,w,D1,om1,R,Tt,gm,gt,Dmid,ommid,den,gamf,gamt)
+  !$omp parallel do private(i,w,t,D1,om1,R,Tt,gm,gt,Dmid,ommid,den,gamf,gamt)
   do c=1,Nchord
+     t=ds(c)/hvf
      allocate(gamf(Nw,Ns),gamt(Nw,Ns))
      ! forward gamma: upstream bulk root at i=1
      do w=1,Nw

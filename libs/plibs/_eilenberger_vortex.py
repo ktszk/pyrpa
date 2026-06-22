@@ -28,57 +28,16 @@ conditions -- on top of the same chord integration and self-consistency here.
 """
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
-from ._eilenberger import riccati_homogeneous, propagators_from_riccati, matsubara
-from ._eilenberger_surface import _integrate_vec, _bulk_gap, _bulk_gap_imp
-
-try:                                       # optional Fortran acceleration of the chord loops
-    from ..flibs import riccati_chords as _fort_chords
-    _HAVE_FORT = True
-except Exception:
-    _HAVE_FORT = False
+from ._eilenberger import matsubara
+from ._eilenberger_surface import _bulk_gap, _bulk_gap_imp
+from ..flibs import riccati_chords
 
 
-def _chords_batch(om3: np.ndarray, dd3: np.ndarray, hvf: float, ds: float):
-    """Batched g, f over all chords [Ns, Nchord, Nw]: Fortran if available, else a
-    Python fallback over the chords (mirrors _chord_gf_pos)."""
-    if _HAVE_FORT:
-        return _fort_chords(om3, dd3, hvf, ds)
-    Ns, Nc, Nw = om3.shape
-    g = np.empty((Ns, Nc, Nw), dtype=np.complex128)
-    f = np.empty((Ns, Nc, Nw), dtype=np.complex128)
-    for j in range(Nc):
-        g[:, j, :], f[:, j, :] = _chord_gf_pos(om3[:, j, :], dd3[:, j, :], hvf, ds)
-    return g, f
-
-
-def _chord_gf(omega: np.ndarray, Dchord: np.ndarray, hvf: float, ds: float):
-    """Quasiclassical g, f along one straight chord (vectorized over frequency).
-    gamma is integrated forward from the upstream bulk root, gamma-tilde backward
-    from the downstream bulk root, both with the unconditionally stable step.
-    @param  omega: frequencies [Nw] (Matsubara or retarded)
-    @param Dchord: complex order parameter sampled along the chord [Ns]
-    @param    hvf: hbar |v_F|
-    @param     ds: step along the chord
-    @return (g, f): propagators along the chord [Ns, Nw]
-    """
-    ga0, _ = riccati_homogeneous(omega, Dchord[0])
-    gamma = _integrate_vec(omega, Dchord, hvf, ds, ga0)
-    _, gb0 = riccati_homogeneous(omega, Dchord[-1])
-    gammat = _integrate_vec(omega, np.conj(Dchord[::-1]), hvf, ds, gb0)[::-1]
-    g, f, _ = propagators_from_riccati(gamma, gammat)
-    return g, f
-
-
-def _chord_gf_pos(omega2d: np.ndarray, Delta2d: np.ndarray, hvf: float, ds: float):
-    """Like _chord_gf but with position-dependent renormalized fields along the
-    chord: omega2d and Delta2d are [Ns, Nw] (needed once impurities make w_tilde(r)
-    and Sigma_f(r) vary in space)."""
-    ga0, _ = riccati_homogeneous(omega2d[0], Delta2d[0])
-    gamma = _integrate_vec(omega2d, Delta2d, hvf, ds, ga0)
-    _, gb0 = riccati_homogeneous(omega2d[-1], Delta2d[-1])
-    gammat = _integrate_vec(omega2d[::-1], np.conj(Delta2d[::-1]), hvf, ds, gb0)[::-1]
-    g, f, _ = propagators_from_riccati(gamma, gammat)
-    return g, f
+def _chords_batch(om3: np.ndarray, dd3: np.ndarray, hvf: float, ds):
+    """Batched scalar g, f over all chords [Ns, Nchord, Nw] via the Fortran
+    riccati_chords kernel (forward gamma + backward gamma-tilde + combine).  ds is
+    scalar or per-chord [Nchord]."""
+    return riccati_chords(om3, dd3, hvf, ds)
 
 
 def _eval_field(field: np.ndarray, xg: np.ndarray, px: np.ndarray, py: np.ndarray,
@@ -164,11 +123,10 @@ def solve_vortex(coupling: float, temp: float, omega: np.ndarray, Dbulk: float =
     Nw = len(omega)
     Dr = Dbulk * np.tanh(rgrid / xi)               # standard vortex ansatz
     for it in range(itemax):
-        Delta = _delta_grid(Dr, rgrid, Rg, phase, Dbulk)
-        f_grid = np.empty((ngrid, ngrid, Nw), dtype=np.complex128)
-        for j in range(ngrid):                     # one chord per impact parameter (column)
-            _, f = _chord_gf(omega, Delta[:, j], hvf, dx)
-            f_grid[:, j] = f
+        Delta = _delta_grid(Dr, rgrid, Rg, phase, Dbulk)   # [ngrid, ngrid] (s, impact param)
+        om3 = np.broadcast_to(omega, (ngrid, ngrid, Nw)).astype(np.complex128)
+        dd3 = np.broadcast_to(Delta[:, :, None], (ngrid, ngrid, Nw))
+        _, f_grid = _chords_batch(om3, np.ascontiguousarray(dd3), hvf, dx)   # one call, all chords
         # gap equation: D(rho) = lambda 2T sum_n <f e^{-i theta}>_azimuth
         favg = _azimuthal(f_grid, xg, rgrid, theta, weight_phase=True)   # [Nr, Nw]
         Dr_new = coupling * 2.0 * temp * favg.sum(axis=1).real
@@ -203,10 +161,10 @@ def vortex_ldos(Dr: np.ndarray, rgrid: np.ndarray, xi: float, wlist: np.ndarray,
     theta = np.linspace(0.0, 2.0 * np.pi, ntheta, endpoint=False)
     zomega = delta - 1j * wlist
     Delta = _delta_grid(Dr, rgrid, Rg, phase, Dbulk)
-    g_grid = np.empty((ngrid, ngrid, len(wlist)), dtype=np.complex128)
-    for j in range(ngrid):
-        g, _ = _chord_gf(zomega, Delta[:, j], hvf, dx)
-        g_grid[:, j] = g
+    Nw = len(wlist)
+    om3 = np.broadcast_to(zomega, (ngrid, ngrid, Nw)).astype(np.complex128)
+    dd3 = np.broadcast_to(Delta[:, :, None], (ngrid, ngrid, Nw))
+    g_grid, _ = _chords_batch(om3, np.ascontiguousarray(dd3), hvf, dx)
     rho_out = rgrid if rho_list is None else np.asarray(rho_list)
     gavg = _azimuthal(g_grid, xg, rho_out, theta, weight_phase=False)    # [Nr, Nw]
     return rho_out, gavg.real

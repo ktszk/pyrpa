@@ -29,7 +29,7 @@ the new inhomogeneous physics for validation against known results
 surface bound state).
 """
 import numpy as np
-from ._eilenberger import riccati_homogeneous, propagators_from_riccati
+from ..flibs import riccati_chords
 
 
 def form_factor(beta: np.ndarray, gap_sym: str, beta_surf: float = 0.0) -> np.ndarray:
@@ -65,102 +65,47 @@ def form_factor(beta: np.ndarray, gap_sym: str, beta_surf: float = 0.0) -> np.nd
     raise ValueError(f"unknown gap_sym: {gap_sym}")
 
 
-def _integrate_vec(omega: np.ndarray, Delta_s: np.ndarray, hvf: float, ds: float,
-                   gamma0: np.ndarray) -> np.ndarray:
-    """Integrate the Riccati coherence function along a trajectory, vectorized over
-    the frequency axis, with an *unconditionally stable* analytic step.
-
-    The Riccati equation is stiff: high Matsubara frequencies relax to the local
-    bulk root over a length hbar*v_F/(2*omega_n) that is far smaller than the grid
-    step on grazing trajectories, so explicit RK schemes overflow.  Writing
-    gamma = u2/u1 with the linear spinor system
-        hbar v_F d/ds [u1; u2] = [[omega, conj(D)], [D, -omega]] [u1; u2]
-    the exact propagator over a step with piecewise-constant D maps
-        gamma -> (gamma + T (D - omega gamma)) / (1 + T (omega + conj(D) gamma)),
-        T = tanh(R t)/R,   R = sqrt(omega^2 + |D|^2),   t = ds/hbar v_F,
-    which is bounded for any step size (tanh saturates) and reduces to the correct
-    stable root, so the integration never blows up.
-
-    omega and Delta_s may be constant along the path ([Nw]) or position dependent
-    ([Ns, Nw]); the latter is needed once the impurity self-energy renormalizes the
-    frequency and gap locally, omega -> w_tilde(x), Delta -> Delta_tilde(x).
-
-    @param   omega: (renormalized/complex) frequencies [Nw] or [Ns, Nw]
-    @param Delta_s: order parameter along the trajectory [Ns] or [Ns, Nw]
-    @param     hvf: hbar |v_F|
-    @param      ds: arc-length step
-    @param  gamma0: initial gamma at s[0] [Nw]
-    @return  gamma: gamma along the trajectory [Ns, Nw]
+def _surface_chords(Damp, phi_out, phi_in, om, hvf, dx, cosb, sigf=None):
     """
-    Ns = len(Delta_s)
-    om2d = (np.ndim(omega) == 2)
-    Nw = omega.shape[-1]
-    out = np.empty((Ns, Nw), dtype=np.complex128)
-    g = np.array(gamma0, dtype=np.complex128)
-    out[0] = g
-    t = ds / hvf
-    for i in range(Ns - 1):
-        D = 0.5 * (Delta_s[i] + Delta_s[i + 1])     # piecewise-constant over step
-        om = 0.5 * (omega[i] + omega[i + 1]) if om2d else omega
-        R = np.sqrt(om ** 2 + (D * np.conj(D)).real)
-        T = np.tanh(R * t) / R
-        g = (g + T * (D - om * g)) / (1.0 + T * (om + np.conj(D) * g))
-        out[i + 1] = g
-    return out
+    @fn _surface_chords
+    @brief Solve g, f on ALL unfolded surface trajectories at once (one batched
+    Fortran riccati_chords call), the single chord kernel for every surface solver.
 
+    Each chord c is the unfolded path of one outgoing direction: incoming branch
+    (x: L->0, form factor phi_in[c]) concatenated with the outgoing branch
+    (x: 0->L, form factor phi_out[c]); the step is per chord, ds[c]=dx/cosb[c].
+    With impurities the renormalized frequency ``om`` ([Ng,Nw]) and the additive
+    self-energy ``sigf`` ([Ng,Nw]) are position dependent.
 
-def _trajectory_gf(omega: np.ndarray, Damp: np.ndarray, phi_in: float, phi_out: float,
-                   hvf: float, dx: float, cosb: float, sigf: np.ndarray = None):
-    """
-    @fn _trajectory_gf
-    @brief Solve g, f on one unfolded surface trajectory for all frequencies.
-
-    The unfolded path runs incoming (x: L->0, momentum beta_in, form factor
-    phi_in) then outgoing (x: 0->L, momentum beta, form factor phi_out).  gamma
-    is integrated forward from the incoming bulk; gamma-tilde backward from the
-    outgoing bulk.  With impurities, the renormalized frequency ``omega`` and the
-    additive (isotropic) self-energy ``sigf`` are position dependent on the x grid.
-
-    @param  omega: frequencies [Nw] (clean) or w_tilde(x) [Ngrid, Nw] (with impurity)
-    @param   Damp: gap amplitude profile on the x grid [Ngrid] (x=0..L)
-    @param phi_in,phi_out: form factor on the incoming / outgoing branch
-    @param    hvf: hbar |v_F|
-    @param     dx: x-grid spacing
-    @param   cosb: |cos(beta)| (perpendicular projection of v_F)
-    @param   sigf: additive impurity self-energy Sigma_f(x) [Ngrid, Nw], or None (clean)
-    @return (g_out, f_out, g_in, f_in): propagators [Ngrid, Nw] for the outgoing
-            (direction beta) and incoming (direction beta_in) branches, each on
-            the x=0..L grid.
+    @param   Damp: gap amplitude profile on x=0..L [Ng]
+    @param phi_out,phi_in: form factor per chord on the outgoing / incoming branch [Nchord]
+    @param     om: frequencies [Nw] (clean) or w_tilde(x) [Ng, Nw] (impurity)
+    @param    hvf: hbar |v_F|;  dx: x spacing;  cosb: |cos beta| per chord [Nchord]
+    @param   sigf: additive impurity self-energy [Ng, Nw], or None (clean)
+    @return (g_out, f_out, g_in, f_in): propagators [Ng, Nchord, Nw] on x=0..L
     """
     Ng = len(Damp)
-    ds = dx / cosb
-    om2d = (np.ndim(omega) == 2)
-    # unfolded order parameter Delta_tilde: incoming (x=L..0) then outgoing (x=0..L)
+    Nc = len(phi_out)
+    om2d = (np.ndim(om) == 2)
+    Nw = om.shape[-1] if om2d else len(om)
+    # unfolded gap path dd3 [2Ng, Nchord, Nw]: incoming (x=L..0) then outgoing (x=0..L)
     if sigf is None:
-        D_in = phi_in * Damp[::-1]
-        D_out = phi_out * Damp
+        D_in = phi_in[None, :] * Damp[::-1, None]          # [Ng, Nchord]
+        D_out = phi_out[None, :] * Damp[:, None]
+        dd3 = np.broadcast_to(np.concatenate([D_in, D_out], axis=0)[:, :, None],
+                              (2 * Ng, Nc, Nw))
     else:
-        D_in = phi_in * Damp[::-1, None] + sigf[::-1]
-        D_out = phi_out * Damp[:, None] + sigf
-    Dpath = np.concatenate([D_in, D_out])              # [2Ng] or [2Ng, Nw]
-    om_fwd = np.concatenate([omega[::-1], omega]) if om2d else omega
-    om_start = om_fwd[0] if om2d else omega
-    om_end = om_fwd[-1] if om2d else omega
-    # gamma: forward from incoming bulk (first path point)
-    ga0, _ = riccati_homogeneous(om_start, Dpath[0])
-    gamma = _integrate_vec(om_fwd, Dpath, hvf, ds, ga0)
-    # gamma-tilde: backward from outgoing bulk (last path point)
-    _, gb0 = riccati_homogeneous(om_end, Dpath[-1])
-    om_bwd = om_fwd[::-1] if om2d else omega
-    gammat_rev = _integrate_vec(om_bwd, np.conj(Dpath[::-1]), hvf, ds, gb0)
-    gammat = gammat_rev[::-1]
-    g, f, _ = propagators_from_riccati(gamma, gammat)
-    # split: first half = incoming (x=L..0 -> reverse to x=0..L), second = outgoing
-    g_in = g[:Ng][::-1]
-    f_in = f[:Ng][::-1]
-    g_out = g[Ng:]
-    f_out = f[Ng:]
-    return g_out, f_out, g_in, f_in
+        D_in = phi_in[None, :, None] * Damp[::-1, None, None] + sigf[::-1][:, None, :]
+        D_out = phi_out[None, :, None] * Damp[:, None, None] + sigf[:, None, :]
+        dd3 = np.concatenate([D_in, D_out], axis=0)        # [2Ng, Nchord, Nw]
+    if om2d:
+        om_path = np.concatenate([om[::-1], om], axis=0)   # [2Ng, Nw]
+        om3 = np.broadcast_to(om_path[:, None, :], (2 * Ng, Nc, Nw))
+    else:
+        om3 = np.broadcast_to(om[None, None, :], (2 * Ng, Nc, Nw))
+    g, f = riccati_chords(np.ascontiguousarray(om3), np.ascontiguousarray(dd3),
+                          hvf, dx / cosb)
+    return g[Ng:], f[Ng:], g[:Ng][::-1], f[:Ng][::-1]      # out, in branches [Ng,Nchord,Nw]
 
 
 def _beta_grid(Nbeta: int, cos_min: float = 0.02):
@@ -254,21 +199,17 @@ def solve_surface(coupling: float, temp: float, omega: np.ndarray, gap_sym: str,
     wt = np.tile(omega.astype(np.complex128), (Ngrid, 1))   # w_tilde(x,n) [Ngrid,Nw]
     sigf = np.zeros((Ngrid, Nw), dtype=np.complex128)       # Sigma_f(x,n)
     for it in range(itemax):
-        acc = np.zeros(Ngrid, dtype=np.complex128)          # sum_n <phi f>(x)
-        gsum = np.zeros((Ngrid, Nw), dtype=np.complex128)
-        fsum = np.zeros((Ngrid, Nw), dtype=np.complex128)
-        for ib in range(Nbeta):
-            if clean:
-                g_out, f_out, g_in, f_in = _trajectory_gf(omega, Damp, phi_in[ib],
-                                                          phi_out[ib], hvf, dx, cosb[ib])
-            else:
-                g_out, f_out, g_in, f_in = _trajectory_gf(wt, Damp, phi_in[ib],
-                                                          phi_out[ib], hvf, dx, cosb[ib], sigf=sigf)
-            # gap projection uses conj(phi) (matters for complex/chiral form factors)
-            acc += (np.conj(phi_out[ib]) * f_out + np.conj(phi_in[ib]) * f_in).sum(axis=1)
-            if not clean:
-                gsum += g_out + g_in
-                fsum += f_out + f_in
+        # all unfolded trajectories at once; out/in branches [Ngrid, Nbeta, Nw]
+        om_arg = omega if clean else wt
+        g_out, f_out, g_in, f_in = _surface_chords(Damp, phi_out, phi_in, om_arg,
+                                                   hvf, dx, cosb, sigf=None if clean else sigf)
+        # gap projection uses conj(phi) (matters for complex/chiral form factors)
+        co = np.conj(phi_out)[None, :, None]
+        ci = np.conj(phi_in)[None, :, None]
+        acc = (co * f_out + ci * f_in).sum(axis=(1, 2))     # sum over directions, freqs
+        if not clean:
+            gsum = (g_out + g_in).sum(axis=1)               # [Ngrid, Nw]
+            fsum = (f_out + f_in).sum(axis=1)
         Damp_new = coupling * 2.0 * temp * (acc.real / ndir)
         err = np.abs(Damp_new - Damp).max() / max(Dbulk, 1e-12)
         Damp = (1.0 - mix) * Damp + mix * Damp_new
@@ -391,19 +332,13 @@ def surface_ldos(Damp: np.ndarray, x: np.ndarray, wlist: np.ndarray, gap_sym: st
         wt = np.tile(zomega, (Ng, 1))
         sigf = np.zeros((Ng, Nw), dtype=np.complex128)
         for it in range(1 if clean else itemax):
-            gsum_x = np.zeros((Ng, Nw), dtype=np.complex128)
-            fsum_x = np.zeros((Ng, Nw), dtype=np.complex128)
-            for ib in range(Nbeta):
-                if clean:
-                    g_out, _, g_in, _ = _trajectory_gf(zomega, Damp, phi_in[ib],
-                                                       phi_out[ib], hvf, dx, cosb[ib])
-                else:
-                    g_out, f_out, g_in, f_in = _trajectory_gf(wt, Damp, phi_in[ib],
-                                                              phi_out[ib], hvf, dx, cosb[ib], sigf=sigf)
-                    fsum_x += f_out + f_in
-                gsum_x += g_out + g_in
+            g_out, f_out, g_in, f_in = _surface_chords(Damp, phi_out, phi_in,
+                                                       zomega if clean else wt, hvf, dx, cosb,
+                                                       sigf=None if clean else sigf)
+            gsum_x = (g_out + g_in).sum(axis=1)             # [Ng, Nw]
             if clean:
                 return (gsum_x[ix] / ndir).real
+            fsum_x = (f_out + f_in).sum(axis=1)
             avg_g = gsum_x / ndir
             avg_f = fsum_x / ndir
             Dimp = imp_c ** 2 + avg_g ** 2 + avg_f * np.conj(avg_f)
@@ -532,23 +467,12 @@ def surface_ldos_fs(fs, Damp, x, wlist, gap_sym, ix=0, delta=None, Dbulk=1.0, hv
     dx = x[1] - x[0]
     zomega = delta - 1j * wlist
     vmax = np.abs(vx).max()
-    gsum = np.zeros(Nw, dtype=np.complex128)
-    wsum = 0.0
-    for i in np.where(vx > vmin_frac * vmax)[0]:        # outgoing FS points (v_x>0)
-        j = int(refl[i])                                 # incoming (reflected) partner
-        ds = dx / abs(vx[i])
-        D_in = phi[j] * Damp[::-1]                        # incoming branch x=L..0
-        D_out = phi[i] * Damp                             # outgoing branch x=0..L
-        Dpath = np.concatenate([D_in, D_out])
-        ga0, _ = riccati_homogeneous(zomega, Dpath[0])
-        gamma = _integrate_vec(zomega, Dpath, hvf, ds, ga0)
-        _, gb0 = riccati_homogeneous(zomega, Dpath[-1])
-        gammat = _integrate_vec(zomega, np.conj(Dpath[::-1]), hvf, ds, gb0)[::-1]
-        g, _, _ = propagators_from_riccati(gamma, gammat)
-        g_out = g[Ng:]
-        g_in = g[:Ng][::-1]
-        gsum += nf[i] * g_out[ix] + nf[j] * g_in[ix]
-        wsum += nf[i] + nf[j]
+    out = np.where(vx > vmin_frac * vmax)[0]            # outgoing FS points (v_x>0)
+    jj = refl[out].astype(int)                          # incoming (reflected) partners
+    vproj = np.abs(vx[out])                              # ds = dx/|v_x| (_surface_chords: dx/cosb)
+    g_out, _, g_in, _ = _surface_chords(Damp, phi[out], phi[jj], zomega, hvf, dx, vproj)
+    gsum = (nf[out][:, None] * g_out[ix] + nf[jj][:, None] * g_in[ix]).sum(axis=0)  # [Nw]
+    wsum = (nf[out] + nf[jj]).sum()
     return (gsum / wsum).real
 
 
@@ -581,22 +505,15 @@ def solve_surface_fs(coupling, temp, omega, fs, gap_sym, Dbulk=None, Lxi=8.0, np
     x = np.linspace(0.0, Lxi * xi, Ng)
     dx = x[1] - x[0]
     Damp = Dbulk * np.tanh(x / xi)
+    jj = refl[out].astype(int)
+    vproj = np.abs(vx[out])                              # ds = dx/|v_x| (per chord)
+    co = (nf[out] * np.conj(phi[out]))[None, :]
+    ci = (nf[jj] * np.conj(phi[jj]))[None, :]
     for it in range(itemax):
-        acc = np.zeros(Ng, dtype=np.complex128)          # nf-weighted sum_n <phi* f>(x)
-        for i in out:
-            j = int(refl[i])
-            ds = dx / abs(vx[i])
-            D_in = phi[j] * Damp[::-1]
-            D_out = phi[i] * Damp
-            Dpath = np.concatenate([D_in, D_out])
-            ga0, _ = riccati_homogeneous(omega, Dpath[0])
-            gamma = _integrate_vec(omega, Dpath, hvf, ds, ga0)
-            _, gb0 = riccati_homogeneous(omega, Dpath[-1])
-            gammat = _integrate_vec(omega, np.conj(Dpath[::-1]), hvf, ds, gb0)[::-1]
-            _, f, _ = propagators_from_riccati(gamma, gammat)
-            f_out = f[Ng:].sum(axis=1)                    # sum over Matsubara
-            f_in = f[:Ng][::-1].sum(axis=1)
-            acc += nf[i] * np.conj(phi[i]) * f_out + nf[j] * np.conj(phi[j]) * f_in
+        _, f_out, _, f_in = _surface_chords(Damp, phi[out], phi[jj], omega, hvf, dx, vproj)
+        fo = f_out.sum(axis=2)                            # [Ng, Nchord], summed over freq
+        fi = f_in.sum(axis=2)
+        acc = (co * fo + ci * fi).sum(axis=1)             # nf-weighted FS average [Ng]
         Damp_new = np.maximum(coupling * 2.0 * temp * acc.real, 0.0)
         err = np.abs(Damp_new - Damp).max() / Dbulk
         Damp = (1.0 - mix) * Damp + mix * Damp_new

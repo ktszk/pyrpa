@@ -33,8 +33,8 @@ geometry is the genuine 2D lattice -- not the circular-cell approximation.
 """
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
-from ._eilenberger import matsubara, riccati_homogeneous, propagators_from_riccati
-from ._eilenberger_surface import _integrate_vec, _bulk_gap
+from ._eilenberger import matsubara
+from ._eilenberger_surface import _bulk_gap
 from ._eilenberger_vortex import _ff_vortex, _chords_batch
 
 
@@ -94,16 +94,6 @@ def _periodic_interp(field, Ng):
     fp[Ng, Ng] = field[0, 0]
     ax = np.linspace(0.0, 1.0, Ng + 1)
     return RegularGridInterpolator((ax, ax), fp, bounds_error=False, fill_value=None)
-
-
-def _chord(omega2d, Delta2d, hvf, ds):
-    """g, f along one chord with position-dependent (complex) frequency, real Delta."""
-    ga0, _ = riccati_homogeneous(omega2d[0], Delta2d[0])
-    gamma = _integrate_vec(omega2d, Delta2d, hvf, ds, ga0)
-    _, gb0 = riccati_homogeneous(omega2d[-1], Delta2d[-1])
-    gammat = _integrate_vec(omega2d[::-1], np.conj(Delta2d[::-1]), hvf, ds, gb0)[::-1]
-    g, f, _ = propagators_from_riccati(gamma, gammat)
-    return g, f
 
 
 def _sample_pts(interp, x, y, Minv):
