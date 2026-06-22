@@ -251,3 +251,160 @@ def matrix_trajectory_gf(omega: complex, Dpath, hvf: float, ds: float, h: float 
     for i in range(Ns):
         g[i], f[i] = matrix_gf(a[i], b[i])
     return g, f
+
+
+# --------------------------------------------------------------------------- #
+#  Self-consistent d-vector TEXTURE at a specular surface (triplet)
+# --------------------------------------------------------------------------- #
+def _default_dvector_channels():
+    """Triplet d = cos(b) e_x (orbital p_x, sign-changing at an x-surface) +
+    sin(b) e_z (orbital p_y, even).  Spin matrices Shat_x = sigma_x i sigma_y =
+    diag(-1,1) and Shat_z = sigma_z i sigma_y = sigma_x are both traceless and give
+    a unitary gap; the e_y component (Shat_y proportional to identity) is avoided
+    because the identity piece is not handled by the unitary matrix Riccati bulk
+    seed.  Each orbital factor is normalized to <|phi|^2>=1 over the circle."""
+    sx, sy, sz = _pauli()
+    isy = 1j * sy
+    return [('px(e_x)', (lambda b: np.sqrt(2.0) * np.cos(b)), sx @ isy),
+            ('py(e_z)', (lambda b: np.sqrt(2.0) * np.sin(b)), sz @ isy)]
+
+
+def _bulk_dvector(couplings, temp, om, beta, w, phitil, eps=1e-10, itemax=2000, mix=0.5):
+    """Coupled bulk amplitudes D_a of a multi-component unitary triplet with per-
+    channel couplings.  R(beta) = sqrt(w^2 + sum_b (D_b phi_b)^2) couples the
+    channels; gap_a: D_a = lambda_a T sum_n < phi_a^2 D_a / R > over the full
+    direction set.  Returns the vector (D_a).  Subcritical channels relax to 0."""
+    nc = len(phitil)
+    lam = np.asarray(couplings, dtype=float)
+    phi = np.array([phitil[a](beta) for a in range(nc)])               # [nc, Nb] outgoing
+    phii = np.array([phitil[a](np.pi - beta) for a in range(nc)])      # reflected branch
+    D = np.full(nc, 1.764 * temp)
+    for _ in range(itemax):
+        s2 = ((D[:, None] * phi) ** 2).sum(axis=0)                     # sum_b (D_b phi_b)^2 [Nb]
+        s2i = ((D[:, None] * phii) ** 2).sum(axis=0)
+        Ro = np.sqrt(om[None, :] ** 2 + s2[:, None])                   # [Nb, Nw]
+        Ri = np.sqrt(om[None, :] ** 2 + s2i[:, None])
+        Dnew = np.empty(nc)
+        for a in range(nc):
+            amp = (w * (phi[a][:, None] ** 2 / Ro).sum(axis=1)).sum() \
+                + (w * (phii[a][:, None] ** 2 / Ri).sum(axis=1)).sum()
+            Dnew[a] = max(lam[a] * temp * D[a] * amp, 0.0)
+        if np.abs(Dnew - D).max() < eps * max(Dnew.max(), eps):
+            return Dnew
+        D = (1.0 - mix) * D + mix * Dnew
+    return D
+
+
+def solve_surface_dvector(couplings, temp, omega, channels=None, Dbulk=None,
+                          Lxi=8.0, nper=8, Nbeta=16, hvf=1.0, cos_min=0.06,
+                          eps=3e-3, itemax=60, mix=0.4):
+    """
+    @fn solve_surface_dvector
+    @brief Self-consistent d-vector TEXTURE at a specular surface (x>=0) for a
+    multi-component unitary triplet, via the 2x2 spin-matrix Riccati.  Each spin
+    component a has an orbital form factor phi_a(beta), a spin matrix Shat_a, and its
+    own coupling lambda_a; the (complex) spatial amplitude Delta_a(x) is solved
+    self-consistently.  Components whose orbital factor is sign-changing under
+    specular reflection (beta -> pi-beta) are suppressed at the surface, so a
+    dominant + subdominant pair makes the net d-vector reorient in spin space as the
+    surface is approached -- the texture.
+    @param couplings: per-channel lambda_a (use a dominant + subdominant pair).
+    @return (x, Damp [Ncomp, Ng] complex, Dbulk [Ncomp])
+    """
+    if channels is None:
+        channels = _default_dvector_channels()
+    nc = len(channels)
+    lam = np.asarray(couplings, dtype=float)
+    Smats = [S for _, _, S in channels]
+    Sd = [np.conj(S).T for S in Smats]
+    trSS = [np.trace(Sd[a] @ Smats[a]).real for a in range(nc)]
+    phitil = [ch[1] for ch in channels]
+    om = np.concatenate([omega, -omega])                  # full +/- Matsubara set
+    bmax = 0.5 * np.pi * (1.0 - cos_min)
+    beta = np.linspace(-bmax, bmax, Nbeta)
+    cosb = np.cos(beta)
+    w = 1.0 / (2.0 * Nbeta)                               # per branch (full circle uniform)
+    if Dbulk is None:
+        Dbulk = _bulk_dvector(lam, temp, om, beta, w, phitil)
+    Dref = float(np.max(Dbulk))
+    if Dref <= 1.0e-6 * temp:
+        xi = hvf / (np.pi * max(temp, 1e-12))
+        x = np.linspace(0.0, Lxi * xi, int(Lxi * nper))
+        return x, np.zeros((nc, len(x)), dtype=np.complex128), Dbulk
+    xi = hvf / (np.pi * Dref)
+    Ng = int(Lxi * nper)
+    x = np.linspace(0.0, Lxi * xi, Ng)
+    dx = x[1] - x[0]
+    # seed: each channel toward its bulk value (texture emerges from self-consistency)
+    Damp = np.array([Dbulk[a] * np.tanh(x / xi) for a in range(nc)], dtype=np.complex128)
+    fo = np.array([phitil[a](beta) for a in range(nc)])         # [nc, Nb] outgoing
+    fi = np.array([phitil[a](np.pi - beta) for a in range(nc)]) # [nc, Nb] incoming
+    for it in range(itemax):
+        acc = np.zeros((nc, Ng), dtype=np.complex128)
+        for ib in range(Nbeta):
+            ds = dx / cosb[ib]
+            # unfolded gap matrix path: incoming (x=L..0) then outgoing (x=0..L)
+            Dpath = np.zeros((2 * Ng, 2, 2), dtype=np.complex128)
+            for a in range(nc):
+                amp_path = np.concatenate([fi[a, ib] * Damp[a][::-1], fo[a, ib] * Damp[a]])
+                Dpath += amp_path[:, None, None] * Smats[a]
+            for wn in om:                                            # loop Matsubara
+                _, f = matrix_trajectory_gf(wn, Dpath, hvf, ds, h=0.0)
+                f_out = f[Ng:]
+                f_in = f[:Ng][::-1]
+                for a in range(nc):
+                    po = np.einsum('ij,xji->x', Sd[a], f_out) / trSS[a]
+                    pi_ = np.einsum('ij,xji->x', Sd[a], f_in) / trSS[a]
+                    acc[a] += w * (np.conj(fo[a, ib]) * po + np.conj(fi[a, ib]) * pi_)
+        Damp_new = (lam[:, None] * temp) * acc            # complex (allows TRSB phase)
+        err = np.abs(Damp_new - Damp).max() / Dref
+        Damp = (1.0 - mix) * Damp + mix * Damp_new
+        if err < eps:
+            break
+    return x, Damp, Dbulk
+
+
+def calc_surface_dvector(coupling, temp, wc, kb=1.0, Lxi=8.0, nper=8, Nbeta=16,
+                         sub_ratio=0.9):
+    """
+    @fn calc_surface_dvector
+    @brief Driver: self-consistent d-vector texture at a specular surface of a
+    triplet superconductor.  The bulk orders in the dominant p_x channel (spin e_x,
+    orbital cos(b), sign-changing at an x-surface, lambda); a subdominant p_y channel
+    (spin e_y, orbital sin(b), even, lambda*sub_ratio) is also retained.  The dominant
+    p_x is pair-broken at the surface, so the (relatively enhanced) p_y component
+    rotates the net d-vector toward e_y -- the d-vector texture.  Reports the spatial
+    component amplitudes and the rotation angle theta_d(x) = atan2(|Dpy|,|Dpx|), the
+    relative phase (90 deg = time-reversal-broken p_x + i p_y surface state), and
+    writes 'surface_dvector.dat'.
+    @param sub_ratio: lambda_py / lambda_px (subdominant strength)
+    """
+    omega = matsubara(temp, wc)
+    couplings = (coupling, coupling * sub_ratio)
+    print("d-vector texture at a specular surface (triplet p_x + subdominant p_y, spin-matrix Riccati)", flush=True)
+    print(f"T={temp/kb:.2f} K, lambda_px={couplings[0]:.3f}, lambda_py={couplings[1]:.3f}, "
+          f"{len(omega)} Matsubara freqs, Nbeta={Nbeta}, grid={int(Lxi*nper)}", flush=True)
+    x, Damp, Dbulk = solve_surface_dvector(couplings, temp, omega, Lxi=Lxi, nper=nper, Nbeta=Nbeta)
+    Dref = float(np.max(np.abs(Dbulk)))
+    if Dref <= 0.0:
+        print("normal state (Dbulk=0); nothing to profile", flush=True)
+        return x, Damp
+    xi = 1.0 / (np.pi * Dref)
+    apx, apy = np.abs(Damp[0]), np.abs(Damp[1])
+    theta = np.degrees(np.arctan2(apy, np.maximum(apx, 1e-12)))            # d-vector tilt
+    relph = np.degrees(np.angle(Damp[1] / np.where(np.abs(Damp[0]) > 1e-12 * Dref, Damp[0], 1.0)))
+    print(f"Dbulk(px,py) = ({Dbulk[0].real:.4e}, {Dbulk[1].real:.4e}) eV,  xi = {xi:.4g}", flush=True)
+    print(f"  surface: |Dpx|(0)/Db={apx[0]/Dref:.3f}  |Dpy|(0)/Db={apy[0]/Dref:.3f}  "
+          f"theta_d(0)={theta[0]:.1f} deg  rel.phase={relph[0]:.1f} deg", flush=True)
+    print(f"  bulk:    |Dpx|(L)/Db={apx[-1]/Dref:.3f}  |Dpy|(L)/Db={apy[-1]/Dref:.3f}  "
+          f"theta_d(L)={theta[-1]:.1f} deg", flush=True)
+    print(f"  TEXTURE: d-vector tilt theta_d {theta[-1]:.1f} deg (bulk) -> {theta[0]:.1f} deg (surface)", flush=True)
+    try:
+        with open('surface_dvector.dat', 'w') as fh:
+            fh.write("# x/xi  |Dpx|/Db  |Dpy|/Db  theta_d[deg]  rel.phase[deg]\n")
+            for j in range(len(x)):
+                fh.write(f"{x[j]/xi:10.4f} {apx[j]/Dref:12.5e} {apy[j]/Dref:12.5e} "
+                         f"{theta[j]:9.3f} {relph[j]:9.3f}\n")
+    except IOError as e:
+        print(f"Error writing surface_dvector.dat: {e}", flush=True)
+    return x, Damp

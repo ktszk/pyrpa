@@ -188,6 +188,8 @@ eil_ldos=True            #True: also compute the real-frequency LDOS (bound/core
 eil_surf_beta=0.785398   #surface orientation [rad]: 0=[100], pi/4(0.7854)=[110] (d-wave ZEBS)
 eil_surf_h=0.0           #Zeeman (Maki) field [eV] for the surface LDOS (splits the d[110] ZEBS into +-h)
 eil_surf_fs=None         #model FS for the surface LDOS: None=isotropic cylinder, else 'iso'/'ellipse'/'tb' (uses eil_fs_params)
+eil_surf_dvector=False   #True: self-consistent triplet d-vector TEXTURE at the surface (dominant p_x(e_x) + subdominant p_y(e_z), spin-matrix Riccati)
+eil_dvec_subratio=0.9    #subdominant/dominant coupling ratio for the d-vector texture (~0.85 is the bulk threshold)
 eil_vort_lxi=8.0         #vortex cell half-width in coherence lengths xi (isolated vortex, field=0)
 eil_vort_ngrid=81        #vortex 2D grid points per axis
 eil_vort_h=0.0           #Zeeman (Maki) field [eV] for the vortex core LDOS (spin-splits the core bound states)
@@ -1367,9 +1369,12 @@ def main():
                                    method=eil_method,sw_find_tc=eil_find_tc,sw_imp_sweep=eil_imp_sweep,
                                    imp_sweep=eil_imp_list)
     elif option==CalcMode.EILENBERGER_SURFACE: #specular surface state via Riccati Eilenberger (model FS)
-        plibs.calc_surface(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,beta_surf=eil_surf_beta,
-                           kb=kb,sw_ldos=eil_ldos,imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,h=eil_surf_h,
-                           fs_kind=eil_surf_fs,fs_params=eil_fs_params)
+        if eil_surf_dvector: #self-consistent triplet d-vector texture (spin-matrix Riccati)
+            plibs.calc_surface_dvector(eil_coupling,temp,eil_wc,kb=kb,sub_ratio=eil_dvec_subratio)
+        else:
+            plibs.calc_surface(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,beta_surf=eil_surf_beta,
+                               kb=kb,sw_ldos=eil_ldos,imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,h=eil_surf_h,
+                               fs_kind=eil_surf_fs,fs_params=eil_fs_params)
     elif option==CalcMode.EILENBERGER_VORTEX: #vortex / vortex lattice via Riccati Eilenberger (model FS)
         if eil_field_list is not None: #sweep B/Hc2 on the TRUE periodic lattice -> <N(0)>(B) (d~sqrt(B) Volovik)
             plibs.calc_vortex_lattice_periodic(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,
