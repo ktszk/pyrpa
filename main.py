@@ -1427,10 +1427,10 @@ def main():
                  if eil_vort_fs=='wannier' else None)  #FS geometry only (d-vector channels carry the gap)
             plibs.calc_vortex_dvector(eil_coupling,temp,eil_wc,kb=kb,sub_ratio=eil_dvec_subratio,
                                       field=eil_field,fs=dfs)
-        elif eil_vort_lattice_sc and eil_field_list is not None: #je-style self-consistent periodic lattice (formulation A); finite eil_kappa = London A back-reaction, >=1e3 = bare extreme
+        elif eil_vort_lattice_sc and eil_field_list is not None: #je-style self-consistent periodic lattice (formulation A); eil_lattice square/triangular; eil_nvortex=Vw flux quanta/cell; finite eil_kappa = London A back-reaction, >=1e3 = bare extreme
             plibs.calc_vortex_lattice_sc(eil_coupling,temp,eil_wc,gap_sym=eil_gs,
                                          field_list=eil_field_list,lattice=eil_lattice,kb=kb,fs=eil_fs_obj,
-                                         kappa=(None if eil_kappa>=1e3 else eil_kappa))
+                                         kappa=(None if eil_kappa>=1e3 else eil_kappa),Vw=eil_nvortex)
         elif eil_field_list is not None: #sweep B/Hc2 on the TRUE periodic lattice -> <N(0)>(B) (d~sqrt(B) Volovik)
             plibs.calc_vortex_lattice_periodic(eil_coupling,temp,eil_wc,gap_sym=eil_gs,
                                                field_list=eil_field_list,kappa=eil_kappa,lattice=eil_lattice,kb=kb,

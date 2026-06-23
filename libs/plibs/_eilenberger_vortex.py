@@ -1185,35 +1185,66 @@ def calc_vortex_maxwell(coupling, temp, wc, gap_sym='s', field=0.2, kappa=2.0, k
 # Extreme type-II (A=0): the supercurrent/Volovik shift emerges from the phase
 # variation of the complex Delta sampled along each chord.
 # --------------------------------------------------------------------------- #
-def _abrikosov_z(x, y, a, np_sum=6):
-    """Abrikosov (lowest-Landau-level) quasi-periodic order parameter on a square
-    lattice of period ``a`` (Dr=Dly/Dlx=1, zeta=0), shifted so the single vortex
-    sits at the cell centre (0,0).  Returns the complex theta-function value; its
-    phase is the vortex winding, its modulus ~1 between vortices and 0 at the core."""
-    xs = x - 0.5 * a                                   # shift zero from corner to centre
-    ys = y + 0.5 * a
-    Z = np.zeros(np.broadcast(xs, ys).shape, dtype=np.complex128)
+def _cell_geom(field, xi, lattice='square', nflux=1):
+    """Magnetic-cell geometry (je convention): rectangular generators (Dlx, Dly) with
+    obliqueness zeta so the primitive translations are a1=((1-zeta)Dlx, -Dly),
+    a2=(zeta Dlx, Dly) and the cell holds ``nflux`` flux quanta (area Dlx*Dly =
+    nflux*2 pi xi^2 / field).  square -> (1,1,0); triangular (Abrikosov ground state)
+    -> (1, sqrt3/2, 1/2).  Returns a dict with Dlx,Dly,zeta, a1,a2, reciprocal b1,b2, S."""
+    if lattice.startswith('s'):
+        Dlx0, Dly0, zeta = 1.0, 1.0, 0.0
+    else:                                              # triangular / hexagonal
+        Dlx0, Dly0, zeta = 1.0, np.sqrt(3.0) * 0.5, 0.5
+    Lsc = xi * np.sqrt(nflux * 2.0 * np.pi / (field * Dlx0 * Dly0))
+    Dlx, Dly = Dlx0 * Lsc, Dly0 * Lsc
+    a1 = np.array([(1.0 - zeta) * Dlx, -Dly])
+    a2 = np.array([zeta * Dlx, Dly])
+    M = np.column_stack([a1, a2])
+    B = 2.0 * np.pi * np.linalg.inv(M).T
+    return dict(Dlx=Dlx, Dly=Dly, zeta=zeta, a1=a1, a2=a2,
+                b1=B[:, 0], b2=B[:, 1], S=abs(Dlx * Dly), nflux=nflux)
+
+
+def _to_frac(x, y, g):
+    """Cartesian -> fractional cell coordinates (r1, r2) (inverse of the je map
+    x=(r1(1-z)+r2 z)Dlx, y=(-r1+r2)Dly)."""
+    return x / g['Dlx'] - g['zeta'] * y / g['Dly'], x / g['Dlx'] + (1.0 - g['zeta']) * y / g['Dly']
+
+
+def _abrikosov_z(x, y, g, np_sum=6):
+    """Abrikosov (lowest-Landau-level) quasi-periodic order parameter for the magnetic
+    cell ``g`` (je's Sabrikosov; Dr=Dly/Dlx, obliqueness zeta, one zero per primitive
+    cell at Dx0=-0.5(1+zeta), Dy0=-0.5).  Its phase is the vortex winding, its modulus
+    ~1 between vortices and 0 at each core; works for square and triangular cells."""
+    Dlx, Dly, zeta = g['Dlx'], g['Dly'], g['zeta']
+    Dr = Dly / Dlx
+    Dx0, Dy0 = -0.5 * (1.0 + zeta), -0.5
+    xl, yl = x / Dlx, y / Dly
+    Z = np.zeros(np.broadcast(x, y).shape, dtype=np.complex128)
     for p in range(-np_sum, np_sum + 1):
-        Z += np.exp(-np.pi * (ys / a + p) ** 2) * np.exp(-2j * np.pi * (p + 0.0) * xs / a)
-    Z *= np.sqrt(np.sqrt(2.0))
-    return Z * np.exp(-1j * np.pi * xs / a * ys / a)
+        Z += (np.exp(-np.pi * Dr * (yl + Dy0 + p) ** 2)
+              * np.exp(-2j * np.pi * (p * (Dx0 + p * zeta * 0.5) + (Dy0 + p) * xl)))
+    Z *= np.sqrt(np.sqrt(2.0 * Dr))
+    return Z * np.exp(-1j * np.pi * xl * yl)
 
 
-def _abrikosov_unit_phase(x, y, a):
-    """Unit phase factor e^{i chi(r)} of the vortex winding (conjugate convention,
-    matching je's conj(Zphase)): chi = -arg(Abrikosov)."""
-    Z = _abrikosov_z(x, y, a)
+def _abrikosov_unit_phase(x, y, g, Vw=1):
+    """Unit phase factor e^{i chi(r)} = (conj(Abrikosov)/|Abrikosov|)^Vw  (conjugate
+    convention, je's conj(Zphase)^Vw); Vw>1 gives a multiply-quantized (giant) vortex."""
+    Z = _abrikosov_z(x, y, g)
     az = np.abs(Z)
-    return np.where(az > 1e-12, np.conj(Z) / np.where(az > 1e-12, az, 1.0), 1.0 + 0.0j)
+    u = np.where(az > 1e-12, np.conj(Z) / np.where(az > 1e-12, az, 1.0), 1.0 + 0.0j)
+    return u if Vw == 1 else u ** Vw
 
 
-def _periodic_eval(field, a, px, py):
-    """Bilinear interpolation of a cell-centred field [Ng,Ng] (grid points at
-    x_k=((k+0.5)/Ng-0.5)*a) at scattered points (px,py), with periodic wrap.
-    Returns px.shape.  Real field only (the amplitude)."""
+def _periodic_eval(field, g, px, py):
+    """Bilinear interpolation of a cell-centred field [Ng,Ng] (grid points at fractional
+    (k+0.5)/Ng-0.5) at scattered Cartesian points (px,py), with periodic wrap on the
+    (oblique) cell.  Real field only (the amplitude)."""
     Ng = field.shape[0]
-    u = ((px / a + 0.5) % 1.0) * Ng - 0.5              # grid point k sits at u=k
-    v = ((py / a + 0.5) % 1.0) * Ng - 0.5
+    f1, f2 = _to_frac(px, py, g)
+    u = ((f1 + 0.5) % 1.0) * Ng - 0.5                  # grid point k sits at u=k
+    v = ((f2 + 0.5) % 1.0) * Ng - 0.5
     i0 = np.floor(u).astype(int); j0 = np.floor(v).astype(int)
     wu = u - i0; wv = v - j0
     i0m = i0 % Ng; i1 = (i0 + 1) % Ng
@@ -1222,26 +1253,29 @@ def _periodic_eval(field, a, px, py):
             + (1 - wu) * wv * field[i0m, j1] + wu * wv * field[i1, j1])
 
 
-def _london_A(a, lam, nfft=64):
-    """Finite-kappa (London) vector potential A(r) on the square cell, as the
-    low-pass-filtered bare supervelocity:  A(K) = (grad(chi)/2)(K) / (1 + lambda^2 K^2).
-    The filter makes A SMOOTH and regular at the core (so subtracting v_F.A does NOT
-    cancel the node-enforcing winding of the complex Delta), keeps the uniform piece
-    (K=0 -> the symmetric-gauge vector potential, removing the spurious bare uniform
-    circulation) and screens the periodic supercurrent over lambda.  lambda->inf keeps
-    only K=0 (uniform A removed, no screening); lambda->0 -> A=grad(chi)/2 (p_s->0).
-    @return (Ax, Ay) cell-centred grids [nfft,nfft]
+def _london_A(g, lam, Vw=1, nfft=64):
+    """Finite-kappa (London) vector potential A(r) on the magnetic cell ``g``, as the
+    low-pass-filtered bare supervelocity:  A(K) = (grad(chi)/2)(K) / (1 + lambda^2 K^2),
+    K = m b1 + n b2.  The filter makes A SMOOTH and regular at the core (so -v_F.A does
+    NOT cancel the node-enforcing winding), keeps the uniform piece (K=0 -> removes the
+    spurious bare uniform circulation) and screens the periodic supercurrent over lambda.
+    Returned on the cell-centred fractional grid; sample with _periodic_eval.
+    @return (Ax, Ay) [nfft,nfft]
     """
-    xg = (np.arange(nfft) + 0.5) / nfft * a - 0.5 * a
-    X, Y = np.meshgrid(xg, xg, indexing='ij')
-    h = 1e-3 * a
-    U = _abrikosov_unit_phase(X, Y, a)
-    gx = 0.5 * np.imag(np.conj(U) * (_abrikosov_unit_phase(X + h, Y, a)
-                                     - _abrikosov_unit_phase(X - h, Y, a)) / (2 * h))
-    gy = 0.5 * np.imag(np.conj(U) * (_abrikosov_unit_phase(X, Y + h, a)
-                                     - _abrikosov_unit_phase(X, Y - h, a)) / (2 * h))
-    kx = 2.0 * np.pi * np.fft.fftfreq(nfft, d=a / nfft)
-    KX, KY = np.meshgrid(kx, kx, indexing='ij')
+    fax = (np.arange(nfft) + 0.5) / nfft - 0.5
+    F1, F2 = np.meshgrid(fax, fax, indexing='ij')
+    X = F1 * g['a1'][0] + F2 * g['a2'][0]
+    Y = F1 * g['a1'][1] + F2 * g['a2'][1]
+    h = 1e-3 * np.sqrt(g['S'])
+    U = _abrikosov_unit_phase(X, Y, g, Vw)
+    gx = 0.5 * np.imag(np.conj(U) * (_abrikosov_unit_phase(X + h, Y, g, Vw)
+                                     - _abrikosov_unit_phase(X - h, Y, g, Vw)) / (2 * h))
+    gy = 0.5 * np.imag(np.conj(U) * (_abrikosov_unit_phase(X, Y + h, g, Vw)
+                                     - _abrikosov_unit_phase(X, Y - h, g, Vw)) / (2 * h))
+    m = np.fft.fftfreq(nfft) * nfft                    # integer Fourier indices
+    M1, M2 = np.meshgrid(m, m, indexing='ij')
+    KX = M1 * g['b1'][0] + M2 * g['b2'][0]
+    KY = M1 * g['b1'][1] + M2 * g['b2'][1]
     H = 1.0 / (1.0 + lam ** 2 * (KX ** 2 + KY ** 2))
     Ax = np.fft.ifft2(np.fft.fft2(gx) * H).real
     Ay = np.fft.ifft2(np.fft.fft2(gy) * H).real
@@ -1249,14 +1283,18 @@ def _london_A(a, lam, nfft=64):
 
 
 def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='square',
-                     Ng=20, nbeta=16, hvf=1.0, fs=None, kappa=None, Lchord=6.0, ds_xi=0.3,
-                     itemax=60, mix=0.4, eps=3.0e-3, anderson=True, m_and=4, seed_profile=None):
+                     Ng=20, nbeta=16, hvf=1.0, fs=None, kappa=None, Vw=1, Lchord=6.0,
+                     ds_xi=0.3, itemax=60, mix=0.4, eps=3.0e-3, anderson=True, m_and=4,
+                     seed_profile=None):
     """
     @fn solve_lattice_sc
     @brief Self-consistent complex order parameter Psi(r)=|Psi|(r) e^{i chi(r)} of a
-    true periodic vortex lattice (square), je-style: formulation A (phase kept in
-    Delta) with the analytic Abrikosov winding chi(r), closed by per-grid-point
-    anchored trajectories (the f-to-grid map is exact, not binned).
+    true periodic vortex lattice, je-style: formulation A (phase kept in Delta) with
+    the analytic Abrikosov winding chi(r), closed by per-grid-point anchored
+    trajectories (the f-to-grid map is exact, not binned).
+    @param lattice: 'square' or 'triangular' (Abrikosov ground state; oblique cell).
+    @param Vw: vortex winding number / flux quanta per cell (1 = single vortex;
+    Vw>1 = a multiply-quantized giant vortex, area scaled to hold Vw quanta).
     @param kappa: None -> bare extreme limit (Doppler = analytic grad(chi)/2 only, no
     uniform-A subtraction); finite -> the je finite-kappa back-reaction, where the
     smooth London vector potential A(r)=lowpass(grad chi/2) (_london_A) is subtracted
@@ -1278,11 +1316,13 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
     if Dbulk <= 0:
         return None
     xi = hvf_eff / (np.pi * Dbulk)
-    a1, a2, b1, b2, S, M = _lattice_vectors(field, xi, lattice, 1)
-    a = np.sqrt(S)
-    xg = (np.arange(Ng) + 0.5) / Ng * a - 0.5 * a      # cell-centred (vortex at 0,0 between points)
-    X, Y = np.meshgrid(xg, xg, indexing='ij')
-    chi_grid = np.angle(_abrikosov_unit_phase(X, Y, a))
+    g = _cell_geom(field, xi, lattice, nflux=Vw)        # oblique magnetic cell (Vw quanta)
+    a = np.sqrt(g['S'])
+    fax = (np.arange(Ng) + 0.5) / Ng - 0.5             # cell-centred fractional grid
+    F1, F2 = np.meshgrid(fax, fax, indexing='ij')
+    X = F1 * g['a1'][0] + F2 * g['a2'][0]
+    Y = F1 * g['a1'][1] + F2 * g['a2'][1]
+    chi_grid = np.angle(_abrikosov_unit_phase(X, Y, g, Vw))
     if fs is not None:
         dirs = np.arctan2(fs['vy'], fs['vx']); phi = fs_form_factor(fs, gap_sym)
         hvfarr = np.asarray(fs['vabs']); wt_dir = np.asarray(fs['nf']); nbd = len(dirs)
@@ -1296,7 +1336,7 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
     s = np.linspace(-L, L, ns)
     ax = X.ravel(); ay = Y.ravel(); Nanch = ax.size
     lam = kappa * xi if kappa is not None else None
-    Axg, Ayg = _london_A(a, lam) if lam is not None else (None, None)  # smooth screened A(r)
+    Axg, Ayg = _london_A(g, lam, Vw) if lam is not None else (None, None)  # smooth screened A(r)
     # pre-compute the fixed per-direction chord geometry, winding phase, projector and
     # (finite kappa) the screening Doppler -v_hat.A(r)
     chord = []
@@ -1304,15 +1344,15 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
         cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
         px = ax[None, :] + s[:, None] * cb             # [ns, Nanch]
         py = ay[None, :] + s[:, None] * sb
-        eichi = _abrikosov_unit_phase(px, py, a)       # e^{i chi} along the chord
+        eichi = _abrikosov_unit_phase(px, py, g, Vw)   # e^{i chi} along the chord
         proj = wt_dir[ib] * np.conj(phi[ib]) * np.conj(eichi[ic])   # strip phase at anchor
-        dch = (-(cb * _periodic_eval(Axg, a, px, py) + sb * _periodic_eval(Ayg, a, px, py))
+        dch = (-(cb * _periodic_eval(Axg, g, px, py) + sb * _periodic_eval(Ayg, g, px, py))
                if lam is not None else None)
         chord.append((px, py, eichi, proj, dch))
     if seed_profile is not None:                       # warm start (units of Dbulk)
         A = Dbulk * np.asarray(seed_profile)
     else:
-        A = Dbulk * np.tanh(np.sqrt(X ** 2 + Y ** 2) / xi)   # node at centre
+        A = Dbulk * np.tanh(np.abs(_abrikosov_z(X, Y, g)) / 0.5)   # node at each core
     Nw = len(omega)
     om0 = np.broadcast_to(omega, (ns, Nanch, Nw)).astype(np.complex128)
     # iteration-independent per-direction frequency arrays (Doppler is fixed)
@@ -1324,7 +1364,7 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
         accf = np.zeros(Nanch, dtype=np.complex128)
         for ib in range(nbd):
             px, py, eichi, proj, _ = chord[ib]
-            base = phi[ib] * _periodic_eval(Af, a, px, py) * eichi
+            base = phi[ib] * _periodic_eval(Af, g, px, py) * eichi
             dd3 = np.broadcast_to(base[:, :, None], (ns, Nanch, Nw))
             _, f = riccati_chords(om_dir[ib], np.ascontiguousarray(dd3), hvfarr[ib], ds)
             accf += proj * f[ic].sum(axis=1)
@@ -1345,12 +1385,13 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
         else:                                          # min || f_k - dF.gamma ||
             dF = np.column_stack([fs[i + 1] - fs[i] for i in range(len(fs) - 1)])
             dX = np.column_stack([xs[i + 1] - xs[i] for i in range(len(xs) - 1)])
-            g, *_ = np.linalg.lstsq(dF, fs[-1], rcond=None)
-            A_next = xs[-1] + mix * fs[-1] - (dX + mix * dF) @ g
+            gam, *_ = np.linalg.lstsq(dF, fs[-1], rcond=None)
+            A_next = xs[-1] + mix * fs[-1] - (dX + mix * dF) @ gam
         A = np.maximum(A_next.reshape(Ng, Ng), 0.0)
     return dict(X=X, Y=Y, absD=A, Psi=A * np.exp(1j * chi_grid), chi=chi_grid,
-                Dbulk=Dbulk, xi=xi, a=a, S=S, Minv=np.linalg.inv(M), b1=b1, b2=b2,
-                a1=a1, a2=a2, acell=a, kappa=kappa, iters=it + 1, err=err)
+                Dbulk=Dbulk, xi=xi, a=a, S=g['S'], geom=g, b1=g['b1'], b2=g['b2'],
+                a1=g['a1'], a2=g['a2'], acell=a, kappa=kappa, Vw=Vw,
+                iters=it + 1, err=err)
 
 
 def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None,
@@ -1366,11 +1407,12 @@ def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None
     N(w)/N0 = <Re g(anchor)>_{grid, FS}.
     @return N(w)/N0 [Nw]
     """
-    A = state['absD']; chi = state['chi']; xi = state['xi']; a = state['a']
+    A = state['absD']; xi = state['xi']
     Dbulk = state['Dbulk']; Ng = A.shape[0]
     X, Y = state['X'], state['Y']
+    g = state['geom']; Vw = state.get('Vw', 1)
     kappa = state.get('kappa'); lam = kappa * xi if kappa is not None else None
-    Axg, Ayg = _london_A(a, lam) if lam is not None else (None, None)
+    Axg, Ayg = _london_A(g, lam, Vw) if lam is not None else (None, None)
     if delta is None:
         delta = 0.03 * Dbulk
     zomega = delta - 1j * np.asarray(wlist)
@@ -1393,26 +1435,29 @@ def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None
         cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
         px = ax[None, :] + s[:, None] * cb
         py = ay[None, :] + s[:, None] * sb
-        eichi = _abrikosov_unit_phase(px, py, a)
-        base = phi[ib] * _periodic_eval(A, a, px, py) * eichi
+        eichi = _abrikosov_unit_phase(px, py, g, Vw)
+        base = phi[ib] * _periodic_eval(A, g, px, py) * eichi
         dd3 = np.broadcast_to(base[:, :, None], (ns, Nanch, Nw))
         om3 = (om0 if lam is None else
                zomega[None, None, :] - 1j * hvfarr[ib]
-               * (cb * _periodic_eval(Axg, a, px, py)
-                  + sb * _periodic_eval(Ayg, a, px, py))[:, :, None])
-        g, _ = riccati_chords(np.ascontiguousarray(om3), np.ascontiguousarray(dd3), hvfarr[ib], ds)
-        gsum += wt_dir[ib] * g[ic].real.mean(axis=0)   # <Re g> over anchors
+               * (cb * _periodic_eval(Axg, g, px, py)
+                  + sb * _periodic_eval(Ayg, g, px, py))[:, :, None])
+        gg, _ = riccati_chords(np.ascontiguousarray(om3), np.ascontiguousarray(dd3), hvfarr[ib], ds)
+        gsum += wt_dir[ib] * gg[ic].real.mean(axis=0)   # <Re g> over anchors
     return gsum
 
 
 def calc_vortex_lattice_sc(coupling, temp, wc, gap_sym='d', field_list=None,
-                           lattice='square', kb=1.0, Ng=20, nbeta=16, fs=None, kappa=None):
+                           lattice='square', kb=1.0, Ng=20, nbeta=16, fs=None,
+                           kappa=None, Vw=1):
     """
     @fn calc_vortex_lattice_sc
     @brief Driver: je-style self-consistent PERIODIC vortex lattice (formulation A).
     Sweeps B/Hc2, self-consistently solves the complex order parameter Psi(r) (true
     node at every core, full Abrikosov-lattice supercurrent) and reports the
     spatially-averaged zero-energy DOS <N(0)>/N0(B) (d-wave ~sqrt(B) Volovik).
+    @param lattice: 'square' or 'triangular' (Abrikosov ground state).
+    @param Vw: flux quanta per cell (1; Vw>1 = a multiply-quantized giant vortex).
     @param kappa: None -> bare extreme limit; finite -> the je finite-kappa A(r)
     back-reaction (London-screened supercurrent, smooth vector potential), which
     removes the spurious uniform-A overcount and screens the Volovik DOS.
@@ -1423,7 +1468,7 @@ def calc_vortex_lattice_sc(coupling, temp, wc, gap_sym='d', field_list=None,
         field_list = [0.05, 0.1, 0.2, 0.35]
     print(f"self-consistent periodic vortex lattice (formulation A, "
           f"{'extreme type-II' if kappa is None else f'finite kappa={kappa}'}): "
-          f"{gap_sym}, {lattice}, lambda={coupling:.3f}, T={temp/kb:.2f} K"
+          f"{gap_sym}, {lattice}, Vw={Vw}, lambda={coupling:.3f}, T={temp/kb:.2f} K"
           f"{', FS+v_F' if fs is not None else ''}", flush=True)
     results = []
     last = None
@@ -1431,7 +1476,7 @@ def calc_vortex_lattice_sc(coupling, temp, wc, gap_sym='d', field_list=None,
     for b in field_list:
         st = solve_lattice_sc(coupling, temp, omega, gap_sym=gap_sym, field=b,
                               lattice=lattice, Ng=Ng, nbeta=nbeta, fs=fs, kappa=kappa,
-                              seed_profile=seed)
+                              Vw=Vw, seed_profile=seed)
         if st is None or st['Dbulk'] <= 0:
             print(f"  B/Hc2={b:.3f}: normal", flush=True)
             continue
