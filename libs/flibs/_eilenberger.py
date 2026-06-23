@@ -63,16 +63,20 @@ def matrix_riccati_chords(om: np.ndarray, Dpath: np.ndarray, hvf: float, ds: flo
     """
     @fn matrix_riccati_chords
     @brief 2x2 spin-matrix g, f along many chords, batched over frequencies (Fortran,
-    OpenMP over chords).  For the 2D vortex d-vector solver: one call per FS direction.
-    @param om: frequencies [Nw] complex128
+    OpenMP over chord x frequency).  For the 2D vortex d-vector solver: one call per FS
+    direction.  omega may be position dependent (Doppler v_F.Q on the vortex lattice).
+    @param om: frequencies [Nw] (constant along the chord) OR [Ns, Nchord, Nw]
     @param Dpath: 2x2 gap matrix along each chord [Ns, Nchord, 2, 2] complex128
     @param hvf, ds, h: hbar|v_F|, arc-length step, Zeeman energy
     @return (g, f): 2x2 propagators [Ns, Nchord, Nw, 2, 2] complex128
     """
-    om = np.ascontiguousarray(om, dtype=np.complex128)
     Dpath = np.ascontiguousarray(Dpath, dtype=np.complex128)
     Ns, Nchord = Dpath.shape[0], Dpath.shape[1]
-    Nw = om.shape[0]
+    om = np.asarray(om, dtype=np.complex128)
+    Nw = om.shape[-1]
+    if om.ndim == 1:                                   # broadcast constant-omega to the path
+        om = np.broadcast_to(om, (Ns, Nchord, Nw))
+    om = np.ascontiguousarray(om)
     g = np.empty((Ns, Nchord, Nw, 2, 2), dtype=np.complex128)
     f = np.empty((Ns, Nchord, Nw, 2, 2), dtype=np.complex128)
     _lib.matrix_riccati_chords(g, f, om, Dpath, dbl(hvf), dbl(ds), dbl(h),

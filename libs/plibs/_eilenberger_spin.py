@@ -383,23 +383,25 @@ def calc_surface_dvector(coupling, temp, wc, kb=1.0, Lxi=8.0, nper=8, Nbeta=16,
 # --------------------------------------------------------------------------- #
 def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0),
                            Dbulk=None, Lxi=7.0, ngrid=33, nbeta=16, hvf=1.0,
-                           eps=4.0e-3, itemax=40, mix=0.4):
+                           field=0.0, eps=4.0e-3, itemax=40, mix=0.4):
     """
     @fn solve_vortex2d_dvector
-    @brief Self-consistent d-vector TEXTURE around an isolated vortex of a
-    multi-component unitary triplet, via the 2x2 spin-matrix Riccati on the 2D plane
-    (the vortex analogue of solve_surface_dvector).  Each spin component a has an
-    orbital form factor phi_a(beta), a spin matrix Shat_a, a coupling lambda_a and a
-    phase WINDING m_a; its complex amplitude field A_a(r) (winding removed) is solved
-    self-consistently, Delta_hat(r,k) = sum_a phi_a(k) A_a(r) e^{i m_a theta} Shat_a.
+    @brief Self-consistent d-vector order parameter of a multi-component unitary
+    triplet around a vortex (field=0: isolated vortex) or on the circular-cell vortex
+    LATTICE (field=B/Hc2>0: Wigner-Seitz cell of radius Rc=sqrt(2/field)*xi with the
+    supercurrent Doppler shift), via the 2x2 spin-matrix Riccati on the 2D plane.
+    Each spin component a has an orbital form factor phi_a(beta), spin matrix Shat_a,
+    coupling lambda_a and phase WINDING m_a; its complex amplitude field A_a(r) (winding
+    removed) is solved self-consistently, Delta_hat(r,k)=sum_a phi_a(k) A_a(r) e^{i m_a theta} Shat_a.
     The dominant (m=1) component vanishes and is pair-broken in the core; a subdominant
     with a different winding (default m=0, core-localized) survives there, so the net
-    d-vector reorients in spin space across the core -- the d-vector texture.  (For
-    equal windings the axisymmetric profiles coincide and there is no radial texture.)
+    d-vector reorients in spin space across the core -- the d-vector texture.  With
+    field>0 the supercurrent v_F.Q fills the inter-vortex states (Volovik), entering as
+    a position-dependent Doppler shift omega -> omega + i v_F.Q in the matrix Riccati.
     @return (xg, A [Ncomp, ngrid, ngrid] complex, Dbulk [Ncomp], xi)
     """
     from scipy.interpolate import RegularGridInterpolator
-    from ._eilenberger_vortex import _eval_field
+    from ._eilenberger_vortex import _eval_field, _doppler_chord
     if channels is None:
         channels = _default_dvector_channels()
     nc = len(channels)
@@ -415,9 +417,11 @@ def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0
         Dbulk = _bulk_dvector(lam, temp, om, bb, 1.0 / (2.0 * nb0), phitil)
     Dref = float(np.max(Dbulk))
     xi = hvf / (np.pi * Dref)
-    R = Lxi * xi
+    Rc = np.sqrt(2.0 / field) * xi if field > 0.0 else np.inf   # Wigner-Seitz cell radius
+    R = Rc if field > 0.0 else Lxi * xi
     xg = np.linspace(-R, R, ngrid)
     dx = xg[1] - xg[0]
+    rho_min = 0.5 * dx
     X, Y = np.meshgrid(xg, xg, indexing='ij')
     Rg = np.sqrt(X ** 2 + Y ** 2)
     theta = np.arctan2(Y, X)
@@ -450,7 +454,12 @@ def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0
             for a in range(nc):
                 amp = phid[a, ib] * Ai[a]((Lx, Ly)) * thr ** mwind[a]   # [ns,nb]
                 Dpath += amp[:, :, None, None] * Smats[a]
-            _, fch = matrix_riccati_chords(om, np.ascontiguousarray(Dpath),
+            if field > 0.0:           # supercurrent Doppler om -> om + i v_F.Q (position dependent)
+                dop = hvf * _doppler_chord(Lx, Ly, Rc, cb, sb, rho_min)
+                om_ch = om[None, None, :] + 1j * dop[:, :, None]    # [ns,nb,Nw]
+            else:
+                om_ch = om                                          # [Nw] (broadcast in wrapper)
+            _, fch = matrix_riccati_chords(om_ch, np.ascontiguousarray(Dpath),
                                            hvf, dx, 0.0)            # [ns,nb,Nw,2,2]
             for a in range(nc):
                 fa = np.einsum('ij,snwji->sn', Sd[a], fch) / trSS[a]   # summed over freq
@@ -466,23 +475,25 @@ def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0
 
 
 def calc_vortex_dvector(coupling, temp, wc, kb=1.0, Lxi=7.0, ngrid=33, nbeta=16,
-                        sub_ratio=0.95):
+                        sub_ratio=0.95, field=0.0):
     """
     @fn calc_vortex_dvector
-    @brief Driver: self-consistent d-vector texture around an isolated vortex of a
-    triplet superconductor (dominant p_x(e_x) + subdominant p_y(e_z), 2D spin-matrix
-    Riccati).  The dominant component winds and is pair-broken in the core; the
-    subdominant is relatively enhanced there, so the net d-vector tilt
-    theta_d(r) = atan2(|A_pz|,|A_px|) reorients across the core.  Reports the radial
-    texture (along +x) and writes 'vortex_dvector.dat'.
+    @brief Driver: self-consistent d-vector order parameter of a triplet superconductor
+    around an isolated vortex (field=0) or on the circular-cell vortex LATTICE
+    (field=B/Hc2>0, with the supercurrent Doppler shift) -- dominant p_x(e_x) +
+    subdominant p_y(e_z), 2D spin-matrix Riccati.  The dominant component winds and is
+    pair-broken in the core; the subdominant is relatively enhanced there, so the net
+    d-vector tilt theta_d(r) = atan2(|A_pz|,|A_px|) reorients across the core.  Reports
+    the radial texture (along +x) and writes 'vortex_dvector.dat'.
     """
     omega = matsubara(temp, wc)
     couplings = (coupling, coupling * sub_ratio)
-    print("d-vector texture around a vortex (triplet p_x + subdominant p_y, 2D spin-matrix Riccati)", flush=True)
+    cell = 'isolated vortex' if field <= 0 else f'circular-cell lattice B/Hc2={field:.3f}'
+    print(f"d-vector vortex ({cell}): triplet p_x + subdominant p_y, 2D spin-matrix Riccati", flush=True)
     print(f"T={temp/kb:.2f} K, lambda_px={couplings[0]:.3f}, lambda_py={couplings[1]:.3f}, "
           f"{len(omega)} Matsubara freqs, grid={ngrid}x{ngrid}, nbeta={nbeta}", flush=True)
     xg, A, Dbulk, xi = solve_vortex2d_dvector(couplings, temp, omega, Lxi=Lxi,
-                                              ngrid=ngrid, nbeta=nbeta)
+                                              ngrid=ngrid, nbeta=nbeta, field=field)
     Dref = float(np.max(np.abs(Dbulk)))
     if Dref <= 0.0:
         print("normal state (Dbulk=0); nothing to profile", flush=True)

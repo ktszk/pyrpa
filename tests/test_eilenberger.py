@@ -432,6 +432,26 @@ def test_wannier_surface_zebs():
     assert res[1][0] > 0.8 and res[1][1] < 1.0        # d: flat + no ZEBS
 
 
+def test_spin_vortex_lattice_doppler():
+    """The self-consistent d-vector vortex lattice (field>0, circular cell): converges
+    with the supercurrent Doppler, keeps the core d-vector texture (theta_d ~ 90 deg at
+    the core), and the Doppler modifies the inter-vortex subdominant vs the isolated
+    vortex."""
+    wc, T = 0.2, 1.5e-3
+    om = E.matsubara(T, wc)
+    out = {}
+    for field in (0.0, 0.3):
+        xg, A, Db, xi = SP.solve_vortex2d_dvector((0.8, 0.8 * 0.95), T, om, windings=(1, 0),
+                                                  Lxi=7, ngrid=23, nbeta=10, itemax=25, field=field)
+        ic = len(xg) // 2
+        apx, apz = np.abs(A[0, ic:, ic]), np.abs(A[1, ic:, ic])
+        thc = np.degrees(np.arctan2(apz[0], max(apx[0], 1e-12)))
+        out[field] = (apx[0] / np.max(np.abs(Db)), thc, apz[-1] / np.max(np.abs(Db)))
+    assert out[0.0][0] < 0.1 and out[0.3][0] < 0.1     # dominant pair-broken in the core
+    assert out[0.0][1] > 75.0 and out[0.3][1] > 75.0   # d-vector ~ pure subdominant at core
+    assert abs(out[0.0][2] - out[0.3][2]) > 1e-3       # Doppler changes the inter-vortex subdominant
+
+
 def test_chiral_pip_gap_sym_minus3():
     """gap_sym = -3 is the chiral p+ip state: a complex form factor (px + i py) that
     is fully gapped (|phi| > 0 everywhere)."""

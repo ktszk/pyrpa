@@ -262,7 +262,8 @@ subroutine matrix_riccati_chords(g,f,om,Dpath,hvf,ds,h,Ns,Nchord,Nw) bind(C)
 !> by the 2D vortex d-vector solver (one call per Fermi-surface direction).
 !!@param   g,out: normal 2x2 propagator [Ns,Nchord,Nw,2,2] complex128
 !!@param   f,out: anomalous 2x2 propagator [Ns,Nchord,Nw,2,2] complex128
-!!@param  om, in: (renormalized) frequencies [Nw] complex128
+!!@param  om, in: (renormalized) frequency along each chord [Ns,Nchord,Nw] complex128
+!!                (position dependent, e.g. om + i v_F.Q Doppler shift)
 !!@param Dpath,in: 2x2 gap matrix along each chord [Ns,Nchord,2,2] complex128
 !!@param hvf,ds,h: hbar|v_F|, arc-length step, Zeeman energy
 !!@param Ns,Nchord,Nw,in: points per chord, chords, frequencies
@@ -270,7 +271,7 @@ subroutine matrix_riccati_chords(g,f,om,Dpath,hvf,ds,h,Ns,Nchord,Nw) bind(C)
   implicit none
   integer(c_int64_t),intent(in):: Ns,Nchord,Nw
   real(c_double),intent(in):: hvf,ds,h
-  complex(c_double),intent(in),dimension(Nw):: om
+  complex(c_double),intent(in),dimension(Nw,Nchord,Ns):: om
   complex(c_double),intent(in),dimension(2,2,Nchord,Ns):: Dpath
   complex(c_double),intent(out),dimension(2,2,Nw,Nchord,Ns):: g,f
   integer(c_int64_t) c,iw,i
@@ -293,17 +294,17 @@ subroutine matrix_riccati_chords(g,f,om,Dpath,hvf,ds,h,Ns,Nchord,Nw) bind(C)
   !$omp   private(i,Dmid,Nmat,Mexp,a,b,aa,bb,ab,P,res)
   do c=1,Nchord
      do iw=1,Nw
-        call bulk_root(om(iw),Dmat(:,:,1,c),.true.,a(:,:,1))
+        call bulk_root(om(iw,c,1),Dmat(:,:,1,c),.true.,a(:,:,1))
         do i=1,Ns-1
            Dmid=0.5d0*(Dmat(:,:,i,c)+Dmat(:,:,i+1,c))
-           call riccati_gen(om(iw),Dmid,h,1d0,sz,Nmat)
+           call riccati_gen(0.5d0*(om(iw,c,i)+om(iw,c,i+1)),Dmid,h,1d0,sz,Nmat)
            call expm4(Nmat*t,Mexp)
            call mobius(a(:,:,i),Mexp,a(:,:,i+1))
         end do
-        call bulk_root(om(iw),Dmat(:,:,Ns,c),.false.,b(:,:,Ns))
+        call bulk_root(om(iw,c,Ns),Dmat(:,:,Ns,c),.false.,b(:,:,Ns))
         do i=Ns,2,-1
            Dmid=0.5d0*(Dmat(:,:,i,c)+Dmat(:,:,i-1,c))
-           call riccati_gen(om(iw),Dmid,h,-1d0,sz,Nmat)
+           call riccati_gen(0.5d0*(om(iw,c,i)+om(iw,c,i-1)),Dmid,h,-1d0,sz,Nmat)
            call expm4(Nmat*t,Mexp)
            call mobius(b(:,:,i),Mexp,b(:,:,i-1))
         end do
