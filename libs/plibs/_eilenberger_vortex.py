@@ -1250,7 +1250,7 @@ def _london_A(a, lam, nfft=64):
 
 def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='square',
                      Ng=20, nbeta=16, hvf=1.0, fs=None, kappa=None, Lchord=6.0, ds_xi=0.3,
-                     itemax=60, mix=0.4, eps=3.0e-3):
+                     itemax=60, mix=0.4, eps=3.0e-3, anderson=True, m_and=4, seed_profile=None):
     """
     @fn solve_lattice_sc
     @brief Self-consistent complex order parameter Psi(r)=|Psi|(r) e^{i chi(r)} of a
@@ -1259,9 +1259,13 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
     anchored trajectories (the f-to-grid map is exact, not binned).
     @param kappa: None -> bare extreme limit (Doppler = analytic grad(chi)/2 only, no
     uniform-A subtraction); finite -> the je finite-kappa back-reaction, where the
-    physical screened supervelocity Q_Brandt(lambda=kappa*xi) replaces grad(chi)/2 via
-    an explicit Doppler shift (_screen_doppler): the uniform vector potential is
-    removed and the supercurrent is London-screened, reducing the Volovik DOS.
+    smooth London vector potential A(r)=lowpass(grad chi/2) (_london_A) is subtracted
+    as -v_F.A: the uniform vector potential is removed and the supercurrent is
+    London-screened (lambda=kappa*xi), reducing the Volovik DOS.
+    @param anderson,m_and: Anderson/Pulay acceleration of the self-consistency (m_and
+    history vectors); falls back to linear ``mix`` for the first step / if disabled.
+    @param seed_profile: optional [Ng,Ng] starting amplitude in units of the bulk gap
+    (e.g. a converged absD/Dbulk from a nearby field) for a warm start.
     @return state dict (X,Y,absD,Psi,chi,Dbulk,xi,a,...) for lattice_dos_sc
     """
     bfull = np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False)
@@ -1305,25 +1309,45 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
         dch = (-(cb * _periodic_eval(Axg, a, px, py) + sb * _periodic_eval(Ayg, a, px, py))
                if lam is not None else None)
         chord.append((px, py, eichi, proj, dch))
-    A = Dbulk * np.tanh(np.sqrt(X ** 2 + Y ** 2) / xi) # seed amplitude (node at centre)
+    if seed_profile is not None:                       # warm start (units of Dbulk)
+        A = Dbulk * np.asarray(seed_profile)
+    else:
+        A = Dbulk * np.tanh(np.sqrt(X ** 2 + Y ** 2) / xi)   # node at centre
     Nw = len(omega)
     om0 = np.broadcast_to(omega, (ns, Nanch, Nw)).astype(np.complex128)
-    for it in range(itemax):
+    # iteration-independent per-direction frequency arrays (Doppler is fixed)
+    om_dir = [om0 if dch is None
+              else np.ascontiguousarray(omega[None, None, :] + 1j * hvfarr[ib] * dch[:, :, None])
+              for ib, (_, _, _, _, dch) in enumerate(chord)]
+
+    def gap_map(Af):                                   # one self-consistency pass: A -> A_new
         accf = np.zeros(Nanch, dtype=np.complex128)
         for ib in range(nbd):
-            px, py, eichi, proj, dch = chord[ib]
-            amp = _periodic_eval(A, a, px, py)         # [ns, Nanch]
-            base = phi[ib] * amp * eichi               # complex Delta along chord
+            px, py, eichi, proj, _ = chord[ib]
+            base = phi[ib] * _periodic_eval(Af, a, px, py) * eichi
             dd3 = np.broadcast_to(base[:, :, None], (ns, Nanch, Nw))
-            om3 = (om0 if dch is None
-                   else omega[None, None, :] + 1j * hvfarr[ib] * dch[:, :, None])
-            _, f = riccati_chords(np.ascontiguousarray(om3), np.ascontiguousarray(dd3), hvfarr[ib], ds)
-            accf += proj * f[ic].sum(axis=1)           # f at the anchor, phase-stripped
-        A_new = np.maximum(coupling * 2.0 * temp * accf.real, 0.0).reshape(Ng, Ng)
-        err = np.abs(A_new - A).max() / Dbulk
-        A = (1.0 - mix) * A + mix * A_new
+            _, f = riccati_chords(om_dir[ib], np.ascontiguousarray(dd3), hvfarr[ib], ds)
+            accf += proj * f[ic].sum(axis=1)
+        return np.maximum(coupling * 2.0 * temp * accf.real, 0.0).reshape(Ng, Ng)
+
+    xs, fs = [], []                                    # Anderson/Pulay history (Walker-Ni)
+    for it in range(itemax):
+        res = gap_map(A) - A                            # residual f_k = G(x_k) - x_k
+        err = np.abs(res).max() / Dbulk
         if err < eps:
+            A = A + res
             break
+        xs.append(A.ravel().copy()); fs.append(res.ravel().copy())
+        if len(fs) > m_and + 1:
+            xs.pop(0); fs.pop(0)
+        if not anderson or len(fs) == 1:
+            A_next = A.ravel() + mix * res.ravel()
+        else:                                          # min || f_k - dF.gamma ||
+            dF = np.column_stack([fs[i + 1] - fs[i] for i in range(len(fs) - 1)])
+            dX = np.column_stack([xs[i + 1] - xs[i] for i in range(len(xs) - 1)])
+            g, *_ = np.linalg.lstsq(dF, fs[-1], rcond=None)
+            A_next = xs[-1] + mix * fs[-1] - (dX + mix * dF) @ g
+        A = np.maximum(A_next.reshape(Ng, Ng), 0.0)
     return dict(X=X, Y=Y, absD=A, Psi=A * np.exp(1j * chi_grid), chi=chi_grid,
                 Dbulk=Dbulk, xi=xi, a=a, S=S, Minv=np.linalg.inv(M), b1=b1, b2=b2,
                 a1=a1, a2=a2, acell=a, kappa=kappa, iters=it + 1, err=err)
@@ -1337,8 +1361,9 @@ def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None
     vortex lattice (formulation A): the same per-grid-point anchored trajectories as
     solve_lattice_sc, now on the retarded axis (z=delta-i*w).  The Volovik shift is
     carried by the winding phase of the complex Delta sampled along each chord, plus
-    (finite kappa, from state['kappa']) the screening Doppler v_F.(Q_Brandt-grad chi/2)
-    -- consistent with solve_lattice_sc.  N(w)/N0 = <Re g(anchor)>_{grid, FS}.
+    (finite kappa, from state['kappa']) the screening Doppler -v_F.A(r) from the smooth
+    London vector potential (_london_A) -- consistent with solve_lattice_sc.
+    N(w)/N0 = <Re g(anchor)>_{grid, FS}.
     @return N(w)/N0 [Nw]
     """
     A = state['absD']; chi = state['chi']; xi = state['xi']; a = state['a']
@@ -1402,12 +1427,15 @@ def calc_vortex_lattice_sc(coupling, temp, wc, gap_sym='d', field_list=None,
           f"{', FS+v_F' if fs is not None else ''}", flush=True)
     results = []
     last = None
+    seed = None                                        # warm start from the previous field
     for b in field_list:
         st = solve_lattice_sc(coupling, temp, omega, gap_sym=gap_sym, field=b,
-                              lattice=lattice, Ng=Ng, nbeta=nbeta, fs=fs, kappa=kappa)
+                              lattice=lattice, Ng=Ng, nbeta=nbeta, fs=fs, kappa=kappa,
+                              seed_profile=seed)
         if st is None or st['Dbulk'] <= 0:
             print(f"  B/Hc2={b:.3f}: normal", flush=True)
             continue
+        seed = st['absD'] / st['Dbulk']                # dimensionless profile (same Ng/grid)
         n0 = float(lattice_dos_sc(st, gap_sym, np.array([0.0]), nbeta=max(nbeta, 36),
                                   delta=0.03 * st['Dbulk'], fs=fs)[0])
         results.append((b, n0))
