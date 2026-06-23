@@ -304,6 +304,24 @@ def test_lattice_sc_formulation_a_node_and_volovik():
     assert 1.25 < n0[0.2] / n0[0.1] < 1.6           # ~sqrt(2) (d-wave Volovik sqrt(B) scaling)
 
 
+def test_lattice_sc_finite_kappa_screening():
+    """Finite-kappa A(r) back-reaction (je #2 connection) on the formulation-A lattice:
+    the London-screened smooth vector potential keeps the core node (the complex Delta
+    still winds) yet reduces the Volovik DOS -- weaker screening (larger kappa) gives a
+    higher N(0), and all finite-kappa values lie below the bare (uniform-A-overcounting)
+    extreme limit."""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    n0 = {}
+    for kap in (None, 2.0, 10.0):
+        st = V.solve_lattice_sc(0.6, T, om, gap_sym='d', field=0.2, Ng=16, nbeta=14,
+                                kappa=kap, itemax=90, mix=0.35, eps=2.5e-3)
+        assert st['absD'].min() / st['Dbulk'] < 0.35     # core still suppressed (node)
+        n0[kap] = float(V.lattice_dos_sc(st, 'd', np.array([0.0]), nbeta=30,
+                                         delta=0.03 * st['Dbulk'])[0])
+    assert n0[2.0] < n0[10.0] < n0[None]                 # screening: smaller kappa -> lower N(0)
+
+
 def test_lattice_sc_grid_convergent():
     """The formulation-A gap map is interpolation-based (per-grid-point anchored
     trajectories), so the converged amplitude is grid-convergent -- unlike a scatter/

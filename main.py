@@ -651,6 +651,16 @@ def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
     sigma=sigmaconst*L11
     kappa=kappaSconst*L22
     sigmaS=kappaSconst*L12
+    # full electronic thermal conductivity subtracts the thermoelectric backflow:
+    # kappa = kappaSconst*(L22 - L12.L11^-1.L12)  (cf. Boltzmann K2-K1.K0^-1.K1).
+    # The subtraction is done on the bare L tensors (all share the same prefactor),
+    # so kappa2 carries the same kappaSconst as the L22-only kappa.
+    try:
+        kappa2=kappaSconst*np.array([l22-l12.dot(sclin.inv(l11).dot(l12))
+                                     for l11,l12,l22 in zip(L11,L12,L22)])
+    except np.linalg.LinAlgError:
+        print("Warning: L11 is a singular matrix. Cannot subtract thermoelectric backflow from kappa",flush=True)
+        kappa2=kappa.copy()
     # Handle sclin.inv() failures
     try:
         Seebeck=np.array([-sclin.inv(s).dot(sS) for s,sS in zip(sigma,sigmaS)])
@@ -659,12 +669,19 @@ def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
         Seebeck=np.zeros_like(sigma)
     print_matrix('sigma matrix (S/m)',sigma[0].real)
     print_matrix('kappa matrix (L22 only) (W/m/K)',kappa[0].real)
+    print_matrix('kappa matrix (full) (W/m/K)',kappa2[0].real)
     print_matrix('sigmaS matrix (A/m/K)',sigmaS[0].real)
     print('Lorenz number (Wohm/K^2) (fe 2.44e-8)',flush=True)
     try:
         # Lorenz tensor L = kb * kappa . (sigma*T)^-1 (matrix product, not element-wise)
-        Lorenz_matrix=(kb*kappa[0].dot(sclin.inv(sigma[0]*temp))).real.round(10)
+        sigmaT_inv=sclin.inv(sigma[0]*temp)
+        Lorenz_matrix=(kb*kappa[0].dot(sigmaT_inv)).real.round(10)
+        Lorenz_matrix2=(kb*kappa2[0].dot(sigmaT_inv)).real.round(10)
+        print(' (L22 only):',flush=True)
         for lor in Lorenz_matrix:
+            print(f" {lor[0]:9.2e} {lor[1]:9.2e} {lor[2]:9.2e}",flush=True)
+        print(' (full):',flush=True)
+        for lor in Lorenz_matrix2:
             print(f" {lor[0]:9.2e} {lor[1]:9.2e} {lor[2]:9.2e}",flush=True)
     except np.linalg.LinAlgError:
         print("Warning: Failed to compute Lorenz coefficient (singular matrix)",flush=True)
@@ -1410,9 +1427,10 @@ def main():
                  if eil_vort_fs=='wannier' else None)  #FS geometry only (d-vector channels carry the gap)
             plibs.calc_vortex_dvector(eil_coupling,temp,eil_wc,kb=kb,sub_ratio=eil_dvec_subratio,
                                       field=eil_field,fs=dfs)
-        elif eil_vort_lattice_sc and eil_field_list is not None: #je-style self-consistent periodic lattice (formulation A, extreme type-II)
+        elif eil_vort_lattice_sc and eil_field_list is not None: #je-style self-consistent periodic lattice (formulation A); finite eil_kappa = London A back-reaction, >=1e3 = bare extreme
             plibs.calc_vortex_lattice_sc(eil_coupling,temp,eil_wc,gap_sym=eil_gs,
-                                         field_list=eil_field_list,lattice=eil_lattice,kb=kb,fs=eil_fs_obj)
+                                         field_list=eil_field_list,lattice=eil_lattice,kb=kb,fs=eil_fs_obj,
+                                         kappa=(None if eil_kappa>=1e3 else eil_kappa))
         elif eil_field_list is not None: #sweep B/Hc2 on the TRUE periodic lattice -> <N(0)>(B) (d~sqrt(B) Volovik)
             plibs.calc_vortex_lattice_periodic(eil_coupling,temp,eil_wc,gap_sym=eil_gs,
                                                field_list=eil_field_list,kappa=eil_kappa,lattice=eil_lattice,kb=kb,
