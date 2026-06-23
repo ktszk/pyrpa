@@ -23,6 +23,7 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
   
   integer(c_int64_t) i,j,k,l,m
   complex(c_double) tmp
+  real(c_double) ebar
   complex(c_double),parameter::ii=(0.0d0,1.0d0)
 
   !$omp parallel
@@ -31,10 +32,12 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
   L12(:,:)=0.0d0
   L22(:,:)=0.0d0
   !$omp end workshare
-  !$omp do reduction(+: L11,L12,L22) private(i,l,m,j,k,tmp)
+  !$omp do reduction(+: L11,L12,L22) private(i,l,m,j,k,tmp,ebar)
   ! Kubo formula: L_ij = (i/Nk) sum_{k,n,m} v_n(k) v_m(k) * [occupation factor] / [energy denominator]
   ! Intraband (n==m, degenerate): weight = f*(1-f)/T  — Drude-like term (dc limit when w->0)
   ! Interband (n/=m):             weight = (f_l-f_m)/[(e_m-e_l)*(w+e_m-e_l+i*delta)]
+  ! The thermoelectric/thermal moments use the symmetrized heat-current vertex
+  ! ebar = (e_l+e_m)/2 - mu (reduces to (e-mu) intraband; keeps L12 = L21^T / Onsager).
   k_loop: do i=1,Nk
      band_loop1: do l=1,Norb
         band_loop2: do m=1,Norb
@@ -48,11 +51,12 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
                     L22(k,j)=L22(k,j)+tmp*(eig(m,i)-mu)*(eig(m,i)-mu)
                  else if(abs(ffermi(l,i)-ffermi(m,i))>eps)then
                     ! Interband contribution: skip when both states have the same occupation
+                    ebar=0.5d0*(eig(l,i)+eig(m,i))-mu
                     tmp=vk(k,m,l,i)*vk(j,l,m,i)*(ffermi(l,i)-ffermi(m,i))/((eig(m,i)-eig(l,i))&
                        *cmplx(w+eig(m,i)-eig(l,i),idelta,kind=c_double))
                     L11(k,j)=L11(k,j)+tmp
-                    L12(k,j)=L12(k,j)+tmp*(eig(l,i)-mu)
-                    L22(k,j)=L22(k,j)+tmp*(eig(m,i)-mu)*(eig(l,i)-mu)
+                    L12(k,j)=L12(k,j)+tmp*ebar
+                    L22(k,j)=L22(k,j)+tmp*ebar*ebar
                  end if
               end do
            end do
@@ -96,7 +100,7 @@ subroutine calc_lij_wl(L11,L22,L12,vk,eig,ffermi,Norb,Nk,Nw,mu,wl,idelta,eps,tem
   complex(c_double),intent(out),dimension(Nw,3,3):: L11,L12,L22
 
   integer(c_int64_t) i,j,k,l,m,iw
-  real(c_double) de,fl,fm,el,em
+  real(c_double) de,fl,fm,el,em,ebar
   complex(c_double) p11,p12,p22,denom
   complex(c_double),parameter::ii=(0.0d0,1.0d0)
 
@@ -104,7 +108,7 @@ subroutine calc_lij_wl(L11,L22,L12,vk,eig,ffermi,Norb,Nk,Nw,mu,wl,idelta,eps,tem
   L12(:,:,:)=(0.0d0,0.0d0)
   L22(:,:,:)=(0.0d0,0.0d0)
 
-  !$omp parallel do reduction(+: L11,L12,L22) private(i,l,m,j,k,iw,de,fl,fm,el,em,p11,p12,p22,denom)
+  !$omp parallel do reduction(+: L11,L12,L22) private(i,l,m,j,k,iw,de,fl,fm,el,em,ebar,p11,p12,p22,denom)
   k_loop: do i=1,Nk
      band_loop1: do l=1,Norb
         fl=ffermi(l,i); el=eig(l,i)
@@ -124,9 +128,11 @@ subroutine calc_lij_wl(L11,L22,L12,vk,eig,ffermi,Norb,Nk,Nw,mu,wl,idelta,eps,tem
                        L22(iw,j,k)=L22(iw,j,k)+p22/denom
                     end do
                  else if(abs(fl-fm)>eps)then
+                    ! symmetrized heat-current vertex ebar = (e_l+e_m)/2 - mu
+                    ebar=0.5d0*(el+em)-mu
                     p11=vk(k,m,l,i)*vk(j,l,m,i)*(fl-fm)/de
-                    p12=p11*(el-mu)
-                    p22=p11*(em-mu)*(el-mu)
+                    p12=p11*ebar
+                    p22=p11*ebar*ebar
                     do iw=1,Nw
                        denom=cmplx(wl(iw)+de,idelta,kind=c_double)
                        L11(iw,j,k)=L11(iw,j,k)+p11/denom
@@ -249,11 +255,16 @@ subroutine calc_sigma_hall(eig,veloc,imass,kweight,tau,temp,mu,Nk,Norb,sigma_hal
   !$omp end do
 
   !$omp do private(i,j) reduction(+:sigma_hall)
-  ! sigma_Hall ~ sum_{k,n} (vx^2 * m^-1_yy - vx*vy * m^-1_xy) * (-df/de) * tau^2
-  ! From the semi-classical Hall formula in the relaxation-time approximation
+  ! sigma_Hall ~ sum_{k,n} 0.5*(vx^2*m^-1_yy + vy^2*m^-1_xx - 2*vx*vy*m^-1_xy) * (-df/de) * tau^2
+  ! Semi-classical Hall formula (B||z) in the relaxation-time approximation.
+  ! The x<->y symmetrized integrand equals the one-sided form (vx^2*m^-1_yy - vx*vy*m^-1_xy)
+  ! over the full BZ (integration by parts), but converges better on a finite mesh and is
+  ! the manifestly antisymmetric Hall response.
   get_Kn: do i=1,Nk
      band_loop: do j=1,Norb
-        sigma_hall=sigma_hall+(veloc(1,j,i)*veloc(1,j,i)*imass(2,2,j,i)-veloc(1,j,i)*veloc(2,j,i)*imass(1,2,j,i))&
+        sigma_hall=sigma_hall+0.5d0*(veloc(1,j,i)*veloc(1,j,i)*imass(2,2,j,i)&
+             +veloc(2,j,i)*veloc(2,j,i)*imass(1,1,j,i)&
+             -2.0d0*veloc(1,j,i)*veloc(2,j,i)*imass(1,2,j,i))&
              *dfermi(j,i)*kweight(i)*tau(j,i)**2
      end do band_loop
   end do get_Kn
