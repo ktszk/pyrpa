@@ -285,6 +285,39 @@ def test_lattice_volovik_field_dependence():
     assert 0.0 < n[0] < n[1]                   # rises with B
 
 
+def test_lattice_sc_formulation_a_node_and_volovik():
+    """je-style self-consistent periodic lattice (formulation A): the complex order
+    parameter develops a TRUE node at every core (min|Psi|->0), the amplitude stays
+    bounded (no binning blow-up), and the zero-energy DOS follows the d-wave Volovik
+    sqrt(B) law (N(0) ~ sqrt(B): doubling B raises N(0) by ~sqrt(2))."""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    n0 = {}
+    for b in (0.1, 0.2):
+        st = V.solve_lattice_sc(0.6, T, om, gap_sym='d', field=b, Ng=14, nbeta=12,
+                                itemax=60, mix=0.4, eps=3e-3)
+        D, Db = st['absD'], st['Dbulk']
+        assert D.min() / Db < 0.12                  # true node at the core
+        assert D.max() / Db < 1.05                  # bounded amplitude (no scatter blow-up)
+        n0[b] = float(V.lattice_dos_sc(st, 'd', np.array([0.0]), nbeta=36, delta=0.03 * Db)[0])
+    assert 0.0 < n0[0.1] < n0[0.2]                  # Volovik: DOS grows with B
+    assert 1.25 < n0[0.2] / n0[0.1] < 1.6           # ~sqrt(2) (d-wave Volovik sqrt(B) scaling)
+
+
+def test_lattice_sc_grid_convergent():
+    """The formulation-A gap map is interpolation-based (per-grid-point anchored
+    trajectories), so the converged amplitude is grid-convergent -- unlike a scatter/
+    binning estimator whose max|Psi| diverges as the grid is refined."""
+    wc, T = 0.4, 1e-3
+    om = E.matsubara(T, wc)
+    mx = []
+    for Ng in (12, 20):
+        st = V.solve_lattice_sc(0.6, T, om, gap_sym='d', field=0.2, Ng=Ng, nbeta=12,
+                                itemax=60, mix=0.4, eps=3e-3)
+        mx.append(st['absD'].max() / st['Dbulk'])
+    assert abs(mx[0] - mx[1]) < 0.06                # max|Psi| stable under refinement
+
+
 # --------------------------------------------------------------------------- #
 #  condensation free energy / supercurrent (je observables)
 # --------------------------------------------------------------------------- #

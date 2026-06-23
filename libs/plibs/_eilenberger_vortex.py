@@ -1169,3 +1169,222 @@ def calc_vortex_maxwell(coupling, temp, wc, gap_sym='s', field=0.2, kappa=2.0, k
     except IOError as e:
         print(f"Error writing vortex_maxwell.dat: {e}", flush=True)
     return rgrid, aphi, n0_sc, n0_ex
+
+
+# --------------------------------------------------------------------------- #
+# je-style self-consistent PERIODIC vortex lattice (formulation A)
+#
+# This mirrors the reference Julia code (je): the order parameter keeps its
+# vortex phase (complex Delta), the magnetic unit cell carries one flux quantum
+# via the analytic Abrikosov quasi-periodic phase, and the gap equation is closed
+# point by point -- for every grid point a trajectory is anchored AT that point
+# and the Riccati f is read at the anchor (no scatter/binning, no rotated-frame
+# remapping).  Only the real amplitude |Psi|(r) is interpolated (it is smooth and
+# strictly periodic); the winding phase is evaluated analytically along the chord,
+# so there is no magnetic-translation-phase bookkeeping in the accumulation.
+# Extreme type-II (A=0): the supercurrent/Volovik shift emerges from the phase
+# variation of the complex Delta sampled along each chord.
+# --------------------------------------------------------------------------- #
+def _abrikosov_z(x, y, a, np_sum=6):
+    """Abrikosov (lowest-Landau-level) quasi-periodic order parameter on a square
+    lattice of period ``a`` (Dr=Dly/Dlx=1, zeta=0), shifted so the single vortex
+    sits at the cell centre (0,0).  Returns the complex theta-function value; its
+    phase is the vortex winding, its modulus ~1 between vortices and 0 at the core."""
+    xs = x - 0.5 * a                                   # shift zero from corner to centre
+    ys = y + 0.5 * a
+    Z = np.zeros(np.broadcast(xs, ys).shape, dtype=np.complex128)
+    for p in range(-np_sum, np_sum + 1):
+        Z += np.exp(-np.pi * (ys / a + p) ** 2) * np.exp(-2j * np.pi * (p + 0.0) * xs / a)
+    Z *= np.sqrt(np.sqrt(2.0))
+    return Z * np.exp(-1j * np.pi * xs / a * ys / a)
+
+
+def _abrikosov_unit_phase(x, y, a):
+    """Unit phase factor e^{i chi(r)} of the vortex winding (conjugate convention,
+    matching je's conj(Zphase)): chi = -arg(Abrikosov)."""
+    Z = _abrikosov_z(x, y, a)
+    az = np.abs(Z)
+    return np.where(az > 1e-12, np.conj(Z) / np.where(az > 1e-12, az, 1.0), 1.0 + 0.0j)
+
+
+def _periodic_eval(field, a, px, py):
+    """Bilinear interpolation of a cell-centred field [Ng,Ng] (grid points at
+    x_k=((k+0.5)/Ng-0.5)*a) at scattered points (px,py), with periodic wrap.
+    Returns px.shape.  Real field only (the amplitude)."""
+    Ng = field.shape[0]
+    u = ((px / a + 0.5) % 1.0) * Ng - 0.5              # grid point k sits at u=k
+    v = ((py / a + 0.5) % 1.0) * Ng - 0.5
+    i0 = np.floor(u).astype(int); j0 = np.floor(v).astype(int)
+    wu = u - i0; wv = v - j0
+    i0m = i0 % Ng; i1 = (i0 + 1) % Ng
+    j0m = j0 % Ng; j1 = (j0 + 1) % Ng
+    return ((1 - wu) * (1 - wv) * field[i0m, j0m] + wu * (1 - wv) * field[i1, j0m]
+            + (1 - wu) * wv * field[i0m, j1] + wu * wv * field[i1, j1])
+
+
+def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='square',
+                     Ng=20, nbeta=16, hvf=1.0, fs=None, Lchord=6.0, ds_xi=0.3,
+                     itemax=60, mix=0.4, eps=3.0e-3):
+    """
+    @fn solve_lattice_sc
+    @brief Self-consistent complex order parameter Psi(r)=|Psi|(r) e^{i chi(r)} of a
+    true periodic vortex lattice (square), je-style: formulation A (phase kept in
+    Delta) with the analytic Abrikosov winding chi(r), closed by per-grid-point
+    anchored trajectories (the f-to-grid map is exact, not binned).  Extreme type-II.
+    @return state dict (X,Y,absD,Psi,chi,Dbulk,xi,a,...) for lattice_dos_sc
+    """
+    bfull = np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False)
+    hvf_eff = float((fs['nf'] * fs['vabs']).sum()) if fs is not None else hvf
+    if fs is not None:
+        from ._eilenberger import bulk_gap_fs, fs_form_factor
+        Dbulk = bulk_gap_fs(coupling, temp, omega, fs, gap_sym)
+    else:
+        Dbulk = _bulk_gap(coupling, temp, omega, _ff_vortex(bfull, gap_sym))
+    if Dbulk <= 0:
+        return None
+    xi = hvf_eff / (np.pi * Dbulk)
+    a1, a2, b1, b2, S, M = _lattice_vectors(field, xi, lattice, 1)
+    a = np.sqrt(S)
+    xg = (np.arange(Ng) + 0.5) / Ng * a - 0.5 * a      # cell-centred (vortex at 0,0 between points)
+    X, Y = np.meshgrid(xg, xg, indexing='ij')
+    chi_grid = np.angle(_abrikosov_unit_phase(X, Y, a))
+    if fs is not None:
+        dirs = np.arctan2(fs['vy'], fs['vx']); phi = fs_form_factor(fs, gap_sym)
+        hvfarr = np.asarray(fs['vabs']); wt_dir = np.asarray(fs['nf']); nbd = len(dirs)
+    else:
+        dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
+        phi = _ff_vortex(dirs, gap_sym); hvfarr = np.full(nbeta, hvf)
+        wt_dir = np.full(nbeta, 1.0 / nbeta); nbd = nbeta
+    L = Lchord * xi; ds = ds_xi * xi
+    ns = int(2 * L / ds) | 1                            # odd -> exact centre index
+    ic = ns // 2
+    s = np.linspace(-L, L, ns)
+    ax = X.ravel(); ay = Y.ravel(); Nanch = ax.size
+    # pre-compute the fixed per-direction chord geometry, winding phase and projector
+    chord = []
+    for ib in range(nbd):
+        cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
+        px = ax[None, :] + s[:, None] * cb             # [ns, Nanch]
+        py = ay[None, :] + s[:, None] * sb
+        eichi = _abrikosov_unit_phase(px, py, a)       # e^{i chi} along the chord
+        proj = wt_dir[ib] * np.conj(phi[ib]) * np.conj(eichi[ic])   # strip phase at anchor
+        chord.append((px, py, eichi, proj))
+    A = Dbulk * np.tanh(np.sqrt(X ** 2 + Y ** 2) / xi) # seed amplitude (node at centre)
+    Nw = len(omega)
+    om3 = np.broadcast_to(omega, (ns, Nanch, Nw)).astype(np.complex128)
+    for it in range(itemax):
+        accf = np.zeros(Nanch, dtype=np.complex128)
+        for ib in range(nbd):
+            px, py, eichi, proj = chord[ib]
+            amp = _periodic_eval(A, a, px, py)         # [ns, Nanch]
+            base = phi[ib] * amp * eichi               # complex Delta along chord
+            dd3 = np.broadcast_to(base[:, :, None], (ns, Nanch, Nw))
+            _, f = riccati_chords(np.ascontiguousarray(om3), np.ascontiguousarray(dd3), hvfarr[ib], ds)
+            accf += proj * f[ic].sum(axis=1)           # f at the anchor, phase-stripped
+        A_new = np.maximum(coupling * 2.0 * temp * accf.real, 0.0).reshape(Ng, Ng)
+        err = np.abs(A_new - A).max() / Dbulk
+        A = (1.0 - mix) * A + mix * A_new
+        if err < eps:
+            break
+    return dict(X=X, Y=Y, absD=A, Psi=A * np.exp(1j * chi_grid), chi=chi_grid,
+                Dbulk=Dbulk, xi=xi, a=a, S=S, Minv=np.linalg.inv(M),
+                a1=a1, a2=a2, acell=a, iters=it + 1, err=err)
+
+
+def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None,
+                   Lchord=6.0, ds_xi=0.3):
+    """
+    @fn lattice_dos_sc
+    @brief Spatially-averaged DOS N(w)/N0 of the je-style self-consistent periodic
+    vortex lattice (formulation A): the same per-grid-point anchored trajectories as
+    solve_lattice_sc, now on the retarded axis (z=delta-i*w).  The Volovik shift is
+    carried by the winding phase of the complex Delta sampled along each chord (A=0),
+    so no explicit Doppler is added.  N(w)/N0 = <Re g(anchor)>_{grid, FS}.
+    @return N(w)/N0 [Nw]
+    """
+    A = state['absD']; chi = state['chi']; xi = state['xi']; a = state['a']
+    Dbulk = state['Dbulk']; Ng = A.shape[0]
+    X, Y = state['X'], state['Y']
+    if delta is None:
+        delta = 0.03 * Dbulk
+    zomega = delta - 1j * np.asarray(wlist)
+    Nw = zomega.size
+    if fs is not None:
+        from ._eilenberger import fs_form_factor
+        dirs = np.arctan2(fs['vy'], fs['vx']); phi = fs_form_factor(fs, gap_sym)
+        hvfarr = np.asarray(fs['vabs']); wt_dir = np.asarray(fs['nf']); nbd = len(dirs)
+    else:
+        dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
+        phi = _ff_vortex(dirs, gap_sym); hvfarr = np.full(nbeta, hvf)
+        wt_dir = np.full(nbeta, 1.0 / nbeta); nbd = nbeta
+    L = Lchord * xi; ds = ds_xi * xi
+    ns = int(2 * L / ds) | 1; ic = ns // 2
+    s = np.linspace(-L, L, ns)
+    ax = X.ravel(); ay = Y.ravel(); Nanch = ax.size
+    om3 = np.broadcast_to(zomega, (ns, Nanch, Nw)).astype(np.complex128)
+    gsum = np.zeros(Nw)
+    for ib in range(nbd):
+        cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
+        px = ax[None, :] + s[:, None] * cb
+        py = ay[None, :] + s[:, None] * sb
+        eichi = _abrikosov_unit_phase(px, py, a)
+        base = phi[ib] * _periodic_eval(A, a, px, py) * eichi
+        dd3 = np.broadcast_to(base[:, :, None], (ns, Nanch, Nw))
+        g, _ = riccati_chords(np.ascontiguousarray(om3), np.ascontiguousarray(dd3), hvfarr[ib], ds)
+        gsum += wt_dir[ib] * g[ic].real.mean(axis=0)   # <Re g> over anchors
+    return gsum
+
+
+def calc_vortex_lattice_sc(coupling, temp, wc, gap_sym='d', field_list=None,
+                           lattice='square', kb=1.0, Ng=20, nbeta=16, fs=None):
+    """
+    @fn calc_vortex_lattice_sc
+    @brief Driver: je-style self-consistent PERIODIC vortex lattice (formulation A,
+    extreme type-II).  Sweeps B/Hc2, self-consistently solves the complex order
+    parameter Psi(r) (true node at every core, full Abrikosov-lattice supercurrent)
+    and reports the spatially-averaged zero-energy DOS <N(0)>/N0(B) (d-wave ~sqrt(B)
+    Volovik).  Writes the converged |Psi|(r) for the largest field to lattice_sc.dat.
+    """
+    omega = matsubara(temp, wc)
+    if field_list is None:
+        field_list = [0.05, 0.1, 0.2, 0.35]
+    print(f"self-consistent periodic vortex lattice (formulation A, extreme type-II): "
+          f"{gap_sym}, {lattice}, lambda={coupling:.3f}, T={temp/kb:.2f} K"
+          f"{', FS+v_F' if fs is not None else ''}", flush=True)
+    results = []
+    last = None
+    for b in field_list:
+        st = solve_lattice_sc(coupling, temp, omega, gap_sym=gap_sym, field=b,
+                              lattice=lattice, Ng=Ng, nbeta=nbeta, fs=fs)
+        if st is None or st['Dbulk'] <= 0:
+            print(f"  B/Hc2={b:.3f}: normal", flush=True)
+            continue
+        n0 = float(lattice_dos_sc(st, gap_sym, np.array([0.0]), nbeta=max(nbeta, 36),
+                                  delta=0.03 * st['Dbulk'], fs=fs)[0])
+        results.append((b, n0))
+        D = st['absD']; Db = st['Dbulk']
+        print(f"  B/Hc2={b:.3f}  a/xi={st['a']/st['xi']:.2f}  iters={st['iters']}  "
+              f"|D| min/mean/max/Db=[{D.min()/Db:.3f},{D.mean()/Db:.3f},{D.max()/Db:.3f}]  "
+              f"<N(0)>/N0={n0:.4f}  N(0)/sqrt(B)={n0/np.sqrt(b):.3f}", flush=True)
+        last = st
+    if len(results) >= 2:
+        bb = np.array([r[0] for r in results]); nn = np.array([r[1] for r in results])
+        p = np.polyfit(np.log(bb), np.log(np.maximum(nn, 1e-12)), 1)[0]
+        print(f"  power law  <N(0)>/N0 ~ (B/Hc2)^{p:.2f}  (d ~0.5 Volovik, saturating near Hc2)", flush=True)
+    try:
+        with open('lattice_sc.dat', 'w') as fh:
+            fh.write("# B/Hc2   <N(0)>/N0\n")
+            for b, n0 in results:
+                fh.write(f"{b:12.5e} {n0:12.5e}\n")
+        if last is not None:
+            with open('lattice_sc_op.dat', 'w') as fh:
+                fh.write("# x/xi  y/xi  |Psi|/Dbulk\n")
+                xi = last['xi']; Db = last['Dbulk']
+                for i in range(last['X'].shape[0]):
+                    for j in range(last['X'].shape[1]):
+                        fh.write(f"{last['X'][i,j]/xi:10.4f} {last['Y'][i,j]/xi:10.4f} "
+                                 f"{last['absD'][i,j]/Db:10.5f}\n")
+                    fh.write("\n")
+    except OSError:
+        pass
+    return results
