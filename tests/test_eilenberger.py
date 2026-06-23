@@ -475,6 +475,19 @@ def test_wannier_dvector_vortex():
     assert np.degrees(np.arctan2(apz[0], max(apx[0], 1e-12))) > 75.0   # d ~ pure subdominant at core
 
 
+def test_vortex_maxwell_selfA():
+    """The self-consistent finite-kappa vector potential (Maxwell back-reaction): the
+    A_theta(rho) loop converges; the enclosed-flux edge value is fixed (A_theta(Rc) ~
+    the extreme type-II value); and as kappa->infinity it reduces to extreme type-II
+    (same core DOS)."""
+    rg, aphi, n0_sc, n0_ex = V.calc_vortex_maxwell(0.6, 8e-4, 0.5, gap_sym='d', field=0.3,
+                                                   kappa=80.0, ngrid=27, nbeta=14, itemax_a=3)
+    Rc = rg[-1]
+    a_edge_ext = rg[-1] / (2.0 * Rc ** 2)
+    assert abs(aphi[-1] - a_edge_ext) / a_edge_ext < 0.1   # edge A fixed by enclosed flux
+    assert abs(n0_sc - n0_ex) / n0_ex < 0.05               # kappa->inf reduces to extreme type-II
+
+
 def test_chiral_pip_gap_sym_minus3():
     """gap_sym = -3 is the chiral p+ip state: a complex form factor (px + i py) that
     is fully gapped (|phi| > 0 everywhere)."""

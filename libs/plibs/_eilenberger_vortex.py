@@ -221,10 +221,23 @@ def _doppler_chord(Lx, Ly, Rc, cb, sb, rho_min):
     return np.where(rho2 < Rc ** 2, delta, 0.0)
 
 
+def _doppler_aphi(Lx, Ly, Rc, cb, sb, rho_min, rgrid, aphi):
+    """Field Doppler shift -v_F.A from a SELF-CONSISTENT radial vector potential
+    A_theta(rho) (finite-kappa Maxwell back-reaction), replacing the uniform-field
+    _doppler_chord.  delta = -A_theta(rho) (v_hat . theta_hat); outside the tabulated
+    range A_theta ~ 1/rho (flux conservation).  aphi is A_theta on rgrid (0..Rc)."""
+    rho = np.sqrt(np.maximum(Lx ** 2 + Ly ** 2, rho_min ** 2))
+    vhth = (-Ly * cb + Lx * sb) / rho       # v_hat . theta_hat (unit)
+    At = np.interp(rho, rgrid, aphi, right=aphi[-1] * rgrid[-1])  # A_theta(rho)
+    far = rho > rgrid[-1]
+    At = np.where(far, aphi[-1] * rgrid[-1] / rho, At)            # 1/rho tail beyond the cell
+    return np.where(rho ** 2 < Rc ** 2, -At * vhth, 0.0)
+
+
 def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str = 'd',
                    Dbulk: float = None, Lxi: float = 8.0, ngrid: int = 49, nbeta: int = 24,
                    hvf: float = 1.0, imp_gamma: float = 0.0, imp_c: float = 1.0e8,
-                   field: float = 0.0, fs: dict = None, eps: float = 2.0e-3,
+                   field: float = 0.0, fs: dict = None, qprof=None, eps: float = 2.0e-3,
                    itemax: int = 80, mix: float = 0.3):
     """
     @fn solve_vortex2d
@@ -325,7 +338,9 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
             else:
                 om_rot = np.broadcast_to(omega, (ngrid, ngrid, Nw)).astype(np.complex128).copy()
                 if field > 0.0:                          # Doppler shift v_F.Q (scales with |v_F|)
-                    om_rot = om_rot + 1j * hvf_i * _doppler_chord(Lx, Ly, Rc, cb, sb, rho_min)[:, :, None]
+                    dch = (_doppler_aphi(Lx, Ly, Rc, cb, sb, rho_min, qprof[0], qprof[1])
+                           if qprof is not None else _doppler_chord(Lx, Ly, Rc, cb, sb, rho_min))
+                    om_rot = om_rot + 1j * hvf_i * dch[:, :, None]
                 Dtraj = np.broadcast_to(base[:, :, None], (ngrid, ngrid, Nw)).copy()
                 if not no_imp:
                     om_rot = om_rot + _eval_field(dwt, xg, Lx, Ly, fill=0.0)
@@ -356,8 +371,8 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
 def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
                   gap_sym: str, Dbulk: float, delta: float = None, nbeta: int = 36,
                   hvf: float = 1.0, imp_gamma: float = 0.0, imp_c: float = 1.0e8,
-                  field: float = 0.0, h: float = 0.0, fs: dict = None, eps: float = 3.0e-3,
-                  itemax: int = 60, mix: float = 0.5):
+                  field: float = 0.0, h: float = 0.0, fs: dict = None, qprof=None,
+                  eps: float = 3.0e-3, itemax: int = 60, mix: float = 0.5):
     """
     @fn vortex_ldos2d
     @brief 2D local density of states N(x,y,w)/N0 from a converged Psi field, via
@@ -404,7 +419,12 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
         Ly = SS * sb + BB * cb
         base.append(phi[ib] * Ai((Lx, Ly)) * np.exp(1j * np.arctan2(Ly, Lx)))
         sxyb.append((X * cb + Y * sb, -X * sb + Y * cb, Lx, Ly))
-        dopp.append(_doppler_chord(Lx, Ly, Rc, cb, sb, rho_min) if field > 0.0 else None)
+        if field <= 0.0:
+            dopp.append(None)
+        elif qprof is not None:
+            dopp.append(_doppler_aphi(Lx, Ly, Rc, cb, sb, rho_min, qprof[0], qprof[1]))
+        else:
+            dopp.append(_doppler_chord(Lx, Ly, Rc, cb, sb, rho_min))
 
     def _sector(zomega):
         """N(x,y,w) for a given (possibly spin-shifted) retarded frequency [Nw]."""
@@ -1075,3 +1095,77 @@ def calc_vortex_current(coupling, temp, wc, gap_sym='d', kb=1.0, Lxi=8.0, ngrid=
     except IOError as e:
         print(f"Error writing vortex_current.dat: {e}", flush=True)
     return rho, jphi
+
+
+def _radial_amp(Psi, xg, rgrid, ntheta=48):
+    """Azimuthal average of |Psi| on circles of radius rgrid (radial gap profile)."""
+    ai = RegularGridInterpolator((xg, xg), np.abs(Psi), bounds_error=False,
+                                 fill_value=float(np.abs(Psi).max()))
+    th = np.linspace(0.0, 2.0 * np.pi, ntheta, endpoint=False)
+    return np.array([ai(np.stack([r * np.cos(th), r * np.sin(th)], axis=1)).mean() for r in rgrid])
+
+
+def calc_vortex_maxwell(coupling, temp, wc, gap_sym='s', field=0.2, kappa=2.0, kb=1.0,
+                        Lxi=8.0, ngrid=41, nbeta=24, itemax_a=6):
+    """
+    @fn calc_vortex_maxwell
+    @brief Circular-cell vortex with the SELF-CONSISTENT (finite-kappa Maxwell)
+    vector potential A_theta(rho) -- the je 'A_renew' back-reaction.  Outer loop:
+    (i) solve the order parameter with the supercurrent Doppler from the current
+    A_theta; (ii) from the converged |Delta|(rho) get the screened field B(rho)
+    (finite-kappa London, vortex_field_profile) and integrate it to the new
+    A_theta(rho)=(1/rho) int_0^rho B rho' drho'.  Finite kappa screens the
+    supercurrent (A_theta below the extreme type-II rho/2Rc^2), reducing the
+    field-induced zero-energy DOS.  Reports <N(0)> for the self-consistent A and,
+    for reference, the extreme type-II (kappa->infinity) result.  Writes 'vortex_maxwell.dat'.
+    """
+    omega = matsubara(temp, wc)
+    Dbulk = (_bulk_gap(coupling, temp, omega, _ff_vortex(np.linspace(0, 2 * np.pi, 180, endpoint=False), gap_sym)))
+    if Dbulk <= 0:
+        print("normal state (Dbulk=0)", flush=True)
+        return None
+    xi = 1.0 / (np.pi * Dbulk)
+    Rc = np.sqrt(2.0 / field) * xi
+    rgrid = np.linspace(0.0, Rc, ngrid // 2)
+    Bbar = 1.0 / Rc ** 2
+    aphi = rgrid / (2.0 * Rc ** 2)                      # seed: extreme type-II A_theta
+    print(f"vortex Maxwell back-reaction (self-consistent A, finite kappa={kappa}): "
+          f"{gap_sym}, B/Hc2={field}, T={temp/kb:.2f} K", flush=True)
+    ng2 = min(ngrid, 41)
+    for ita in range(itemax_a):
+        xg, Psi, Db, xiv = solve_vortex2d(coupling, temp, omega, gap_sym, Lxi=Lxi, ngrid=ng2,
+                                          nbeta=nbeta, field=field, qprof=(rgrid, aphi))
+        Dr = _radial_amp(Psi, xg, rgrid)
+        _, _, Brel = vortex_field_profile(rgrid, Dr, Db, xiv, kappa, omega)   # B(rho)/<B>, mean 1
+        B = Brel * Bbar
+        integ = np.concatenate([[0.0], np.cumsum(0.5 * (B[1:] * rgrid[1:] + B[:-1] * rgrid[:-1])
+                                                 * np.diff(rgrid))])
+        aphi_new = integ / np.maximum(rgrid, 0.5 * rgrid[1])           # A_theta=(1/rho)int B rho' drho'
+        da = np.abs(aphi_new - aphi).max() / max(aphi.max(), 1e-30)
+        aphi = 0.5 * aphi + 0.5 * aphi_new
+        if da < 1e-3:
+            break
+    ic = len(xg) // 2
+    n0_sc = vortex_ldos2d(Psi, xg, xiv, np.array([0.0]), gap_sym, Db, nbeta=48,
+                          field=field, qprof=(rgrid, aphi))[ic, ic, 0]
+    # reference: extreme type-II (no screening)
+    xg2, Psi2, Db2, xiv2 = solve_vortex2d(coupling, temp, omega, gap_sym, Lxi=Lxi, ngrid=ng2,
+                                          nbeta=nbeta, field=field)
+    n0_ex = vortex_ldos2d(Psi2, xg2, xiv2, np.array([0.0]), gap_sym, Db2, nbeta=48,
+                          field=field)[ic, ic, 0]
+    a_ext = rgrid / (2.0 * Rc ** 2)                    # extreme type-II A_theta
+    im = len(rgrid) // 2                                # mid-radius rho ~ Rc/2
+    print(f"Dbulk={Db:.4e}, xi={xiv:.4g}, lambda/xi=kappa={kappa} (finite kappa concentrates B near the core)", flush=True)
+    print(f"  A_theta(Rc/2): self-consistent={aphi[im]:.4e} vs extreme type-II={a_ext[im]:.4e} "
+          f"(ratio {aphi[im]/max(a_ext[im],1e-30):.3f})", flush=True)
+    print(f"  A_theta(edge): self={aphi[-1]:.4e} vs extreme={a_ext[-1]:.4e} (enclosed flux fixed)", flush=True)
+    print(f"  N(core,0)/N0: self-consistent A = {n0_sc:.3f},  extreme type-II (kappa->inf) = {n0_ex:.3f}", flush=True)
+    try:
+        with open('vortex_maxwell.dat', 'w') as fh:
+            fh.write("# rho/xi   A_theta(self)   A_theta(extreme)   B(rho)/<B>\n")
+            for r, a in zip(rgrid, aphi):
+                fh.write(f"{r/xiv:10.4f} {a:12.5e} {r/(2*Rc**2):12.5e} "
+                         f"{np.interp(r,rgrid,Brel):12.5e}\n")
+    except IOError as e:
+        print(f"Error writing vortex_maxwell.dat: {e}", flush=True)
+    return rgrid, aphi, n0_sc, n0_ex

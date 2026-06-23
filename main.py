@@ -198,6 +198,7 @@ eil_vort_field=False     #True: also compute the self-consistent finite-kappa Ma
 eil_vort_fs=None         #FS for the vortex: None=isotropic, 'iso'/'ellipse'/'tb' (model, uses eil_fs_params), or 'wannier' (the loaded Wannier band's FS + v_F)
 eil_vort_dvector=False   #True: self-consistent triplet d-vector TEXTURE around the vortex core (dominant p_x(e_x) winding + core-localized subdominant p_y(e_z), 2D spin-matrix Riccati; uses eil_dvec_subratio)
 eil_vort_current=False   #True: circulating charge supercurrent j_phi(rho) of an isolated vortex (writes vortex_current.dat)
+eil_vort_maxwell=False   #True: circular-cell vortex with the self-consistent finite-kappa vector potential A(r) (Maxwell back-reaction; needs eil_field>0, uses eil_kappa)
 eil_vort_tilt=0.0        #field tilt theta [deg] from the c-axis (quasi-2D): orbital uses B_z=B cos(theta), Zeeman -> h/cos(theta) (Pauli/orbital ratio)
 eil_nvortex=1            #vortices (flux quanta) per computational cell of the periodic lattice (supercell; n^2 reduces to the primitive cell)
 eil_field=0.0            #vortex lattice field B/Hc2 (0=isolated vortex; >0=circular-cell lattice w/ Doppler)
@@ -1397,7 +1398,10 @@ def main():
             eil_fs_kw,eil_gs=None,gap_sym       #the (int) gap_sym is baked into fs['phi']
         else:
             eil_fs_obj,eil_fs_kw,eil_gs=None,eil_vort_fs,eil_pair_sym
-        if eil_vort_current: #circulating charge supercurrent j_phi(rho) of an isolated vortex
+        if eil_vort_maxwell: #self-consistent finite-kappa vector potential A(r) (Maxwell back-reaction)
+            plibs.calc_vortex_maxwell(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,field=eil_field,
+                                      kappa=eil_kappa,kb=kb,Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
+        elif eil_vort_current: #circulating charge supercurrent j_phi(rho) of an isolated vortex
             plibs.calc_vortex_current(eil_coupling,temp,eil_wc,gap_sym=eil_gs,kb=kb,
                                       Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
         elif eil_vort_dvector: #self-consistent triplet d-vector vortex/lattice (spin-matrix Riccati; eil_field>0 = circular-cell lattice)
