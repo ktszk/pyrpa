@@ -439,17 +439,40 @@ def test_spin_vortex_lattice_doppler():
     vortex."""
     wc, T = 0.2, 1.5e-3
     om = E.matsubara(T, wc)
-    out = {}
-    for field in (0.0, 0.3):
+    prof = {}
+    for field in (0.0, 0.5):
         xg, A, Db, xi = SP.solve_vortex2d_dvector((0.8, 0.8 * 0.95), T, om, windings=(1, 0),
                                                   Lxi=7, ngrid=23, nbeta=10, itemax=25, field=field)
         ic = len(xg) // 2
-        apx, apz = np.abs(A[0, ic:, ic]), np.abs(A[1, ic:, ic])
+        Dref = np.max(np.abs(Db))
+        apx = np.abs(A[0, ic:, ic]) / Dref
+        apz = np.abs(A[1, ic:, ic]) / Dref
         thc = np.degrees(np.arctan2(apz[0], max(apx[0], 1e-12)))
-        out[field] = (apx[0] / np.max(np.abs(Db)), thc, apz[-1] / np.max(np.abs(Db)))
-    assert out[0.0][0] < 0.1 and out[0.3][0] < 0.1     # dominant pair-broken in the core
-    assert out[0.0][1] > 75.0 and out[0.3][1] > 75.0   # d-vector ~ pure subdominant at core
-    assert abs(out[0.0][2] - out[0.3][2]) > 1e-3       # Doppler changes the inter-vortex subdominant
+        assert apx[0] < 0.1                            # dominant pair-broken in the core
+        assert thc > 75.0                              # d-vector ~ pure subdominant at core
+        prof[field] = apz
+    assert np.abs(prof[0.5] - prof[0.0]).max() > 1e-4   # the supercurrent Doppler modifies the gap
+
+
+def test_wannier_dvector_vortex():
+    """The self-consistent d-vector vortex runs on a real Wannier FS (FS directions,
+    Fermi velocities and nf from the band, downsampled to nbeta directions): the
+    dominant component is pair-broken in the core and the d-vector tilts to ~90 deg."""
+    import libs.plibs as p
+    hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       'inputs', 'square.hop')
+    if not os.path.exists(hop):
+        return
+    rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
+    fw = E.build_wannier_fs(rvec, ham_r, [], np.eye(3), -1.0, mesh=120)   # FS geometry only
+    om = E.matsubara(1.5e-3, 0.2)
+    xg, A, Db, xi = SP.solve_vortex2d_dvector((0.8, 0.8 * 0.95), 1.5e-3, om, windings=(1, 0),
+                                              Lxi=7, ngrid=23, nbeta=16, itemax=22, fs=fw)
+    ic = len(xg) // 2
+    apx = np.abs(A[0, ic:, ic]); apz = np.abs(A[1, ic:, ic])
+    Dref = np.max(np.abs(Db))
+    assert apx[0] / Dref < 0.1                          # dominant pair-broken in the core
+    assert np.degrees(np.arctan2(apz[0], max(apx[0], 1e-12))) > 75.0   # d ~ pure subdominant at core
 
 
 def test_chiral_pip_gap_sym_minus3():

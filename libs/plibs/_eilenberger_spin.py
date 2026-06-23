@@ -383,7 +383,7 @@ def calc_surface_dvector(coupling, temp, wc, kb=1.0, Lxi=8.0, nper=8, Nbeta=16,
 # --------------------------------------------------------------------------- #
 def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0),
                            Dbulk=None, Lxi=7.0, ngrid=33, nbeta=16, hvf=1.0,
-                           field=0.0, eps=4.0e-3, itemax=40, mix=0.4):
+                           field=0.0, fs=None, eps=4.0e-3, itemax=40, mix=0.4):
     """
     @fn solve_vortex2d_dvector
     @brief Self-consistent d-vector order parameter of a multi-component unitary
@@ -411,12 +411,60 @@ def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0
     trSS = [np.trace(Sd[a] @ Smats[a]).real for a in range(nc)]
     phitil = [ch[1] for ch in channels]
     om = np.concatenate([omega, -omega])
-    if Dbulk is None:                                   # full-circle bulk amplitudes
-        nb0 = 24
-        bb = np.linspace(-0.5 * np.pi * 0.94, 0.5 * np.pi * 0.94, nb0)
-        Dbulk = _bulk_dvector(lam, temp, om, bb, 1.0 / (2.0 * nb0), phitil)
+    # trajectory directions, per-direction |v_F| and FS weight, and the orbital form
+    # factor of each channel (evaluated at the k-direction); cylinder or a model/Wannier FS
+    def _norm(ph, wt):                                  # normalize nf-weighted <|phi|^2>=1
+        out = ph.copy()
+        for a in range(nc):
+            nrm = np.sqrt((wt * np.abs(out[a]) ** 2).sum())
+            if nrm > 0:
+                out[a] = out[a] / nrm
+        return out
+    # dense FS set for an accurate bulk gap, independent of the trajectory sampling
+    if fs is not None:
+        kfull = np.arctan2(fs['ky'], fs['kx'])
+        wfull = np.asarray(fs['nf'], dtype=float)
+    else:
+        bfull = np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False)
+        kfull = bfull
+        wfull = np.full(180, 1.0 / 180)
+    phid_b = _norm(np.array([phitil[a](kfull) for a in range(nc)], dtype=np.complex128), wfull)
+    # trajectory directions, per-direction |v_F| and FS weight, and the orbital form
+    # factor of each channel (evaluated at the k-direction); cylinder or a model/Wannier FS
+    if fs is not None:                                  # real FS: v_hat directions, nf weights
+        dirs = np.arctan2(fs['vy'], fs['vx'])          # trajectory along v_F
+        kang = kfull                                   # k-direction sets the gap form factor
+        hvfarr = np.asarray(fs['vabs'], dtype=float)
+        wt_dir = wfull
+        if len(dirs) > nbeta:                           # downsample to ~nbeta FS directions
+            sel = np.linspace(0, len(dirs) - 1, nbeta).round().astype(int)
+            dirs, kang = dirs[sel], kang[sel]
+            hvfarr = hvfarr[sel]
+            wt_dir = wt_dir[sel] / wt_dir[sel].sum()    # renormalize the FS weights
+        nbeta = len(dirs)
+        phid = _norm(np.array([phitil[a](kang) for a in range(nc)], dtype=np.complex128), wt_dir)
+        hvf_eff = float((np.asarray(fs['nf']) * np.asarray(fs['vabs'])).sum())
+    else:                                              # isotropic cylinder (v_hat = k_hat)
+        dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
+        hvfarr = np.full(nbeta, hvf)
+        wt_dir = np.full(nbeta, 1.0 / nbeta)
+        phid = np.array([phitil[a](dirs) for a in range(nc)], dtype=np.complex128)
+        hvf_eff = hvf
+    if Dbulk is None:                                   # coupled multi-channel bulk gap (dense set)
+        a2 = np.abs(phid_b) ** 2                        # [nc, ndense]
+        D = np.full(nc, 1.764 * temp)
+        for _ in range(2000):
+            s2 = ((D[:, None] ** 2) * a2).sum(axis=0)   # sum_b (D_b|phi_b|)^2  [ndense]
+            R = np.sqrt(om[None, :] ** 2 + s2[:, None])
+            Dn = np.array([max(lam[a] * temp * D[a] * (wfull[:, None] * a2[a][:, None] / R).sum(), 0.0)
+                           for a in range(nc)])
+            if np.abs(Dn - D).max() < 1e-10 * max(Dn.max(), 1e-12):
+                D = Dn
+                break
+            D = 0.5 * (D + Dn)
+        Dbulk = D
     Dref = float(np.max(Dbulk))
-    xi = hvf / (np.pi * Dref)
+    xi = hvf_eff / (np.pi * Dref)
     Rc = np.sqrt(2.0 / field) * xi if field > 0.0 else np.inf   # Wigner-Seitz cell radius
     R = Rc if field > 0.0 else Lxi * xi
     xg = np.linspace(-R, R, ngrid)
@@ -426,9 +474,6 @@ def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0
     Rg = np.sqrt(X ** 2 + Y ** 2)
     theta = np.arctan2(Y, X)
     SS, BB = np.meshgrid(xg, xg, indexing='ij')
-    dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
-    wt_dir = 1.0 / nbeta
-    phid = np.array([phitil[a](dirs) for a in range(nc)])      # [nc, nbeta]
     mwind = np.asarray(windings, dtype=int)
     # seed: winding-1 components vanish at the core (tanh); core-localized (m=0)
     # subcritical components get a small core-peaked seed so they can nucleate
@@ -455,15 +500,15 @@ def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0
                 amp = phid[a, ib] * Ai[a]((Lx, Ly)) * thr ** mwind[a]   # [ns,nb]
                 Dpath += amp[:, :, None, None] * Smats[a]
             if field > 0.0:           # supercurrent Doppler om -> om + i v_F.Q (position dependent)
-                dop = hvf * _doppler_chord(Lx, Ly, Rc, cb, sb, rho_min)
+                dop = hvfarr[ib] * _doppler_chord(Lx, Ly, Rc, cb, sb, rho_min)
                 om_ch = om[None, None, :] + 1j * dop[:, :, None]    # [ns,nb,Nw]
             else:
                 om_ch = om                                          # [Nw] (broadcast in wrapper)
             _, fch = matrix_riccati_chords(om_ch, np.ascontiguousarray(Dpath),
-                                           hvf, dx, 0.0)            # [ns,nb,Nw,2,2]
+                                           hvfarr[ib], dx, 0.0)     # [ns,nb,Nw,2,2]
             for a in range(nc):
                 fa = np.einsum('ij,snwji->sn', Sd[a], fch) / trSS[a]   # summed over freq
-                accf[a] += wt_dir * np.conj(phid[a, ib]) * _eval_field(fa, xg, sxy, bxy, fill=0.0)
+                accf[a] += wt_dir[ib] * np.conj(phid[a, ib]) * _eval_field(fa, xg, sxy, bxy, fill=0.0)
         err = 0.0
         for a in range(nc):
             A_new = (lam[a] * temp) * (accf[a] * np.conj(ewind) ** mwind[a])   # remove winding
@@ -475,7 +520,7 @@ def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0
 
 
 def calc_vortex_dvector(coupling, temp, wc, kb=1.0, Lxi=7.0, ngrid=33, nbeta=16,
-                        sub_ratio=0.95, field=0.0):
+                        sub_ratio=0.95, field=0.0, fs=None):
     """
     @fn calc_vortex_dvector
     @brief Driver: self-consistent d-vector order parameter of a triplet superconductor
@@ -489,11 +534,12 @@ def calc_vortex_dvector(coupling, temp, wc, kb=1.0, Lxi=7.0, ngrid=33, nbeta=16,
     omega = matsubara(temp, wc)
     couplings = (coupling, coupling * sub_ratio)
     cell = 'isolated vortex' if field <= 0 else f'circular-cell lattice B/Hc2={field:.3f}'
-    print(f"d-vector vortex ({cell}): triplet p_x + subdominant p_y, 2D spin-matrix Riccati", flush=True)
+    fstxt = ', Wannier FS+v_F' if fs is not None else ''
+    print(f"d-vector vortex ({cell}{fstxt}): triplet p_x + subdominant p_y, 2D spin-matrix Riccati", flush=True)
     print(f"T={temp/kb:.2f} K, lambda_px={couplings[0]:.3f}, lambda_py={couplings[1]:.3f}, "
-          f"{len(omega)} Matsubara freqs, grid={ngrid}x{ngrid}, nbeta={nbeta}", flush=True)
+          f"{len(omega)} Matsubara freqs, grid={ngrid}x{ngrid}", flush=True)
     xg, A, Dbulk, xi = solve_vortex2d_dvector(couplings, temp, omega, Lxi=Lxi,
-                                              ngrid=ngrid, nbeta=nbeta, field=field)
+                                              ngrid=ngrid, nbeta=nbeta, field=field, fs=fs)
     Dref = float(np.max(np.abs(Dbulk)))
     if Dref <= 0.0:
         print("normal state (Dbulk=0); nothing to profile", flush=True)

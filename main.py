@@ -1401,7 +1401,10 @@ def main():
             plibs.calc_vortex_current(eil_coupling,temp,eil_wc,gap_sym=eil_gs,kb=kb,
                                       Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
         elif eil_vort_dvector: #self-consistent triplet d-vector vortex/lattice (spin-matrix Riccati; eil_field>0 = circular-cell lattice)
-            plibs.calc_vortex_dvector(eil_coupling,temp,eil_wc,kb=kb,sub_ratio=eil_dvec_subratio,field=eil_field)
+            dfs=(plibs.build_wannier_fs(rvec,ham_r,S_r,avec,plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill))
+                 if eil_vort_fs=='wannier' else None)  #FS geometry only (d-vector channels carry the gap)
+            plibs.calc_vortex_dvector(eil_coupling,temp,eil_wc,kb=kb,sub_ratio=eil_dvec_subratio,
+                                      field=eil_field,fs=dfs)
         elif eil_field_list is not None: #sweep B/Hc2 on the TRUE periodic lattice -> <N(0)>(B) (d~sqrt(B) Volovik)
             plibs.calc_vortex_lattice_periodic(eil_coupling,temp,eil_wc,gap_sym=eil_gs,
                                                field_list=eil_field_list,kappa=eil_kappa,lattice=eil_lattice,kb=kb,
