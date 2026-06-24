@@ -339,6 +339,26 @@ def test_lattice_free_energy_triangular():
     assert F['square'] - F['triangular'] > 1e-4          # triangular favored (isotropic)
 
 
+def test_lattice_symmetry_gap_anisotropy_resolved():
+    """The free energy resolves the gap anisotropy that selects the vortex-lattice
+    symmetry: for d-wave it depends on the orientation theta0 of the gap relative to the
+    lattice (fourfold ~cos4 theta0), enabling the triangular<->square transition scan;
+    for the isotropic s-wave it is theta0-independent.  (The full apex+theta0 scan,
+    calc_vortex_lattice_symmetry, reproduces d-wave triangular at low field -> square
+    near Hc2.)"""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    def Fth(gs, th):
+        st = V.solve_lattice_sc(0.6, T, om, gap_sym=gs, field=0.2, lattice='square',
+                                Ng=18, nbeta=24, kappa=None, itemax=150, mix=0.4,
+                                eps=1e-3, theta0=th)
+        return V.lattice_free_energy(st, 0.6, T, om, gs, nbeta=48, theta0=th)
+    ds = abs(Fth('s', 0.0) - Fth('s', np.pi / 8))        # isotropic: no theta0 dependence
+    dd = abs(Fth('d', 0.0) - Fth('d', np.pi / 8))        # d-wave: fourfold theta0 dependence
+    assert ds < 1e-5
+    assert dd > 1e-4 and dd > 30 * ds                    # d-wave clearly anisotropic vs s-wave
+
+
 def test_lattice_sc_finite_kappa_screening():
     """Finite-kappa A(r) back-reaction (je #2 connection) on the formulation-A lattice:
     the London-screened smooth vector potential keeps the core node (the complex Delta

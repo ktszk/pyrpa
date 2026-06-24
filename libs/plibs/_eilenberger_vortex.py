@@ -1185,13 +1185,20 @@ def calc_vortex_maxwell(coupling, temp, wc, gap_sym='s', field=0.2, kappa=2.0, k
 # Extreme type-II (A=0): the supercurrent/Volovik shift emerges from the phase
 # variation of the complex Delta sampled along each chord.
 # --------------------------------------------------------------------------- #
-def _cell_geom(field, xi, lattice='square', nflux=1):
+def _cell_geom(field, xi, lattice='square', nflux=1, shape=None):
     """Magnetic-cell geometry (je convention): rectangular generators (Dlx, Dly) with
     obliqueness zeta so the primitive translations are a1=((1-zeta)Dlx, -Dly),
     a2=(zeta Dlx, Dly) and the cell holds ``nflux`` flux quanta (area Dlx*Dly =
     nflux*2 pi xi^2 / field).  square -> (1,1,0); triangular (Abrikosov ground state)
-    -> (1, sqrt3/2, 1/2).  Returns a dict with Dlx,Dly,zeta, a1,a2, reciprocal b1,b2, S."""
-    if lattice.startswith('s'):
+    -> (1, sqrt3/2, 1/2).
+    @param shape: (zeta, ratio) to scan a GENERAL cell continuously (ratio=Dly/Dlx);
+    with zeta=1/2 the rhombic family ratio in [1/2, sqrt3/2] interpolates square<->triangular
+    (apex angle), used by the vortex-lattice symmetry scan.  Overrides ``lattice``.
+    @return dict Dlx,Dly,zeta, a1,a2, reciprocal b1,b2, S."""
+    if shape is not None:
+        zeta, ratio = shape
+        Dlx0, Dly0 = 1.0, float(ratio)
+    elif lattice.startswith('s'):
         Dlx0, Dly0, zeta = 1.0, 1.0, 0.0
     else:                                              # triangular / hexagonal
         Dlx0, Dly0, zeta = 1.0, np.sqrt(3.0) * 0.5, 0.5
@@ -1305,7 +1312,8 @@ def _maxwell_A(jx, jy, g):
 def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='square',
                      Ng=20, nbeta=16, hvf=1.0, fs=None, kappa=None, Vw=1, Lchord=6.0,
                      ds_xi=0.3, itemax=60, mix=0.4, eps=3.0e-3, anderson=True, m_and=4,
-                     seed_profile=None, self_consistent_A=False, mixA=0.3):
+                     seed_profile=None, self_consistent_A=False, mixA=0.3,
+                     shape=None, theta0=0.0):
     """
     @fn solve_lattice_sc
     @brief Self-consistent complex order parameter Psi(r)=|Psi|(r) e^{i chi(r)} of a
@@ -1342,19 +1350,19 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
     if Dbulk <= 0:
         return None
     xi = hvf_eff / (np.pi * Dbulk)
-    g = _cell_geom(field, xi, lattice, nflux=Vw)        # oblique magnetic cell (Vw quanta)
+    g = _cell_geom(field, xi, lattice, nflux=Vw, shape=shape)   # oblique magnetic cell (Vw quanta)
     a = np.sqrt(g['S'])
     fax = (np.arange(Ng) + 0.5) / Ng - 0.5             # cell-centred fractional grid
     F1, F2 = np.meshgrid(fax, fax, indexing='ij')
     X = F1 * g['a1'][0] + F2 * g['a2'][0]
     Y = F1 * g['a1'][1] + F2 * g['a2'][1]
     chi_grid = np.angle(_abrikosov_unit_phase(X, Y, g, Vw))
-    if fs is not None:
+    if fs is not None:                                  # theta0 rotates the gap vs the lattice
         dirs = np.arctan2(fs['vy'], fs['vx']); phi = fs_form_factor(fs, gap_sym)
         hvfarr = np.asarray(fs['vabs']); wt_dir = np.asarray(fs['nf']); nbd = len(dirs)
     else:
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
-        phi = _ff_vortex(dirs, gap_sym); hvfarr = np.full(nbeta, hvf)
+        phi = _ff_vortex(dirs - theta0, gap_sym); hvfarr = np.full(nbeta, hvf)
         wt_dir = np.full(nbeta, 1.0 / nbeta); nbd = nbeta
     L = Lchord * xi; ds = ds_xi * xi
     ns = int(2 * L / ds) | 1                            # odd -> exact centre index
@@ -1513,7 +1521,7 @@ def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None
 
 
 def lattice_free_energy(state, coupling, temp, omega, gap_sym, nbeta=24, hvf=1.0, fs=None,
-                        Lchord=6.0, ds_xi=0.3):
+                        Lchord=6.0, ds_xi=0.3, theta0=0.0):
     """
     @fn lattice_free_energy
     @brief Electronic (condensation) free energy of the converged formulation-A vortex
@@ -1541,7 +1549,7 @@ def lattice_free_energy(state, coupling, temp, omega, gap_sym, nbeta=24, hvf=1.0
         hvfarr = np.asarray(fs['vabs']); wt_dir = np.asarray(fs['nf']); nbd = len(dirs)
     else:
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
-        phi = _ff_vortex(dirs, gap_sym); hvfarr = np.full(nbeta, hvf)
+        phi = _ff_vortex(dirs - theta0, gap_sym); hvfarr = np.full(nbeta, hvf)
         wt_dir = np.full(nbeta, 1.0 / nbeta); nbd = nbeta
     L = Lchord * xi; ds = ds_xi * xi
     ns = int(2 * L / ds) | 1; ic = ns // 2
@@ -1568,43 +1576,62 @@ def lattice_free_energy(state, coupling, temp, omega, gap_sym, nbeta=24, hvf=1.0
     return cond - 2.0 * temp * Isum / Dbulk ** 2
 
 
+def _apex_angle(ratio):
+    """Apex angle (deg) of the rhombic (|a1|=|a2|, zeta=1/2) cell with Dly/Dlx=ratio:
+    cos(alpha) = (1/4 - ratio^2)/(1/4 + ratio^2).  ratio=1/2 -> 90 (square),
+    ratio=sqrt3/2 -> 120 (triangular, 60-deg apex of the equilateral triangle)."""
+    return np.degrees(np.arccos((0.25 - ratio ** 2) / (0.25 + ratio ** 2)))
+
+
 def calc_vortex_lattice_symmetry(coupling, temp, wc, gap_sym='d', field_list=None,
-                                 kb=1.0, Ng=28, nbeta=36, fs=None):
+                                 kb=1.0, Ng=28, nbeta=36, fs=None,
+                                 n_ratio=5, n_theta=4, ratio_range=(0.5, None)):
     """
     @fn calc_vortex_lattice_symmetry
-    @brief Vortex-lattice SYMMETRY by the Eilenberger free-energy comparison
-    (Ichioka-Machida functional, lattice_free_energy): solve the formulation-A lattice
-    for the square and the triangular cell at each field (extreme type-II, so the
-    magnetic-field energy is identical and cancels), and report
-    dF = F(square) - F(triangular) -- dF>0 favors triangular, dF<0 favors square.
-    Both symmetries use identical numerical parameters so the large common condensation
-    cancels and the small symmetry-distinguishing anisotropy survives.
-    CAVEAT: this real-space framework robustly reproduces the GENERIC result
-    (isotropic gap -> triangular), but it does NOT reliably resolve the small
-    gap-anisotropy-driven SQUARE transition (the fourfold higher-Landau-level / non-local
-    term, Ichioka cond-mat/9704147): that needs the near-Hc2 GL beta_A treatment or much
-    higher resolution.  Use this for the generic trend / energetics, not as the last word
-    on an anisotropy-driven square lock-in.
+    @brief Vortex-lattice SYMMETRY by minimizing the Eilenberger free energy
+    (Ichioka-Machida functional) over the lattice geometry, the proper full-quasiclassical
+    route (Nakai-Miranovic-Ichioka-Machida, PRL 89, 237004): for each field scan the
+    rhombic family (zeta=1/2, Dly/Dlx = ratio in [1/2, sqrt3/2], i.e. apex 90deg [square]
+    .. 60deg [triangular]) AND the orientation theta0 of the gap relative to the lattice
+    (the fourfold gap anisotropy makes F depend on theta0 ~ cos4 theta0).  The
+    free-energy minimum's apex angle gives the stable symmetry and its field/T evolution.
+    Extreme type-II (kappa=None): the magnetic-field energy is uniform and cancels, so the
+    electronic free energy selects the geometry.  Warm-started across the scan.
+    @return list of (field, best_ratio, best_apex_deg, best_theta0_deg, Fmin)
     """
     omega = matsubara(temp, wc)
     if field_list is None:
-        field_list = [0.1, 0.2, 0.3]
-    print(f"vortex-lattice symmetry (Eilenberger free-energy compare, extreme type-II): "
-          f"{gap_sym}, lambda={coupling:.3f}, T={temp/kb:.2f} K"
+        field_list = [0.2]
+    rmax = ratio_range[1] if ratio_range[1] is not None else np.sqrt(3.0) / 2.0
+    ratios = np.linspace(ratio_range[0], rmax, n_ratio)
+    thetas = np.linspace(0.0, np.pi / 4.0, n_theta)         # fourfold -> [0, pi/4]
+    print(f"vortex-lattice symmetry scan (Eilenberger free-energy minimization, "
+          f"extreme type-II): {gap_sym}, lambda={coupling:.3f}, T={temp/kb:.2f} K"
           f"{', FS+v_F' if fs is not None else ''}", flush=True)
+    out = []
     for b in field_list:
-        Fs = {}
-        for latt in ('square', 'triangular'):
-            st = solve_lattice_sc(coupling, temp, omega, gap_sym=gap_sym, field=b,
-                                  lattice=latt, Ng=Ng, nbeta=nbeta, kappa=None,
-                                  itemax=180, mix=0.4, eps=8e-4)
-            Fs[latt] = (lattice_free_energy(st, coupling, temp, omega, gap_sym,
-                                            nbeta=max(nbeta, 60), fs=fs) if st is not None else 0.0)
-        dF = Fs['square'] - Fs['triangular']
-        sym = 'triangular' if dF > 0 else 'square'
-        print(f"  B/Hc2={b:.3f}: F_sq={Fs['square']:.5f} F_tri={Fs['triangular']:.5f}  "
-              f"dF(sq-tri)={dF:+.2e} -> {sym}", flush=True)
-    return None
+        best = (None, None, None, 1e30)
+        for r in ratios:
+            seed = None
+            for th in thetas:
+                st = solve_lattice_sc(coupling, temp, omega, gap_sym=gap_sym, field=b,
+                                      shape=(0.5, r), theta0=th, Ng=Ng, nbeta=nbeta,
+                                      kappa=None, itemax=180, mix=0.4, eps=8e-4,
+                                      seed_profile=seed, fs=fs)
+                if st is None:
+                    continue
+                seed = st['absD'] / st['Dbulk']            # warm start within the ratio
+                F = lattice_free_energy(st, coupling, temp, omega, gap_sym,
+                                        nbeta=max(nbeta, 60), theta0=th, fs=fs)
+                if F < best[3]:
+                    best = (r, _apex_angle(r), np.degrees(th), F)
+        r, apex, th, F = best
+        sym = ('square' if abs(apex - 90) < 7 else 'triangular' if abs(apex - 120) < 7
+               else f'rhombic')
+        print(f"  B/Hc2={b:.3f}: min F={F:.5f} at apex={apex:.1f}deg (ratio={r:.3f}), "
+              f"theta0={th:.1f}deg -> {sym}", flush=True)
+        out.append((b, r, apex, th, F))
+    return out
 
 
 def calc_vortex_lattice_sc(coupling, temp, wc, gap_sym='d', field_list=None,
