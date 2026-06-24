@@ -1422,11 +1422,16 @@ def main():
         elif eil_vort_current: #circulating charge supercurrent j_phi(rho) of an isolated vortex
             plibs.calc_vortex_current(eil_coupling,temp,eil_wc,gap_sym=eil_gs,kb=kb,
                                       Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
-        elif eil_vort_dvector: #self-consistent triplet d-vector vortex/lattice (spin-matrix Riccati; eil_field>0 = circular-cell lattice)
+        elif eil_vort_dvector: #self-consistent triplet d-vector vortex/lattice (spin-matrix Riccati)
             dfs=(plibs.build_wannier_fs(rvec,ham_r,S_r,avec,plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill))
                  if eil_vort_fs=='wannier' else None)  #FS geometry only (d-vector channels carry the gap)
-            plibs.calc_vortex_dvector(eil_coupling,temp,eil_wc,kb=kb,sub_ratio=eil_dvec_subratio,
-                                      field=eil_field,fs=dfs)
+            if eil_vort_lattice_sc: #je-style TRUE periodic d-vector lattice (formulation A, square/triangular)
+                plibs.calc_vortex_lattice_sc_dvector(eil_coupling,temp,eil_wc,kb=kb,field=eil_field,
+                                                     lattice=eil_lattice,sub_ratio=eil_dvec_subratio,
+                                                     kappa=(None if eil_kappa>=1e3 else eil_kappa),fs=dfs)
+            else: #isolated vortex (eil_field=0) or circular-cell lattice (eil_field>0)
+                plibs.calc_vortex_dvector(eil_coupling,temp,eil_wc,kb=kb,sub_ratio=eil_dvec_subratio,
+                                          field=eil_field,fs=dfs)
         elif eil_vort_lattice_sc and eil_field_list is not None: #je-style self-consistent periodic lattice (formulation A); eil_lattice square/triangular; eil_nvortex=Vw flux quanta/cell; finite eil_kappa = London A back-reaction, >=1e3 = bare extreme
             plibs.calc_vortex_lattice_sc(eil_coupling,temp,eil_wc,gap_sym=eil_gs,
                                          field_list=eil_field_list,lattice=eil_lattice,kb=kb,fs=eil_fs_obj,

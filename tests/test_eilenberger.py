@@ -340,6 +340,24 @@ def test_lattice_sc_finite_kappa_screening():
     assert n0[2.0] < n0[10.0] < n0[None]                 # screening: smaller kappa -> lower N(0)
 
 
+def test_lattice_sc_dvector_texture():
+    """je-style d-vector triplet on the TRUE periodic lattice (2x2 spin-matrix Riccati,
+    formulation A): the dominant p_x(e_x) winds with the Abrikosov lattice and nodes at
+    every core, while the subdominant p_y(e_z) nucleates core-localized (core > bulk) --
+    the vortex-core d-vector texture, now on the periodic cell."""
+    wc, T = 0.3, 3e-3
+    om = E.matsubara(T, wc)
+    st = SP.solve_lattice_sc_dvector((0.7, 0.66), T, om, windings=(1, 0), field=0.1,
+                                     lattice='square', Ng=10, nbeta=8, Lchord=5.0,
+                                     itemax=35, mix=0.4, eps=5e-3)
+    A, Db = st['A'], st['Dbulk']; Dref = max(Db)
+    assert Db[0] > 0 and Db[1] < 1e-3 * Db[0]          # dominant supercritical, subdom subcritical
+    assert np.abs(A[0]).min() / Dref < 0.15           # dominant: node at the core
+    r = np.sqrt(st['X'] ** 2 + st['Y'] ** 2); xi = st['xi']
+    core, bulk = r < 0.8 * xi, r > 2.5 * xi
+    assert np.abs(A[1])[core].mean() > 1.3 * np.abs(A[1])[bulk].mean()   # subdom core-localized
+
+
 def test_lattice_sc_grid_convergent():
     """The formulation-A gap map is interpolation-based (per-grid-point anchored
     trajectories), so the converged amplitude is grid-convergent -- unlike a scatter/

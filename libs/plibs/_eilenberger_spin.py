@@ -519,6 +519,135 @@ def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0
     return xg, A, Dbulk, xi
 
 
+def solve_lattice_sc_dvector(couplings, temp, omega, channels=None, windings=(1, 0),
+                             field=0.2, lattice='square', Ng=18, nbeta=16, hvf=1.0,
+                             fs=None, kappa=None, Lchord=6.0, ds_xi=0.3,
+                             eps=4.0e-3, itemax=60, mix=0.4):
+    """
+    @fn solve_lattice_sc_dvector
+    @brief Self-consistent d-vector (multi-component unitary triplet) on the TRUE
+    periodic vortex lattice, je-style (formulation A): the spin-matrix order parameter
+    Delta_hat(r,k)=sum_a phi_a(k) A_a(r) e^{i m_a chi(r)} Shat_a keeps the analytic
+    Abrikosov winding chi(r), and the gap equation is closed by per-grid-point anchored
+    2x2 matrix-Riccati trajectories (exact f-to-grid map, no binning) on the magnetic
+    cell (square/triangular, _cell_geom).  The dominant winding component (m=1) carries
+    the vortex lattice and vanishes at every core; a subdominant with a different winding
+    (default m=0) nucleates in the cores -> the d-vector reorients across each core.
+    Finite ``kappa`` adds the smooth London Doppler -v_F.A(r) (screening, je #2).
+    @return state dict (X,Y,A[nc,Ng,Ng],chi,Dbulk[nc],xi,geom,kappa,...) for lattice_dos_sc_dvector
+    """
+    from ._eilenberger_vortex import (_cell_geom, _abrikosov_unit_phase, _abrikosov_z,
+                                      _periodic_eval, _london_A)
+    if channels is None:
+        channels = _default_dvector_channels()
+    nc = len(channels)
+    lam = np.asarray(couplings, dtype=float)
+    Smats = [S for _, _, S in channels]
+    Sd = [np.conj(S).T for S in Smats]
+    trSS = [np.trace(Sd[a] @ Smats[a]).real for a in range(nc)]
+    phitil = [ch[1] for ch in channels]
+    om = np.concatenate([omega, -omega])
+    mwind = np.asarray(windings, dtype=int)
+
+    def _norm(ph, wt):                                  # normalize nf-weighted <|phi|^2>=1
+        out = ph.copy()
+        for a in range(nc):
+            nrm = np.sqrt((wt * np.abs(out[a]) ** 2).sum())
+            if nrm > 0:
+                out[a] = out[a] / nrm
+        return out
+    if fs is not None:                                  # dense FS for the bulk gap
+        kfull = np.arctan2(fs['ky'], fs['kx']); wfull = np.asarray(fs['nf'], float)
+    else:
+        kfull = np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False); wfull = np.full(180, 1.0 / 180)
+    phid_b = _norm(np.array([phitil[a](kfull) for a in range(nc)], dtype=np.complex128), wfull)
+    if fs is not None:                                  # trajectory directions / weights
+        dirs = np.arctan2(fs['vy'], fs['vx']); kang = kfull
+        hvfarr = np.asarray(fs['vabs'], float); wt_dir = wfull
+        if len(dirs) > nbeta:
+            sel = np.linspace(0, len(dirs) - 1, nbeta).round().astype(int)
+            dirs, kang, hvfarr = dirs[sel], kang[sel], hvfarr[sel]
+            wt_dir = wt_dir[sel] / wt_dir[sel].sum()
+        nbeta = len(dirs)
+        phid = _norm(np.array([phitil[a](kang) for a in range(nc)], dtype=np.complex128), wt_dir)
+        hvf_eff = float((np.asarray(fs['nf']) * np.asarray(fs['vabs'])).sum())
+    else:
+        dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
+        hvfarr = np.full(nbeta, hvf); wt_dir = np.full(nbeta, 1.0 / nbeta)
+        phid = np.array([phitil[a](dirs) for a in range(nc)], dtype=np.complex128)
+        hvf_eff = hvf
+    a2 = np.abs(phid_b) ** 2                            # coupled multi-channel bulk gap
+    D = np.full(nc, 1.764 * temp)
+    for _ in range(2000):
+        s2 = ((D[:, None] ** 2) * a2).sum(axis=0)
+        R = np.sqrt(om[None, :] ** 2 + s2[:, None])
+        Dn = np.array([max(lam[a] * temp * D[a] * (wfull[:, None] * a2[a][:, None] / R).sum(), 0.0)
+                       for a in range(nc)])
+        if np.abs(Dn - D).max() < 1e-10 * max(Dn.max(), 1e-12):
+            D = Dn; break
+        D = 0.5 * (D + Dn)
+    Dbulk = D; Dref = float(np.max(Dbulk))
+    if Dref <= 0:
+        return None
+    xi = hvf_eff / (np.pi * Dref)
+    g = _cell_geom(field, xi, lattice, nflux=1)
+    fax = (np.arange(Ng) + 0.5) / Ng - 0.5
+    F1, F2 = np.meshgrid(fax, fax, indexing='ij')
+    X = F1 * g['a1'][0] + F2 * g['a2'][0]
+    Y = F1 * g['a1'][1] + F2 * g['a2'][1]
+    chi1 = _abrikosov_unit_phase(X, Y, g, 1)           # winding-1 phase on the grid
+    L = Lchord * xi; ds = ds_xi * xi
+    ns = int(2 * L / ds) | 1; ic = ns // 2
+    s = np.linspace(-L, L, ns)
+    ax = X.ravel(); ay = Y.ravel(); Nanch = ax.size
+    lamL = kappa * xi if kappa is not None else None
+    Axg, Ayg = _london_A(g, lamL, 1) if lamL is not None else (None, None)
+    chord = []                                          # fixed per-direction geometry
+    for ib in range(nbeta):
+        cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
+        px = ax[None, :] + s[:, None] * cb
+        py = ay[None, :] + s[:, None] * sb
+        eichi = _abrikosov_unit_phase(px, py, g, 1)
+        dch = (-(cb * _periodic_eval(Axg, g, px, py) + sb * _periodic_eval(Ayg, g, px, py))
+               if lamL is not None else None)
+        chord.append((px, py, eichi, dch))
+    Zg = np.abs(_abrikosov_z(X, Y, g))                  # ~0 at cores, ~1 between
+    A = np.empty((nc, Ng, Ng), dtype=np.complex128)
+    for a in range(nc):
+        if Dbulk[a] > 1.0e-3 * Dref:
+            A[a] = Dbulk[a] * (np.tanh(Zg / 0.5) if mwind[a] != 0 else 1.0)
+        else:
+            A[a] = 0.15 * Dref * (1.0 - np.tanh(Zg / 0.5))   # core-peaked nucleation seed
+    Nw = len(om)
+    om_dir = [om if dch is None
+              else np.ascontiguousarray(om[None, None, :] + 1j * hvfarr[ib] * dch[:, :, None])
+              for ib, (_, _, _, dch) in enumerate(chord)]
+    for it in range(itemax):
+        accf = np.zeros((nc, Nanch), dtype=np.complex128)
+        for ib in range(nbeta):
+            px, py, eichi, _ = chord[ib]
+            Dpath = np.zeros((ns, Nanch, 2, 2), dtype=np.complex128)
+            for a in range(nc):
+                amp = phid[a, ib] * _periodic_eval(A[a], g, px, py) * eichi ** mwind[a]
+                Dpath += amp[:, :, None, None] * Smats[a]
+            _, fch = matrix_riccati_chords(om_dir[ib], np.ascontiguousarray(Dpath),
+                                           hvfarr[ib], ds, 0.0)
+            fc = fch[ic]                                # [Nanch, Nw, 2, 2]
+            for a in range(nc):
+                tmp = np.einsum('ij,nwji->n', Sd[a], fc) / trSS[a]   # spin-project, sum freq
+                accf[a] += wt_dir[ib] * np.conj(phid[a, ib]) * np.conj(eichi[ic] ** mwind[a]) * tmp
+        err = 0.0
+        for a in range(nc):
+            A_new = (lam[a] * temp) * accf[a].reshape(Ng, Ng)
+            err = max(err, np.abs(A_new - A[a]).max() / Dref)
+            A[a] = (1.0 - mix) * A[a] + mix * A_new
+        if err < eps:
+            break
+    return dict(X=X, Y=Y, A=A, chi=np.angle(chi1), Dbulk=Dbulk, xi=xi, geom=g,
+                a=np.sqrt(g['S']), kappa=kappa, channels=channels, windings=mwind,
+                iters=it + 1, err=err)
+
+
 def calc_vortex_dvector(coupling, temp, wc, kb=1.0, Lxi=7.0, ngrid=33, nbeta=16,
                         sub_ratio=0.95, field=0.0, fs=None):
     """
@@ -561,3 +690,52 @@ def calc_vortex_dvector(coupling, temp, wc, kb=1.0, Lxi=7.0, ngrid=33, nbeta=16,
     except IOError as e:
         print(f"Error writing vortex_dvector.dat: {e}", flush=True)
     return xg, A
+
+
+def calc_vortex_lattice_sc_dvector(coupling, temp, wc, kb=1.0, field=0.2, lattice='square',
+                                   Ng=12, nbeta=10, sub_ratio=0.92, kappa=None, fs=None):
+    """
+    @fn calc_vortex_lattice_sc_dvector
+    @brief Driver: self-consistent d-vector triplet on the TRUE periodic vortex lattice
+    (je-style formulation A, square/triangular cell) -- dominant p_x(e_x) winding with
+    the Abrikosov lattice (node at every core) + subdominant p_y(e_z) that nucleates,
+    core-localized, where the dominant is suppressed (the d-vector texture).  Finite
+    ``kappa`` adds the London screening Doppler.  Writes the converged fields to
+    'lattice_dvector.dat'.
+    """
+    omega = matsubara(temp, wc)
+    couplings = (coupling, coupling * sub_ratio)
+    print(f"d-vector periodic vortex lattice (formulation A, {lattice}, B/Hc2={field:.3f}"
+          f"{', finite kappa=%g' % kappa if kappa is not None else ', extreme'}"
+          f"{', Wannier FS' if fs is not None else ''}): dominant p_x(e_x) + subdominant p_y(e_z)",
+          flush=True)
+    print(f"T={temp/kb:.2f} K, lambda=({couplings[0]:.3f},{couplings[1]:.3f}), "
+          f"{len(omega)} Matsubara freqs, grid={Ng}x{Ng}", flush=True)
+    st = solve_lattice_sc_dvector(couplings, temp, omega, windings=(1, 0), field=field,
+                                  lattice=lattice, Ng=Ng, nbeta=nbeta, kappa=kappa, fs=fs)
+    if st is None:
+        print("normal state (Dbulk=0)", flush=True)
+        return None
+    A = st['A']; Db = st['Dbulk']; Dref = float(np.max(Db)); xi = st['xi']
+    X, Y = st['X'], st['Y']; r = np.sqrt(X ** 2 + Y ** 2)
+    core = r < 0.8 * xi; bulk = r > 2.0 * xi
+    adom_core, adom_bulk = np.abs(A[0])[core].mean() / Dref, np.abs(A[0])[bulk].mean() / Dref
+    asub_core = np.abs(A[1])[core].mean() / Dref
+    asub_bulk = np.abs(A[1])[bulk].mean() / Dref if bulk.any() else 0.0
+    print(f"Dbulk(dom,sub) = ({Db[0]:.4e}, {Db[1]:.4e}) eV,  xi = {xi:.4g},  iters={st['iters']}", flush=True)
+    print(f"  dominant p_x(e_x):  min|A|/Db={np.abs(A[0]).min()/Dref:.3f} (core node)  "
+          f"core={adom_core:.3f}  bulk={adom_bulk:.3f}", flush=True)
+    print(f"  subdom  p_y(e_z):   core={asub_core:.4f}  bulk={asub_bulk:.4f}  "
+          f"({'core-localized TEXTURE' if asub_core > 1.3 * max(asub_bulk, 1e-9) else 'uniform/absent'})",
+          flush=True)
+    try:
+        with open('lattice_dvector.dat', 'w') as fh:
+            fh.write("# x/xi  y/xi  |A_px|/Db  |A_pz|/Db\n")
+            for i in range(Ng):
+                for j in range(Ng):
+                    fh.write(f"{X[i,j]/xi:10.4f} {Y[i,j]/xi:10.4f} "
+                             f"{np.abs(A[0,i,j])/Dref:12.5e} {np.abs(A[1,i,j])/Dref:12.5e}\n")
+                fh.write("\n")
+    except IOError as e:
+        print(f"Error writing lattice_dvector.dat: {e}", flush=True)
+    return st
