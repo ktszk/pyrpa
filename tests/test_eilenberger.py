@@ -483,6 +483,41 @@ def test_wannier_fs_matches_model_tb():
     assert abs(Dw - Dm) / Dm < 0.01
 
 
+def test_multiband_gap_projection():
+    """Low-energy projection of an orbital-basis pair potential onto the FS bands
+    (Nagai-Nakamura JPSJ 85, 074707 (2016), Eq. 43): build_wannier_fs stores the band
+    eigenvectors u(k_F), u(-k_F) and project_gap_to_band forms phi=u^dag Delta_orb u*(-k).
+    On a 2-orbital model: an intra-orbital equal pairing (Delta=I) gives a band-uniform
+    gap; an orbital-selective pairing (diag(1,0)) makes the band gap track the orbital
+    weight; diag(1,-1) yields an s+-like sign change driven by the orbital character.
+    The projected gap then feeds the quasiclassical solvers (bulk_gap_fs)."""
+    import libs.plibs as p
+    hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       'inputs', 'hop2.input')
+    if not os.path.exists(hop):
+        return
+    rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
+    assert Norb == 2
+    fw = E.build_wannier_fs(rvec, ham_r, [], np.eye(3), 0.0, mesh=140)
+    assert fw['evec'].shape == (len(fw['kx']), 2)            # (a) eigenvectors stored
+    assert np.allclose((np.abs(fw['evec']) ** 2).sum(1), 1.0)   # orbital-weight normalized
+    # (b) Delta = I  -> band-uniform gap (no orbital selectivity)
+    E.project_gap_to_band(fw, np.eye(2))
+    assert fw['phi'].real.std() / abs(fw['phi'].real.mean()) < 1e-6
+    # (b) Delta = diag(1,0) -> band gap == orbital-0 weight |u_0|^2
+    E.project_gap_to_band(fw, np.diag([1.0, 0.0]), normalize=False)
+    assert np.allclose(fw['phi'].real, np.abs(fw['evec'][:, 0]) ** 2, atol=1e-6)
+    w0 = np.abs(fw['evec'][:, 0]) ** 2
+    assert w0.max() - w0.min() > 0.3                          # genuinely orbital-resolved
+    # (b) Delta = diag(1,-1) -> s+- sign change from the orbital character
+    E.project_gap_to_band(fw, np.diag([1.0, -1.0]), normalize=False)
+    assert fw['phi'].real.min() < 0 < fw['phi'].real.max()
+    # the projected gap drives the solver: build with gap_orbital=I gives a finite Tc gap
+    fwp = E.build_wannier_fs(rvec, ham_r, [], np.eye(3), 0.0, mesh=140, gap_orbital=np.eye(2))
+    D = E.bulk_gap_fs(0.6, 8e-4, E.matsubara(8e-4, 0.5), fwp, 0)
+    assert D > 0
+
+
 def test_gap_sym_index_and_delta0():
     """The gap symmetry can be set by the pyrpa integer gap_sym index (lattice
     harmonics via gap_symms, baked into the FS), and delta0 sets per-band gap

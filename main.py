@@ -201,6 +201,7 @@ eil_vort_current=False   #True: circulating charge supercurrent j_phi(rho) of an
 eil_vort_maxwell=False   #True: circular-cell vortex with the self-consistent finite-kappa vector potential A(r) (Maxwell back-reaction; needs eil_field>0, uses eil_kappa)
 eil_vort_lattice_sc=False #True: je-style self-consistent TRUE periodic lattice (formulation A, extreme type-II): complex Psi(r) with a real node at every core + full Abrikosov supercurrent; sweeps eil_field_list -> <N(0)>(B) (d~sqrt(B) Volovik)
 eil_vort_scA=False       #True (lattice_sc, finite eil_kappa): fully self-consistent vector potential A from the quasiclassical current j_s=<v_F Im g> (je A_renew), instead of the analytic London A
+eil_gap_orbital=None     #None, or an Norb x Norb orbital-basis pair-potential matrix (or callable kfrac->NxN): the band gap is its low-energy PROJECTION onto the FS bands (Nagai-Nakamura, JPSJ 85 074707 (2016) Eq.43; needs wannier FS); supersedes gap_sym/delta0
 eil_vort_tilt=0.0        #field tilt theta [deg] from the c-axis (quasi-2D): orbital uses B_z=B cos(theta), Zeeman -> h/cos(theta) (Pauli/orbital ratio)
 eil_nvortex=1            #vortices (flux quanta) per computational cell of the periodic lattice (supercell; n^2 reduces to the primitive cell)
 eil_field=0.0            #vortex lattice field B/Hc2 (0=isolated vortex; >0=circular-cell lattice w/ Doppler)
@@ -1402,7 +1403,7 @@ def main():
             if eil_surf_fs=='wannier': #real Wannier-band FS + v_F (gap symmetry/multiband from gap_sym,delta0)
                 sfs=plibs.build_wannier_fs(rvec,ham_r,S_r,avec,
                                            plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill),
-                                           gap_sym=gap_sym,delta0=delta0)
+                                           gap_sym=gap_sym,delta0=delta0,gap_orbital=eil_gap_orbital)
                 sfk,sgs=None,gap_sym
             else:
                 sfs,sfk,sgs=None,eil_surf_fs,eil_pair_sym
@@ -1413,7 +1414,7 @@ def main():
         if eil_vort_fs=='wannier': #real Wannier-band FS + Fermi velocities (mu from filling)
             eil_fs_obj=plibs.build_wannier_fs(rvec,ham_r,S_r,avec,
                                               plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill),
-                                              gap_sym=gap_sym,delta0=delta0) #symmetry/multiband from gap_sym,delta0
+                                              gap_sym=gap_sym,delta0=delta0,gap_orbital=eil_gap_orbital) #gap_orbital=projection (Nagai)
             eil_fs_kw,eil_gs=None,gap_sym       #the (int) gap_sym is baked into fs['phi']
         else:
             eil_fs_obj,eil_fs_kw,eil_gs=None,eil_vort_fs,eil_pair_sym

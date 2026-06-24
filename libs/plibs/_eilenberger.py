@@ -873,8 +873,40 @@ def calc_free_energy(coupling, temp, wc, gap_sym='s', fs=None, t_list=None, kb=1
     return rows
 
 
+def project_gap_to_band(fs, gap_orbital, normalize=True):
+    """
+    @fn project_gap_to_band
+    @brief Band-basis pairing form factor by the systematic low-energy projection of an
+    orbital-basis pair potential onto the Fermi-surface bands (Nagai-Nakamura, JPSJ 85,
+    074707 (2016), Eq. 43):  Delta_eff(k_F) = U(k_F)^dagger . Delta_orb(k_F) . U*(-k_F),
+    where U(k_F)=fs['evec'] is the (orbital-content) eigenvector of the FS band and
+    U*(-k_F)=conj(fs['evec_mk']).  For one band per sheet (M=1) this is the scalar
+    phi(k_F)=sum_{ab} conj(u_a(k_F)) Delta_orb,ab(k_F) conj(u_b(-k_F)); the orbital
+    character of the band (how u varies over/between sheets) is thus built into the gap
+    -- e.g. orbital-selective or s+- structure emerges, rather than being imposed by delta0.
+    @param fs: a Wannier FS dict carrying 'evec' and 'evec_mk' (build_wannier_fs)
+    @param gap_orbital: the N x N orbital pair-potential matrix Delta_orb -- either a
+           constant array (k-independent on-site/orbital pairing) or a callable
+           kfrac(3,) -> N x N array (k-dependent, e.g. an extended/d-wave bond pairing)
+    @param normalize: rescale to the nf-weighted <|phi|^2> = 1 convention
+    @return fs (with fs['phi'] set)
+    """
+    ev, evm = fs['evec'], fs['evec_mk']                # [Nfs, Norb]
+    if callable(gap_orbital):
+        phi = np.array([np.conj(ev[i]) @ np.asarray(gap_orbital(fs['kf'][i]), dtype=np.complex128)
+                        @ np.conj(evm[i]) for i in range(ev.shape[0])], dtype=np.complex128)
+    else:
+        D = np.asarray(gap_orbital, dtype=np.complex128)
+        phi = np.einsum('ia,ab,ib->i', np.conj(ev), D, np.conj(evm))
+    if normalize:
+        nrm = np.sqrt((fs['nf'] * np.abs(phi) ** 2).sum())
+        phi = phi / nrm if nrm > 0 else phi
+    fs['phi'] = phi
+    return fs
+
+
 def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, band=None, RotMat=None,
-                     gap_sym=None, delta0=None):
+                     gap_sym=None, delta0=None, gap_orbital=None):
     """
     @fn build_wannier_fs
     @brief Build the Fermi surface (with Fermi velocities) of a REAL Wannier tight-
@@ -890,7 +922,11 @@ def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, band=None, Ro
                     form factor phi(k) via set_fs_gap (lattice harmonics on the real FS)
     @param  delta0: per-band gap amplitudes/signs (indexed by band) for a multiband gap
                     (e.g. s+- with opposite signs on different sheets); None = uniform
-    @return dict th,kx,ky,kf,band,vx,vy,vabs,vhx,vhy,nf [,phi]  (Cartesian in-plane k,
+    @param gap_orbital: N x N orbital-basis pair potential (array or callable kfrac->NxN);
+                    if given, the band gap phi(k) is the low-energy PROJECTION of it onto
+                    the FS bands (Nagai-Nakamura Eq 43, project_gap_to_band) -- the orbital
+                    character is built in, superseding the phenomenological gap_sym/delta0
+    @return dict th,kx,ky,kf,band,vx,vy,vabs,vhx,vhy,nf,evec,evec_mk [,phi]  (in-plane k,
             kf = fractional k, band = per-point band index; nf sums to 1)
     """
     from ._bands import get_eigs_2d, get_kf_points, get_eigs
@@ -899,7 +935,7 @@ def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, band=None, Ro
         RotMat = np.eye(3)
     eig2d = get_eigs_2d(mesh, rvec, ham_r, S_r, RotMat, kz)
     kf, fsband = get_kf_points(eig2d, mesh, mu, kz)
-    kxs, kys, vxs, vys, nfs, kfs, bnd = [], [], [], [], [], [], []
+    kxs, kys, vxs, vys, nfs, kfs, bnd, evs, evms = [], [], [], [], [], [], [], [], []
     for contlist, b in zip(kf, fsband):
         if band is not None and b != band:
             continue
@@ -910,6 +946,12 @@ def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, band=None, Ro
             _, uni = get_eigs(pts, ham_r, S_r, rvec)
             vk = flibs.get_veloc(pts, ham_r, rvec, avec.T, uni).real    # [Np,Norb,3]
             v = vk[:, b, :]
+            # band eigenvectors u(k_F) and u(-k_F) (orbital content) for the gap projection
+            ub = uni[:, b, :].copy()                   # [Np, Norb] (Eilenberger band a=b)
+            ub /= np.sqrt((np.abs(ub) ** 2).sum(axis=1))[:, None]
+            _, uni_m = get_eigs(np.ascontiguousarray(-pts), ham_r, S_r, rvec)
+            umb = uni_m[:, b, :].copy()
+            umb /= np.sqrt((np.abs(umb) ** 2).sum(axis=1))[:, None]
             kc = 2.0 * np.pi * pts[:, :2]              # Cartesian in-plane k (a=1)
             seg = np.sqrt((np.diff(kc, axis=0) ** 2).sum(axis=1))      # piece segments
             dl = np.zeros(len(pts))
@@ -920,6 +962,7 @@ def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, band=None, Ro
             vxs.append(v[:, 0]); vys.append(v[:, 1])
             nfs.append(dl / np.maximum(vab, 1e-12))
             kfs.append(pts); bnd.append(np.full(len(pts), b, dtype=int))
+            evs.append(ub); evms.append(umb)
     if not kxs:
         raise ValueError("no Fermi surface at this mu/kz")
     kx = np.concatenate(kxs); ky = np.concatenate(kys)
@@ -929,7 +972,10 @@ def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, band=None, Ro
     nf = nf / nf.sum()
     fs = dict(th=np.arctan2(ky, kx), kx=kx, ky=ky, kf=np.concatenate(kfs),
               band=np.concatenate(bnd), vx=vx, vy=vy, vabs=vabs,
-              vhx=vx / vabs, vhy=vy / vabs, nf=nf)
-    if gap_sym is not None:
-        set_fs_gap(fs, gap_sym, delta0)                # bake phi (per-band ratio/sign)
+              vhx=vx / vabs, vhy=vy / vabs, nf=nf,
+              evec=np.concatenate(evs), evec_mk=np.concatenate(evms))  # u(k_F), u(-k_F)
+    if gap_orbital is not None:
+        project_gap_to_band(fs, gap_orbital)           # band gap = U^dag Delta_orb U*  (Nagai Eq 43)
+    elif gap_sym is not None:
+        set_fs_gap(fs, gap_sym, delta0)                # phenomenological per-band ratio/sign
     return fs
