@@ -356,6 +356,9 @@ def test_lattice_sc_dvector_texture():
     r = np.sqrt(st['X'] ** 2 + st['Y'] ** 2); xi = st['xi']
     core, bulk = r < 0.8 * xi, r > 2.5 * xi
     assert np.abs(A[1])[core].mean() > 1.3 * np.abs(A[1])[bulk].mean()   # subdom core-localized
+    # spatially-averaged DOS: finite, recovers to the normal state at high energy
+    Nw = SP.lattice_dos_sc_dvector(st, np.array([0.0, 2.0 * Dref]), nbeta=20, delta=0.05 * Dref)
+    assert Nw[0] > 0.0 and abs(Nw[1] - 1.0) < 0.25     # N(0)>0 (core states), N(large w)->1
 
 
 def test_lattice_sc_grid_convergent():

@@ -522,7 +522,7 @@ def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0
 def solve_lattice_sc_dvector(couplings, temp, omega, channels=None, windings=(1, 0),
                              field=0.2, lattice='square', Ng=18, nbeta=16, hvf=1.0,
                              fs=None, kappa=None, Lchord=6.0, ds_xi=0.3,
-                             eps=4.0e-3, itemax=60, mix=0.4):
+                             eps=4.0e-3, itemax=60, mix=0.4, anderson=True, m_and=4):
     """
     @fn solve_lattice_sc_dvector
     @brief Self-consistent d-vector (multi-component unitary triplet) on the TRUE
@@ -622,13 +622,13 @@ def solve_lattice_sc_dvector(couplings, temp, omega, channels=None, windings=(1,
     om_dir = [om if dch is None
               else np.ascontiguousarray(om[None, None, :] + 1j * hvfarr[ib] * dch[:, :, None])
               for ib, (_, _, _, dch) in enumerate(chord)]
-    for it in range(itemax):
+    def gap_map_dv(Acur):                              # one pass: A[nc] -> A_new[nc]
         accf = np.zeros((nc, Nanch), dtype=np.complex128)
         for ib in range(nbeta):
             px, py, eichi, _ = chord[ib]
             Dpath = np.zeros((ns, Nanch, 2, 2), dtype=np.complex128)
             for a in range(nc):
-                amp = phid[a, ib] * _periodic_eval(A[a], g, px, py) * eichi ** mwind[a]
+                amp = phid[a, ib] * _periodic_eval(Acur[a], g, px, py) * eichi ** mwind[a]
                 Dpath += amp[:, :, None, None] * Smats[a]
             _, fch = matrix_riccati_chords(om_dir[ib], np.ascontiguousarray(Dpath),
                                            hvfarr[ib], ds, 0.0)
@@ -636,16 +636,89 @@ def solve_lattice_sc_dvector(couplings, temp, omega, channels=None, windings=(1,
             for a in range(nc):
                 tmp = np.einsum('ij,nwji->n', Sd[a], fc) / trSS[a]   # spin-project, sum freq
                 accf[a] += wt_dir[ib] * np.conj(phid[a, ib]) * np.conj(eichi[ic] ** mwind[a]) * tmp
-        err = 0.0
-        for a in range(nc):
-            A_new = (lam[a] * temp) * accf[a].reshape(Ng, Ng)
-            err = max(err, np.abs(A_new - A[a]).max() / Dref)
-            A[a] = (1.0 - mix) * A[a] + mix * A_new
+        return np.array([(lam[a] * temp) * accf[a].reshape(Ng, Ng) for a in range(nc)])
+
+    xs, fs_h = [], []                                  # Anderson/Pulay history (stacked channels)
+    sh = A.shape
+    for it in range(itemax):
+        res = gap_map_dv(A) - A
+        err = np.abs(res).max() / Dref
         if err < eps:
+            A = A + res
             break
+        xs.append(A.ravel().copy()); fs_h.append(res.ravel().copy())
+        if len(fs_h) > m_and + 1:
+            xs.pop(0); fs_h.pop(0)
+        if not anderson or len(fs_h) == 1:
+            A = A + mix * res
+        else:
+            dF = np.column_stack([fs_h[i + 1] - fs_h[i] for i in range(len(fs_h) - 1)])
+            dX = np.column_stack([xs[i + 1] - xs[i] for i in range(len(xs) - 1)])
+            gam, *_ = np.linalg.lstsq(dF, fs_h[-1], rcond=None)
+            A = (xs[-1] + mix * fs_h[-1] - (dX + mix * dF) @ gam).reshape(sh)
     return dict(X=X, Y=Y, A=A, chi=np.angle(chi1), Dbulk=Dbulk, xi=xi, geom=g,
                 a=np.sqrt(g['S']), kappa=kappa, channels=channels, windings=mwind,
                 iters=it + 1, err=err)
+
+
+def lattice_dos_sc_dvector(state, wlist, delta=None, nbeta=16, hvf=1.0, fs=None,
+                           Lchord=6.0, ds_xi=0.3):
+    """
+    @fn lattice_dos_sc_dvector
+    @brief Spatially-averaged DOS N(w)/N0 of the self-consistent d-vector periodic
+    lattice (state from solve_lattice_sc_dvector): per-grid-point anchored 2x2 matrix
+    Riccati on the retarded axis (z=delta-i*w), N(w)/N0 = <(1/2) Tr Re g(anchor)>_{grid,FS},
+    with the same Abrikosov winding and (finite kappa) London Doppler as the solver.
+    @return N(w)/N0 [Nw]
+    """
+    from ._eilenberger_vortex import _abrikosov_unit_phase, _periodic_eval, _london_A
+    A = state['A']; g = state['geom']; xi = state['xi']
+    Dbulk = state['Dbulk']; Dref = float(np.max(Dbulk)); Ng = A.shape[1]
+    X, Y = state['X'], state['Y']
+    channels = state['channels']; mwind = state['windings']
+    Smats = [S for _, _, S in channels]; phitil = [ch[1] for ch in channels]; nc = len(channels)
+    kappa = state.get('kappa'); lam = kappa * xi if kappa is not None else None
+    Axg, Ayg = _london_A(g, lam, 1) if lam is not None else (None, None)
+    if delta is None:
+        delta = 0.03 * Dref
+    zomega = delta - 1j * np.asarray(wlist); Nw = zomega.size
+    if fs is not None:
+        dirs = np.arctan2(fs['vy'], fs['vx']); kang = np.arctan2(fs['ky'], fs['kx'])
+        hvfarr = np.asarray(fs['vabs'], float); wt_dir = np.asarray(fs['nf'], float)
+        if len(dirs) > nbeta:
+            sel = np.linspace(0, len(dirs) - 1, nbeta).round().astype(int)
+            dirs, kang, hvfarr = dirs[sel], kang[sel], hvfarr[sel]
+            wt_dir = wt_dir[sel] / wt_dir[sel].sum()
+        nbeta = len(dirs)
+    else:
+        dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False); kang = dirs
+        hvfarr = np.full(nbeta, hvf); wt_dir = np.full(nbeta, 1.0 / nbeta)
+    phid = np.array([phitil[a](kang) for a in range(nc)], dtype=np.complex128)
+    nrm = np.array([np.sqrt((wt_dir * np.abs(phid[a]) ** 2).sum()) for a in range(nc)])
+    phid = phid / np.where(nrm[:, None] > 0, nrm[:, None], 1.0)
+    L = Lchord * xi; ds = ds_xi * xi
+    ns = int(2 * L / ds) | 1; ic = ns // 2
+    s = np.linspace(-L, L, ns)
+    ax = X.ravel(); ay = Y.ravel(); Nanch = ax.size
+    gsum = np.zeros(Nw)
+    for ib in range(nbeta):
+        cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
+        px = ax[None, :] + s[:, None] * cb; py = ay[None, :] + s[:, None] * sb
+        eichi = _abrikosov_unit_phase(px, py, g, 1)
+        Dpath = np.zeros((ns, Nanch, 2, 2), dtype=np.complex128)
+        for a in range(nc):
+            amp = phid[a, ib] * _periodic_eval(A[a], g, px, py) * eichi ** mwind[a]
+            Dpath += amp[:, :, None, None] * Smats[a]
+        if lam is None:
+            om_ch = zomega
+        else:
+            dch = -(cb * _periodic_eval(Axg, g, px, py) + sb * _periodic_eval(Ayg, g, px, py))
+            om_ch = zomega[None, None, :] + 1j * hvfarr[ib] * dch[:, :, None]
+        gch, _ = matrix_riccati_chords(om_ch, np.ascontiguousarray(Dpath), hvfarr[ib], ds, 0.0)
+        # N(w) = (1/2) Tr Re g at the anchor, averaged over anchors
+        trg = 0.5 * (gch[ic, :, :, 0, 0] + gch[ic, :, :, 1, 1]).real   # [Nanch, Nw]
+        gsum += wt_dir[ib] * trg.mean(axis=0)
+    return gsum
 
 
 def calc_vortex_dvector(coupling, temp, wc, kb=1.0, Lxi=7.0, ngrid=33, nbeta=16,
@@ -728,6 +801,10 @@ def calc_vortex_lattice_sc_dvector(coupling, temp, wc, kb=1.0, field=0.2, lattic
     print(f"  subdom  p_y(e_z):   core={asub_core:.4f}  bulk={asub_bulk:.4f}  "
           f"({'core-localized TEXTURE' if asub_core > 1.3 * max(asub_bulk, 1e-9) else 'uniform/absent'})",
           flush=True)
+    n0 = float(lattice_dos_sc_dvector(st, np.array([0.0]), nbeta=max(nbeta, 20),
+                                      delta=0.05 * Dref, fs=fs)[0])
+    print(f"  spatially-averaged zero-energy DOS <N(0)>/N0 = {n0:.3f} "
+          f"(triplet: core-bound-state + nodal contributions)", flush=True)
     try:
         with open('lattice_dvector.dat', 'w') as fh:
             fh.write("# x/xi  y/xi  |A_px|/Db  |A_pz|/Db\n")
