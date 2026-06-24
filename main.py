@@ -200,6 +200,7 @@ eil_vort_dvector=False   #True: self-consistent triplet d-vector TEXTURE around 
 eil_vort_current=False   #True: circulating charge supercurrent j_phi(rho) of an isolated vortex (writes vortex_current.dat)
 eil_vort_maxwell=False   #True: circular-cell vortex with the self-consistent finite-kappa vector potential A(r) (Maxwell back-reaction; needs eil_field>0, uses eil_kappa)
 eil_vort_lattice_sc=False #True: je-style self-consistent TRUE periodic lattice (formulation A, extreme type-II): complex Psi(r) with a real node at every core + full Abrikosov supercurrent; sweeps eil_field_list -> <N(0)>(B) (d~sqrt(B) Volovik)
+eil_vort_scA=False       #True (lattice_sc, finite eil_kappa): fully self-consistent vector potential A from the quasiclassical current j_s=<v_F Im g> (je A_renew), instead of the analytic London A
 eil_vort_tilt=0.0        #field tilt theta [deg] from the c-axis (quasi-2D): orbital uses B_z=B cos(theta), Zeeman -> h/cos(theta) (Pauli/orbital ratio)
 eil_nvortex=1            #vortices (flux quanta) per computational cell of the periodic lattice (supercell; n^2 reduces to the primitive cell)
 eil_field=0.0            #vortex lattice field B/Hc2 (0=isolated vortex; >0=circular-cell lattice w/ Doppler)
@@ -1435,7 +1436,8 @@ def main():
         elif eil_vort_lattice_sc and eil_field_list is not None: #je-style self-consistent periodic lattice (formulation A); eil_lattice square/triangular; eil_nvortex=Vw flux quanta/cell; finite eil_kappa = London A back-reaction, >=1e3 = bare extreme
             plibs.calc_vortex_lattice_sc(eil_coupling,temp,eil_wc,gap_sym=eil_gs,
                                          field_list=eil_field_list,lattice=eil_lattice,kb=kb,fs=eil_fs_obj,
-                                         kappa=(None if eil_kappa>=1e3 else eil_kappa),Vw=eil_nvortex)
+                                         kappa=(None if eil_kappa>=1e3 else eil_kappa),Vw=eil_nvortex,
+                                         self_consistent_A=eil_vort_scA)
         elif eil_field_list is not None: #sweep B/Hc2 on the TRUE periodic lattice -> <N(0)>(B) (d~sqrt(B) Volovik)
             plibs.calc_vortex_lattice_periodic(eil_coupling,temp,eil_wc,gap_sym=eil_gs,
                                                field_list=eil_field_list,kappa=eil_kappa,lattice=eil_lattice,kb=kb,

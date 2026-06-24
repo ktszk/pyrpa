@@ -1282,10 +1282,30 @@ def _london_A(g, lam, Vw=1, nfft=64):
     return Ax, Ay
 
 
+def _maxwell_A(jx, jy, g):
+    """Coulomb-gauge vector potential from a 2D current density on the cell grid:
+    A(K) = j_T(K) / K^2 with j_T the transverse (divergence-free) projection
+    j_T(K) = j(K) - K (K.j)/K^2  (je Svector_potential).  K = m b1 + n b2.
+    @return (Ax, Ay) on the same [Ng,Ng] grid."""
+    Ng = jx.shape[0]
+    m = np.fft.fftfreq(Ng) * Ng
+    M1, M2 = np.meshgrid(m, m, indexing='ij')
+    KX = M1 * g['b1'][0] + M2 * g['b2'][0]
+    KY = M1 * g['b1'][1] + M2 * g['b2'][1]
+    K2 = KX ** 2 + KY ** 2
+    safe = K2 > 1e-12
+    K2s = np.where(safe, K2, 1.0)
+    Jx, Jy = np.fft.fft2(jx), np.fft.fft2(jy)
+    Kdj = (KX * Jx + KY * Jy) / K2s
+    Ax = np.where(safe, (Jx - KX * Kdj) / K2s, 0.0)
+    Ay = np.where(safe, (Jy - KY * Kdj) / K2s, 0.0)
+    return np.fft.ifft2(Ax).real, np.fft.ifft2(Ay).real
+
+
 def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='square',
                      Ng=20, nbeta=16, hvf=1.0, fs=None, kappa=None, Vw=1, Lchord=6.0,
                      ds_xi=0.3, itemax=60, mix=0.4, eps=3.0e-3, anderson=True, m_and=4,
-                     seed_profile=None):
+                     seed_profile=None, self_consistent_A=False, mixA=0.3):
     """
     @fn solve_lattice_sc
     @brief Self-consistent complex order parameter Psi(r)=|Psi|(r) e^{i chi(r)} of a
@@ -1304,6 +1324,12 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
     history vectors); falls back to linear ``mix`` for the first step / if disabled.
     @param seed_profile: optional [Ng,Ng] starting amplitude in units of the bulk gap
     (e.g. a converged absD/Dbulk from a nearby field) for a warm start.
+    @param self_consistent_A: finite kappa only -- replace the analytic London A by the
+    FULLY self-consistent vector potential (je A_renew): each step the actual
+    quasiclassical supercurrent j_s(r)=<v_F Im g> is computed and A(K)=j_{s,T}(K)/K^2
+    (transverse, Coulomb gauge, _maxwell_A) is updated together with Delta (mixA).  This
+    captures the spatial superfluid-density variation (current suppressed at cores) that
+    the bare-grad(chi) London A misses; reduces to it when |Psi| is uniform.
     @return state dict (X,Y,absD,Psi,chi,Dbulk,xi,a,...) for lattice_dos_sc
     """
     bfull = np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False)
@@ -1355,27 +1381,63 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
         A = Dbulk * np.tanh(np.abs(_abrikosov_z(X, Y, g)) / 0.5)   # node at each core
     Nw = len(omega)
     om0 = np.broadcast_to(omega, (ns, Nanch, Nw)).astype(np.complex128)
-    # iteration-independent per-direction frequency arrays (Doppler is fixed)
+    scA = bool(self_consistent_A and lam is not None)
+    if scA:                                            # bulk superfluid density (London calibration)
+        q0 = 0.05 * Dbulk / max(hvf_eff, 1e-12)
+        jb = 0.0
+        for ib in range(nbd):
+            wt = omega + 1j * hvfarr[ib] * np.cos(dirs[ib]) * q0
+            Dk2 = (phi[ib] * np.conj(phi[ib])).real * Dbulk ** 2
+            jb += wt_dir[ib] * hvfarr[ib] * np.cos(dirs[ib]) * np.imag(
+                wt / np.sqrt(wt ** 2 + Dk2)).sum()
+        rho_s = -2.0 * temp * jb / q0
+        Cj = -1.0 / (lam ** 2 * rho_s) if rho_s != 0 else 0.0
+        Axf, Ayf = _london_A(g, lam, Vw, nfft=Ng)      # seed A from the London solution (Ng grid)
+        AuX, AuY = Axf.mean(), Ayf.mean()              # uniform (K=0) part: cancels the chi gauge term
+                                                       # (gauge invariance); _maxwell_A gives only K!=0
+    # iteration-independent per-direction frequency arrays (fixed Doppler; recomputed if scA)
     om_dir = [om0 if dch is None
               else np.ascontiguousarray(omega[None, None, :] + 1j * hvfarr[ib] * dch[:, :, None])
               for ib, (_, _, _, _, dch) in enumerate(chord)]
 
-    def gap_map(Af):                                   # one self-consistency pass: A -> A_new
+    def gap_map(Af, om_use):                            # one pass: returns A_new (+ current grids if scA)
         accf = np.zeros(Nanch, dtype=np.complex128)
+        curx = np.zeros(Nanch); cury = np.zeros(Nanch)
         for ib in range(nbd):
             px, py, eichi, proj, _ = chord[ib]
             base = phi[ib] * _periodic_eval(Af, g, px, py) * eichi
             dd3 = np.broadcast_to(base[:, :, None], (ns, Nanch, Nw))
-            _, f = riccati_chords(om_dir[ib], np.ascontiguousarray(dd3), hvfarr[ib], ds)
+            gch, f = riccati_chords(om_use[ib], np.ascontiguousarray(dd3), hvfarr[ib], ds)
             accf += proj * f[ic].sum(axis=1)
-        return np.maximum(coupling * 2.0 * temp * accf.real, 0.0).reshape(Ng, Ng)
+            if scA:                                    # supercurrent <v_F Im g> at the anchor
+                img = gch[ic].imag.sum(axis=1)
+                cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
+                curx += wt_dir[ib] * hvfarr[ib] * cb * img
+                cury += wt_dir[ib] * hvfarr[ib] * sb * img
+        Anew = np.maximum(coupling * 2.0 * temp * accf.real, 0.0).reshape(Ng, Ng)
+        if scA:
+            return Anew, 2.0 * temp * curx.reshape(Ng, Ng), 2.0 * temp * cury.reshape(Ng, Ng)
+        return Anew
 
-    xs, fs = [], []                                    # Anderson/Pulay history (Walker-Ni)
+    xs, fs = [], []                                    # Anderson/Pulay history (Walker-Ni) on Delta
     for it in range(itemax):
-        res = gap_map(A) - A                            # residual f_k = G(x_k) - x_k
-        err = np.abs(res).max() / Dbulk
+        if scA:                                        # Doppler from the current self-consistent A
+            omd = [np.ascontiguousarray(omega[None, None, :] - 1j * hvfarr[ib]
+                   * (np.cos(dirs[ib]) * _periodic_eval(Axf, g, chord[ib][0], chord[ib][1])
+                      + np.sin(dirs[ib]) * _periodic_eval(Ayf, g, chord[ib][0], chord[ib][1]))[:, :, None])
+                   for ib in range(nbd)]
+            Anew, curx, cury = gap_map(A, omd)
+            Axn, Ayn = _maxwell_A(Cj * curx, Cj * cury, g)   # K!=0 screening part
+            Axn += AuX; Ayn += AuY                            # + uniform (gauge-cancelling) part
+            errA = max(np.abs(Axn - Axf).max(), np.abs(Ayn - Ayf).max()) / max(np.abs(Axf).max(), 1e-12)
+            Axf = (1.0 - mixA) * Axf + mixA * Axn
+            Ayf = (1.0 - mixA) * Ayf + mixA * Ayn
+        else:
+            Anew = gap_map(A, om_dir); errA = 0.0
+        res = Anew - A                                  # residual f_k = G(x_k) - x_k
+        err = max(np.abs(res).max() / Dbulk, errA)
         if err < eps:
-            A = A + res
+            A = Anew
             break
         xs.append(A.ravel().copy()); fs.append(res.ravel().copy())
         if len(fs) > m_and + 1:
@@ -1391,7 +1453,7 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
     return dict(X=X, Y=Y, absD=A, Psi=A * np.exp(1j * chi_grid), chi=chi_grid,
                 Dbulk=Dbulk, xi=xi, a=a, S=g['S'], geom=g, b1=g['b1'], b2=g['b2'],
                 a1=g['a1'], a2=g['a2'], acell=a, kappa=kappa, Vw=Vw,
-                iters=it + 1, err=err)
+                Afield=((Axf, Ayf) if scA else None), iters=it + 1, err=err)
 
 
 def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None,
@@ -1412,7 +1474,10 @@ def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None
     X, Y = state['X'], state['Y']
     g = state['geom']; Vw = state.get('Vw', 1)
     kappa = state.get('kappa'); lam = kappa * xi if kappa is not None else None
-    Axg, Ayg = _london_A(g, lam, Vw) if lam is not None else (None, None)
+    if state.get('Afield') is not None:                # self-consistent A (je A_renew)
+        Axg, Ayg = state['Afield']
+    else:
+        Axg, Ayg = _london_A(g, lam, Vw) if lam is not None else (None, None)
     if delta is None:
         delta = 0.03 * Dbulk
     zomega = delta - 1j * np.asarray(wlist)
@@ -1449,7 +1514,7 @@ def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None
 
 def calc_vortex_lattice_sc(coupling, temp, wc, gap_sym='d', field_list=None,
                            lattice='square', kb=1.0, Ng=20, nbeta=16, fs=None,
-                           kappa=None, Vw=1):
+                           kappa=None, Vw=1, self_consistent_A=False):
     """
     @fn calc_vortex_lattice_sc
     @brief Driver: je-style self-consistent PERIODIC vortex lattice (formulation A).
@@ -1461,13 +1526,16 @@ def calc_vortex_lattice_sc(coupling, temp, wc, gap_sym='d', field_list=None,
     @param kappa: None -> bare extreme limit; finite -> the je finite-kappa A(r)
     back-reaction (London-screened supercurrent, smooth vector potential), which
     removes the spurious uniform-A overcount and screens the Volovik DOS.
+    @param self_consistent_A: finite kappa only -- use the fully self-consistent A from
+    the actual quasiclassical current (je A_renew) instead of the analytic London A.
     Writes the converged |Psi|(r) for the largest field to lattice_sc_op.dat.
     """
     omega = matsubara(temp, wc)
     if field_list is None:
         field_list = [0.05, 0.1, 0.2, 0.35]
-    print(f"self-consistent periodic vortex lattice (formulation A, "
-          f"{'extreme type-II' if kappa is None else f'finite kappa={kappa}'}): "
+    akind = ('extreme type-II' if kappa is None else
+             f"finite kappa={kappa}{', self-consistent A' if self_consistent_A else ' (London A)'}")
+    print(f"self-consistent periodic vortex lattice (formulation A, {akind}): "
           f"{gap_sym}, {lattice}, Vw={Vw}, lambda={coupling:.3f}, T={temp/kb:.2f} K"
           f"{', FS+v_F' if fs is not None else ''}", flush=True)
     results = []
@@ -1476,7 +1544,7 @@ def calc_vortex_lattice_sc(coupling, temp, wc, gap_sym='d', field_list=None,
     for b in field_list:
         st = solve_lattice_sc(coupling, temp, omega, gap_sym=gap_sym, field=b,
                               lattice=lattice, Ng=Ng, nbeta=nbeta, fs=fs, kappa=kappa,
-                              Vw=Vw, seed_profile=seed)
+                              Vw=Vw, seed_profile=seed, self_consistent_A=self_consistent_A)
         if st is None or st['Dbulk'] <= 0:
             print(f"  B/Hc2={b:.3f}: normal", flush=True)
             continue

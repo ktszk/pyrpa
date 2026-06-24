@@ -361,6 +361,24 @@ def test_lattice_sc_dvector_texture():
     assert Nw[0] > 0.0 and abs(Nw[1] - 1.0) < 0.25     # N(0)>0 (core states), N(large w)->1
 
 
+def test_lattice_sc_self_consistent_A():
+    """Fully self-consistent vector potential (je A_renew): A(K)=j_{s,T}(K)/K^2 from the
+    actual quasiclassical current j_s=<v_F Im g>, solved together with Delta.  It keeps
+    the core node, converges, and at weak field (near-uniform |Psi|) reduces to the
+    analytic-London A (the current there equals the London (1/lambda^2) p_s)."""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    stL = V.solve_lattice_sc(0.6, T, om, gap_sym='d', field=0.1, Ng=14, nbeta=12,
+                             kappa=3.0, itemax=120, mix=0.4, eps=2.5e-3)
+    stA = V.solve_lattice_sc(0.6, T, om, gap_sym='d', field=0.1, Ng=14, nbeta=12,
+                             kappa=3.0, itemax=120, mix=0.4, eps=2.5e-3, self_consistent_A=True)
+    assert stA['Afield'] is not None and stA['iters'] < 120          # converged with an A field
+    assert stA['absD'].min() / stA['Dbulk'] < 0.3                    # core node preserved
+    nL = float(V.lattice_dos_sc(stL, 'd', np.array([0.0]), nbeta=30, delta=0.03 * stL['Dbulk'])[0])
+    nA = float(V.lattice_dos_sc(stA, 'd', np.array([0.0]), nbeta=30, delta=0.03 * stA['Dbulk'])[0])
+    assert nA > 0 and abs(nA - nL) / nL < 0.20                       # ~reduces to London at weak field
+
+
 def test_lattice_sc_grid_convergent():
     """The formulation-A gap map is interpolation-based (per-grid-point anchored
     trajectories), so the converged amplitude is grid-convergent -- unlike a scatter/
