@@ -322,6 +322,23 @@ def test_lattice_sc_triangular_and_giant_vortex():
     assert gv['absD'].min() / gv['Dbulk'] < 0.1      # deep (multiply-quantized) core node
 
 
+def test_lattice_free_energy_triangular():
+    """The Eilenberger free-energy functional (Ichioka-Machida, lattice_free_energy)
+    selects the vortex-lattice symmetry: for an isotropic s-wave gap the triangular
+    lattice has the lower free energy, F(square) - F(triangular) > 0 (the generic
+    Abrikosov result).  [The gap-anisotropy-driven square transition is a small fourfold
+    term not resolved by this real-space framework -- see calc_vortex_lattice_symmetry.]"""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    F = {}
+    for latt in ('square', 'triangular'):
+        st = V.solve_lattice_sc(0.6, T, om, gap_sym='s', field=0.2, lattice=latt,
+                                Ng=18, nbeta=24, kappa=None, itemax=150, mix=0.4, eps=1e-3)
+        F[latt] = V.lattice_free_energy(st, 0.6, T, om, 's', nbeta=48)
+    assert F['square'] < 0 and F['triangular'] < 0       # condensed (free energy lowered)
+    assert F['square'] - F['triangular'] > 1e-4          # triangular favored (isotropic)
+
+
 def test_lattice_sc_finite_kappa_screening():
     """Finite-kappa A(r) back-reaction (je #2 connection) on the formulation-A lattice:
     the London-screened smooth vector potential keeps the core node (the complex Delta

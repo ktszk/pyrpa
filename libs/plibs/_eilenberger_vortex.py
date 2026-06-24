@@ -1512,6 +1512,101 @@ def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None
     return gsum
 
 
+def lattice_free_energy(state, coupling, temp, omega, gap_sym, nbeta=24, hvf=1.0, fs=None,
+                        Lchord=6.0, ds_xi=0.3):
+    """
+    @fn lattice_free_energy
+    @brief Electronic (condensation) free energy of the converged formulation-A vortex
+    lattice, in the quasiclassical Eilenberger functional of Ichioka-Machida
+    (PRB 59, 8902; cond-mat/9704147 Eq. 10-12; cond-mat/0205012 Eq. 10-12):
+        F_el/(N0 Delta0^2) = <|Psi(r)|^2>_r/(coupling Delta0^2)
+                             - (2T/Delta0^2) sum_{wn>0} < I >_{r,FS},
+        I = (Delta* f + Delta f^dag)/(1+g) = 2 Re(Delta* f)/(1+g)   (scalar: f^dag=conj f).
+    The magnetic-field term kappa^2<h^2> is omitted: in the extreme type-II limit B is
+    uniform so it is identical for every lattice symmetry and cancels in the difference
+    F(square)-F(triangular) -- which is what selects the vortex-lattice symmetry.
+    1/(N0 V) = 1/coupling in pyrpa units.  Use the SAME numerical parameters for the two
+    symmetries so the large common condensation cancels and the small anisotropy survives.
+    @return F_el/(N0 Delta0^2) (dimensionless)
+    """
+    A = state['absD']; g = state['geom']; xi = state['xi']; Dbulk = state['Dbulk']
+    X, Y = state['X'], state['Y']; Vw = state.get('Vw', 1)
+    kappa = state.get('kappa'); lam = kappa * xi if kappa is not None else None
+    Afield = state.get('Afield')
+    Axg, Ayg = (Afield if Afield is not None
+                else (_london_A(g, lam, Vw) if lam is not None else (None, None)))
+    if fs is not None:
+        from ._eilenberger import fs_form_factor
+        dirs = np.arctan2(fs['vy'], fs['vx']); phi = fs_form_factor(fs, gap_sym)
+        hvfarr = np.asarray(fs['vabs']); wt_dir = np.asarray(fs['nf']); nbd = len(dirs)
+    else:
+        dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
+        phi = _ff_vortex(dirs, gap_sym); hvfarr = np.full(nbeta, hvf)
+        wt_dir = np.full(nbeta, 1.0 / nbeta); nbd = nbeta
+    L = Lchord * xi; ds = ds_xi * xi
+    ns = int(2 * L / ds) | 1; ic = ns // 2
+    s = np.linspace(-L, L, ns)
+    ax = X.ravel(); ay = Y.ravel(); Nanch = ax.size
+    Nw = len(omega)
+    om0 = np.broadcast_to(omega, (ns, Nanch, Nw)).astype(np.complex128)
+    Isum = 0.0                                          # sum_n <I>_{r,FS}
+    for ib in range(nbd):
+        cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
+        px = ax[None, :] + s[:, None] * cb; py = ay[None, :] + s[:, None] * sb
+        eichi = _abrikosov_unit_phase(px, py, g, Vw)
+        Dl = phi[ib] * _periodic_eval(A, g, px, py) * eichi          # Delta(theta,r) on chord
+        dd3 = np.broadcast_to(Dl[:, :, None], (ns, Nanch, Nw))
+        om3 = (om0 if lam is None else
+               omega[None, None, :] - 1j * hvfarr[ib]
+               * (cb * _periodic_eval(Axg, g, px, py)
+                  + sb * _periodic_eval(Ayg, g, px, py))[:, :, None])
+        gc, fc = riccati_chords(np.ascontiguousarray(om3), np.ascontiguousarray(dd3), hvfarr[ib], ds)
+        Dia = Dl[ic]                                                # Delta at the anchor [Nanch]
+        Ii = 2.0 * np.real(np.conj(Dia)[:, None] * fc[ic]) / (1.0 + gc[ic]).real   # [Nanch, Nw]
+        Isum += wt_dir[ib] * Ii.sum(axis=1).mean()                  # sum_n, FS-weight, <>_r
+    cond = (np.abs(A) ** 2).mean() / (coupling * Dbulk ** 2)        # condensation cost
+    return cond - 2.0 * temp * Isum / Dbulk ** 2
+
+
+def calc_vortex_lattice_symmetry(coupling, temp, wc, gap_sym='d', field_list=None,
+                                 kb=1.0, Ng=28, nbeta=36, fs=None):
+    """
+    @fn calc_vortex_lattice_symmetry
+    @brief Vortex-lattice SYMMETRY by the Eilenberger free-energy comparison
+    (Ichioka-Machida functional, lattice_free_energy): solve the formulation-A lattice
+    for the square and the triangular cell at each field (extreme type-II, so the
+    magnetic-field energy is identical and cancels), and report
+    dF = F(square) - F(triangular) -- dF>0 favors triangular, dF<0 favors square.
+    Both symmetries use identical numerical parameters so the large common condensation
+    cancels and the small symmetry-distinguishing anisotropy survives.
+    CAVEAT: this real-space framework robustly reproduces the GENERIC result
+    (isotropic gap -> triangular), but it does NOT reliably resolve the small
+    gap-anisotropy-driven SQUARE transition (the fourfold higher-Landau-level / non-local
+    term, Ichioka cond-mat/9704147): that needs the near-Hc2 GL beta_A treatment or much
+    higher resolution.  Use this for the generic trend / energetics, not as the last word
+    on an anisotropy-driven square lock-in.
+    """
+    omega = matsubara(temp, wc)
+    if field_list is None:
+        field_list = [0.1, 0.2, 0.3]
+    print(f"vortex-lattice symmetry (Eilenberger free-energy compare, extreme type-II): "
+          f"{gap_sym}, lambda={coupling:.3f}, T={temp/kb:.2f} K"
+          f"{', FS+v_F' if fs is not None else ''}", flush=True)
+    for b in field_list:
+        Fs = {}
+        for latt in ('square', 'triangular'):
+            st = solve_lattice_sc(coupling, temp, omega, gap_sym=gap_sym, field=b,
+                                  lattice=latt, Ng=Ng, nbeta=nbeta, kappa=None,
+                                  itemax=180, mix=0.4, eps=8e-4)
+            Fs[latt] = (lattice_free_energy(st, coupling, temp, omega, gap_sym,
+                                            nbeta=max(nbeta, 60), fs=fs) if st is not None else 0.0)
+        dF = Fs['square'] - Fs['triangular']
+        sym = 'triangular' if dF > 0 else 'square'
+        print(f"  B/Hc2={b:.3f}: F_sq={Fs['square']:.5f} F_tri={Fs['triangular']:.5f}  "
+              f"dF(sq-tri)={dF:+.2e} -> {sym}", flush=True)
+    return None
+
+
 def calc_vortex_lattice_sc(coupling, temp, wc, gap_sym='d', field_list=None,
                            lattice='square', kb=1.0, Ng=20, nbeta=16, fs=None,
                            kappa=None, Vw=1, self_consistent_A=False):
