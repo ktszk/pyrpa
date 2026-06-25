@@ -181,21 +181,18 @@ eil_free_energy=False #True: condensation free energy (Omega_s-Omega_n)/N0 vs T 
 eil_spin=False       #True: spin-2x2 Zeeman response, singlet vs triplet d-vector (d||h Pauli-limited, d_|_h immune)
 eil_lambda=False     #True: superfluid density rho_s(T)/penetration depth lambda(T) sweep (s exp-flat, d linear-in-T)
 eil_fs=False         #True: model-FS + Fermi-velocity penetration depth (anisotropic lambda_xx/lambda_yy)
-eil_fs_kind='ellipse'#model Fermi surface: 'iso', 'ellipse' (params=(mx,my)), or 'tb' (params=t)
+eil_fs_kind=None     #Fermi surface for ALL eilenberger modes (homogeneous penetration / surface / vortex): None=isotropic (cylinder; homogeneous falls back to 'ellipse'), 'iso'/'ellipse'(params=(mx,my))/'tb'(params=t) model FS, or 'wannier' (loaded band FS+v_F; surface/vortex symmetry/multiband from gap_sym,delta0)
 eil_fs_params=(1.0,0.4) #model-FS parameters (ellipse masses or tb hopping)
+eil_zeeman=0.0       #Zeeman (Maki) field [eV] for the LDOS (surface: splits the d[110] ZEBS into +-h; vortex: spin-splits the core bound states)
 #----- EILENBERGER inhomogeneous (surface & vortex, Riccati; model cylindrical FS) -----
 eil_pair_sym='d'         #pairing on model FS/cylinder (surface & vortex): singlet 's','d'(dx2-y2),'dxy'; triplet 'px','py','p+ip'/'p-ip'(chiral). The Wannier-FS path uses the global gap_sym index (0 s,1 dx2-y2,2 s+-,3 dxy,-1 px,-2 py,-3 p+ip)
 eil_ldos=True            #True: also compute the real-frequency LDOS (bound/core states) (surface & vortex)
 eil_surf_beta=0.785398   #surface orientation [rad]: 0=[100], pi/4(0.7854)=[110] (d-wave ZEBS)
-eil_surf_h=0.0           #Zeeman (Maki) field [eV] for the surface LDOS (splits the d[110] ZEBS into +-h)
-eil_surf_fs=None         #FS for the surface: None=isotropic cylinder, 'iso'/'ellipse'/'tb' (model, eil_fs_params), or 'wannier' (loaded band's FS+v_F; symmetry/multiband from gap_sym,delta0)
 eil_surf_dvector=False   #True: self-consistent triplet d-vector TEXTURE at the surface (dominant p_x(e_x) + subdominant p_y(e_z), spin-matrix Riccati)
 eil_dvec_subratio=0.9    #subdominant/dominant coupling ratio for the d-vector texture (~0.85 is the bulk threshold)
 eil_vort_lxi=8.0         #vortex cell half-width in coherence lengths xi (isolated vortex, field=0)
 eil_vort_ngrid=81        #vortex 2D grid points per axis
-eil_vort_h=0.0           #Zeeman (Maki) field [eV] for the vortex core LDOS (spin-splits the core bound states)
 eil_vort_field=False     #True: also compute the self-consistent finite-kappa Maxwell field profile B(rho) of the vortex (uses eil_kappa)
-eil_vort_fs=None         #FS for the vortex: None=isotropic, 'iso'/'ellipse'/'tb' (model, uses eil_fs_params), or 'wannier' (the loaded Wannier band's FS + v_F)
 eil_vort_dvector=False   #True: self-consistent triplet d-vector TEXTURE around the vortex core (dominant p_x(e_x) winding + core-localized subdominant p_y(e_z), 2D spin-matrix Riccati; uses eil_dvec_subratio)
 eil_vort_current=False   #True: circulating charge supercurrent j_phi(rho) of an isolated vortex (writes vortex_current.dat)
 eil_vort_maxwell=False   #True: circular-cell vortex with the self-consistent finite-kappa vector potential A(r) (Maxwell back-reaction; needs eil_field>0, uses eil_kappa)
@@ -1379,8 +1376,8 @@ def main():
                 output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,plist,mu,temp,sw_self)
     elif option==CalcMode.EILENBERGER: #solve homogeneous quasiclassical Eilenberger equation
         if eil_fs: #model FS + Fermi velocity: anisotropic penetration depth lambda_xx/lambda_yy
-            plibs.calc_fs_penetration(eil_coupling,temp,eil_wc,kind=eil_fs_kind,gap_sym=eil_pair_sym,
-                                      params=eil_fs_params,kb=kb)
+            plibs.calc_fs_penetration(eil_coupling,temp,eil_wc,kind=(eil_fs_kind or 'ellipse'),
+                                      gap_sym=eil_pair_sym,params=eil_fs_params,kb=kb)
         elif eil_lambda: #superfluid density / penetration depth lambda(T) (s exp-flat, d linear-in-T)
             plibs.calc_penetration_depth(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,kb=kb)
         elif eil_spin: #spin-2x2 Zeeman response: singlet vs triplet d-vector (d||h vs d_|_h)
@@ -1400,24 +1397,24 @@ def main():
         if eil_surf_dvector: #self-consistent triplet d-vector texture (spin-matrix Riccati)
             plibs.calc_surface_dvector(eil_coupling,temp,eil_wc,kb=kb,sub_ratio=eil_dvec_subratio,sw_ldos=eil_ldos)
         else:
-            if eil_surf_fs=='wannier': #real Wannier-band FS + v_F (gap symmetry/multiband from gap_sym,delta0)
+            if eil_fs_kind=='wannier': #real Wannier-band FS + v_F (gap symmetry/multiband from gap_sym,delta0)
                 sfs=plibs.build_wannier_fs(rvec,ham_r,S_r,avec,
                                            plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill),
                                            gap_sym=gap_sym,delta0=delta0,gap_orbital=eil_gap_orbital)
                 sfk,sgs=None,gap_sym
             else:
-                sfs,sfk,sgs=None,eil_surf_fs,eil_pair_sym
+                sfs,sfk,sgs=None,eil_fs_kind,eil_pair_sym
             plibs.calc_surface(eil_coupling,temp,eil_wc,gap_sym=sgs,beta_surf=eil_surf_beta,
-                               kb=kb,sw_ldos=eil_ldos,imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,h=eil_surf_h,
+                               kb=kb,sw_ldos=eil_ldos,imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,h=eil_zeeman,
                                fs_kind=sfk,fs_params=eil_fs_params,fs=sfs)
     elif option==CalcMode.EILENBERGER_VORTEX: #vortex / vortex lattice via Riccati Eilenberger (model FS)
-        if eil_vort_fs=='wannier': #real Wannier-band FS + Fermi velocities (mu from filling)
+        if eil_fs_kind=='wannier': #real Wannier-band FS + Fermi velocities (mu from filling)
             eil_fs_obj=plibs.build_wannier_fs(rvec,ham_r,S_r,avec,
                                               plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill),
                                               gap_sym=gap_sym,delta0=delta0,gap_orbital=eil_gap_orbital) #gap_orbital=projection (Nagai)
             eil_fs_kw,eil_gs=None,gap_sym       #the (int) gap_sym is baked into fs['phi']
         else:
-            eil_fs_obj,eil_fs_kw,eil_gs=None,eil_vort_fs,eil_pair_sym
+            eil_fs_obj,eil_fs_kw,eil_gs=None,eil_fs_kind,eil_pair_sym
         if eil_vort_maxwell: #self-consistent finite-kappa vector potential A(r) (Maxwell back-reaction)
             plibs.calc_vortex_maxwell(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,field=eil_field,
                                       kappa=eil_kappa,kb=kb,Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
@@ -1426,7 +1423,7 @@ def main():
                                       Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
         elif eil_vort_dvector: #self-consistent triplet d-vector vortex/lattice (spin-matrix Riccati)
             dfs=(plibs.build_wannier_fs(rvec,ham_r,S_r,avec,plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill))
-                 if eil_vort_fs=='wannier' else None)  #FS geometry only (d-vector channels carry the gap)
+                 if eil_fs_kind=='wannier' else None)  #FS geometry only (d-vector channels carry the gap)
             if eil_vort_lattice_sc: #je-style TRUE periodic d-vector lattice (formulation A, square/triangular)
                 plibs.calc_vortex_lattice_sc_dvector(eil_coupling,temp,eil_wc,kb=kb,field=eil_field,
                                                      lattice=eil_lattice,sub_ratio=eil_dvec_subratio,
@@ -1445,7 +1442,7 @@ def main():
                                                fs_kind=eil_fs_kw,fs_params=eil_fs_params,fs=eil_fs_obj,nflux=eil_nvortex)
         else: #single field (isolated vortex if eil_field=0, else circular-cell lattice)
             plibs.calc_vortex(eil_coupling,temp,eil_wc,gap_sym=eil_gs,kb=kb,sw_ldos=eil_ldos,
-                              imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,field=eil_field,h=eil_vort_h,
+                              imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,field=eil_field,h=eil_zeeman,
                               kappa=(eil_kappa if eil_vort_field else 0.0),tilt_deg=eil_vort_tilt,
                               fs_kind=eil_fs_kw,fs_params=eil_fs_params,fs=eil_fs_obj,
                               Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
