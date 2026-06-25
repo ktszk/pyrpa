@@ -198,6 +198,9 @@ eil_vort_maxwell=False   #True: circular-cell vortex with the self-consistent fi
 eil_vort_lattice_sc=False #True: je-style self-consistent TRUE periodic lattice (formulation A, extreme type-II): complex Psi(r) with a real node at every core + full Abrikosov supercurrent; sweeps eil_field_list -> <N(0)>(B) (d~sqrt(B) Volovik)
 eil_vort_scA=False       #True (lattice_sc, finite eil_kappa): fully self-consistent vector potential A from the quasiclassical current j_s=<v_F Im g> (je A_renew), instead of the analytic London A
 eil_gap_orbital=None     #None, or an Norb x Norb orbital-basis pair-potential matrix (or callable kfrac->NxN): the band gap is its low-energy PROJECTION onto the FS bands (Nagai-Nakamura, JPSJ 85 074707 (2016) Eq.43; needs wannier FS); supersedes gap_sym/delta0
+eil_gap_file=None        #None, or the base name (no extension) of an RPA/FLEX gap exported by LIN_ELIASHBERG/NONLIN_ELIASHBERG with sw_out_self=True (output_gap_wannier -> 'gap_wannier'): loads Delta(R,iw) and uses it as eil_gap_orbital (projected to the FS bands); supersedes eil_gap_orbital/gap_sym. Use a self-consistent RPA gap (e.g. KFe2As2) as the vortex pairing form factor
+eil_gap_iw=0             #starting Matsubara index for eil_gap_file (0=lowest iw_0; sharpest gap symmetry/anisotropy, matches the FS gap usually quoted)
+eil_gap_navg=1           #number of consecutive Matsubara slices to average for eil_gap_file (1=single iw_gap_iw slice; >1 smooths noise at the cost of slightly diluting the anisotropy)
 eil_vort_tilt=0.0        #field tilt theta [deg] from the c-axis (quasi-2D): orbital uses B_z=B cos(theta), Zeeman -> h/cos(theta) (Pauli/orbital ratio)
 eil_nvortex=1            #vortices (flux quanta) per computational cell of the periodic lattice (supercell; n^2 reduces to the primitive cell)
 eil_field=0.0            #vortex lattice field B/Hc2 (0=isolated vortex; >0=circular-cell lattice w/ Doppler)
@@ -1396,10 +1399,12 @@ def main():
         if eil_surf_dvector: #self-consistent triplet d-vector texture (spin-matrix Riccati)
             plibs.calc_surface_dvector(eil_coupling,temp,eil_wc,kb=kb,sub_ratio=eil_dvec_subratio,sw_ldos=eil_ldos)
         else:
+            gorb=(plibs.gap_orbital_from_wannier(eil_gap_file,eil_gap_iw,eil_gap_navg) #RPA/FLEX gap as form factor
+                  if eil_gap_file else eil_gap_orbital)
             if eil_fs_kind=='wannier': #real Wannier-band FS + v_F (gap symmetry/multiband from gap_sym,delta0)
                 sfs=plibs.build_wannier_fs(rvec,ham_r,S_r,avec,
                                            plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill),
-                                           gap_sym=gap_sym,delta0=delta0,gap_orbital=eil_gap_orbital)
+                                           gap_sym=gap_sym,delta0=delta0,gap_orbital=gorb)
                 sfk=None                    #the (int) gap_sym is baked into fs['phi']
             else:
                 sfs,sfk=None,eil_fs_kind    #model FS/cylinder: the int gap_sym -> continuum harmonic
@@ -1407,10 +1412,12 @@ def main():
                                kb=kb,sw_ldos=eil_ldos,imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,h=eil_zeeman,
                                fs_kind=sfk,fs_params=eil_fs_params,fs=sfs)
     elif option==CalcMode.EILENBERGER_VORTEX: #vortex / vortex lattice via Riccati Eilenberger (model FS)
+        gorb=(plibs.gap_orbital_from_wannier(eil_gap_file,eil_gap_iw,eil_gap_navg) #RPA/FLEX gap (e.g. KFe2As2) as form factor
+              if eil_gap_file else eil_gap_orbital)
         if eil_fs_kind=='wannier': #real Wannier-band FS + Fermi velocities (mu from filling)
             eil_fs_obj=plibs.build_wannier_fs(rvec,ham_r,S_r,avec,
                                               plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill),
-                                              gap_sym=gap_sym,delta0=delta0,gap_orbital=eil_gap_orbital) #gap_orbital=projection (Nagai)
+                                              gap_sym=gap_sym,delta0=delta0,gap_orbital=gorb) #gap_orbital=projection (Nagai)
             eil_fs_kw=None                  #the (int) gap_sym is baked into fs['phi']
         else:
             eil_fs_obj,eil_fs_kw=None,eil_fs_kind   #model FS/cylinder: the int gap_sym -> continuum harmonic

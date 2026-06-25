@@ -577,6 +577,40 @@ def test_multiband_gap_projection():
     assert D > 0
 
 
+def test_gap_orbital_from_wannier(tmp_path):
+    """The bridge that uses an RPA/FLEX gap exported as Wannier "hopping" (output_gap_wannier)
+    as the quasiclassical pairing form factor: gap_orbital_from_wannier loads Delta(R,iw)
+    and returns the inverse-FT callable kfrac->Delta_orb(k), which build_wannier_fs projects
+    onto the FS bands (Nagai Eq 43).  Validated on a synthetic 1-orbital d-wave gap
+    Delta(k)=cos2pi kx - cos2pi ky exported as Delta(R), recovering exactly that on the
+    real square FS; n_avg averages consecutive Matsubara slices."""
+    import libs.plibs as p
+    # 1-orbital d-wave gap Delta(k)=cos2pi kx - cos2pi ky  ->  Delta(R) at (+-1,0),(0,+-1)
+    rvec = np.array([[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]])
+    gap = np.zeros((1, 1, 2, 4), dtype=complex)
+    gap[0, 0, 0, :] = [0.5, 0.5, -0.5, -0.5]                  # iw_0 slice: d-wave
+    gap[0, 0, 1, :] = [0.5, 0.5, 0.5, 0.5]                    # iw_1 slice: extended-s (cos+cos)
+    base = str(tmp_path / 'gap_wannier')
+    np.savez(base, gap=gap, rvec=rvec, iw=np.array([0.1, 0.3]), temp=1e-3)
+    g0 = p.gap_orbital_from_wannier(base)                     # iw_0 (d-wave)
+    assert abs(g0(np.array([0.25, 0.0, 0.0]))[0, 0] - (np.cos(2 * np.pi * 0.25) - 1.0)) < 1e-12
+    assert abs(g0(np.array([0.0, 0.25, 0.0]))[0, 0] - (1.0 - np.cos(2 * np.pi * 0.25))) < 1e-12
+    # n_avg=2 averages the d-wave and extended-s slices -> (cos2pi kx - cos2pi ky + cos+cos)/2 = cos2pi kx
+    g_avg = p.gap_orbital_from_wannier(base, iw_index=0, n_avg=2)
+    assert abs(g_avg(np.array([0.1, 0.3, 0.0]))[0, 0] - np.cos(2 * np.pi * 0.1)) < 1e-12
+    # end-to-end on the real square FS: projected fs['phi'] == the analytic d-wave shape
+    hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       'inputs', 'square.hop')
+    if not os.path.exists(hop):
+        return
+    rv, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
+    fw = E.build_wannier_fs(rv, ham_r, [], np.eye(3), -1.0, mesh=200, gap_orbital=g0)
+    assert abs((fw['nf'] * np.abs(fw['phi']) ** 2).sum() - 1.0) < 1e-9   # normalized
+    assert fw['phi'].real.min() < -0.3 and fw['phi'].real.max() > 0.3    # d-wave sign change
+    fd = E.build_wannier_fs(rv, ham_r, [], np.eye(3), -1.0, mesh=200, gap_sym=1)
+    assert abs(np.corrcoef(fw['phi'].real, fd['phi'].real)[0, 1]) > 0.99 # matches analytic d
+
+
 def test_gap_sym_index_and_delta0():
     """The gap symmetry can be set by the pyrpa integer gap_sym index (lattice
     harmonics via gap_symms, baked into the FS), and delta0 sets per-band gap

@@ -916,6 +916,44 @@ def project_gap_to_band(fs, gap_orbital, normalize=True):
     return fs
 
 
+def gap_orbital_from_wannier(fname='gap_wannier', iw_index=0, n_avg=1):
+    """
+    @fn gap_orbital_from_wannier
+    @brief Load an RPA/FLEX gap Delta(R, iw_n) written by output_gap_wannier (the gap
+    exported in Wannier-real-space "hopping" format) and return a callable
+    kfrac(3,) -> Delta_orb(k) (the inverse Fourier transform on the orbital matrix),
+    ready to pass as build_wannier_fs's ``gap_orbital`` -- which then projects it onto the
+    Fermi-surface bands (Nagai-Nakamura Eq 43, project_gap_to_band) to set fs['phi'].
+    This is the bridge that uses a self-consistent RPA/FLEX gap (e.g. the KFe2As2 gap of
+    PRB 84, 144514) as the pairing form factor for the quasiclassical vortex(-lattice)
+    solvers.
+
+    The Eilenberger form factor is a STATIC phi(k_F); the lowest Matsubara slice iw_0
+    (iw_index=0) carries the full symmetry / sign / node / anisotropy structure most
+    sharply and matches the gap usually quoted on the Fermi surface.  n_avg>1 averages the
+    first n_avg consecutive slices for noise robustness (smoother phi at the cost of
+    slightly diluting the anisotropy, since Delta(k,iw_n) gets more isotropic with n).
+    The absolute scale is irrelevant: project_gap_to_band renormalizes to <|phi|^2>=1.
+
+    @param fname: base name of the .npz written by output_gap_wannier (without extension)
+    @param iw_index: starting Matsubara index (0 = lowest iw_0)
+    @param n_avg: number of consecutive Matsubara slices to average (1 = single slice)
+    @return callable kfrac(3,) -> Delta_orb(k) [Norb, Norb] complex
+    """
+    d = np.load(f'{fname}.npz')
+    gap, rvec = d['gap'], d['rvec']                  # (Norb,Norb,N_cut,Nr), (Nr,3)
+    n0, n1 = iw_index, min(iw_index + n_avg, gap.shape[2])
+    if n0 >= gap.shape[2]:
+        raise ValueError(f"iw_index={iw_index} out of range (N_iw={gap.shape[2]})")
+    gR = gap[:, :, n0:n1, :].mean(axis=2)            # (Norb,Norb,Nr) over chosen slices
+    rg = np.ascontiguousarray(rvec, dtype=np.float64)
+
+    def gap_orbital(kfrac):                          # Delta_orb(k) = sum_R e^{i 2pi k.R} Delta(R)
+        ph = np.exp(2j * np.pi * (rg @ np.asarray(kfrac, dtype=np.float64)))
+        return (gR * ph).sum(axis=-1)               # (Norb, Norb)
+    return gap_orbital
+
+
 def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, band=None, RotMat=None,
                      gap_sym=None, delta0=None, gap_orbital=None):
     """
