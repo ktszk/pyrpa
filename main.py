@@ -405,17 +405,22 @@ def plot_3d_surf(fspolys,fscenters,fscolors,surface_opt,kscale,bvec):
         if surface_opt==1:
             tri=Poly3DCollection(fspolys,facecolors=fscolors,lw=0)
         else:
-            clmax=fscolors.max()
-            clmin=fscolors.min()
-            # Check for clmax=clmin case
-            if clmax == clmin:
-                print(f"Warning: plot_3d_surf has clmax=clmin={clmax}. Using default colors",flush=True)
+            if surface_opt==ColorMode.GAP: #diverging map, symmetric about 0 so the node sits on white
+                cmap=cm.bwr
+                vmax=np.abs(fscolors).max()
+                vmin=-vmax
+            else:
+                cmap=cm.jet
+                vmin,vmax=fscolors.min(),fscolors.max()
+            # Check for vmax=vmin case
+            if vmax == vmin:
+                print(f"Warning: plot_3d_surf has vmax=vmin={vmax}. Using default colors",flush=True)
                 nor_cols=np.ones_like(fscolors)*0.5
             else:
-                nor_cols=(fscolors-clmin)/(clmax-clmin)
-            tri=Poly3DCollection(fspolys,facecolors=cm.jet(nor_cols),lw=0)
+                nor_cols=(fscolors-vmin)/(vmax-vmin)
+            tri=Poly3DCollection(fspolys,facecolors=cmap(nor_cols),lw=0)
             fs=ax.scatter(fscenters[:,0],fscenters[:,1],fscenters[:,2],
-                          c=fscolors,cmap=cm.jet,s=0.1)
+                          c=fscolors,cmap=cmap,vmin=vmin,vmax=vmax,s=0.1)
             plt.colorbar(fs,format='%.2e')
         ax.add_collection3d(tri)
     ax.grid(False)
