@@ -539,6 +539,7 @@ def calc_penetration_depth(coupling: float, temp: float, wc: float, gap_sym: str
     'penetration_depth.dat'.
     @param t_list: temperatures [eV] (default a sweep from ~0.05 Tc to Tc)
     """
+    gap_sym = _gap_sym_str(gap_sym)                   # accept the global int index too
     # estimate Tc from the linearized eigenvalue scale: bracket via Delta(T)
     if t_list is None:
         # geometric-ish sweep up to where the gap vanishes
@@ -644,6 +645,14 @@ def build_model_fs(kind: str = 'iso', Nth: int = 360, mu: float = None, params=N
 
 
 _INT_GAP_STR = {0: 's', 1: 'd', 2: 's', 3: 'dxy', -1: 'px', -2: 'py', -3: 'p+ip'}   # int -> continuum phi
+
+
+def _gap_sym_str(gap_sym):
+    """Map the global integer gap_sym index (gap_symms convention) to the continuum
+    string used by the model-FS/cylinder routines; pass strings through unchanged."""
+    if isinstance(gap_sym, (int, np.integer)):
+        return _INT_GAP_STR.get(int(gap_sym), 's')
+    return gap_sym
 
 
 def fs_form_factor(fs: dict, gap_sym) -> np.ndarray:
@@ -755,6 +764,7 @@ def calc_fs_penetration(coupling, temp, wc, kind='ellipse', gap_sym='s', Nth=360
     lambda_xx != lambda_yy, and nodes give the linear-in-T penetration depth.
     Writes 'fs_penetration.dat'.
     """
+    gap_sym = _gap_sym_str(gap_sym)                   # accept the global int index too
     fs = build_model_fs(kind, Nth, mu, params)
     vx2 = (fs['nf'] * fs['vhx'] ** 2).sum()
     vy2 = (fs['nf'] * fs['vhy'] ** 2).sum()
@@ -839,6 +849,7 @@ def calc_free_energy(coupling, temp, wc, gap_sym='s', fs=None, t_list=None, kb=1
     @brief Temperature sweep of the homogeneous condensation free energy
     (Omega_s-Omega_n)/N0 (coupling-constant integration).  Writes 'free_energy.dat'.
     """
+    gap_sym = _gap_sym_str(gap_sym)                   # accept the global int index too
     if t_list is None:
         t_hi = temp
         for _ in range(8):

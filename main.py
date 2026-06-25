@@ -142,7 +142,7 @@ olist=[0,0,0]
 #U,J= 0.6, 0.075
 U,J=1.2,0.15
 #U,J=1.8,0.225
-#0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py
+#0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py,-3:p+ip  (also drives ALL eilenberger modes; model FS/cylinder maps the int -> continuum harmonic, 2 spm -> s)
 gap_sym=1
 
 #use calculation of magnetic susceptibility at superconducting state
@@ -185,7 +185,6 @@ eil_fs_kind=None     #Fermi surface for ALL eilenberger modes (homogeneous penet
 eil_fs_params=(1.0,0.4) #model-FS parameters (ellipse masses or tb hopping)
 eil_zeeman=0.0       #Zeeman (Maki) field [eV] for the LDOS (surface: splits the d[110] ZEBS into +-h; vortex: spin-splits the core bound states)
 #----- EILENBERGER inhomogeneous (surface & vortex, Riccati; model cylindrical FS) -----
-eil_pair_sym='d'         #pairing on model FS/cylinder (surface & vortex): singlet 's','d'(dx2-y2),'dxy'; triplet 'px','py','p+ip'/'p-ip'(chiral). The Wannier-FS path uses the global gap_sym index (0 s,1 dx2-y2,2 s+-,3 dxy,-1 px,-2 py,-3 p+ip)
 eil_ldos=True            #True: also compute the real-frequency LDOS (bound/core states) (surface & vortex)
 eil_surf_beta=0.785398   #surface orientation [rad]: 0=[100], pi/4(0.7854)=[110] (d-wave ZEBS)
 eil_surf_dvector=False   #True: self-consistent triplet d-vector TEXTURE at the surface (dominant p_x(e_x) + subdominant p_y(e_z), spin-matrix Riccati)
@@ -1377,9 +1376,9 @@ def main():
     elif option==CalcMode.EILENBERGER: #solve homogeneous quasiclassical Eilenberger equation
         if eil_fs: #model FS + Fermi velocity: anisotropic penetration depth lambda_xx/lambda_yy
             plibs.calc_fs_penetration(eil_coupling,temp,eil_wc,kind=(eil_fs_kind or 'ellipse'),
-                                      gap_sym=eil_pair_sym,params=eil_fs_params,kb=kb)
+                                      gap_sym=gap_sym,params=eil_fs_params,kb=kb)
         elif eil_lambda: #superfluid density / penetration depth lambda(T) (s exp-flat, d linear-in-T)
-            plibs.calc_penetration_depth(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,kb=kb)
+            plibs.calc_penetration_depth(eil_coupling,temp,eil_wc,gap_sym=gap_sym,kb=kb)
         elif eil_spin: #spin-2x2 Zeeman response: singlet vs triplet d-vector (d||h vs d_|_h)
             plibs.calc_spin_pauli(Nx,Ny,Nz,eil_wc,ham_r,S_r,rvec,avec,mu,temp,eil_coupling,
                                   gap_sym=gap_sym,fs_width=eil_fs_width,kb=kb)
@@ -1387,7 +1386,7 @@ def main():
             plibs.calc_pauli_limit(Nx,Ny,Nz,eil_wc,ham_r,S_r,rvec,avec,mu,temp,gap_sym,eil_coupling,
                                    fs_width=eil_fs_width,kb=kb)
         elif eil_free_energy: #condensation free energy (Omega_s-Omega_n)/N0 vs T (coupling-independent)
-            plibs.calc_free_energy(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,kb=kb)
+            plibs.calc_free_energy(eil_coupling,temp,eil_wc,gap_sym=gap_sym,kb=kb)
         else:
             plibs.calc_eilenberger(Nx,Ny,Nz,eil_wc,ham_r,S_r,rvec,avec,mu,temp,gap_sym,eil_coupling,
                                    imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,fs_width=eil_fs_width,kb=kb,
@@ -1401,10 +1400,10 @@ def main():
                 sfs=plibs.build_wannier_fs(rvec,ham_r,S_r,avec,
                                            plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill),
                                            gap_sym=gap_sym,delta0=delta0,gap_orbital=eil_gap_orbital)
-                sfk,sgs=None,gap_sym
+                sfk=None                    #the (int) gap_sym is baked into fs['phi']
             else:
-                sfs,sfk,sgs=None,eil_fs_kind,eil_pair_sym
-            plibs.calc_surface(eil_coupling,temp,eil_wc,gap_sym=sgs,beta_surf=eil_surf_beta,
+                sfs,sfk=None,eil_fs_kind    #model FS/cylinder: the int gap_sym -> continuum harmonic
+            plibs.calc_surface(eil_coupling,temp,eil_wc,gap_sym=gap_sym,beta_surf=eil_surf_beta,
                                kb=kb,sw_ldos=eil_ldos,imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,h=eil_zeeman,
                                fs_kind=sfk,fs_params=eil_fs_params,fs=sfs)
     elif option==CalcMode.EILENBERGER_VORTEX: #vortex / vortex lattice via Riccati Eilenberger (model FS)
@@ -1412,14 +1411,14 @@ def main():
             eil_fs_obj=plibs.build_wannier_fs(rvec,ham_r,S_r,avec,
                                               plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill),
                                               gap_sym=gap_sym,delta0=delta0,gap_orbital=eil_gap_orbital) #gap_orbital=projection (Nagai)
-            eil_fs_kw,eil_gs=None,gap_sym       #the (int) gap_sym is baked into fs['phi']
+            eil_fs_kw=None                  #the (int) gap_sym is baked into fs['phi']
         else:
-            eil_fs_obj,eil_fs_kw,eil_gs=None,eil_fs_kind,eil_pair_sym
+            eil_fs_obj,eil_fs_kw=None,eil_fs_kind   #model FS/cylinder: the int gap_sym -> continuum harmonic
         if eil_vort_maxwell: #self-consistent finite-kappa vector potential A(r) (Maxwell back-reaction)
-            plibs.calc_vortex_maxwell(eil_coupling,temp,eil_wc,gap_sym=eil_pair_sym,field=eil_field,
+            plibs.calc_vortex_maxwell(eil_coupling,temp,eil_wc,gap_sym=gap_sym,field=eil_field,
                                       kappa=eil_kappa,kb=kb,Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
         elif eil_vort_current: #circulating charge supercurrent j_phi(rho) of an isolated vortex
-            plibs.calc_vortex_current(eil_coupling,temp,eil_wc,gap_sym=eil_gs,kb=kb,
+            plibs.calc_vortex_current(eil_coupling,temp,eil_wc,gap_sym=gap_sym,kb=kb,
                                       Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
         elif eil_vort_dvector: #self-consistent triplet d-vector vortex/lattice (spin-matrix Riccati)
             dfs=(plibs.build_wannier_fs(rvec,ham_r,S_r,avec,plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill))
@@ -1432,16 +1431,16 @@ def main():
                 plibs.calc_vortex_dvector(eil_coupling,temp,eil_wc,kb=kb,sub_ratio=eil_dvec_subratio,
                                           field=eil_field,fs=dfs)
         elif eil_vort_lattice_sc and eil_field_list is not None: #je-style self-consistent periodic lattice (formulation A); eil_lattice square/triangular; eil_nvortex=Vw flux quanta/cell; finite eil_kappa = London A back-reaction, >=1e3 = bare extreme
-            plibs.calc_vortex_lattice_sc(eil_coupling,temp,eil_wc,gap_sym=eil_gs,
+            plibs.calc_vortex_lattice_sc(eil_coupling,temp,eil_wc,gap_sym=gap_sym,
                                          field_list=eil_field_list,lattice=eil_lattice,kb=kb,fs=eil_fs_obj,
                                          kappa=(None if eil_kappa>=1e3 else eil_kappa),Vw=eil_nvortex,
                                          self_consistent_A=eil_vort_scA)
         elif eil_field_list is not None: #sweep B/Hc2 on the TRUE periodic lattice -> <N(0)>(B) (d~sqrt(B) Volovik)
-            plibs.calc_vortex_lattice_periodic(eil_coupling,temp,eil_wc,gap_sym=eil_gs,
+            plibs.calc_vortex_lattice_periodic(eil_coupling,temp,eil_wc,gap_sym=gap_sym,
                                                field_list=eil_field_list,kappa=eil_kappa,lattice=eil_lattice,kb=kb,
                                                fs_kind=eil_fs_kw,fs_params=eil_fs_params,fs=eil_fs_obj,nflux=eil_nvortex)
         else: #single field (isolated vortex if eil_field=0, else circular-cell lattice)
-            plibs.calc_vortex(eil_coupling,temp,eil_wc,gap_sym=eil_gs,kb=kb,sw_ldos=eil_ldos,
+            plibs.calc_vortex(eil_coupling,temp,eil_wc,gap_sym=gap_sym,kb=kb,sw_ldos=eil_ldos,
                               imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,field=eil_field,h=eil_zeeman,
                               kappa=(eil_kappa if eil_vort_field else 0.0),tilt_deg=eil_vort_tilt,
                               fs_kind=eil_fs_kw,fs_params=eil_fs_params,fs=eil_fs_obj,
