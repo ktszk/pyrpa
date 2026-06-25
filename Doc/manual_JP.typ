@@ -443,7 +443,7 @@ Eliashberg方程式（option=15,23）を解く際, または SC chi 計算（opt
 
 *共通（3 モード）:*
 
-- `eil_coupling` （float）: 無次元の可分離ペアリング結合 $lambda$（$angle.l |phi|^2 angle.r_"FS" = 1$）。大きいほど $T_c$ 上昇。
+- `eil_coupling` （float）: 無次元の可分離ペアリング結合 $lambda$（$ |phi|^2 _"FS" = 1$）。大きいほど $T_c$ 上昇。
 - `eil_wc` （float, eV）: 固定 Matsubara カットオフエネルギー。ペアリングスケール／$T_c$ を決める。
 - `eil_fs_kind` （`None`/`'iso'`/`'ellipse'`/`'tb'`/`'wannier'`）: フェルミ面。`None`=等方シリンダー（一様侵入長計算は `'ellipse'` にフォールバック）; `'iso'`/`'ellipse'`/`'tb'`=`eil_fs_params` から作るモデル FS; `'wannier'`=読み込んだバンドの実 FS ＋フェルミ速度（対称性／マルチバンドは `gap_sym`, `delta0`, `eil_gap_orbital` から）。
 - `eil_fs_params` （tuple）: モデル FS パラメータ — 楕円質量 $(m_x, m_y)$ または `tb` ホッピング。
@@ -482,7 +482,7 @@ Eliashberg方程式（option=15,23）を解く際, または SC chi 計算（opt
 - `eil_gap_orbital` （`None` / $N_"orb" times N_"orb"$ 行列または callable）: 軌道基底ペアポテンシャルで, その FS バンドへの低エネルギー射影がギャップを決める（Nagai–Nakamura, JPSJ *85*, 074707 (2016), Eq. 43; Wannier FS が必要）, `gap_sym`/`delta0` に優先。
 - `eil_gap_file` （`None` / 文字列）: option=15/23（`LIN_ELIASHBERG`/`NONLIN_ELIASHBERG`）を `sw_out_self=True` で実行したとき `output_gap_wannier` が Wannier 実空間「ホッピング」形式で書き出した自己無撞着 RPA/FLEX ギャップの基底名（拡張子なし, 例 `'gap_wannier'`）。指定すると $Delta(bold(R), i omega_n)$ を読み込み, その逆フーリエ変換 $Delta_"orb"(bold(k)) = sum_bold(R) e^(i 2 pi bold(k) dot bold(R)) Delta(bold(R))$ を FS バンドへ射影して `eil_gap_orbital` として用いる。*以前計算した RPA ギャップ*（例: $"KFe"_2"As"_2$, PRB *84*, 144514）を渦のペアリング形状因子に使うための経路。ギャップを書き出した RPA 計算と Eilenberger 計算は*同一*の Wannier Hamiltonian（同じ軌道基底・$bold(R)$/$bold(a)$ 規約, できれば $mu$/filling）を使う必要がある（バンド固有ベクトルと $Delta_"orb"$ が同じ基底であるため）。`eil_gap_orbital`/`gap_sym` に優先。
 - `eil_gap_iw` （int）: `eil_gap_file` の開始 Matsubara インデックス（$0$=最低 $i omega_0$）。Eilenberger の形状因子は静的で, $i omega_0$ が対称性・符号・ノード・異方性を最も鮮鋭に持ち, FS 上で通常図示されるギャップに対応。
-- `eil_gap_navg` （int）: `eil_gap_file` で平均する連続 Matsubara スライス数（$1$=単一スライス）。$> 1$ でノイズを平滑化するが異方性をわずかに希釈（$Delta(bold(k), i omega_n)$ は $n$ とともに等方化）。絶対値スケールは無関係（射影後の $phi$ は $angle.l |phi|^2 angle.r = 1$ に規格化）。
+- `eil_gap_navg` （int）: `eil_gap_file` で平均する連続 Matsubara スライス数（$1$=単一スライス）。$> 1$ でノイズを平滑化するが異方性をわずかに希釈（$Delta(bold(k), i omega_n)$ は $n$ とともに等方化）。絶対値スケールは無関係（射影後の $phi$ は $ |phi|^2  = 1$ に規格化）。
 
 = 典型的な計算フローの例
 
