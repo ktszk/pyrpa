@@ -122,7 +122,7 @@ $ "DOS"(omega) = - 1/pi sum_(bold(k), n) "Im" G^0_n (bold(k), omega + i delta) $
 
 === option=3: 3 次元フェルミ面 (`FERMI_3D`)
 
-Marching cubes アルゴリズムを用いて 3 次元フェルミ面をポリゴンで描画します。`kscale` で各軸方向の表示スケールを変えることができます。
+Marching cubes アルゴリズムを用いて 3 次元フェルミ面をポリゴンで描画します。`kscale` で各軸方向の表示スケールを変えることができます。`color_option=ColorMode.GAP`（3）にすると, Eilenberger 計算を駆動している*まさにそのペアリング形状因子* $"Re"[phi(bold(k))]$（`gap_sym`/`delta0`, または設定されていれば `eil_gap_orbital`/`eil_gap_file`）で表面を着色します。渦/表面ソルバーが使う固定 $k_z$ 断面ではなく, 実際の 3 次元 Wannier フェルミ面（全シート・全 $k_z$）上でギャップ（符号・ノード・異方性）を手早く確認できます。
 
 === option=4: スペクトル関数 (`SPECTRUM`)
 
@@ -311,6 +311,7 @@ option=0,2,3では, バンドやフェルミ面の各点に色をつけること
   [0], [色なし（黒単色）],
   [1], [`olist`で指定した軌道成分をRGB（赤/緑/青）の混合比で表示],
   [2], [群速度 $|bold(v)(bold(k))|$ の大きさを色で表示],
+  [3], [（option=3, `FERMI_3D` 限定）Eilenberger ペアリングギャップ $"Re"[phi(bold(k))]$ — `gap_sym`/`delta0`, または設定されていれば `eil_gap_orbital`/`eil_gap_file` の Nagai–Nakamura 射影],
 )
 
 `color_option=1`の場合, `olist`で軌道インデックスを `[R成分, G成分, B成分]` の形で指定します。複数の軌道を同じ色に割り当てる場合は, リストの要素をさらにリストにします。例:

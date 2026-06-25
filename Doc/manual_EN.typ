@@ -121,7 +121,7 @@ Draws the Fermi surface in the $k_x$-$k_y$ plane at a specified $k_z$ slice (def
 
 === option=3: 3D Fermi Surface (`FERMI_3D`)
 
-Renders the three-dimensional Fermi surface as a polygon mesh using the Marching Cubes algorithm. The display scale along each axis can be adjusted with `kscale`.
+Renders the three-dimensional Fermi surface as a polygon mesh using the Marching Cubes algorithm. The display scale along each axis can be adjusted with `kscale`. With `color_option=ColorMode.GAP` (3), the surface is colored by $"Re"[phi(bold(k))]$, the *same* pairing form factor that drives the Eilenberger calculations (`gap_sym`/`delta0`, or `eil_gap_orbital`/`eil_gap_file` if set) — a quick way to check the actual gap (sign, nodes, anisotropy) on the real 3D Wannier Fermi surface (all sheets/$k_z$, not just the fixed-$k_z$ cut used by the vortex/surface solvers).
 
 === option=4: Spectral Function (`SPECTRUM`)
 
@@ -310,6 +310,7 @@ For option=0, 2, and 3, each point on the band or Fermi surface can be colored a
   [0], [No color (black)],
   [1], [Orbital weights specified by `olist` are mapped to RGB (red/green/blue)],
   [2], [Group velocity magnitude $|bold(v)(bold(k))|$ is shown as a color gradient],
+  [3], [(option=3, `FERMI_3D`, only) the Eilenberger pairing gap $"Re"[phi(bold(k))]$ — from `gap_sym`/`delta0`, or the Nagai–Nakamura projection of `eil_gap_orbital`/`eil_gap_file` if set],
 )
 
 For `color_option=1`, specify orbital indices in `olist` as `[R component, G component, B component]`. To assign multiple orbitals to the same color, use a nested list. Example:

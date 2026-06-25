@@ -611,6 +611,34 @@ def test_gap_orbital_from_wannier(tmp_path):
     assert abs(np.corrcoef(fw['phi'].real, fd['phi'].real)[0, 1]) > 0.99 # matches analytic d
 
 
+def test_gap_color_3d():
+    """gap_color_3d (used by main.py's FERMI_3D, color_option=GAP) must reproduce the
+    EXACT same phi(k) as the Eilenberger FS pipeline at arbitrary k-points, for both the
+    phenomenological gap_sym/delta0 path and the gap_orbital (Nagai projection) path.  On
+    the 1-orbital square model the eigenvector is gauge-trivial (u(k)=1), so phi(k) should
+    equal the bare form factor exactly."""
+    import libs.plibs as p
+    hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       'inputs', 'square.hop')
+    if not os.path.exists(hop):
+        return
+    rv, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
+    centers = [np.array([[0.1, 0.2, 0.0], [0.3, -0.1, 0.0], [-0.2, 0.4, 0.0]])]
+    blist = [0]
+    # gap_sym (d-wave) path == gap_symms directly
+    c_sym = p.gap_color_3d(centers, blist, rv, ham_r, [], gap_sym=1)
+    expect = np.cos(2 * np.pi * centers[0][:, 0]) - np.cos(2 * np.pi * centers[0][:, 1])
+    assert np.allclose(c_sym[0], expect, atol=1e-12)
+    # delta0 rescales the s-wave (gap_sym=0) row uniformly
+    c_delta = p.gap_color_3d(centers, blist, rv, ham_r, [], gap_sym=0, delta0=[2.5])
+    assert np.allclose(c_delta[0], 2.5, atol=1e-12)
+    # gap_orbital callable (1x1 matrix) path: u(k)=u(-k)=1 for a single orbital, so
+    # phi(k) == the bare orbital gap, matching the same d-wave form factor as gap_sym=1
+    gorb = lambda kfrac: np.array([[np.cos(2 * np.pi * kfrac[0]) - np.cos(2 * np.pi * kfrac[1])]])
+    c_orb = p.gap_color_3d(centers, blist, rv, ham_r, [], gap_orbital=gorb)
+    assert np.allclose(c_orb[0], expect, atol=1e-12)
+
+
 def test_gap_sym_index_and_delta0():
     """The gap symmetry can be set by the pyrpa integer gap_sym index (lattice
     harmonics via gap_symms, baked into the FS), and delta0 sets per-band gap

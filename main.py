@@ -79,6 +79,7 @@ class ColorMode(IntEnum):
     MONO     = (0, "no color")
     ORBITAL  = (1, "orbital weight")
     VELOCITY = (2, "velocity size")
+    GAP      = (3, "Eilenberger pairing gap Re[phi(k)] (option 3 only)")
 
 #----- CalcMode capability groups: single source for the option-set checks in main() -----
 M=CalcMode
@@ -113,7 +114,7 @@ del M
 
 #option=CalcMode.CHIS_QPOINT_SC
 option=CalcMode.LIN_ELIASHBERG  #calculation mode to run (see the CalcMode enum above; 0-23 RPA/FLEX/transport, 24-26 Eilenberger superconductivity)
-color_option=ColorMode.VELOCITY  #band/FS coloring (option 0,2,3): MONO=black, ORBITAL=olist weights->RGB, VELOCITY=|v(k)|
+color_option=ColorMode.VELOCITY  #band/FS coloring (option 0,2,3): MONO=black, ORBITAL=olist weights->RGB, VELOCITY=|v(k)|, GAP=Re[phi(k)] from gap_sym/delta0/eil_gap_orbital/eil_gap_file (option 3 only) -- check the Eilenberger pairing gap on the real 3D FS
 
 #Nx,Ny,Nz,Nw=256,256,4,200 #k and energy(or matsubara freq.) mesh size
 Nx,Ny,Nz,Nw=32,32,2,512
@@ -429,14 +430,18 @@ def plot_3d_surf(fspolys,fscenters,fscolors,surface_opt,kscale,bvec):
     plt.show()
     #plt.savefig(fname='3DFS.png',dpi=300)
     
-def set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist):
+def set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist,
+                      gap_sym=None,delta0=None,gap_orbital=None):
     if color_option==0:
         fspolys=polys
         fscenters=[]
         fscolors=[]
         return fspolys,fscenters,fscolors
     else:
-        colors=plibs.get_colors(centers,blist,ihbar*avec.T,rvec,ham_r,S_r,olist,color_option)
+        if color_option==ColorMode.GAP: #the actual Eilenberger pairing gap, on the real 3D FS
+            colors=plibs.gap_color_3d(centers,blist,rvec,ham_r,S_r,gap_sym,delta0,gap_orbital)
+        else:
+            colors=plibs.get_colors(centers,blist,ihbar*avec.T,rvec,ham_r,S_r,olist,color_option)
         fspolys=[]
         fscenters=[]
         fscolors=[]
@@ -1184,9 +1189,12 @@ def main():
         klist,blist=plibs.get_kf_points(eig2d,Nx,mu,kz)
         clist=plibs.get_colors(klist,blist,ihbar*avec.T,rvec,ham_r,S_r,olist,color_option,True)
         plot_FS(clist,klist,color_option)
-    elif option==CalcMode.FERMI_3D: #3D Fermi surface plot
+    elif option==CalcMode.FERMI_3D: #3D Fermi surface plot (color_option=GAP: the Eilenberger pairing gap Re[phi(k)])
         polys,centers,blist=plibs.gen_3d_surf_points(Nx,rvec,ham_r,S_r,mu,kscale)
-        fspolys,fscenters,fscolors=set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist)
+        gorb=(plibs.gap_orbital_from_wannier(eil_gap_file,eil_gap_iw,eil_gap_navg) #RPA/FLEX gap as form factor
+              if eil_gap_file else eil_gap_orbital)
+        fspolys,fscenters,fscolors=set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist,
+                                                      gap_sym,delta0,gorb)
         plot_3d_surf(fspolys,fscenters,fscolors,color_option,kscale,bvec)
     elif option==CalcMode.SPECTRUM: #plot spectrum
         plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw,sw_self)

@@ -1028,3 +1028,49 @@ def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, band=None, Ro
     elif gap_sym is not None:
         set_fs_gap(fs, gap_sym, delta0)                # phenomenological per-band ratio/sign
     return fs
+
+
+def gap_color_3d(centers, blist, rvec, ham_r, S_r, gap_sym=None, delta0=None, gap_orbital=None):
+    """
+    @fn gap_color_3d
+    @brief Re[phi(k)] at each face center of the 3D Wannier Fermi surface
+    (gen_3d_surf_points), using the EXACT SAME pairing-gap definition as the Eilenberger
+    solvers (build_wannier_fs/set_fs_gap/project_gap_to_band) -- so FERMI_3D with
+    color_option=ColorMode.GAP shows the actual gap driving the Eilenberger calculation,
+    directly on the real 3D Fermi surface (all sheets/kz, not just the fixed-kz cut used
+    by the vortex/surface solvers).  If gap_orbital is given, phi is the Nagai-Nakamura
+    band projection U(k)^dagger . Delta_orb(k) . U(-k)^* (Eq.43); otherwise it is the
+    phenomenological gap_sym/delta0 lattice harmonic (set_fs_gap).
+    @param centers: list (per FS sheet) of face-center k-points [Nfaces,3] (fractional),
+           as returned by gen_3d_surf_points
+    @param   blist: band index per sheet (gen_3d_surf_points)
+    @param rvec,ham_r,S_r: Wannier R-vectors, hopping, overlap (S_r=[] for orthogonal)
+    @param gap_sym: phenomenological gap symmetry index (gap_symms convention)
+    @param  delta0: per-band gap amplitude/sign (indexed by band); None = uniform 1
+    @param gap_orbital: Norb x Norb orbital pair-potential (array or callable kfrac->NxN);
+           supersedes gap_sym/delta0, same convention as build_wannier_fs
+    @return clist: list (per FS sheet) of real arrays [Nfaces], Re[phi(k)]
+    """
+    from ._bands import get_eigs
+    clist = []
+    for k, b in zip(centers, blist):
+        k = np.ascontiguousarray(k, dtype=np.float64)
+        if gap_orbital is not None:
+            _, uni = get_eigs(k, ham_r, S_r, rvec)
+            ub = uni[:, b, :].copy()                              # u(k)  [Nfaces,Norb]
+            ub /= np.sqrt((np.abs(ub) ** 2).sum(axis=1))[:, None]
+            _, uni_m = get_eigs(-k, ham_r, S_r, rvec)
+            umb = uni_m[:, b, :].copy()                           # u(-k) [Nfaces,Norb]
+            umb /= np.sqrt((np.abs(umb) ** 2).sum(axis=1))[:, None]
+            if callable(gap_orbital):
+                phi = np.array([np.conj(ub[i]) @ np.asarray(gap_orbital(k[i]), dtype=np.complex128)
+                                @ np.conj(umb[i]) for i in range(len(k))], dtype=np.complex128)
+            else:
+                D = np.asarray(gap_orbital, dtype=np.complex128)
+                phi = np.einsum('ia,ab,ib->i', np.conj(ub), D, np.conj(umb))
+        else:
+            phi = gap_symms(k, 1, int(gap_sym))[0].astype(np.complex128)
+            if delta0 is not None:
+                phi = phi * np.asarray(delta0, dtype=np.float64)[b]
+        clist.append(phi.real)
+    return clist
