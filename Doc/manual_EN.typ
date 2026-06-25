@@ -267,6 +267,39 @@ The initial gap is now generated automatically inside the solver — there is no
 - Amplitude-direction Newton acceleration speeds up convergence of the gap magnitude (see the `sw_amp_newton` comments in `libs/src/ffeliash.f90`)
 - See `libs/src/ffeliash.f90` for implementation details
 
+== Quasiclassical Eilenberger Modes (option=24,25,26)
+
+Options 24–26 solve the *quasiclassical Eilenberger equations* of superconductivity — the energy-integrated Gor'kov equations valid when the gap and disorder vary slowly on the scale of the Fermi wavelength ($Delta, T_c, hbar/tau << E_F$). This is the natural framework for $T_c$, the density of states, surface Andreev bound states, and the vortex/vortex-lattice state. The unknowns are the quasiclassical propagators $g(bold(k)_F, bold(r), omega_n)$ (normal) and $f$ (anomalous), parametrized by a single *Riccati amplitude* $a$ ($f = 2a\/(1+a a^*)$, $g = (1-a a^*)\/(1+a a^*)$), which is integrated along straight Fermi-velocity trajectories with a numerically stable Fortran kernel (`riccati_chords`; the $2 times 2$ spin version `matrix_riccati_chords` for the d-vector). The pairing is separable, $Delta(bold(k)_F, bold(r)) = Delta(bold(r)) phi(bold(k)_F)$, with the form factor $phi$ fixed by `gap_sym` and normalized to $angle.l |phi|^2 angle.r_"FS" = 1$, so the coupling `eil_coupling` is the dimensionless $lambda$.
+
+The Fermi surface is shared by all three modes via `eil_fs_kind`: `None` is an isotropic cylinder (analytic angular average), `'iso'`/`'ellipse'`/`'tb'` are model FSs built from `eil_fs_params`, and `'wannier'` builds the real FS and Fermi velocities from the loaded Wannier band (the gap symmetry / multiband structure then comes from `gap_sym`, `delta0`, or `eil_gap_orbital`). The temperature is the global `tempK`/`temp`, and the gap symmetry is the global `gap_sym` (the model-FS routines map the integer index to its continuum harmonic, with $2$ ($s^plus.minus$) $-> s$).
+
+=== option=24: Homogeneous Eilenberger (`EILENBERGER`)
+
+The bulk (spatially uniform) solver. With all `eil_*` sub-mode flags off it self-consistently solves the gap $Delta(T)$ and reports $T_c$; `eil_find_tc=True` brackets $T_c$ by bisection. The sub-mode flags (mutually exclusive) select:
+
+- `eil_imp_sweep=True`: sweep the non-magnetic impurity rate $Gamma$ (`eil_imp_list`) and write $T_c(Gamma)$ to `eilenberger_tc.dat` — the Abrikosov–Gor'kov pair-breaking curve (no suppression for an isotropic $s$-wave by Anderson's theorem; strong suppression for sign-changing gaps). `eil_imp_c` interpolates Born ($-> infinity$) to unitary ($-> 0$) scattering.
+- `eil_pauli=True`: Zeeman (Maki) Pauli-limiting sweep — the singlet gap $Delta(h)$, the first-order spinodal/Chandrasekhar–Clogston transition, and the Zeeman-split DOS.
+- `eil_spin=True`: the spin-resolved ($2 times 2$) Zeeman response, contrasting a singlet/parallel d-vector ($bold(d) parallel bold(h)$, Pauli-limited) with a perpendicular d-vector ($bold(d) perp bold(h)$, Zeeman-immune).
+- `eil_lambda=True`: the superfluid density $rho_s(T)$ and penetration depth $lambda(T)$ (exponentially flat for a full gap, linear-in-$T$ for a nodal gap) → `penetration_depth.dat`.
+- `eil_fs=True`: the same on a model FS with Fermi velocities, giving the anisotropic $lambda_(x x), lambda_(y y)$ → `fs_penetration.dat`.
+- `eil_free_energy=True`: the condensation free energy $(Omega_s - Omega_n)\/N_0$ vs $T$ (coupling-constant integration) → `free_energy.dat`.
+
+=== option=25: Surface Andreev Bound States (`EILENBERGER_SURFACE`)
+
+Solves the self-consistent gap profile $Delta(x)$ near a specular surface by Riccati integration along reflected trajectories, and (with `eil_ldos=True`) the surface LDOS. The surface orientation is `eil_surf_beta` (for $d$-wave, $0 = [100]$ has no bound state; $pi\/4 = [110]$ produces the zero-energy Andreev bound state, the ZEBS, from the sign change felt on reflection). A Zeeman field `eil_zeeman` splits the ZEBS into $plus.minus h$. With `eil_surf_dvector=True` it instead solves the self-consistent triplet *d-vector texture* at the surface (a dominant + a subdominant component via the spin-matrix Riccati, coupling ratio `eil_dvec_subratio`).
+
+=== option=26: Vortex and Vortex Lattice (`EILENBERGER_VORTEX`)
+
+The inhomogeneous solver around a magnetic vortex. `eil_field` $= B\/H_(c 2)$ selects the geometry: `0` is an isolated vortex in a large circular cell (radius `eil_vort_lxi` in units of $xi$, grid `eil_vort_ngrid`); `>0` is a circular-cell vortex lattice with the Doppler shift. It writes the gap profile $Delta(rho)$ and (with `eil_ldos`) the zero-energy core LDOS (the Caroli–de Gennes–Matricon bound state; the Volovik $sqrt(B)$ DOS in the lattice). A Zeeman field `eil_zeeman` spin-splits the core states. Sub-modes:
+
+- `eil_vort_current=True`: the circulating supercurrent $j_phi(rho)$ → `vortex_current.dat`.
+- `eil_vort_field=True` / `eil_vort_maxwell=True`: the self-consistent finite-$kappa$ magnetic field $B(rho)$ / vector potential $bold(A)(bold(r))$ (Maxwell back-reaction; uses `eil_kappa`).
+- `eil_vort_lattice_sc=True` with `eil_field_list`: the *true periodic* magnetic-Bloch vortex lattice (formulation A, extreme type-II): a complex order parameter $Psi(bold(r))$ with a real node at every core and the full Abrikosov supercurrent phase, swept over $B\/H_(c 2)$ to give $angle.l N(0) angle.r (B)$ ($d$-wave $tilde sqrt(B)$ Volovik). `eil_lattice` is `'square'` or `'triangular'`, `eil_nvortex` sets the flux quanta per cell, finite `eil_kappa` adds London screening (and `eil_vort_scA=True` makes $bold(A)$ fully self-consistent from the quasiclassical current $bold(j)_s = angle.l bold(v)_F "Im" g angle.r$, the `je` `A_renew` scheme).
+- `eil_vort_dvector=True`: the self-consistent triplet d-vector vortex/lattice texture (dominant winding + core-localized subdominant; spin-matrix Riccati).
+- `eil_gap_orbital`: an orbital-basis pair potential whose *low-energy projection* onto the FS bands sets the gap (Nagai–Nakamura multiband Eilenberger, JPSJ *85*, 074707 (2016), Eq. 43; needs a Wannier FS), superseding `gap_sym`/`delta0`.
+
+The companion driver `calc_vortex_lattice_symmetry` (called from the library) minimizes the Ichioka–Machida lattice free energy over the cell apex angle and the gap-vs-lattice orientation $theta_0$ to determine the *stable vortex-lattice symmetry* and its field evolution (e.g. the $d$-wave triangular → square transition near $H_(c 2)$). When a Wannier FS is supplied, $theta_0$ rigidly rotates the whole crystal (FS + gap), so the Fermi-velocity anisotropy also enters the selection.
+
 = Color Plot Settings (`color_option`)
 
 For option=0, 2, and 3, each point on the band or Fermi surface can be colored according to a physical quantity.
@@ -402,6 +435,50 @@ Specifies the symmetry of the initial gap function when solving the Eliashberg e
 - `sw_rescale_flex` (bool): For FLEX (option=14), dynamically rescale the self-energy when max$|Sigma|$ approaches `U` to prevent divergence. Useful when the Stoner factor is close to 1.
 
 - `sw_dec_axis` (bool): If `True`, lattice vectors are decomposed appropriately to set up the reciprocal lattice vectors.
+
+=== Eilenberger Parameters (option=24,25,26)
+
+These drive the quasiclassical Eilenberger solvers. The temperature is the global `tempK`/`temp` and the gap symmetry is the global `gap_sym`.
+
+*Common (all three modes):*
+
+- `eil_coupling` (float): the dimensionless separable pairing coupling $lambda$ (with $angle.l |phi|^2 angle.r_"FS" = 1$). Larger $lambda$ → higher $T_c$.
+- `eil_wc` (float, unit: eV): the fixed Matsubara cutoff energy, which sets the pairing scale / $T_c$.
+- `eil_fs_kind` (`None`/`'iso'`/`'ellipse'`/`'tb'`/`'wannier'`): the Fermi surface. `None` = isotropic cylinder (the homogeneous penetration calc falls back to `'ellipse'`); `'iso'`/`'ellipse'`/`'tb'` = model FS from `eil_fs_params`; `'wannier'` = the real FS + Fermi velocities of the loaded band (gap symmetry/multiband from `gap_sym`, `delta0`, `eil_gap_orbital`).
+- `eil_fs_params` (tuple): model-FS parameters — ellipse masses $(m_x, m_y)$ or the `tb` hopping.
+- `eil_imp_gamma` (float, unit: eV): the non-magnetic impurity scattering rate $Gamma$ ($0$ = clean).
+- `eil_imp_c` (float): the T-matrix $cot delta_0$ — large = Born limit, $0$ = unitary limit.
+- `eil_fs_width` (float, unit: eV): the Gaussian Fermi-surface broadening.
+- `eil_zeeman` (float, unit: eV): the Zeeman (Maki) field for the LDOS (surface: splits the $d_[110]$ ZEBS into $plus.minus h$; vortex: spin-splits the core states).
+
+*Homogeneous (option=24):*
+
+- `eil_method` (`'normalization'`/`'riccati'`): the $(g, f)$ route — `'normalization'` is fast; `'riccati'` matches the inhomogeneous kernel.
+- `eil_find_tc` (bool): bisect for $T_c$ at the current impurity setting.
+- `eil_imp_sweep` (bool), `eil_imp_list` (array): sweep $Gamma$ over `eil_imp_list` and write $T_c(Gamma)$ to `eilenberger_tc.dat`.
+- `eil_pauli`, `eil_spin`, `eil_lambda`, `eil_fs`, `eil_free_energy` (bool): the mutually-exclusive sub-modes described under option=24 above.
+
+*Surface (option=25):*
+
+- `eil_surf_beta` (float, unit: rad): the surface orientation — $0 = [100]$, $pi\/4 approx 0.785 = [110]$ (the $d$-wave ZEBS).
+- `eil_surf_dvector` (bool): self-consistent triplet d-vector surface texture.
+- `eil_dvec_subratio` (float): the subdominant/dominant coupling ratio for the d-vector texture ($tilde 0.85$ is the bulk threshold).
+- `eil_ldos` (bool): also compute the real-frequency surface/core LDOS.
+
+*Vortex / vortex lattice (option=26):*
+
+- `eil_field` (float): $B\/H_(c 2)$ — $0$ = isolated vortex, $>0$ = circular-cell lattice with the Doppler shift.
+- `eil_field_list` (list): the $B\/H_(c 2)$ values to sweep on the *true periodic* lattice (e.g. `[0.04,0.08,0.16,0.32]`); `None` = single field.
+- `eil_lattice` (`'square'`/`'triangular'`): the periodic-lattice geometry.
+- `eil_kappa` (float): the GL parameter $kappa = lambda\/xi$ — large ($gt.eq 10^3$) = extreme type-II (no screening); finite = London screening / Maxwell back-reaction.
+- `eil_nvortex` (int): flux quanta per computational cell (supercell).
+- `eil_vort_lxi` (float), `eil_vort_ngrid` (int): the isolated-vortex cell half-width (in $xi$) and 2D grid size.
+- `eil_vort_field`, `eil_vort_maxwell` (bool): the self-consistent finite-$kappa$ field $B(rho)$ / vector potential $bold(A)(bold(r))$.
+- `eil_vort_current` (bool): the circulating supercurrent $j_phi(rho)$.
+- `eil_vort_lattice_sc` (bool): the je-style fully self-consistent true periodic lattice; `eil_vort_scA=True` makes $bold(A)$ self-consistent from the quasiclassical current.
+- `eil_vort_dvector` (bool): the self-consistent triplet d-vector vortex/lattice texture.
+- `eil_vort_tilt` (float, unit: deg): the field tilt from the $c$-axis (quasi-2D: orbital $B_z = B cos theta$, Zeeman $-> h\/cos theta$).
+- `eil_gap_orbital` (`None` / $N_"orb" times N_"orb"$ matrix or callable): an orbital-basis pair potential whose low-energy projection onto the FS bands sets the gap (Nagai–Nakamura, JPSJ *85*, 074707 (2016), Eq. 43; needs a Wannier FS), superseding `gap_sym`/`delta0`.
 
 = Typical Calculation Workflows
 
