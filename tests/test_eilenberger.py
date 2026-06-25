@@ -359,6 +359,28 @@ def test_lattice_symmetry_gap_anisotropy_resolved():
     assert dd > 1e-4 and dd > 30 * ds                    # d-wave clearly anisotropic vs s-wave
 
 
+def test_lattice_symmetry_wannier_fs_rotation():
+    """theta0 rotates the WHOLE crystal (Wannier/model FS + gap) rigidly against the vortex
+    lattice -- not just the model gap.  Decisive invariance check on the C4-symmetric 'tb'
+    FS: the lattice free energy is exactly invariant under a C4 symmetry rotation
+    (theta0 -> theta0 + pi/2) yet changes under the non-symmetry pi/4 rotation, for BOTH
+    s- and d-wave (the FS velocity anisotropy itself also couples to the lattice -- e.g.
+    s-wave square lattices in the borocarbides -- so theta0 feeds FS *and* gap anisotropy
+    into the symmetry selection)."""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    fm = E.build_model_fs('tb', Nth=160, mu=-1.0, params=1.0)
+    def Fth(gs, th):
+        st = V.solve_lattice_sc(0.6, T, om, gap_sym=gs, field=0.2, Ng=16, nbeta=24,
+                                kappa=None, itemax=140, mix=0.4, eps=1e-3, theta0=th, fs=fm)
+        return V.lattice_free_energy(st, 0.6, T, om, gs, nbeta=48, theta0=th, fs=fm)
+    for gs in ('s', 'd'):
+        dsym = abs(Fth(gs, 0.0) - Fth(gs, np.pi / 2))    # C4 rotation: must be invariant
+        dnon = abs(Fth(gs, 0.0) - Fth(gs, np.pi / 4))    # non-symmetry: must change
+        assert dsym < 1e-10
+        assert dnon > 1e-4 and dnon > 1e5 * dsym
+
+
 def test_lattice_sc_finite_kappa_screening():
     """Finite-kappa A(r) back-reaction (je #2 connection) on the formulation-A lattice:
     the London-screened smooth vector potential keeps the core node (the complex Delta

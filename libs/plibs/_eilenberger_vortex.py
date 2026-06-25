@@ -1357,8 +1357,9 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
     X = F1 * g['a1'][0] + F2 * g['a2'][0]
     Y = F1 * g['a1'][1] + F2 * g['a2'][1]
     chi_grid = np.angle(_abrikosov_unit_phase(X, Y, g, Vw))
-    if fs is not None:                                  # theta0 rotates the gap vs the lattice
-        dirs = np.arctan2(fs['vy'], fs['vx']); phi = fs_form_factor(fs, gap_sym)
+    if fs is not None:                                  # theta0 rotates crystal (FS+gap) vs lattice:
+        dirs = np.arctan2(fs['vy'], fs['vx']) + theta0  # rigidly rotate the v_F trajectory directions;
+        phi = fs_form_factor(fs, gap_sym)               # gap phi stays attached to each FS point
         hvfarr = np.asarray(fs['vabs']); wt_dir = np.asarray(fs['nf']); nbd = len(dirs)
     else:
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
@@ -1460,12 +1461,12 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
         A = np.maximum(A_next.reshape(Ng, Ng), 0.0)
     return dict(X=X, Y=Y, absD=A, Psi=A * np.exp(1j * chi_grid), chi=chi_grid,
                 Dbulk=Dbulk, xi=xi, a=a, S=g['S'], geom=g, b1=g['b1'], b2=g['b2'],
-                a1=g['a1'], a2=g['a2'], acell=a, kappa=kappa, Vw=Vw,
+                a1=g['a1'], a2=g['a2'], acell=a, kappa=kappa, Vw=Vw, theta0=theta0,
                 Afield=((Axf, Ayf) if scA else None), iters=it + 1, err=err)
 
 
 def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None,
-                   Lchord=6.0, ds_xi=0.3):
+                   Lchord=6.0, ds_xi=0.3, theta0=None):
     """
     @fn lattice_dos_sc
     @brief Spatially-averaged DOS N(w)/N0 of the je-style self-consistent periodic
@@ -1490,13 +1491,14 @@ def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None
         delta = 0.03 * Dbulk
     zomega = delta - 1j * np.asarray(wlist)
     Nw = zomega.size
+    th0 = state.get('theta0', 0.0) if theta0 is None else theta0  # same rotation the gap was solved on
     if fs is not None:
         from ._eilenberger import fs_form_factor
-        dirs = np.arctan2(fs['vy'], fs['vx']); phi = fs_form_factor(fs, gap_sym)
+        dirs = np.arctan2(fs['vy'], fs['vx']) + th0; phi = fs_form_factor(fs, gap_sym)
         hvfarr = np.asarray(fs['vabs']); wt_dir = np.asarray(fs['nf']); nbd = len(dirs)
     else:
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
-        phi = _ff_vortex(dirs, gap_sym); hvfarr = np.full(nbeta, hvf)
+        phi = _ff_vortex(dirs - th0, gap_sym); hvfarr = np.full(nbeta, hvf)
         wt_dir = np.full(nbeta, 1.0 / nbeta); nbd = nbeta
     L = Lchord * xi; ds = ds_xi * xi
     ns = int(2 * L / ds) | 1; ic = ns // 2
@@ -1595,6 +1597,10 @@ def calc_vortex_lattice_symmetry(coupling, temp, wc, gap_sym='d', field_list=Non
     .. 60deg [triangular]) AND the orientation theta0 of the gap relative to the lattice
     (the fourfold gap anisotropy makes F depend on theta0 ~ cos4 theta0).  The
     free-energy minimum's apex angle gives the stable symmetry and its field/T evolution.
+    If a Wannier/model FS is passed (fs=...), theta0 rigidly rotates the whole crystal
+    (FS + gap) against the vortex lattice, so the Fermi-velocity anisotropy feeds the
+    selection too (e.g. s-wave square lattices in the borocarbides) -- the route to apply
+    this to a real (iron-based) FS with the multiband-projected gap.
     Extreme type-II (kappa=None): the magnetic-field energy is uniform and cancels, so the
     electronic free energy selects the geometry.  Warm-started across the scan.
     @return list of (field, best_ratio, best_apex_deg, best_theta0_deg, Fmin)
