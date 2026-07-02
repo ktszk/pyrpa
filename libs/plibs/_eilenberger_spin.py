@@ -25,7 +25,7 @@ the Pauli immunity when the d-vector is perpendicular to the field (equal-spin
 pairing) versus depairing when d || h.
 """
 import numpy as np
-from ._eilenberger import matsubara, build_fs
+from ._eilenberger import matsubara, build_fs, BCS_RATIO
 from ..flibs import matrix_riccati_batch, matrix_riccati_chords
 
 
@@ -103,7 +103,7 @@ def solve_gap_spin(coupling, temp, omega, wf, phif, channel='singlet',
     Sd = np.conj(Shat).T
     om = np.concatenate([omega, -omega])                       # full +/- Matsubara set
     if damp_init is None:
-        damp_init = 1.764 * temp
+        damp_init = BCS_RATIO * temp
     damp = damp_init
     Wn = wf.sum()
     for _ in range(itemax):
@@ -191,7 +191,7 @@ def _bulk_dvector(couplings, temp, om, beta, w, phitil, eps=1e-10, itemax=2000, 
     lam = np.asarray(couplings, dtype=float)
     phi = np.array([phitil[a](beta) for a in range(nc)])               # [nc, Nb] outgoing
     phii = np.array([phitil[a](np.pi - beta) for a in range(nc)])      # reflected branch
-    D = np.full(nc, 1.764 * temp)
+    D = np.full(nc, BCS_RATIO * temp)
     for _ in range(itemax):
         s2 = ((D[:, None] * phi) ** 2).sum(axis=0)                     # sum_b (D_b phi_b)^2 [Nb]
         s2i = ((D[:, None] * phii) ** 2).sum(axis=0)
@@ -205,6 +205,29 @@ def _bulk_dvector(couplings, temp, om, beta, w, phitil, eps=1e-10, itemax=2000, 
         if np.abs(Dnew - D).max() < eps * max(Dnew.max(), eps):
             return Dnew
         D = (1.0 - mix) * D + mix * Dnew
+    return D
+
+
+def _coupled_bulk_gap(lam, temp, om, phid_b, wfull):
+    """Coupled multi-channel bulk amplitudes D_a on a dense (nf-weighted) direction
+    set: same channel-coupled gap equation as _bulk_dvector but with a single
+    branch and explicit FS weights (used by the vortex / lattice d-vector solvers).
+    @param     lam: per-channel couplings [nc]
+    @param      om: full +/- Matsubara set
+    @param  phid_b: normalized form factors on the dense set [nc, ndense]
+    @param   wfull: FS weights on the dense set [ndense] (sum 1)
+    """
+    nc = len(phid_b)
+    a2 = np.abs(phid_b) ** 2                            # [nc, ndense]
+    D = np.full(nc, BCS_RATIO * temp)
+    for _ in range(2000):
+        s2 = ((D[:, None] ** 2) * a2).sum(axis=0)       # sum_b (D_b|phi_b|)^2  [ndense]
+        R = np.sqrt(om[None, :] ** 2 + s2[:, None])
+        Dn = np.array([max(lam[a] * temp * D[a] * (wfull[:, None] * a2[a][:, None] / R).sum(), 0.0)
+                       for a in range(nc)])
+        if np.abs(Dn - D).max() < 1e-10 * max(Dn.max(), 1e-12):
+            return Dn
+        D = 0.5 * (D + Dn)
     return D
 
 
@@ -451,18 +474,7 @@ def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0
         phid = np.array([phitil[a](dirs) for a in range(nc)], dtype=np.complex128)
         hvf_eff = hvf
     if Dbulk is None:                                   # coupled multi-channel bulk gap (dense set)
-        a2 = np.abs(phid_b) ** 2                        # [nc, ndense]
-        D = np.full(nc, 1.764 * temp)
-        for _ in range(2000):
-            s2 = ((D[:, None] ** 2) * a2).sum(axis=0)   # sum_b (D_b|phi_b|)^2  [ndense]
-            R = np.sqrt(om[None, :] ** 2 + s2[:, None])
-            Dn = np.array([max(lam[a] * temp * D[a] * (wfull[:, None] * a2[a][:, None] / R).sum(), 0.0)
-                           for a in range(nc)])
-            if np.abs(Dn - D).max() < 1e-10 * max(Dn.max(), 1e-12):
-                D = Dn
-                break
-            D = 0.5 * (D + Dn)
-        Dbulk = D
+        Dbulk = _coupled_bulk_gap(lam, temp, om, phid_b, wfull)
     Dref = float(np.max(Dbulk))
     xi = hvf_eff / (np.pi * Dref)
     Rc = np.sqrt(2.0 / field) * xi if field > 0.0 else np.inf   # Wigner-Seitz cell radius
@@ -576,17 +588,8 @@ def solve_lattice_sc_dvector(couplings, temp, omega, channels=None, windings=(1,
         hvfarr = np.full(nbeta, hvf); wt_dir = np.full(nbeta, 1.0 / nbeta)
         phid = np.array([phitil[a](dirs) for a in range(nc)], dtype=np.complex128)
         hvf_eff = hvf
-    a2 = np.abs(phid_b) ** 2                            # coupled multi-channel bulk gap
-    D = np.full(nc, 1.764 * temp)
-    for _ in range(2000):
-        s2 = ((D[:, None] ** 2) * a2).sum(axis=0)
-        R = np.sqrt(om[None, :] ** 2 + s2[:, None])
-        Dn = np.array([max(lam[a] * temp * D[a] * (wfull[:, None] * a2[a][:, None] / R).sum(), 0.0)
-                       for a in range(nc)])
-        if np.abs(Dn - D).max() < 1e-10 * max(Dn.max(), 1e-12):
-            D = Dn; break
-        D = 0.5 * (D + Dn)
-    Dbulk = D; Dref = float(np.max(Dbulk))
+    Dbulk = _coupled_bulk_gap(lam, temp, om, phid_b, wfull)   # coupled multi-channel bulk gap
+    Dref = float(np.max(Dbulk))
     if Dref <= 0:
         return None
     xi = hvf_eff / (np.pi * Dref)

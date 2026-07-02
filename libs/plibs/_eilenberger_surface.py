@@ -30,43 +30,7 @@ surface bound state).
 """
 import numpy as np
 from ..flibs import riccati_chords
-
-
-def form_factor(beta: np.ndarray, gap_sym: str, beta_surf: float = 0.0) -> np.ndarray:
-    """
-    @fn form_factor
-    @brief Pairing form factor phi(beta) on the cylindrical FS, normalized so that
-    the full-circle average <|phi|^2> = 1 (so the coupling lambda keeps its bulk
-    BCS meaning).  May be complex (chiral / triplet states).
-    @param     beta: FS angle(s) from the surface normal [rad]
-    @param  gap_sym: singlet: 's', 'd' (d_{x^2-y^2}), 'dxy';
-                     triplet (odd parity): 'px', 'py', 'p+ip' / 'p-ip' (chiral)
-    @param beta_surf: rotation of the gap relative to the surface normal
-                      (d-wave: 0 -> [100] surface, pi/4 -> [110] surface)
-    @note Triplet states are treated in the single (pseudo-)spin sector with a
-          fixed d-vector: the equal-spin chiral state p+ip = e^{i beta} is fully
-          gapped in the bulk and carries topological edge / core states.
-          ``gap_sym`` may also be an integer (gap_symms index, mapped to the
-          continuum harmonic: 0 s, 1 d, 2 s+-, 3 dxy, -1 px, -2 py).
-    """
-    if isinstance(gap_sym, (int, np.integer)):
-        gap_sym = {0: 's', 1: 'd', 2: 's', 3: 'dxy', -1: 'px', -2: 'py', -3: 'p+ip'}.get(int(gap_sym), 's')
-    a = beta - beta_surf
-    if gap_sym == 's':
-        return np.ones_like(beta)
-    if gap_sym == 'd':
-        return np.sqrt(2.0) * np.cos(2.0 * a)
-    if gap_sym == 'dxy':
-        return np.sqrt(2.0) * np.sin(2.0 * a)
-    if gap_sym == 'px':
-        return np.sqrt(2.0) * np.cos(a)
-    if gap_sym == 'py':
-        return np.sqrt(2.0) * np.sin(a)
-    if gap_sym in ('p+ip', 'chiral'):
-        return np.exp(1j * a) * np.ones_like(beta, dtype=np.complex128)
-    if gap_sym == 'p-ip':
-        return np.exp(-1j * a) * np.ones_like(beta, dtype=np.complex128)
-    raise ValueError(f"unknown gap_sym: {gap_sym}")
+from ._eilenberger import form_factor, BCS_RATIO
 
 
 def _surface_chords(Damp, phi_out, phi_in, om, hvf, dx, cosb, sigf=None):
@@ -235,7 +199,7 @@ def _bulk_gap(coupling: float, temp: float, omega: np.ndarray, phi: np.ndarray,
               eps: float = 1.0e-8, itemax: int = 500, mix: float = 0.5) -> float:
     """Homogeneous gap amplitude for the cylindrical FS (angle average over phi),
     consistent with the surface solver's normalization."""
-    damp = 1.764 * temp
+    damp = BCS_RATIO * temp
     Dk = phi[:, None]
     absphi2 = (phi * np.conj(phi)).real[:, None]            # |phi|^2
     for _ in range(itemax):
@@ -258,7 +222,7 @@ def _bulk_gap_imp(coupling: float, temp: float, omega: np.ndarray, phi: np.ndarr
     T-matrix impurity self-energy (the bulk reference for the surface solver).
     Nested loop: inner impurity self-consistency at fixed gap, outer gap update."""
     gpref = gamma * (cimp ** 2 + 1.0)
-    damp = 1.764 * temp
+    damp = BCS_RATIO * temp
     wt = omega.astype(np.complex128).copy()
     sigf = np.zeros(len(omega), dtype=np.complex128)
     for _ in range(itemax):

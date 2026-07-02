@@ -6,6 +6,7 @@ Higher-level calculation routines: FLEX, Eliashberg, susceptibility spectra, car
 import numpy as np
 import libs.flibs as flibs
 from ._bands import get_eigs, get_emesh, calc_mu
+from ._eilenberger import BCS_RATIO
 from ._response import get_initial_gap, chis_spectrum, phi_spectrum
 from ._wannier_io import output_self_wannier, output_gap_wannier
 
@@ -329,7 +330,7 @@ def calc_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec,
         delta_init_band = get_initial_gap(state['klist'], len(state['eig'].T), gap_sym)
         delta_init = flibs.get_initial_delta(delta_init_band, state['uni'], state['kmap'], state['invk'], Nw, gap_sym)
     # BCS weak-coupling ratio: Δ₀ = 1.764 kB Tc; scale initial gap to this amplitude.
-    target_gap = 1.764 * temp
+    target_gap = BCS_RATIO * temp
     delta_max = np.abs(delta_init).max()
     if delta_max > 0.0:
         # Only the shape from the linearized eigenvector matters here; the nonlinear solver

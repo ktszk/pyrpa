@@ -818,6 +818,29 @@ def test_dvector_texture_vortex_core():
     assert th(0) > th(len(xg) // 2 - 1) + 20.0             # texture: core vs edge
 
 
+def test_scalar_vortex_rejects_chiral():
+    """The scalar self-consistent vortex solvers project onto a REAL amplitude
+    ansatz, which is exact only for real form factors; a chiral phi (p+ip, ...)
+    must be rejected (the d-vector solvers handle multi-component complex
+    amplitudes), while real odd-parity harmonics (px/py) stay allowed."""
+    T = 2e-3
+    om = E.matsubara(T, 0.2)
+    for gs in ('p+ip', 'p-ip', -3):
+        for call in (lambda: V.solve_vortex2d(0.6, T, om, gap_sym=gs,
+                                              ngrid=9, nbeta=4, itemax=1),
+                     lambda: V.solve_lattice_sc(0.6, T, om, gap_sym=gs,
+                                                field=0.2, Ng=6, nbeta=4, itemax=1)):
+            try:
+                call()
+                raise AssertionError(f"chiral gap_sym={gs!r} must be rejected "
+                                     "by the scalar vortex solvers")
+            except ValueError:
+                pass
+    xg, Psi, Db, xi = V.solve_vortex2d(0.6, T, om, gap_sym='px',
+                                       ngrid=9, nbeta=4, itemax=1)
+    assert np.isfinite(np.abs(Psi)).all()                   # real px still runs
+
+
 # --------------------------------------------------------------------------- #
 #  standalone runner (no pytest required)
 # --------------------------------------------------------------------------- #

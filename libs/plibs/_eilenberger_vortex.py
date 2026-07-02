@@ -29,7 +29,7 @@ conditions -- on top of the same chord integration and self-consistency here.
 """
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
-from ._eilenberger import matsubara
+from ._eilenberger import matsubara, form_factor
 from ._eilenberger_surface import _bulk_gap, _bulk_gap_imp
 from ..flibs import riccati_chords
 
@@ -171,32 +171,30 @@ def vortex_ldos(Dr: np.ndarray, rgrid: np.ndarray, xi: float, wlist: np.ndarray,
     return rho_out, gavg.real
 
 
-_INT_GAP_STR = {0: 's', 1: 'd', 2: 's', 3: 'dxy', -1: 'px', -2: 'py', -3: 'p+ip'}   # gap_symms index -> continuum
+# The pairing form factor phi(beta) is the shared continuum-harmonic helper
+# ``form_factor`` from _eilenberger.  For a d-wave vortex the gap a trajectory
+# sees is phi(beta) * Psi(r), so the trajectory direction enters explicitly and
+# the rotational symmetry of the s-wave vortex is reduced to fourfold.
 
 
-def _ff_vortex(beta: np.ndarray, gap_sym) -> np.ndarray:
-    """Pairing form factor phi_d(k_hat) vs the v_F direction beta, normalized so
-    <phi^2> = 1 over the full circle.  For a d-wave vortex the gap a trajectory
-    sees is phi(beta) * Psi(r), so the trajectory direction enters explicitly and
-    the rotational symmetry of the s-wave vortex is reduced to fourfold.  ``gap_sym``
-    may be a string or an integer (gap_symms index, mapped to the continuum harmonic)."""
-    if isinstance(gap_sym, (int, np.integer)):
-        gap_sym = _INT_GAP_STR.get(int(gap_sym), 's')
-    if gap_sym == 's':
-        return np.ones_like(beta)
-    if gap_sym == 'd':
-        return np.sqrt(2.0) * np.cos(2.0 * beta)
-    if gap_sym == 'dxy':
-        return np.sqrt(2.0) * np.sin(2.0 * beta)
-    if gap_sym == 'px':
-        return np.sqrt(2.0) * np.cos(beta)
-    if gap_sym == 'py':
-        return np.sqrt(2.0) * np.sin(beta)
-    if gap_sym in ('p+ip', 'chiral'):
-        return np.exp(1j * beta) * np.ones_like(beta, dtype=np.complex128)
-    if gap_sym == 'p-ip':
-        return np.exp(-1j * beta) * np.ones_like(beta, dtype=np.complex128)
-    raise ValueError(f"unknown gap_sym: {gap_sym}")
+def _reject_chiral_ff(gap_sym, solver: str):
+    """The scalar self-consistent vortex solvers enforce a REAL amplitude ansatz
+    Delta = phi(beta) A(r) e^{i theta} (update: (accf e^{-i theta}).real >= 0).
+    For a real phi the mirror symmetry beta -> 2 theta - beta makes the discarded
+    imaginary part vanish at the exact solution, so the projection is exact.  A
+    chiral phi = e^{i m beta} (p+ip, d+id, ...) breaks that symmetry itself: the
+    true solution has a genuinely complex amplitude and the core induces the
+    opposite-chirality component, neither of which a single real scalar field can
+    represent -- the result would be silently wrong.  Chiral vortices belong to
+    the multi-component complex-amplitude solvers (_eilenberger_spin, per-channel
+    windings).  Detected by evaluating phi, so any future chiral harmonic is
+    covered automatically."""
+    phi = form_factor(np.linspace(0.0, 2.0 * np.pi, 12, endpoint=False), gap_sym)
+    if np.abs(np.imag(phi)).max() > 1e-12:
+        raise ValueError(
+            f"{solver}: chiral (complex) form factor {gap_sym!r} is not supported by the "
+            "scalar real-amplitude vortex solver; use the multi-component d-vector solvers "
+            "in _eilenberger_spin (main.py: eil_vort_dvector) instead")
 
 
 def _doppler_chord(Lx, Ly, Rc, cb, sb, rho_min):
@@ -262,13 +260,15 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
     With impurities (imp_gamma>0) the local non-magnetic T-matrix self-energy
     w_tilde(r,w_n), Sigma_f(r,w_n) is also relaxed together with Psi(r).
 
-    @param  gap_sym: 's','d','dxy','px','py','p+ip'/'p-ip'
+    @param  gap_sym: 's','d','dxy','px','py' (chiral p+ip/p-ip: rejected, see
+                     _reject_chiral_ff -- use the d-vector solvers)
     @param      Lxi: cell half width in xi (isolated vortex, field=0)
     @param    ngrid,nbeta: grid points per axis / number of v_F directions
     @param imp_gamma,imp_c: normal-state scattering rate [eV] and T-matrix c (0=clean)
     @param    field: B/Hc2 (0 = isolated vortex; >0 = circular-cell vortex lattice)
     @return (xg, Psi, Dbulk, xi): grid axis, complex field [ngrid,ngrid], bulk gap, xi
     """
+    _reject_chiral_ff(gap_sym, 'solve_vortex2d')
     no_imp = (imp_gamma == 0.0)
     use_fs = fs is not None
     # representative velocity scale (sets the coherence length xi); per-direction
@@ -280,8 +280,8 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
             from ._eilenberger import bulk_gap_fs
             Dbulk = bulk_gap_fs(coupling, temp, omega, fs, gap_sym)
         else:
-            Dbulk = (_bulk_gap(coupling, temp, omega, _ff_vortex(bfull, gap_sym)) if no_imp
-                     else _bulk_gap_imp(coupling, temp, omega, _ff_vortex(bfull, gap_sym), imp_gamma, imp_c))
+            Dbulk = (_bulk_gap(coupling, temp, omega, form_factor(bfull, gap_sym)) if no_imp
+                     else _bulk_gap_imp(coupling, temp, omega, form_factor(bfull, gap_sym), imp_gamma, imp_c))
     if Dbulk < 1.0e-6 * temp:
         xi = hvf_eff / (np.pi * max(temp, 1e-12))
         xg = np.linspace(-Lxi * xi, Lxi * xi, ngrid)
@@ -307,7 +307,7 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
         nbeta = len(dirs)
     else:                                               # isotropic cylinder (v_hat = k_hat, uniform)
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
-        phi = _ff_vortex(dirs, gap_sym)
+        phi = form_factor(dirs, gap_sym)
         hvfarr = np.full(nbeta, hvf)
         wt_dir = np.full(nbeta, 1.0 / nbeta)
     SS, BB = np.meshgrid(xg, xg, indexing='ij')        # rotated-frame sample grid (s, b)
@@ -406,7 +406,7 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
         nbeta = len(dirs)
     else:
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
-        phi = _ff_vortex(dirs, gap_sym)
+        phi = form_factor(dirs, gap_sym)
         hvfarr = np.full(nbeta, hvf)
         wt_dir = np.full(nbeta, 1.0 / nbeta)
     gpref = imp_gamma * (imp_c ** 2 + 1.0)
@@ -863,7 +863,7 @@ def solve_lattice(coupling, temp, omega, gap_sym='d', field=0.2, kappa=5.0,
             from ._eilenberger import bulk_gap_fs
             Dbulk = bulk_gap_fs(coupling, temp, omega, fs, gap_sym)
         else:
-            Dbulk = _bulk_gap(coupling, temp, omega, _ff_vortex(bfull, gap_sym))
+            Dbulk = _bulk_gap(coupling, temp, omega, form_factor(bfull, gap_sym))
     if Dbulk <= 0:
         return None
     xi = hvf_eff / (np.pi * Dbulk)
@@ -912,7 +912,7 @@ def lattice_dos(state, gap_sym, wlist, coupling=None, temp=None, omega=None,
         nbeta = len(dirs)
     else:                                             # isotropic cylinder (v_hat = k_hat, uniform)
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
-        phi = _ff_vortex(dirs, gap_sym)               # gap a trajectory sees = phi(beta)*|Delta(r)|
+        phi = form_factor(dirs, gap_sym)               # gap a trajectory sees = phi(beta)*|Delta(r)|
         hvfarr = np.full(nbeta, hvf)
         wt_dir = np.full(nbeta, 1.0 / nbeta)
     Di = _periodic_interp(state['absD'], Ng)
@@ -1029,7 +1029,7 @@ def vortex_current2d(Psi, xg, xi, omega, temp, gap_sym='d', nbeta=24, hvf=1.0):
     AmpI = RegularGridInterpolator((xg, xg), np.abs(Psi), bounds_error=False,
                                    fill_value=float(np.abs(Psi).max()))
     dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
-    phi = _ff_vortex(dirs, gap_sym)
+    phi = form_factor(dirs, gap_sym)
     jx = np.zeros((ngrid, ngrid))
     jy = np.zeros((ngrid, ngrid))
     for ib in range(nbeta):
@@ -1120,7 +1120,7 @@ def calc_vortex_maxwell(coupling, temp, wc, gap_sym='s', field=0.2, kappa=2.0, k
     for reference, the extreme type-II (kappa->infinity) result.  Writes 'vortex_maxwell.dat'.
     """
     omega = matsubara(temp, wc)
-    Dbulk = (_bulk_gap(coupling, temp, omega, _ff_vortex(np.linspace(0, 2 * np.pi, 180, endpoint=False), gap_sym)))
+    Dbulk = (_bulk_gap(coupling, temp, omega, form_factor(np.linspace(0, 2 * np.pi, 180, endpoint=False), gap_sym)))
     if Dbulk <= 0:
         print("normal state (Dbulk=0)", flush=True)
         return None
@@ -1340,13 +1340,14 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
     the bare-grad(chi) London A misses; reduces to it when |Psi| is uniform.
     @return state dict (X,Y,absD,Psi,chi,Dbulk,xi,a,...) for lattice_dos_sc
     """
+    _reject_chiral_ff(gap_sym, 'solve_lattice_sc')
     bfull = np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False)
     hvf_eff = float((fs['nf'] * fs['vabs']).sum()) if fs is not None else hvf
     if fs is not None:
         from ._eilenberger import bulk_gap_fs, fs_form_factor
         Dbulk = bulk_gap_fs(coupling, temp, omega, fs, gap_sym)
     else:
-        Dbulk = _bulk_gap(coupling, temp, omega, _ff_vortex(bfull, gap_sym))
+        Dbulk = _bulk_gap(coupling, temp, omega, form_factor(bfull, gap_sym))
     if Dbulk <= 0:
         return None
     xi = hvf_eff / (np.pi * Dbulk)
@@ -1363,7 +1364,7 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
         hvfarr = np.asarray(fs['vabs']); wt_dir = np.asarray(fs['nf']); nbd = len(dirs)
     else:
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
-        phi = _ff_vortex(dirs - theta0, gap_sym); hvfarr = np.full(nbeta, hvf)
+        phi = form_factor(dirs - theta0, gap_sym); hvfarr = np.full(nbeta, hvf)
         wt_dir = np.full(nbeta, 1.0 / nbeta); nbd = nbeta
     L = Lchord * xi; ds = ds_xi * xi
     ns = int(2 * L / ds) | 1                            # odd -> exact centre index
@@ -1498,7 +1499,7 @@ def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None
         hvfarr = np.asarray(fs['vabs']); wt_dir = np.asarray(fs['nf']); nbd = len(dirs)
     else:
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
-        phi = _ff_vortex(dirs - th0, gap_sym); hvfarr = np.full(nbeta, hvf)
+        phi = form_factor(dirs - th0, gap_sym); hvfarr = np.full(nbeta, hvf)
         wt_dir = np.full(nbeta, 1.0 / nbeta); nbd = nbeta
     L = Lchord * xi; ds = ds_xi * xi
     ns = int(2 * L / ds) | 1; ic = ns // 2
@@ -1551,7 +1552,7 @@ def lattice_free_energy(state, coupling, temp, omega, gap_sym, nbeta=24, hvf=1.0
         hvfarr = np.asarray(fs['vabs']); wt_dir = np.asarray(fs['nf']); nbd = len(dirs)
     else:
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
-        phi = _ff_vortex(dirs - theta0, gap_sym); hvfarr = np.full(nbeta, hvf)
+        phi = form_factor(dirs - theta0, gap_sym); hvfarr = np.full(nbeta, hvf)
         wt_dir = np.full(nbeta, 1.0 / nbeta); nbd = nbeta
     L = Lchord * xi; ds = ds_xi * xi
     ns = int(2 * L / ds) | 1; ic = ns // 2

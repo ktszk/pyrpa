@@ -23,10 +23,10 @@ else: monoclinic
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4nso',0,7,False
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
-#fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
+fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/000AsP.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/FeS',2,0,False
-fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
+#fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2_soc.input',1,0,True
 #fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
 #fname,ftype,brav,sw_soc='inputs/square_soc.hop',1,0,True
@@ -113,11 +113,11 @@ MODES_CHIS_SC       = frozenset({M.CHIS_SPECTRUM_SC,M.CHIS_QPOINT_SC})
 del M
 
 #option=CalcMode.CHIS_QPOINT_SC
-option=CalcMode.LIN_ELIASHBERG  #calculation mode to run (see the CalcMode enum above; 0-23 RPA/FLEX/transport, 24-26 Eilenberger superconductivity)
-color_option=ColorMode.VELOCITY  #band/FS coloring (option 0,2,3): MONO=black, ORBITAL=olist weights->RGB, VELOCITY=|v(k)|, GAP=Re[phi(k)] from gap_sym/delta0/eil_gap_orbital/eil_gap_file (option 3 only) -- check the Eilenberger pairing gap on the real 3D FS
+option=CalcMode.FERMI_3D #calculation mode to run (see the CalcMode enum above; 0-23 RPA/FLEX/transport, 24-26 Eilenberger superconductivity)
+color_option=ColorMode.GAP #band/FS coloring (option 0,2,3): MONO=black, ORBITAL=olist weights->RGB, VELOCITY=|v(k)|, GAP=Re[phi(k)] from gap_sym/delta0/eil_gap_orbital/eil_gap_file (option 3 only) -- check the Eilenberger pairing gap on the real 3D FS
 
 #Nx,Ny,Nz,Nw=256,256,4,200 #k and energy(or matsubara freq.) mesh size
-Nx,Ny,Nz,Nw=32,32,2,512
+Nx,Ny,Nz,Nw=32,32,4,512
 kmesh=200               #number of k-points along the symmetry line for band/spectrum plots (larger=smoother)
 kscale=[1.0,1.0,1.0]    #per-axis display scale for the 3D Fermi-surface plot (option 3); e.g. [1,1,0.5] compresses kz
 kz=0.0                  #reduced kz of the 2D Fermi-surface cut (option 2): 0=Gamma plane, 0.5=zone-boundary plane
@@ -128,7 +128,7 @@ abc=[3.68,3.68,5.03]    #lattice constants a,b,c [Angstrom] (group velocities & 
 #alpha_beta_gamma=[90.,90.,90]  #lattice angles alpha,beta,gamma [deg] (default 90,90,90 if undefined)
 #temp=2.0e-2 #2.59e-2   #directly set k_B*T [eV]; if defined it overrides tempK
 tempK=85 #Kelvin        #temperature [K] (converted internally to temp=k_B*tempK [eV])
-fill= 1.0 #2.9375       #band filling; mu solved from sum f(eps-mu)=Nk*fill (no SOC: per spin, full=Norb; SOC: total, full=2*Norb)
+fill= 2.9375       #band filling; mu solved from sum f(eps-mu)=Nk*fill (no SOC: per spin, full=Norb; SOC: total, full=2*Norb)
 #site_prof=[5]
 
 Emin,Emax=-3,1.         #energy window [eV] for DOS / spectral-function plots (option 1,4)
@@ -969,6 +969,21 @@ def calc_cpa_Akw(k_sets: list, kmesh: int, bvec: np.ndarray,
     plt.show()
     return Akw
 
+def get_eil_gap_fs(rvec,ham_r,S_r,avec,Arot,temp,fill):
+    """Shared FS/gap preparation for the Eilenberger modes: the RPA/FLEX gap
+    (eil_gap_file) or the explicit orbital gap (eil_gap_orbital) as form factor,
+    plus the real Wannier-band FS when eil_fs_kind='wannier'.
+    Returns (fs, fs_kind): fs_kind=None when the gap is baked into fs['phi'],
+    otherwise fs=None and fs_kind=eil_fs_kind (model FS/cylinder)."""
+    gorb=(plibs.gap_orbital_from_wannier(eil_gap_file,eil_gap_iw,eil_gap_navg) #RPA/FLEX gap as form factor
+          if eil_gap_file else eil_gap_orbital)
+    if eil_fs_kind=='wannier': #real Wannier-band FS + v_F (gap symmetry/multiband from gap_sym,delta0)
+        fs=plibs.build_wannier_fs(rvec,ham_r,S_r,avec,
+                                  plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill),
+                                  gap_sym=gap_sym,delta0=delta0,gap_orbital=gorb) #gap_orbital=projection (Nagai)
+        return fs,None                      #the (int) gap_sym is baked into fs['phi']
+    return None,eil_fs_kind                 #model FS/cylinder: the int gap_sym -> continuum harmonic
+
 def main():
     omp_num,omp_check=flibs.omp_params()
 
@@ -1412,28 +1427,12 @@ def main():
         if eil_surf_dvector: #self-consistent triplet d-vector texture (spin-matrix Riccati)
             plibs.calc_surface_dvector(eil_coupling,temp,eil_wc,kb=kb,sub_ratio=eil_dvec_subratio,sw_ldos=eil_ldos)
         else:
-            gorb=(plibs.gap_orbital_from_wannier(eil_gap_file,eil_gap_iw,eil_gap_navg) #RPA/FLEX gap as form factor
-                  if eil_gap_file else eil_gap_orbital)
-            if eil_fs_kind=='wannier': #real Wannier-band FS + v_F (gap symmetry/multiband from gap_sym,delta0)
-                sfs=plibs.build_wannier_fs(rvec,ham_r,S_r,avec,
-                                           plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill),
-                                           gap_sym=gap_sym,delta0=delta0,gap_orbital=gorb)
-                sfk=None                    #the (int) gap_sym is baked into fs['phi']
-            else:
-                sfs,sfk=None,eil_fs_kind    #model FS/cylinder: the int gap_sym -> continuum harmonic
+            sfs,sfk=get_eil_gap_fs(rvec,ham_r,S_r,avec,Arot,temp,fill)
             plibs.calc_surface(eil_coupling,temp,eil_wc,gap_sym=gap_sym,beta_surf=eil_surf_beta,
                                kb=kb,sw_ldos=eil_ldos,imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,h=eil_zeeman,
                                fs_kind=sfk,fs_params=eil_fs_params,fs=sfs)
     elif option==CalcMode.EILENBERGER_VORTEX: #vortex / vortex lattice via Riccati Eilenberger (model FS)
-        gorb=(plibs.gap_orbital_from_wannier(eil_gap_file,eil_gap_iw,eil_gap_navg) #RPA/FLEX gap (e.g. KFe2As2) as form factor
-              if eil_gap_file else eil_gap_orbital)
-        if eil_fs_kind=='wannier': #real Wannier-band FS + Fermi velocities (mu from filling)
-            eil_fs_obj=plibs.build_wannier_fs(rvec,ham_r,S_r,avec,
-                                              plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill),
-                                              gap_sym=gap_sym,delta0=delta0,gap_orbital=gorb) #gap_orbital=projection (Nagai)
-            eil_fs_kw=None                  #the (int) gap_sym is baked into fs['phi']
-        else:
-            eil_fs_obj,eil_fs_kw=None,eil_fs_kind   #model FS/cylinder: the int gap_sym -> continuum harmonic
+        eil_fs_obj,eil_fs_kw=get_eil_gap_fs(rvec,ham_r,S_r,avec,Arot,temp,fill)
         if eil_vort_maxwell: #self-consistent finite-kappa vector potential A(r) (Maxwell back-reaction)
             plibs.calc_vortex_maxwell(eil_coupling,temp,eil_wc,gap_sym=gap_sym,field=eil_field,
                                       kappa=eil_kappa,kb=kb,Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)

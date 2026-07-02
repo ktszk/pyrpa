@@ -41,6 +41,8 @@ from scipy.optimize import brentq
 from ._bands import get_emesh
 from ._response import gap_symms
 
+BCS_RATIO = 1.764        # weak-coupling BCS gap ratio Delta0 / (kB Tc)
+
 
 def _fs_average(values: np.ndarray, w: np.ndarray) -> np.ndarray:
     """DOS-weighted Fermi-surface average over the FS-point axis (axis 0).
@@ -282,7 +284,7 @@ def solve_gap(temp: float, wf: np.ndarray, phif: np.ndarray, omega: np.ndarray,
     @return     damp: converged gap amplitude [eV]
     """
     if damp_init is None:
-        damp_init = 1.764 * temp
+        damp_init = BCS_RATIO * temp
     omega_h = omega + 1j * h
     damp = damp_init
     for _ in range(itemax):
@@ -513,10 +515,9 @@ def superfluid_density(coupling: float, temp: float, wc: float, gap_sym: str = '
     @return (Delta, rho_ratio): bulk gap [eV] and rho_s(T)/rho_s(0) (0 if normal)
     """
     from ._eilenberger_surface import _bulk_gap
-    from ._eilenberger_vortex import _ff_vortex
     omega = matsubara(temp, wc)
     beta = np.linspace(0.0, 2.0 * np.pi, Nbeta, endpoint=False)
-    phi = _ff_vortex(beta, gap_sym)
+    phi = form_factor(beta, gap_sym)
     vx2 = np.cos(beta) ** 2
     Delta = _bulk_gap(coupling, temp, omega, phi)
     if Delta <= 1.0e-6 * temp:
@@ -649,10 +650,54 @@ _INT_GAP_STR = {0: 's', 1: 'd', 2: 's', 3: 'dxy', -1: 'px', -2: 'py', -3: 'p+ip'
 
 def _gap_sym_str(gap_sym):
     """Map the global integer gap_sym index (gap_symms convention) to the continuum
-    string used by the model-FS/cylinder routines; pass strings through unchanged."""
+    string used by the model-FS/cylinder routines; pass strings through unchanged.
+    Indices without a 2D continuum harmonic (e.g. 4 dxz, 5 dyz) raise ValueError
+    instead of silently falling back to 's'."""
     if isinstance(gap_sym, (int, np.integer)):
-        return _INT_GAP_STR.get(int(gap_sym), 's')
+        try:
+            return _INT_GAP_STR[int(gap_sym)]
+        except KeyError:
+            raise ValueError(
+                f"gap_sym={int(gap_sym)} has no 2D continuum form factor "
+                f"(supported indices: {sorted(_INT_GAP_STR)}); kz-dependent symmetries "
+                "like 4 dxz / 5 dyz need a lattice FS (gap_symms harmonics)") from None
     return gap_sym
+
+
+def form_factor(beta: np.ndarray, gap_sym, beta_surf: float = 0.0) -> np.ndarray:
+    """
+    @fn form_factor
+    @brief Continuum pairing form factor phi(beta) on the cylindrical FS,
+    normalized so that the full-circle average <|phi|^2> = 1 (so the coupling
+    lambda keeps its bulk BCS meaning).  May be complex (chiral / triplet
+    states).  Shared by the surface and vortex solvers.
+    @param     beta: FS angle(s) [rad]
+    @param  gap_sym: singlet: 's', 'd' (d_{x^2-y^2}), 'dxy';
+                     triplet (odd parity): 'px', 'py', 'p+ip' / 'p-ip' (chiral);
+                     or an integer (gap_symms index, mapped by _gap_sym_str)
+    @param beta_surf: rotation of the gap relative to the reference axis
+                      (d-wave: 0 -> [100] surface, pi/4 -> [110] surface)
+    @note Triplet states are treated in the single (pseudo-)spin sector with a
+          fixed d-vector: the equal-spin chiral state p+ip = e^{i beta} is fully
+          gapped in the bulk and carries topological edge / core states.
+    """
+    gap_sym = _gap_sym_str(gap_sym)
+    a = beta - beta_surf
+    if gap_sym == 's':
+        return np.ones_like(beta)
+    if gap_sym == 'd':
+        return np.sqrt(2.0) * np.cos(2.0 * a)
+    if gap_sym == 'dxy':
+        return np.sqrt(2.0) * np.sin(2.0 * a)
+    if gap_sym == 'px':
+        return np.sqrt(2.0) * np.cos(a)
+    if gap_sym == 'py':
+        return np.sqrt(2.0) * np.sin(a)
+    if gap_sym in ('p+ip', 'chiral'):
+        return np.exp(1j * a) * np.ones_like(beta, dtype=np.complex128)
+    if gap_sym == 'p-ip':
+        return np.exp(-1j * a) * np.ones_like(beta, dtype=np.complex128)
+    raise ValueError(f"unknown gap_sym: {gap_sym}")
 
 
 def fs_form_factor(fs: dict, gap_sym) -> np.ndarray:
@@ -672,9 +717,7 @@ def fs_form_factor(fs: dict, gap_sym) -> np.ndarray:
             phi = gap_symms(fs['kf'], 1, int(gap_sym))[0].astype(np.complex128)
             norm = np.sqrt((fs['nf'] * np.abs(phi) ** 2).sum())
             return phi / norm if norm > 0 else phi
-        gap_sym = _INT_GAP_STR.get(int(gap_sym))         # continuum fallback (model FS)
-        if gap_sym is None:
-            raise ValueError("gap_sym index has no 2D continuum form factor")
+        gap_sym = _gap_sym_str(gap_sym)                  # continuum fallback (model FS)
     a = np.arctan2(fs['ky'], fs['kx'])
     if gap_sym == 's':
         phi = np.ones_like(a, dtype=np.complex128)
@@ -717,7 +760,7 @@ def bulk_gap_fs(coupling, temp, omega, fs, gap_sym, eps=1e-8, itemax=500, mix=0.
     phi = fs_form_factor(fs, gap_sym)
     nf = fs['nf']
     a2 = (phi * np.conj(phi)).real
-    damp = 1.764 * temp
+    damp = BCS_RATIO * temp
     for _ in range(itemax):
         R = np.sqrt(omega[None, :] ** 2 + a2[:, None] * damp ** 2)
         f = (phi[:, None] * damp) / R
