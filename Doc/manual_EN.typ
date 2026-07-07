@@ -199,7 +199,13 @@ Solves the FLEX equations self-consistently to obtain the electron self-energy $
 - `sw_out_self=True`: write the self-energy to file
 - `sw_in_self=True`: load the previous self-energy (`sigma.bin`) as the initial guess
 - `m_diis_num`: DIIS history length (default 5 if undefined)
-- `sw_rescale_flex=True`: dynamically rescale the self-energy so that max$|Sigma| approx U$, useful when Stoner factor is close to 1
+- `sw_rescale_flex=True`: if the Stoner factor $S = max_bold(q) "eig"[chi_0(bold(q), 0) hat(S)]$ reaches 1 during the iteration, uniformly rescale $chi_0(bold(q), i nu_n)$ by $(1 - 10^(-4))\/S$ to avoid the magnetic-instability divergence
+
+*Notes on the built-in approximations* (all are deliberate choices made for computational cost and numerical stability):
+
+- The `sw_rescale_flex` rescaling shrinks $chi_0$ uniformly at ALL momenta and frequencies, not just the diverging mode. When the rescaling is triggered (stdout shows `[FLEX] Stoner factor= ... : rescaling chi0`) the self-energy is uniformly weakened as well, so results close to the magnetic instability should be interpreted qualitatively.
+- A static part of the self-energy is subtracted at every iteration (wrapper argument `sub_sigma`; `1`: Hermitian part of $Sigma(bold(k), i omega_0)$, the default; `2`: frequency average; `0`: no subtraction). This is a prescription that absorbs the static band shift into the chemical-potential adjustment and stabilizes the Fermi surface; it is NOT a strict Hartree--Fock-only subtraction (the value at $i omega_0$ also contains low-energy dynamical components). Use `sub_sigma=0` if absolute band shifts are of interest.
+- The Matsubara-frequency convolutions ($chi_0$, $Sigma$, Eliashberg kernel) are circular FFT convolutions of length $2 N_w$ with a sharp cutoff and no high-frequency tail correction (only the farthest point of $V$ is approximated by the bare vertex). The effective cutoff $omega_c = (2 N_w - 1) pi T$ shrinks proportionally to $T$, so a temperature scan at fixed $N_w$ carries an $O(1\/N_w)$ systematic drift. Choose $N_w$ so that $omega_c$ safely exceeds the bandwidth and `U` even at the lowest temperature.
 
 === option=15: Linearized Eliashberg Equation (`LIN_ELIASHBERG`)
 
@@ -338,7 +344,7 @@ This section explains all parameters in the upper part of `main.py`, including t
 
 - `Nx, Ny, Nz` (integer): Number of $bold(k)$-point mesh divisions in the first Brillouin zone along $x$, $y$, $z$. Used for 3D $bold(k)$-space integrations and FFT-based convolutions (FLEX, Eliashberg, chi). For 2D systems, set `Nz=1`. Powers of 2 (32, 64, ...) are preferred for FFT efficiency. Memory consumption scales as $tilde.equiv N_x N_y N_z dot N_w dot N_"orb"^2$.
 
-- `Nw` (integer): Number of Matsubara frequencies for FLEX/Eliashberg/SC-chi calculations (option=12,13,14,15,16,23), or number of real-frequency points for DOS/spectral function calculations (option=1,4, etc.). Matsubara frequencies are $omega_n = (2n+1) pi T$ for $n = 0, 1, \ldots, N_w - 1$. Lower temperatures require larger $N_w$ (typical: 256–1024).
+- `Nw` (integer): Number of Matsubara frequencies for FLEX/Eliashberg/SC-chi calculations (option=12,13,14,15,16,23), or number of real-frequency points for DOS/spectral function calculations (option=1,4, etc.). Matsubara frequencies are $omega_n = (2n+1) pi T$ for $n = 0, 1, \ldots, N_w - 1$. Lower temperatures require larger $N_w$ (typical: 256–1024). The effective frequency cutoff $omega_c = (2 N_w - 1) pi T$ shrinks proportionally to $T$, and the Matsubara convolutions use a sharp cutoff (no tail correction), so a temperature scan at fixed `Nw` accumulates a systematic drift; choose `Nw` so that $omega_c$ safely exceeds the bandwidth and `U` at the lowest temperature (see also the notes under option=14).
 
 - `kmesh` (integer): Number of $bold(k)$ points along the symmetry line for band and spectral function plots. Larger values yield smoother plots (200–500 is typical).
 
@@ -433,7 +439,7 @@ Specifies the symmetry of the initial gap function when solving the Eliashberg e
 
 - `sw_check_only` (bool): Used only by option=23 (nonlinear Eliashberg). If `True`, the routine stops right after the internal linearized-Eliashberg solve (reporting the Stoner factor $S$ and eigenvalue $lambda_"eliash"$) without running the nonlinear loop — handy for quickly bracketing $T_c$ via a temperature scan. Regardless of this flag, the nonlinear loop is also skipped automatically whenever $S >= 1$ or $lambda_"eliash" < 1$.
 
-- `sw_rescale_flex` (bool): For FLEX (option=14), dynamically rescale the self-energy when max$|Sigma|$ approaches `U` to prevent divergence. Useful when the Stoner factor is close to 1.
+- `sw_rescale_flex` (bool): For FLEX (option=14), uniformly rescale $chi_0$ by $(1-10^(-4))\/S$ whenever the Stoner factor $S$ reaches 1 during the iteration, preventing the magnetic-instability divergence. Useful when the Stoner factor is close to 1, but note that this regularization modifies $chi_0$ at ALL $(bold(q), i nu_n)$ uniformly; results obtained with active rescaling should be treated as qualitative near the magnetic instability (see the notes under option=14).
 
 - `sw_dec_axis` (bool): If `True`, lattice vectors are decomposed appropriately to set up the reciprocal lattice vectors.
 

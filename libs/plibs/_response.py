@@ -414,6 +414,12 @@ def get_chi_orb_list(Norb: int, site_prof: np.ndarray) -> tuple[np.ndarray, np.n
 
 def gap_symms(klist: np.ndarray, Norb: int, gap_sym: int):
     # The gap symmetry form factor depends only on k, so build one row and broadcast to all orbitals.
+    # CAUTION: these harmonics are built from FRACTIONAL coordinates (cos(2*pi*k_x) etc.),
+    # which represent the labeled symmetries (s, d_{x^2-y^2}, ...) only for a tetragonal /
+    # orthogonal single-site lattice.  For non-orthogonal lattices or multi-site cells
+    # (e.g. the 2-Fe cell of iron-based systems) the label and the actual irreducible
+    # representation no longer correspond exactly; in such cases prefer the orbital-basis
+    # gap route (gap_orbital + Nagai-Nakamura band projection, see project_gap_to_band).
     A=2*np.pi
     kx,ky,kz=klist[:,0],klist[:,1],klist[:,2]
     if gap_sym==0:        # s
