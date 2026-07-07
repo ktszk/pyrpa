@@ -360,10 +360,19 @@ end subroutine get_tau
 subroutine calc_tau_epa(tau,gavg,wavg,eig,edge,step,mu,temp,&
      Nk,Norb,nmodes,nbin,ngrid,nbin_max) bind(C)
   !> calc_tau_epa
-  !> Compute EPA relaxation time from epa.x output (job='egrid').
-  !> Scattering rate: Gamma = 2*pi * sum_nu sum_j <|g_nu(ei,ej)|^2> *
-  !>   [(nB(w_nu)+1-f(ej)) + (nB(w_nu)+f(ej))] * |dE|
-  !!@param        tau,out: relaxation time [Norb,Nk]
+  !> Compute EPA relaxation time from epa.x output (job='egrid'), following the
+  !> energy-conserving EPA rate (Samsonidze & Kozinsky, Adv. Energy Mater. 8,
+  !> 1800246 (2018)):
+  !>
+  !>   1/tau(e) = 2*pi * sum_nu { <|g_nu(e, e+w_nu)|^2> * [nB(w_nu) +   f(e+w_nu)] * rho(e+w_nu)
+  !>                            + <|g_nu(e, e-w_nu)|^2> * [nB(w_nu) + 1-f(e-w_nu)] * rho(e-w_nu) }
+  !>
+  !> The final state is fixed by energy conservation to e +- w_nu (phonon
+  !> absorption / emission) and weighted by the electronic DOS rho there.
+  !> rho is per spin per unit cell, computed here from ``eig`` by linear
+  !> (cloud-in-cell) binning onto the EPA energy bins.  With hbar = 1 and
+  !> energies in eV, tau is returned in units of hbar/eV.
+  !!@param        tau,out: relaxation time [Norb,Nk] (hbar/eV)
   !!@param       gavg, in: EPA averaged |g|^2 [nmodes,nbin_max,nbin_max,ngrid] (eV^2)
   !!@param       wavg, in: averaged phonon freq per mode [nmodes] (eV)
   !!@param        eig, in: electronic eigenvalues [Norb,Nk] (eV)
@@ -388,14 +397,35 @@ subroutine calc_tau_epa(tau,gavg,wavg,eig,edge,step,mu,temp,&
   real(c_double),intent(in),dimension(Norb,Nk):: eig
   real(c_double),intent(out),dimension(Norb,Nk):: tau
 
-  integer(c_int32_t) ik,ib,ig,ig_found,jbin,kk,nu
-  real(c_double) eps,gamma,w,nB,ff,xb,xf,g2,de
+  integer(c_int32_t) ik,ib,ig,ig_found,jbin,kk,nu,isgn
+  real(c_double) eps,gamma,w,nB,ff,xb,xf,g2,ef,dosv,xc,wlo
   real(c_double),parameter:: pi=acos(-1.0d0)
   real(c_double),parameter:: tau_max=1.0d+15
   real(c_double),parameter:: xcut=500.0d0
-  real(c_double) ecenter
+  real(c_double),dimension(nbin_max,ngrid):: dos
 
-  !$omp parallel do private(ik,ib,ig,ig_found,jbin,kk,nu,eps,gamma,w,nB,ff,xb,xf,g2,de,ecenter)
+  ! --- electronic DOS per spin per unit cell on the EPA bins -----------------
+  ! rho(bin) = (1/Nk) sum_{k,band} delta(e_bin - e_kn), delta -> linear
+  ! (cloud-in-cell) weighting between the two adjacent bin centers, so the
+  ! energy integral of rho over the grid is preserved.
+  dos(:,:)=0.0d0
+  do ig=1,int(ngrid)
+     do ik=1,int(Nk)
+        do ib=1,int(Norb)
+           xc=(eig(ib,ik)-edge(ig))/step(ig)-0.5d0   ! fractional bin-center coordinate
+           kk=int(floor(xc))+1                       ! lower bin
+           wlo=1.0d0-(xc-dble(kk-1))                 ! weight of lower bin
+           if(kk>=1 .and. kk<=int(nbin(ig)))   dos(kk,ig)=dos(kk,ig)+wlo
+           if(kk+1>=1 .and. kk+1<=int(nbin(ig))) dos(kk+1,ig)=dos(kk+1,ig)+(1.0d0-wlo)
+        end do
+     end do
+  end do
+  dos(:,:)=dos(:,:)/dble(Nk)
+  do ig=1,int(ngrid)
+     dos(:,ig)=dos(:,ig)/step(ig)                    ! states / (eV spin cell)
+  end do
+
+  !$omp parallel do private(ik,ib,ig,ig_found,jbin,kk,nu,isgn,eps,gamma,w,nB,ff,xb,xf,g2,ef,dosv)
   do ik=1,Nk
      do ib=1,Norb
         eps=eig(ib,ik)
@@ -416,33 +446,39 @@ subroutine calc_tau_epa(tau,gavg,wavg,eig,edge,step,mu,temp,&
         end if
 
         gamma=0.0d0
-        ! sum over final-state bins within same grid
-        do kk=1,int(nbin(ig_found))
-           ! center energy of final bin
-           ecenter=edge(ig_found)+step(ig_found)*(dble(kk)-0.5d0)
-           de=abs(step(ig_found))
+        do nu=1,nmodes
+           w=wavg(nu)
+           if(w<1.0d-8) cycle
 
-           do nu=1,nmodes
-              w=wavg(nu)
-              if(w<1.0d-8) cycle
+           ! Bose distribution nB(w)
+           xb=w/temp
+           if(xb>xcut)then; nB=0.0d0
+           else;            nB=1.0d0/(exp(xb)-1.0d0)
+           end if
+
+           ! isgn=+1: phonon absorption (final e+w, factor nB+f)
+           ! isgn=-1: phonon emission   (final e-w, factor nB+1-f)
+           do isgn=1,-1,-2
+              ef=eps+dble(isgn)*w
+              kk=int((ef-edge(ig_found))/step(ig_found))+1
+              if(kk<1 .or. kk>int(nbin(ig_found))) cycle  ! final state outside grid
               g2=gavg(nu,kk,jbin,ig_found)
               if(abs(g2)<1.0d-30) cycle
+              dosv=dos(kk,ig_found)
+              if(dosv<1.0d-30) cycle
 
-              ! Bose distribution
-              xb=w/temp
-              if(xb>xcut)then; nB=0.0d0
-              else;            nB=1.0d0/(exp(xb)-1.0d0)
-              end if
-
-              ! Fermi distribution f(ecenter)
-              xf=(ecenter-mu)/temp
+              ! Fermi distribution f(ef)
+              xf=(ef-mu)/temp
               if(xf>xcut)then;      ff=0.0d0
               else if(xf<-xcut)then; ff=1.0d0
               else;                  ff=1.0d0/(exp(xf)+1.0d0)
               end if
 
-              ! emission + absorption
-              gamma=gamma+g2*((nB+1.0d0-ff)+(nB+ff))*de
+              if(isgn>0)then
+                 gamma=gamma+g2*(nB+ff)*dosv        ! absorption
+              else
+                 gamma=gamma+g2*(nB+1.0d0-ff)*dosv  ! emission
+              end if
            end do
         end do
 

@@ -779,7 +779,10 @@ def superfluid_density_fs(coupling, temp, wc, fs, gap_sym):
     @fn superfluid_density_fs
     @brief Superfluid-density tensor (rho_xx, rho_yy)/rho_n(0) on a model FS with
     Fermi velocities.  rho_ii(T)/rho_ii(0) = pi <v_i^2 2T sum_n Dk^2/(w^2+Dk^2)^{3/2}>_nf
-    / <v_i^2>_nf (the bracket -> 1 as T->0).  Anisotropic FS / nodes give an
+    / <v_i^2>_nf (the bracket -> 1 as T->0).  The weight uses the FULL velocity
+    components v_i (rho_ii ~ integral dl/|v_F| v_i^2), not the unit direction:
+    with nf = dl/|v_F| this weights fast FS sections by |v_F|^2, which sets both
+    the anisotropy ratio and the T dependence.  Anisotropic FS / nodes give an
     anisotropic penetration depth lambda_ii = 1/sqrt(rho_ii).
     @return (Delta, rho_xx, rho_yy)
     """
@@ -792,7 +795,7 @@ def superfluid_density_fs(coupling, temp, wc, fs, gap_sym):
     fac = 2.0 * temp * (Dk[:, None] ** 2 /
                         (omega[None, :] ** 2 + Dk[:, None] ** 2) ** 1.5).sum(axis=1)
     nf = fs['nf']
-    vx2, vy2 = fs['vhx'] ** 2, fs['vhy'] ** 2
+    vx2, vy2 = fs['vx'] ** 2, fs['vy'] ** 2
     rho_xx = np.pi * (nf * vx2 * fac).sum() / (nf * vx2).sum()
     rho_yy = np.pi * (nf * vy2 * fac).sum() / (nf * vy2).sum()
     return Delta, rho_xx, rho_yy
@@ -809,8 +812,9 @@ def calc_fs_penetration(coupling, temp, wc, kind='ellipse', gap_sym='s', Nth=360
     """
     gap_sym = _gap_sym_str(gap_sym)                   # accept the global int index too
     fs = build_model_fs(kind, Nth, mu, params)
-    vx2 = (fs['nf'] * fs['vhx'] ** 2).sum()
-    vy2 = (fs['nf'] * fs['vhy'] ** 2).sum()
+    # full-velocity weights <v_i^2>_nf (nf = dl/|v_F|), consistent with superfluid_density_fs
+    vx2 = (fs['nf'] * fs['vx'] ** 2).sum()
+    vy2 = (fs['nf'] * fs['vy'] ** 2).sum()
     print(f"model FS '{kind}' (Nth={Nth}): <|v_F|>={fs['vabs'].mean():.4f}, "
           f"<v_x^2>/<v_y^2> = {vx2:.3f}/{vy2:.3f}, "
           f"absolute lambda_xx/lambda_yy(0) = {np.sqrt(vy2/vx2):.3f}", flush=True)

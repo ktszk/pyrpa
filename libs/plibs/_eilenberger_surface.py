@@ -379,7 +379,7 @@ def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
     if sw_ldos:
         wlist = np.linspace(-3.0 * Dbulk, 3.0 * Dbulk, 401)
         if fsobj is not None:     # model or Wannier FS + Fermi velocity (clean): nf-weighted, ds=dx/|v_x|
-            vx2 = (fsobj['nf'] * fsobj['vhx'] ** 2).sum(); vy2 = (fsobj['nf'] * fsobj['vhy'] ** 2).sum()
+            vx2 = (fsobj['nf'] * fsobj['vx'] ** 2).sum(); vy2 = (fsobj['nf'] * fsobj['vy'] ** 2).sum()
             print(f"FS '{fs_kind or 'wannier'}': {len(fsobj['kx'])} pts, "
                   f"<v_x^2>/<v_y^2>={vx2:.3f}/{vy2:.3f}", flush=True)
             ldos = surface_ldos_fs(fsobj, Damp, x, wlist, gap_sym, ix=0, Dbulk=Dbulk)
