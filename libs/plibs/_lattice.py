@@ -3,8 +3,11 @@
 """
 Lattice and reciprocal space utilities: hopping import, k/r-mesh generation, BZ visualization.
 """
+import os
 import numpy as np
 import scipy.linalg as sclin
+
+RY_TO_EV = 13.6          # Rydberg -> eV conversion for the MLO (ecalj) importers
 
 def import_hoppings(fname:str,ftype:int) -> tuple[np.ndarray,np.ndarray,int,int]:
     """
@@ -91,9 +94,119 @@ def import_MLO_hoppings(name:str) -> tuple[np.ndarray,np.ndarray,np.ndarray,int,
     tmp=np.array([complex(tp[5],tp[6]) for tp in tmp1])
     tmpS=np.array([complex(tp[7],tp[8]) for tp in tmp1])
     rvec=np.array([tmp1[i][2:5] for i in range(nr)])
-    ham_r=tmp.reshape((no*no,nr)).T.reshape((nr,no,no)).round(6).copy()*13.6  # Rydberg -> eV
+    ham_r=tmp.reshape((no*no,nr)).T.reshape((nr,no,no)).round(6).copy()*RY_TO_EV
     S_r=tmpS.reshape((no*no,nr)).T.reshape((nr,no,no)).round(6).copy()
     return rvec,ham_r,S_r,no,nr
+
+def read_HamRsMLO(directory: str = '.') -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
+    """
+    @fn read_HamRsMLO()
+    @brief Read ecalj job_mlo binary output (HamRsMLO + HamiltonianPMTInfo).
+           Returns the same format as import_MLO_hoppings.
+    @param directory: path containing HamRsMLO and HamiltonianPMTInfo
+    @retval  rvec: R-vectors (nr, 3) int64, in lattice-vector units
+    @retval ham_r: H(R) (nr, no, no) complex128, eV
+    @retval   S_r: S(R) (nr, no, no) complex128, dimensionless
+    @retval    no: number of MLO orbitals (ndimMTO)
+    @retval    nr: number of R-vectors
+    """
+    def _read_record(f):
+        raw = f.read(4)
+        if len(raw) < 4:
+            raise EOFError('Unexpected end of Fortran binary file')
+        n = int(np.frombuffer(raw, dtype='<i4')[0])
+        data = f.read(n)
+        f.read(4)  # trailing record marker
+        return data
+
+    # ---- HamiltonianPMTInfo ----
+    with open(os.path.join(directory, 'HamiltonianPMTInfo'), 'rb') as f:
+        # Record 1: plat(3,3)[f64] nkk1,nkk2,nkk3,nbas[i32] qlat(3,3)[f64]
+        rec = _read_record(f)
+        nkk1, nkk2, nkk3, nbas = np.frombuffer(rec, dtype='<i4', count=4, offset=72)
+        nbas = int(nbas)
+
+        _read_record(f)  # Record 2: pos(3,nbas), alat  — not needed
+        _read_record(f)  # Record 3: qplist(3,nkp)      — not needed
+
+        # Record 4: npair(nbas,nbas)[i32] npairmx[i32]
+        rec = _read_record(f)
+        arr4 = np.frombuffer(rec, dtype='<i4')
+        npair    = arr4[:nbas * nbas].reshape(nbas, nbas, order='F').copy()
+        npairmx  = int(arr4[nbas * nbas])
+
+        # Record 5: nlat(3,npairmx,nbas,nbas)[i32] nqwgt(npairmx,nbas,nbas)[i32]
+        rec = _read_record(f)
+        n_nlat = 3 * npairmx * nbas * nbas
+        nlat = np.frombuffer(rec, dtype='<i4', count=n_nlat) \
+                 .reshape(3, npairmx, nbas, nbas, order='F').copy()
+        # nqwgt follows but is not needed
+
+    # ---- HamRsMLO ----
+    with open(os.path.join(directory, 'HamRsMLO'), 'rb') as f:
+        # Record 1: ndimMTO, npairmx, nspx
+        rec = _read_record(f)
+        ndimMTO, _, nspx = np.frombuffer(rec, dtype='<i4')
+        ndimMTO, nspx = int(ndimMTO), int(nspx)
+        shape4 = (npairmx, ndimMTO, ndimMTO, nspx)
+        expected_bytes = npairmx * ndimMTO * ndimMTO * nspx * 16  # complex128
+
+        # Record 2: hammr(npairmx, ndimMTO, ndimMTO, nspx)
+        rec = _read_record(f)
+        hammr = np.frombuffer(rec, dtype='<c16').reshape(shape4, order='F').copy()
+
+        # Record 3: ovlmr  — or hammhsor if SOC was enabled (shape uses 3 instead of nspx)
+        rec = _read_record(f)
+        if len(rec) != expected_bytes:
+            # It is hammhsor (SOC); skip it and read ovlmr next
+            rec = _read_record(f)
+        ovlmr = np.frombuffer(rec, dtype='<c16').reshape(shape4, order='F').copy()
+
+        # Record 4/5: ib_tableM(ndimMTO), k_tableM(ndimMTO), l_tableM(ndimMTO)
+        rec = _read_record(f)
+        tables   = np.frombuffer(rec, dtype='<i4').reshape(3, ndimMTO)  # C-order: row = table
+        ib_tableM = tables[0] - 1  # Fortran 1-indexed -> 0-indexed atom index
+
+    # ---- Build (rvec, ham_r, S_r) ----
+    # hammr[it, i, j, sp] has R-vector nlat[:, it, ib_tableM[i], ib_tableM[j]].
+    # Different (i,j) with different atom pairs use different nlat sub-arrays,
+    # so we collect all unique R-vectors across all atom pairs.
+
+    rvec_list: list[tuple[int, int, int]] = []
+    rvec_idx:  dict[tuple[int, int, int], int] = {}
+    rlookup:   dict[tuple[int, int], dict] = {}  # (ib1,ib2) -> {R_tuple -> it}
+
+    for ib1 in range(nbas):
+        for ib2 in range(nbas):
+            nr_pair = int(npair[ib1, ib2])
+            d: dict[tuple[int, int, int], int] = {}
+            for it in range(nr_pair):
+                R = (int(nlat[0, it, ib1, ib2]),
+                     int(nlat[1, it, ib1, ib2]),
+                     int(nlat[2, it, ib1, ib2]))
+                d[R] = it
+                if R not in rvec_idx:
+                    rvec_idx[R] = len(rvec_list)
+                    rvec_list.append(R)
+            rlookup[(ib1, ib2)] = d
+
+    nr = len(rvec_list)
+    no = ndimMTO
+    ham_r = np.zeros((nr, no, no), dtype=np.complex128)
+    S_r   = np.zeros((nr, no, no), dtype=np.complex128)
+
+    for i in range(no):
+        ib1 = int(ib_tableM[i])
+        for j in range(no):
+            ib2 = int(ib_tableM[j])
+            for R, it in rlookup[(ib1, ib2)].items():
+                ir = rvec_idx[R]
+                ham_r[ir, i, j] = hammr[it, i, j, 0]
+                S_r[ir, i, j]   = ovlmr[it, i, j, 0]
+
+    ham_r *= RY_TO_EV
+    rvec = np.array(rvec_list, dtype=np.int64)
+    return rvec, ham_r, S_r, no, nr
 
 def get_bvec(avec: np.ndarray) -> np.ndarray:
     """

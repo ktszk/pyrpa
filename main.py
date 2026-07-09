@@ -23,10 +23,10 @@ else: monoclinic
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4nso',0,7,False
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
-#fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
+fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/000AsP.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/FeS',2,0,False
-fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
+#fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2_soc.input',1,0,True
 #fname,ftype,brav,sw_soc='inputs/square.hop',1,0,False
 #fname,ftype,brav,sw_soc='inputs/square_soc.hop',1,0,True
@@ -65,6 +65,9 @@ class CalcMode(IntEnum):
     SPECTRUM_IMPURITY  = (21, "spectrum with impurity")                    # spectral function with impurity (not implemented)
     SIGMA_CPA          = (22, "calculate sigma_cpa")                       # conductivity via CPA
     NONLIN_ELIASHBERG  = (23, "solve nonlinear eliashberg equation")       # solve nonlinear Eliashberg equation (not implemented)
+    EILENBERGER        = (24, "solve quasiclassical Eilenberger equation")  # homogeneous multi-orbital Eilenberger (Matsubara)
+    EILENBERGER_SURFACE= (25, "solve surface state via Riccati Eilenberger")  # specular surface gap profile + LDOS (model FS)
+    EILENBERGER_VORTEX = (26, "solve isolated vortex via Riccati Eilenberger")  # vortex D(rho) + core LDOS (model FS)
 
 class ColorMode(IntEnum):
     """Color modes for band/FS plots; second element is the printed label (replaces the old `cstr` list)."""
@@ -76,6 +79,7 @@ class ColorMode(IntEnum):
     MONO     = (0, "no color")
     ORBITAL  = (1, "orbital weight")
     VELOCITY = (2, "velocity size")
+    GAP      = (3, "Eilenberger pairing gap Re[phi(k)] (option 3 only)")
 
 #----- CalcMode capability groups: single source for the option-set checks in main() -----
 M=CalcMode
@@ -98,10 +102,10 @@ MODES_COULOMB_VERTEX= frozenset({M.CHIS_SPECTRUM,M.CHIS_QPOINT,M.CHIS_QMAP,M.CHI
 # modes that print a constant U,J header
 MODES_PRINT_UJ      = frozenset({M.CHIS_SPECTRUM,M.CHIS_QPOINT,M.CHIS_QMAP,M.FLEX,M.LIN_ELIASHBERG})
 # modes that compute/define mu themselves (skip the common mu block)
-MODES_SELF_MU       = frozenset({M.CONDUCTIVITY_BT,M.CONDUCTIVITY_PT,M.SPECTRUM_IMPURITY,M.SIGMA_CPA})
+MODES_SELF_MU       = frozenset({M.CONDUCTIVITY_BT,M.CONDUCTIVITY_PT,M.SPECTRUM_IMPURITY,M.SIGMA_CPA,M.EILENBERGER_SURFACE,M.EILENBERGER_VORTEX})
 # k-mesh reporting groups
 MODES_KMESH_SYMLINE = frozenset({M.BAND,M.SPECTRUM})
-MODES_KMESH_SINGLE  = frozenset({M.FERMI_2D,M.FERMI_3D,M.CHIS_QMAP,M.PHI_QMAP,M.CARRIER_NUM,M.CYCLOTRON_MASS})
+MODES_KMESH_SINGLE  = frozenset({M.FERMI_2D,M.FERMI_3D,M.CHIS_QMAP,M.PHI_QMAP,M.CARRIER_NUM,M.CYCLOTRON_MASS,M.EILENBERGER})
 MODES_MATSUBARA     = frozenset({M.FLEX,M.LIN_ELIASHBERG})
 # dispatch groups
 MODES_CHI_NORMAL    = frozenset({M.CHIS_SPECTRUM,M.CHIS_QPOINT,M.CHIS_QMAP,M.PHI_SPECTRUM,M.PHI_QMAP})
@@ -109,60 +113,102 @@ MODES_CHIS_SC       = frozenset({M.CHIS_SPECTRUM_SC,M.CHIS_QPOINT_SC})
 del M
 
 #option=CalcMode.CHIS_QPOINT_SC
-option=CalcMode.LIN_ELIASHBERG
-color_option=ColorMode.VELOCITY
+option=CalcMode.FERMI_3D #calculation mode to run (see the CalcMode enum above; 0-23 RPA/FLEX/transport, 24-26 Eilenberger superconductivity)
+color_option=ColorMode.GAP #band/FS coloring (option 0,2,3): MONO=black, ORBITAL=olist weights->RGB, VELOCITY=|v(k)|, GAP=Re[phi(k)] from gap_sym/delta0/eil_gap_orbital/eil_gap_file (option 3 only) -- check the Eilenberger pairing gap on the real 3D FS
 
 #Nx,Ny,Nz,Nw=256,256,4,200 #k and energy(or matsubara freq.) mesh size
-Nx,Ny,Nz,Nw=32,32,2,512
-kmesh=200               #kmesh for spaghetti plot
-kscale=[1.0,1.0,1.0]
-kz=0.0
+Nx,Ny,Nz,Nw=32,32,4,512
+kmesh=200               #number of k-points along the symmetry line for band/spectrum plots (larger=smoother)
+kscale=[1.0,1.0,1.0]    #per-axis display scale for the 3D Fermi-surface plot (option 3); e.g. [1,1,0.5] compresses kz
+kz=0.0                  #reduced kz of the 2D Fermi-surface cut (option 2): 0=Gamma plane, 0.5=zone-boundary plane
 #RotMat=[[0,0,1],[0,1,0],[1,0,0]]
 
 #abc=[3.96*0.70711,3.96*0.70711,13.02*.5]
-abc=[3.68,3.68,5.03]
-#alpha_beta_gamma=[90.,90.,90]
-#temp=2.0e-2 #2.59e-2
-tempK=85 #Kelvin
-fill= 1.0 #2.9375
+abc=[3.68,3.68,5.03]    #lattice constants a,b,c [Angstrom] (group velocities & symmetry-path lengths)
+#alpha_beta_gamma=[90.,90.,90]  #lattice angles alpha,beta,gamma [deg] (default 90,90,90 if undefined)
+#temp=2.0e-2 #2.59e-2   #directly set k_B*T [eV]; if defined it overrides tempK
+tempK=85 #Kelvin        #temperature [K] (converted internally to temp=k_B*tempK [eV])
+fill= 2.9375       #band filling; mu solved from sum f(eps-mu)=Nk*fill (no SOC: per spin, full=Norb; SOC: total, full=2*Norb)
 #site_prof=[5]
 
-Emin,Emax=-3,1.
-delta=5.0e-3
-Ecut=1.0e-2
-tau_const=100
-olist=[0,0,0]
+Emin,Emax=-3,1.         #energy window [eV] for DOS / spectral-function plots (option 1,4)
+delta=5.0e-3            #spectral broadening eta [eV]: imaginary part added to G (Lorentzian width); too large smears, too small=noise
+Ecut=1.0e-2            #fixed energy omega_0 [eV] for the q-space susceptibility maps (option 9,11); ~0 probes the Fermi surface
+tau_const=100          #constant relaxation time tau [fs] for Boltzmann transport (option 5)
+olist=[0,0,0]          #orbital indices mapped to R,G,B for orbital-weight coloring (color_option=1); nested lists group orbitals
 #olist=[0,[1,2],3]
 #U,J=0.,0.
 #U,J= 0.2, 0.025
 #U,J= 0.4, 0.05
 #U,J= 0.6, 0.075
-U,J=1.2,0.15
+U,J=1.2,0.15           #on-site Hubbard U and Hund J [eV] (FLEX/RPA); screened U'=U-2J used automatically
 #U,J=1.8,0.225
-#0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py
+#0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py,-3:p+ip  (also drives ALL eilenberger modes; model FS/cylinder maps the int -> continuum harmonic, 2 spm -> s)
 gap_sym=1
 
 #use calculation of magnetic susceptibility at superconducting state
 #delta0=1.e-2 #maximum gap size for calculating susceptibility in SC state; set to 0 for normal state
-d0=1.e-1
-delta0=[0.,d0*2.,d0*3.,-d0,0.]
+d0=1.e-1               #helper amplitude scale [eV] for building the per-band delta0 list below
+delta0=[0.,d0*2.,d0*3.,-d0,0.]  #initial SC gap amplitude/sign per band [eV] for SC-state chi (option 12,13); float=single shape, list=multi-gap (signs->s+-)
 #mu0=9.85114560061123
 #k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
 #xlabel=[r'$\Gamma$','X','M']
 #m_diis_num=2
-at_point=[ 0., .5, 0.]
-orb_dep=False  #use orbital dependence U,J
+at_point=[ 0., .5, 0.]  #reduced q-point [0..1] for the single-q susceptibility (option 8)
+orb_dep=False  #use orbital dependence U,J (True: use Umat/Jmat matrices below; False: constant U,J)
 Umat=None      #orbital-dependent U matrix (Norb x Norb); set when orb_dep=True
 Jmat=None      #orbital-dependent J matrix (Norb x Norb); set when orb_dep=True
 sw_unit=True    #True: use physical constants (SI/eV units), False: set all constants to 1 (dimensionless test mode)
-sw_tdf=False
+sw_tdf=False   #True: compute the transport distribution function first, then energy-integrate (energy-dependent tau)
 sw_omega=False #True: real freq, False: Matsubara freq.
 sw_rescale_flex=True #True: rescale self energy to make max|Sigma|~U, False: no rescaling
+sw_chi0_tail=False #True: tail-corrected chi0 in FLEX/Eliashberg (conv[G]-conv[G0]+analytic reference; O(1/Nw^2) Matsubara truncation error). no-SOC path only
 sw_self=False  #True: use calculated self energy for spectrum band plot
-sw_out_self=True
-sw_in_self=False
-sw_from_file=False
+sw_out_self=True #True: write the FLEX self-energy to sigma.bin/self_en.npz (also triggers gap output in option 15)
+sw_in_self=False #True: load the previous self-energy from sigma.bin as the initial guess for the SC loop
+sw_from_file=False #True: read the self-energy from sigma.bin and skip FLEX (solve Eliashberg with it directly)
 sw_check_only=False #True: stop after linear Eliashberg (also stops if Stoner factor>=1 or lambda<1)
+#----- EILENBERGER (homogeneous quasiclassical) parameters -----
+eil_coupling=0.3     #dimensionless separable pairing coupling lambda (with <phi^2>_FS=1)
+eil_wc=0.5           #fixed Matsubara cutoff energy [eV] (sets the pairing scale / Tc)
+eil_imp_gamma=0.0    #non-magnetic impurity scattering strength Gamma [eV] (0=clean)
+eil_imp_c=1.0e8      #T-matrix cot(delta0): large=Born limit, 0=unitary limit
+eil_fs_width=5.0e-3  #Gaussian Fermi-surface broadening [eV]
+eil_method='normalization' #homogeneous (g,f) route: 'normalization' (fast) or 'riccati' (vortex-lattice-ready)
+eil_find_tc=False    #True: bisect for Tc at the current impurity setting
+eil_imp_sweep=False  #True: sweep Gamma and write Tc(Gamma) to eilenberger_tc.dat
+eil_imp_list=None    #array of Gamma values [eV] for the sweep (e.g. np.linspace(0,0.05,11))
+eil_pauli=False      #True: Zeeman/Maki Pauli-limiting sweep (singlet gap Delta(h), spinodal, Zeeman-split DOS)
+eil_free_energy=False #True: condensation free energy (Omega_s-Omega_n)/N0 vs T (coupling-independent; writes free_energy.dat)
+eil_spin=False       #True: spin-2x2 Zeeman response, singlet vs triplet d-vector (d||h Pauli-limited, d_|_h immune)
+eil_lambda=False     #True: superfluid density rho_s(T)/penetration depth lambda(T) sweep (s exp-flat, d linear-in-T)
+eil_fs=False         #True: model-FS + Fermi-velocity penetration depth (anisotropic lambda_xx/lambda_yy)
+eil_fs_kind=None     #Fermi surface for ALL eilenberger modes (homogeneous penetration / surface / vortex): None=isotropic (cylinder; homogeneous falls back to 'ellipse'), 'iso'/'ellipse'(params=(mx,my))/'tb'(params=t) model FS, or 'wannier' (loaded band FS+v_F; surface/vortex symmetry/multiband from gap_sym,delta0)
+eil_fs_params=(1.0,0.4) #model-FS parameters (ellipse masses or tb hopping)
+eil_zeeman=0.0       #Zeeman (Maki) field [eV] for the LDOS (surface: splits the d[110] ZEBS into +-h; vortex: spin-splits the core bound states)
+#----- EILENBERGER inhomogeneous (surface & vortex, Riccati; model cylindrical FS) -----
+eil_ldos=True            #True: also compute the real-frequency LDOS (bound/core states) (surface & vortex)
+eil_surf_beta=0.785398   #surface orientation [rad]: 0=[100], pi/4(0.7854)=[110] (d-wave ZEBS)
+eil_surf_dvector=False   #True: self-consistent triplet d-vector TEXTURE at the surface (dominant p_x(e_x) + subdominant p_y(e_z), spin-matrix Riccati)
+eil_dvec_subratio=0.9    #subdominant/dominant coupling ratio for the d-vector texture (~0.85 is the bulk threshold)
+eil_vort_lxi=8.0         #vortex cell half-width in coherence lengths xi (isolated vortex, field=0)
+eil_vort_ngrid=81        #vortex 2D grid points per axis
+eil_vort_field=False     #True: also compute the self-consistent finite-kappa Maxwell field profile B(rho) of the vortex (uses eil_kappa)
+eil_vort_dvector=False   #True: self-consistent triplet d-vector TEXTURE around the vortex core (dominant p_x(e_x) winding + core-localized subdominant p_y(e_z), 2D spin-matrix Riccati; uses eil_dvec_subratio)
+eil_vort_current=False   #True: circulating charge supercurrent j_phi(rho) of an isolated vortex (writes vortex_current.dat)
+eil_vort_maxwell=False   #True: circular-cell vortex with the self-consistent finite-kappa vector potential A(r) (Maxwell back-reaction; needs eil_field>0, uses eil_kappa)
+eil_vort_lattice_sc=False #True: je-style self-consistent TRUE periodic lattice (formulation A, extreme type-II): complex Psi(r) with a real node at every core + full Abrikosov supercurrent; sweeps eil_field_list -> <N(0)>(B) (d~sqrt(B) Volovik)
+eil_vort_scA=False       #True (lattice_sc, finite eil_kappa): fully self-consistent vector potential A from the quasiclassical current j_s=<v_F Im g> (je A_renew), instead of the analytic London A
+eil_gap_orbital=None     #None, or an Norb x Norb orbital-basis pair-potential matrix (or callable kfrac->NxN): the band gap is its low-energy PROJECTION onto the FS bands (Nagai-Nakamura, JPSJ 85 074707 (2016) Eq.43; needs wannier FS); supersedes gap_sym/delta0
+eil_gap_file=None        #None, or the base name (no extension) of an RPA/FLEX gap exported by LIN_ELIASHBERG/NONLIN_ELIASHBERG with sw_out_self=True (output_gap_wannier -> 'gap_wannier'): loads Delta(R,iw) and uses it as eil_gap_orbital (projected to the FS bands); supersedes eil_gap_orbital/gap_sym. Use a self-consistent RPA gap (e.g. KFe2As2) as the vortex pairing form factor
+eil_gap_iw=0             #starting Matsubara index for eil_gap_file (0=lowest iw_0; sharpest gap symmetry/anisotropy, matches the FS gap usually quoted)
+eil_gap_navg=1           #number of consecutive Matsubara slices to average for eil_gap_file (1=single iw_gap_iw slice; >1 smooths noise at the cost of slightly diluting the anisotropy)
+eil_vort_tilt=0.0        #field tilt theta [deg] from the c-axis (quasi-2D): orbital uses B_z=B cos(theta), Zeeman -> h/cos(theta) (Pauli/orbital ratio)
+eil_nvortex=1            #vortices (flux quanta) per computational cell of the periodic lattice (supercell; n^2 reduces to the primitive cell)
+eil_field=0.0            #vortex lattice field B/Hc2 (0=isolated vortex; >0=circular-cell lattice w/ Doppler)
+eil_field_list=None      #list of B/Hc2 to sweep <N(0)>(B) on the TRUE periodic lattice (e.g. [0.04,0.08,0.16,0.32]); None=single field
+eil_kappa=100.0          #GL kappa=lambda/xi for the periodic lattice (large=extreme type-II; finite=London screening/Maxwell)
+eil_lattice='square'     #periodic vortex lattice geometry: 'square' or 'triangular'
 #------------------------ initial parameters are above -------------------------------
 #----------------------------------main functions-------------------------------------
 #-------------------------------- import packages ------------------------------------
@@ -360,17 +406,22 @@ def plot_3d_surf(fspolys,fscenters,fscolors,surface_opt,kscale,bvec):
         if surface_opt==1:
             tri=Poly3DCollection(fspolys,facecolors=fscolors,lw=0)
         else:
-            clmax=fscolors.max()
-            clmin=fscolors.min()
-            # Check for clmax=clmin case
-            if clmax == clmin:
-                print(f"Warning: plot_3d_surf has clmax=clmin={clmax}. Using default colors",flush=True)
+            if surface_opt==ColorMode.GAP: #diverging map, symmetric about 0 so the node sits on white
+                cmap=cm.bwr
+                vmax=np.abs(fscolors).max()
+                vmin=-vmax
+            else:
+                cmap=cm.jet
+                vmin,vmax=fscolors.min(),fscolors.max()
+            # Check for vmax=vmin case
+            if vmax == vmin:
+                print(f"Warning: plot_3d_surf has vmax=vmin={vmax}. Using default colors",flush=True)
                 nor_cols=np.ones_like(fscolors)*0.5
             else:
-                nor_cols=(fscolors-clmin)/(clmax-clmin)
-            tri=Poly3DCollection(fspolys,facecolors=cm.jet(nor_cols),lw=0)
+                nor_cols=(fscolors-vmin)/(vmax-vmin)
+            tri=Poly3DCollection(fspolys,facecolors=cmap(nor_cols),lw=0)
             fs=ax.scatter(fscenters[:,0],fscenters[:,1],fscenters[:,2],
-                          c=fscolors,cmap=cm.jet,s=0.1)
+                          c=fscolors,cmap=cmap,vmin=vmin,vmax=vmax,s=0.1)
             plt.colorbar(fs,format='%.2e')
         ax.add_collection3d(tri)
     ax.grid(False)
@@ -385,14 +436,18 @@ def plot_3d_surf(fspolys,fscenters,fscolors,surface_opt,kscale,bvec):
     plt.show()
     #plt.savefig(fname='3DFS.png',dpi=300)
     
-def set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist):
+def set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist,
+                      gap_sym=None,delta0=None,gap_orbital=None):
     if color_option==0:
         fspolys=polys
         fscenters=[]
         fscolors=[]
         return fspolys,fscenters,fscolors
     else:
-        colors=plibs.get_colors(centers,blist,ihbar*avec.T,rvec,ham_r,S_r,olist,color_option)
+        if color_option==ColorMode.GAP: #the actual Eilenberger pairing gap, on the real 3D FS
+            colors=plibs.gap_color_3d(centers,blist,rvec,ham_r,S_r,gap_sym,delta0,gap_orbital)
+        else:
+            colors=plibs.get_colors(centers,blist,ihbar*avec.T,rvec,ham_r,S_r,olist,color_option)
         fspolys=[]
         fscenters=[]
         fscolors=[]
@@ -608,6 +663,16 @@ def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
     sigma=sigmaconst*L11
     kappa=kappaSconst*L22
     sigmaS=kappaSconst*L12
+    # full electronic thermal conductivity subtracts the thermoelectric backflow:
+    # kappa = kappaSconst*(L22 - L12.L11^-1.L12)  (cf. Boltzmann K2-K1.K0^-1.K1).
+    # The subtraction is done on the bare L tensors (all share the same prefactor),
+    # so kappa2 carries the same kappaSconst as the L22-only kappa.
+    try:
+        kappa2=kappaSconst*np.array([l22-l12.dot(sclin.inv(l11).dot(l12))
+                                     for l11,l12,l22 in zip(L11,L12,L22)])
+    except np.linalg.LinAlgError:
+        print("Warning: L11 is a singular matrix. Cannot subtract thermoelectric backflow from kappa",flush=True)
+        kappa2=kappa.copy()
     # Handle sclin.inv() failures
     try:
         Seebeck=np.array([-sclin.inv(s).dot(sS) for s,sS in zip(sigma,sigmaS)])
@@ -616,12 +681,19 @@ def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
         Seebeck=np.zeros_like(sigma)
     print_matrix('sigma matrix (S/m)',sigma[0].real)
     print_matrix('kappa matrix (L22 only) (W/m/K)',kappa[0].real)
+    print_matrix('kappa matrix (full) (W/m/K)',kappa2[0].real)
     print_matrix('sigmaS matrix (A/m/K)',sigmaS[0].real)
     print('Lorenz number (Wohm/K^2) (fe 2.44e-8)',flush=True)
     try:
         # Lorenz tensor L = kb * kappa . (sigma*T)^-1 (matrix product, not element-wise)
-        Lorenz_matrix=(kb*kappa[0].dot(sclin.inv(sigma[0]*temp))).real.round(10)
+        sigmaT_inv=sclin.inv(sigma[0]*temp)
+        Lorenz_matrix=(kb*kappa[0].dot(sigmaT_inv)).real.round(10)
+        Lorenz_matrix2=(kb*kappa2[0].dot(sigmaT_inv)).real.round(10)
+        print(' (L22 only):',flush=True)
         for lor in Lorenz_matrix:
+            print(f" {lor[0]:9.2e} {lor[1]:9.2e} {lor[2]:9.2e}",flush=True)
+        print(' (full):',flush=True)
+        for lor in Lorenz_matrix2:
             print(f" {lor[0]:9.2e} {lor[1]:9.2e} {lor[2]:9.2e}",flush=True)
     except np.linalg.LinAlgError:
         print("Warning: Failed to compute Lorenz coefficient (singular matrix)",flush=True)
@@ -898,6 +970,21 @@ def calc_cpa_Akw(k_sets: list, kmesh: int, bvec: np.ndarray,
     plt.show()
     return Akw
 
+def get_eil_gap_fs(rvec,ham_r,S_r,avec,Arot,temp,fill):
+    """Shared FS/gap preparation for the Eilenberger modes: the RPA/FLEX gap
+    (eil_gap_file) or the explicit orbital gap (eil_gap_orbital) as form factor,
+    plus the real Wannier-band FS when eil_fs_kind='wannier'.
+    Returns (fs, fs_kind): fs_kind=None when the gap is baked into fs['phi'],
+    otherwise fs=None and fs_kind=eil_fs_kind (model FS/cylinder)."""
+    gorb=(plibs.gap_orbital_from_wannier(eil_gap_file,eil_gap_iw,eil_gap_navg) #RPA/FLEX gap as form factor
+          if eil_gap_file else eil_gap_orbital)
+    if eil_fs_kind=='wannier': #real Wannier-band FS + v_F (gap symmetry/multiband from gap_sym,delta0)
+        fs=plibs.build_wannier_fs(rvec,ham_r,S_r,avec,
+                                  plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill),
+                                  gap_sym=gap_sym,delta0=delta0,gap_orbital=gorb) #gap_orbital=projection (Nagai)
+        return fs,None                      #the (int) gap_sym is baked into fs['phi']
+    return None,eil_fs_kind                 #model FS/cylinder: the int gap_sym -> continuum harmonic
+
 def main():
     omp_num,omp_check=flibs.omp_params()
 
@@ -1123,9 +1210,12 @@ def main():
         klist,blist=plibs.get_kf_points(eig2d,Nx,mu,kz)
         clist=plibs.get_colors(klist,blist,ihbar*avec.T,rvec,ham_r,S_r,olist,color_option,True)
         plot_FS(clist,klist,color_option)
-    elif option==CalcMode.FERMI_3D: #3D Fermi surface plot
+    elif option==CalcMode.FERMI_3D: #3D Fermi surface plot (color_option=GAP: the Eilenberger pairing gap Re[phi(k)])
         polys,centers,blist=plibs.gen_3d_surf_points(Nx,rvec,ham_r,S_r,mu,kscale)
-        fspolys,fscenters,fscolors=set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist)
+        gorb=(plibs.gap_orbital_from_wannier(eil_gap_file,eil_gap_iw,eil_gap_navg) #RPA/FLEX gap as form factor
+              if eil_gap_file else eil_gap_orbital)
+        fspolys,fscenters,fscolors=set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist,
+                                                      gap_sym,delta0,gorb)
         plot_3d_surf(fspolys,fscenters,fscolors,color_option,kscale,bvec)
     elif option==CalcMode.SPECTRUM: #plot spectrum
         plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw,sw_self)
@@ -1308,13 +1398,74 @@ def main():
                 plibs.calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,site,
                                 orb_dep,U,J,fill,sw_out_self,sw_in_self,
                                 Umat if orb_dep else None,Jmat if orb_dep else None,
-                                m_diis=m_diis_num,sw_rescale=sw_rescale_flex)
+                                m_diis=m_diis_num,sw_rescale=sw_rescale_flex,sw_tail=sw_chi0_tail)
             elif option==CalcMode.LIN_ELIASHBERG: #calc gap function
                 plibs.calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,site,plist,mu,temp,gap_sym,sw_self,
                                              orb_dep,U,J,fill,sw_from_file,sw_out_self,sw_in_self,
-                                             Umat if orb_dep else None,Jmat if orb_dep else None)
+                                             Umat if orb_dep else None,Jmat if orb_dep else None,
+                                             sw_tail=sw_chi0_tail)
             elif option==CalcMode.GAP_FUNCTION: #post gap calculation, output gap function/anomalous green's function
                 output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,plist,mu,temp,sw_self)
+    elif option==CalcMode.EILENBERGER: #solve homogeneous quasiclassical Eilenberger equation
+        if eil_fs: #model FS + Fermi velocity: anisotropic penetration depth lambda_xx/lambda_yy
+            plibs.calc_fs_penetration(eil_coupling,temp,eil_wc,kind=(eil_fs_kind or 'ellipse'),
+                                      gap_sym=gap_sym,params=eil_fs_params,kb=kb)
+        elif eil_lambda: #superfluid density / penetration depth lambda(T) (s exp-flat, d linear-in-T)
+            plibs.calc_penetration_depth(eil_coupling,temp,eil_wc,gap_sym=gap_sym,kb=kb)
+        elif eil_spin: #spin-2x2 Zeeman response: singlet vs triplet d-vector (d||h vs d_|_h)
+            plibs.calc_spin_pauli(Nx,Ny,Nz,eil_wc,ham_r,S_r,rvec,avec,mu,temp,eil_coupling,
+                                  gap_sym=gap_sym,fs_width=eil_fs_width,kb=kb)
+        elif eil_pauli: #Zeeman (Maki) Pauli-limiting sweep: singlet gap Delta(h), spinodal, Zeeman-split DOS
+            plibs.calc_pauli_limit(Nx,Ny,Nz,eil_wc,ham_r,S_r,rvec,avec,mu,temp,gap_sym,eil_coupling,
+                                   fs_width=eil_fs_width,kb=kb)
+        elif eil_free_energy: #condensation free energy (Omega_s-Omega_n)/N0 vs T (coupling-independent)
+            plibs.calc_free_energy(eil_coupling,temp,eil_wc,gap_sym=gap_sym,kb=kb)
+        else:
+            plibs.calc_eilenberger(Nx,Ny,Nz,eil_wc,ham_r,S_r,rvec,avec,mu,temp,gap_sym,eil_coupling,
+                                   imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,fs_width=eil_fs_width,kb=kb,
+                                   method=eil_method,sw_find_tc=eil_find_tc,sw_imp_sweep=eil_imp_sweep,
+                                   imp_sweep=eil_imp_list)
+    elif option==CalcMode.EILENBERGER_SURFACE: #specular surface state via Riccati Eilenberger (model FS)
+        if eil_surf_dvector: #self-consistent triplet d-vector texture (spin-matrix Riccati)
+            plibs.calc_surface_dvector(eil_coupling,temp,eil_wc,kb=kb,sub_ratio=eil_dvec_subratio,sw_ldos=eil_ldos)
+        else:
+            sfs,sfk=get_eil_gap_fs(rvec,ham_r,S_r,avec,Arot,temp,fill)
+            plibs.calc_surface(eil_coupling,temp,eil_wc,gap_sym=gap_sym,beta_surf=eil_surf_beta,
+                               kb=kb,sw_ldos=eil_ldos,imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,h=eil_zeeman,
+                               fs_kind=sfk,fs_params=eil_fs_params,fs=sfs)
+    elif option==CalcMode.EILENBERGER_VORTEX: #vortex / vortex lattice via Riccati Eilenberger (model FS)
+        eil_fs_obj,eil_fs_kw=get_eil_gap_fs(rvec,ham_r,S_r,avec,Arot,temp,fill)
+        if eil_vort_maxwell: #self-consistent finite-kappa vector potential A(r) (Maxwell back-reaction)
+            plibs.calc_vortex_maxwell(eil_coupling,temp,eil_wc,gap_sym=gap_sym,field=eil_field,
+                                      kappa=eil_kappa,kb=kb,Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
+        elif eil_vort_current: #circulating charge supercurrent j_phi(rho) of an isolated vortex
+            plibs.calc_vortex_current(eil_coupling,temp,eil_wc,gap_sym=gap_sym,kb=kb,
+                                      Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
+        elif eil_vort_dvector: #self-consistent triplet d-vector vortex/lattice (spin-matrix Riccati)
+            dfs=(plibs.build_wannier_fs(rvec,ham_r,S_r,avec,plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill))
+                 if eil_fs_kind=='wannier' else None)  #FS geometry only (d-vector channels carry the gap)
+            if eil_vort_lattice_sc: #je-style TRUE periodic d-vector lattice (formulation A, square/triangular)
+                plibs.calc_vortex_lattice_sc_dvector(eil_coupling,temp,eil_wc,kb=kb,field=eil_field,
+                                                     lattice=eil_lattice,sub_ratio=eil_dvec_subratio,
+                                                     kappa=(None if eil_kappa>=1e3 else eil_kappa),fs=dfs)
+            else: #isolated vortex (eil_field=0) or circular-cell lattice (eil_field>0)
+                plibs.calc_vortex_dvector(eil_coupling,temp,eil_wc,kb=kb,sub_ratio=eil_dvec_subratio,
+                                          field=eil_field,fs=dfs)
+        elif eil_vort_lattice_sc and eil_field_list is not None: #je-style self-consistent periodic lattice (formulation A); eil_lattice square/triangular; eil_nvortex=Vw flux quanta/cell; finite eil_kappa = London A back-reaction, >=1e3 = bare extreme
+            plibs.calc_vortex_lattice_sc(eil_coupling,temp,eil_wc,gap_sym=gap_sym,
+                                         field_list=eil_field_list,lattice=eil_lattice,kb=kb,fs=eil_fs_obj,
+                                         kappa=(None if eil_kappa>=1e3 else eil_kappa),Vw=eil_nvortex,
+                                         self_consistent_A=eil_vort_scA)
+        elif eil_field_list is not None: #sweep B/Hc2 on the TRUE periodic lattice -> <N(0)>(B) (d~sqrt(B) Volovik)
+            plibs.calc_vortex_lattice_periodic(eil_coupling,temp,eil_wc,gap_sym=gap_sym,
+                                               field_list=eil_field_list,kappa=eil_kappa,lattice=eil_lattice,kb=kb,
+                                               fs_kind=eil_fs_kw,fs_params=eil_fs_params,fs=eil_fs_obj,nflux=eil_nvortex)
+        else: #single field (isolated vortex if eil_field=0, else circular-cell lattice)
+            plibs.calc_vortex(eil_coupling,temp,eil_wc,gap_sym=gap_sym,kb=kb,sw_ldos=eil_ldos,
+                              imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,field=eil_field,h=eil_zeeman,
+                              kappa=(eil_kappa if eil_vort_field else 0.0),tilt_deg=eil_vort_tilt,
+                              fs_kind=eil_fs_kw,fs_params=eil_fs_params,fs=eil_fs_obj,
+                              Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
     elif option==CalcMode.CARRIER_NUM: #calc carrier number
         n_carr=plibs.calc_carrier(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp)
         print(n_carr)
@@ -1401,7 +1552,7 @@ def main():
                                  orb_dep,U,J,fill,sw_from_file,sw_out_self,sw_in_self,
                                  Umat if orb_dep else None,Jmat if orb_dep else None,
                                  m_diis=m_diis_num,sw_rescale=sw_rescale_flex,
-                                 sw_check_only=sw_check_only)
+                                 sw_check_only=sw_check_only,sw_tail=sw_chi0_tail)
 
 if __name__=="__main__":
     main()

@@ -480,9 +480,38 @@ subroutine get_chi_map(chi_map,irr_chi,olist,Nchi)
   end do
 end subroutine get_chi_map
 
-subroutine get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,&
-     Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi) bind(C,name='get_chi0_conv_')
-  !> This function obtains chi_0 using convolution.
+subroutine chi0_threshold(chi,Nk,Nw,Nchi)
+  !> Zero out numerically tiny real/imaginary parts of chi (cosmetic cleanup,
+  !> same eps as the original get_chi0_conv).
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  implicit none
+  integer(c_int64_t),intent(in):: Nk,Nw,Nchi
+  complex(c_double),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
+
+  integer(c_int32_t) i,j,l,m
+  real(c_double),parameter:: eps=1.0d-9
+
+  !$omp parallel do collapse(2) private(i,j)
+  do l=1,Nchi
+     do m=1,Nchi
+        do j=1,Nw
+           do i=1,Nk
+              if(abs(dble(chi(i,j,m,l)))<eps) chi(i,j,m,l)=cmplx(0.0d0,imag(chi(i,j,m,l)),kind=c_double)
+              if(abs(imag(chi(i,j,m,l)))<eps) chi(i,j,m,l)=cmplx(dble(chi(i,j,m,l)),0.0d0,kind=c_double)
+           end do
+        end do
+     end do
+  end do
+  !$omp end parallel do
+end subroutine chi0_threshold
+
+subroutine chi0_conv_acc(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,coef,&
+     Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+  !> Accumulate coef * (FFT-convolution bubble of Gk) into chi.
+  !> Body of the original get_chi0_conv, made additive (chi += coef*conv) so the
+  !> tail-corrected driver can combine conv[G] - conv[G0] + analytic reference
+  !> without a second chi-sized work array.  The small-value thresholding is
+  !> applied by the callers (chi0_threshold) after the final combination.
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
@@ -490,17 +519,16 @@ subroutine get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,&
   integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
   integer(c_int32_t),intent(in),dimension(Nchi,Nchi,2):: chi_map
   integer(c_int32_t),intent(in),dimension(Nchi*(Nchi+1)/2,2):: irr_chi
-  real(c_double),intent(in):: temp
+  real(c_double),intent(in):: temp,coef
   complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
-  complex(c_double),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
+  complex(c_double),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
 
   integer(c_int32_t) i,j,k,l,m,n,iorb
   integer(c_int32_t) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(2*Nw)
   real(c_double) weight
-  real(c_double),parameter:: eps=1.0d-9
   complex(c_double),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmp,tmpgk13,tmpgk42
-  
-  weight=temp/dble(Nkall)
+
+  weight=coef*temp/dble(Nkall)
   ii(0)=0
   ij(0)=0
   ik(0)=0
@@ -574,9 +602,7 @@ subroutine get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,&
      w_loop_tmp_to_chi:do j=1,Nw
         k_loop_tmp_to_chi:do i=1,Nkall
            if(invk(2,i)==0)then
-              chi(invk(1,i),j,m,l)=tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight
-              if(abs(dble(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(0.0d0,imag(chi(invk(1,i),j,m,l)),kind=c_double)
-              if(abs(imag(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(dble(chi(invk(1,i),j,m,l)),0.0d0,kind=c_double)
+              chi(invk(1,i),j,m,l)=chi(invk(1,i),j,m,l)+tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight
            end if
         end do k_loop_tmp_to_chi
      end do w_loop_tmp_to_chi
@@ -584,7 +610,312 @@ subroutine get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,&
      chi(:,:,chi_map(m,l,1),chi_map(m,l,2))=conjg(chi(:,:,m,l))
   end do orb_loop
   call destroy_fft_plans()
+end subroutine chi0_conv_acc
+
+subroutine get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,&
+     Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi) bind(C,name='get_chi0_conv_')
+  !> This function obtains chi_0 using convolution (sharp Matsubara cutoff).
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  implicit none
+  integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
+  integer(c_int32_t),intent(in),dimension(Nchi,Nchi,2):: chi_map
+  integer(c_int32_t),intent(in),dimension(Nchi*(Nchi+1)/2,2):: irr_chi
+  real(c_double),intent(in):: temp
+  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
+  complex(c_double),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
+
+  !$omp parallel workshare
+  chi(:,:,:,:)=(0.0d0,0.0d0)
+  !$omp end parallel workshare
+  call chi0_conv_acc(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,1.0d0,&
+       Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+  call chi0_threshold(chi,Nk,Nw,Nchi)
 end subroutine get_chi0_conv
+
+subroutine chi0_ref_tau(chi,eig,uni,mu,kmap,invk,irr_chi,chi_map,olist,temp,&
+     Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+  !> Accumulate into chi the ANALYTIC reference bubble chi0[G0,G0](q,i nu_m).
+  !>
+  !> The non-interacting particle-hole bubble is evaluated through the exact
+  !> imaginary-time product
+  !>     chi0(q,tau) = -(1/N) sum_k G0(k+q,tau) G0(k,-tau)
+  !> with G0(k,tau) built analytically per band (no Matsubara truncation), the
+  !> k-convolution done by batched spatial FFT and the bosonic tau -> i nu_m
+  !> transform by DFT on the uniform tau grid (M = 2*Nw points).
+  !>
+  !> Companion of chi0_conv_acc inside chi0_tail_impl:
+  !>     chi0 = conv[G] - conv[G0] + (this reference)
+  !> By bilinearity the FFT then only ever sees the fast-decaying residual
+  !> (G-G0 ~ 1/w^2), removing the O(1/Nw) sharp-cutoff tail error of the plain
+  !> convolution (residual O(1/Nw^2)).
+  !>
+  !> tau=0 jump handling: for orbital pairs with a nonzero equal-time
+  !> commutator the bubble chi0(tau) has a step at tau=0 (the 1/(i nu)
+  !> high-frequency component of chi0).  The jump J is computed analytically
+  !> from the free density matrix and handled by the sawtooth trick: the DFT
+  !> of J*(1/2 - tau/beta) is replaced by its exact transform -J/(i nu_m).
+  !>
+  !> Assumes TRS without SOC (H(-k) = H(k)^*), the same restriction as
+  !> get_chi0_conv / gen_irr_k_TRS.
+  use constant
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  implicit none
+  integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
+  integer(c_int32_t),intent(in),dimension(Nchi,Nchi,2):: chi_map
+  integer(c_int32_t),intent(in),dimension(Nchi*(Nchi+1)/2,2):: irr_chi
+  real(c_double),intent(in):: temp,mu
+  real(c_double),intent(in),dimension(Norb,Nk):: eig
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
+  complex(c_double),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
+
+  integer(c_int32_t) i,j,k,l,m,n,s,iorb,kk,M32,a13,b13,a42,b42
+  integer(c_int32_t) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1)
+  real(c_double) beta,dtau,xi,tau,fn,weight,nu
+  complex(c_double) Jlm,zsumA,zsumB,ph
+  real(c_double),allocatable:: gp(:,:,:),gm(:,:,:),ff(:,:)
+  complex(c_double),allocatable:: U13(:,:),U42(:,:),rho(:,:,:)
+  complex(c_double),dimension(Norb,Norb):: rhobar
+  complex(c_double),dimension(Nw):: sawc
+  complex(c_double),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpA,tmpB,tmp
+
+  M32=int(2*Nw,c_int32_t)
+  beta=1.0d0/temp
+  dtau=beta/dble(M32)
+  weight=1.0d0/(temp*dble(Nkall))
+
+  ii(0)=0
+  ij(0)=0
+  ik(0)=0
+  do i=1,Nx-1
+     ii(i)=Nx-i
+  end do
+  do i=1,Ny-1
+     ij(i)=Ny-i
+  end do
+  do i=1,Nz-1
+     ik(i)=Nz-i
+  end do
+
+  ! --- stable analytic band kernels on the tau grid ------------------------
+  ! gp(s,n,k) = g_n(k, tau_{s-1}) = -e^{-xi tau}(1-f)   (0 <= tau < beta)
+  ! gm(s,n,k) = g_n(k,-tau_{s-1}) = +e^{ xi tau} f
+  allocate(gp(2*Nw,Norb,Nk),gm(2*Nw,Norb,Nk),ff(Norb,Nk))
+  !$omp parallel do private(n,s,xi,tau,fn)
+  do i=1,Nk
+     do n=1,Norb
+        xi=eig(n,i)-mu
+        if(xi>=0.0d0)then
+           fn=exp(-beta*xi)/(1.0d0+exp(-beta*xi))
+        else
+           fn=1.0d0/(1.0d0+exp(beta*xi))
+        end if
+        ff(n,i)=fn
+        do s=1,M32
+           tau=dble(s-1)*dtau
+           if(xi>=0.0d0)then
+              gp(s,n,i)=-exp(-xi*tau)/(1.0d0+exp(-beta*xi))
+              gm(s,n,i)= exp(-xi*(beta-tau))/(1.0d0+exp(-beta*xi))
+           else
+              gp(s,n,i)=-exp(xi*(beta-tau))/(1.0d0+exp(beta*xi))
+              gm(s,n,i)= exp(xi*tau)/(1.0d0+exp(beta*xi))
+           end if
+        end do
+     end do
+  end do
+  !$omp end parallel do
+
+  ! --- BZ-averaged free density matrix (for the tau=0 jump) ----------------
+  allocate(rho(Norb,Norb,Nk))
+  !$omp parallel do private(l,m,n)
+  do i=1,Nk
+     do l=1,Norb
+        do m=1,Norb
+           rho(m,l,i)=(0.0d0,0.0d0)
+           do n=1,Norb
+              rho(m,l,i)=rho(m,l,i)+uni(m,n,i)*conjg(uni(l,n,i))*ff(n,i)
+           end do
+        end do
+     end do
+  end do
+  !$omp end parallel do
+  rhobar(:,:)=(0.0d0,0.0d0)
+  do i=1,Nkall
+     kk=int(invk(1,i),c_int32_t)
+     if(invk(2,i)==0)then
+        rhobar(:,:)=rhobar(:,:)+rho(:,:,kk)
+     else if(invk(2,i)==1)then
+        rhobar(:,:)=rhobar(:,:)+transpose(rho(:,:,kk))
+     end if
+  end do
+  rhobar(:,:)=rhobar(:,:)/dble(Nkall)
+  deallocate(rho)
+
+  ! --- sawtooth: exact transform minus its rectangle-rule DFT --------------
+  ! saw(tau) = 1/2 - tau/beta carries the unit tau=0 jump; exact coefficients
+  ! are -1/(i nu_m) (0 at nu=0).  sawc = exact - numeric replaces the poorly
+  ! converging jump part of the sampled bubble by its analytic value.
+  do j=1,Nw
+     if(j==1)then
+        sawc(j)=(0.0d0,0.0d0)
+     else
+        nu=2.0d0*pi*dble(j-1)*temp
+        sawc(j)=cmplx(0.0d0,1.0d0/nu,kind=c_double)
+     end if
+     do s=0,M32-1
+        ph=exp(cmplx(0.0d0,2.0d0*pi*dble(j-1)*dble(s)/dble(M32),kind=c_double))
+        sawc(j)=sawc(j)-dtau*ph*(0.5d0-dble(s)/dble(M32))
+     end do
+  end do
+
+  allocate(U13(Norb,Nk),U42(Norb,Nk))
+  call init_fft_plans(tmpA,tmp,Nx,Ny,Nz,2*Nw)
+  orb_loop:do iorb=1,Nchi*(Nchi+1)/2
+     l=irr_chi(iorb,1)
+     m=irr_chi(iorb,2)
+     a13=int(olist(l,1),c_int32_t)  ! G13 = G0_{a13,b13}(k+q, tau)
+     b13=int(olist(m,1),c_int32_t)
+     a42=int(olist(m,2),c_int32_t)  ! G42 = G0_{a42,b42}(k, -tau)
+     b42=int(olist(l,2),c_int32_t)
+     !$omp parallel do private(n)
+     do i=1,Nk
+        do n=1,Norb
+           U13(n,i)=uni(a13,n,i)*conjg(uni(b13,n,i))
+           U42(n,i)=uni(a42,n,i)*conjg(uni(b42,n,i))
+        end do
+     end do
+     !$omp end parallel do
+     ! full-grid tau kernels; G0(-k,tau) = G0(k,tau)^T (TRS) -> conj(U) coefficients
+     !$omp parallel do private(i,kk,n,zsumA,zsumB)
+     do s=1,M32
+        do i=1,Nkall
+           kk=int(invk(1,i),c_int32_t)
+           zsumA=(0.0d0,0.0d0)
+           zsumB=(0.0d0,0.0d0)
+           if(invk(2,i)==0)then
+              do n=1,Norb
+                 zsumA=zsumA+U13(n,kk)*gp(s,n,kk)
+                 zsumB=zsumB+U42(n,kk)*gm(s,n,kk)
+              end do
+           else if(invk(2,i)==1)then
+              do n=1,Norb
+                 zsumA=zsumA+conjg(U13(n,kk))*gp(s,n,kk)
+                 zsumB=zsumB+conjg(U42(n,kk))*gm(s,n,kk)
+              end do
+           end if
+           tmpA(kmap(1,i),kmap(2,i),kmap(3,i),s)=zsumA
+           tmpB(kmap(1,i),kmap(2,i),kmap(3,i),s)=zsumB
+        end do
+     end do
+     !$omp end parallel do
+     ! spatial-only FFT (tau axis untouched), product with spatial reversal,
+     ! then one 4D backward = spatial q-transform + bosonic tau -> nu DFT
+     call fft3d_batch(tmpA,tmp,Nx,Ny,Nz,2*Nw,.true.)
+     call fft3d_batch(tmpB,tmp,Nx,Ny,Nz,2*Nw,.true.)
+     !$omp parallel do private(i,j,k)
+     do s=1,M32
+        do k=0,Nz-1
+           do j=0,Ny-1
+              !$omp simd
+              do i=0,Nx-1
+                 tmp(i,j,k,s)=-tmpA(i,j,k,s)*tmpB(ii(i),ij(j),ik(k),s)
+              end do
+              !$omp end simd
+           end do
+        end do
+     end do
+     !$omp end parallel do
+     call FFT(tmp,tmpB,Nx,Ny,Nz,2*Nw,.false.)
+     ! tau=0 jump of this pair: J = delta_{13} rhobar_{42} - delta_{42} rhobar_{13}
+     Jlm=(0.0d0,0.0d0)
+     if(a13==b13) Jlm=Jlm+rhobar(a42,b42)
+     if(a42==b42) Jlm=Jlm-rhobar(a13,b13)
+     !$omp parallel do private(i,j)
+     do j=1,Nw
+        do i=1,Nkall
+           if(invk(2,i)==0)then
+              chi(invk(1,i),j,m,l)=chi(invk(1,i),j,m,l)&
+                   +tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight+Jlm*sawc(j)
+           end if
+        end do
+     end do
+     !$omp end parallel do
+     chi(:,:,chi_map(m,l,1),chi_map(m,l,2))=conjg(chi(:,:,m,l))
+  end do orb_loop
+  call destroy_fft_plans()
+  deallocate(U13,U42,gp,gm,ff)
+end subroutine chi0_ref_tau
+
+subroutine chi0_tail_impl(chi,Gk,eig,uni,mu,kmap,invk,irr_chi,chi_map,olist,temp,&
+     Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+  !> Tail-corrected chi0: chi0 = conv[G] - conv[G0] + chi0_ref[G0].
+  !> By bilinearity of the bubble the FFT convolution only acts on terms
+  !> containing dG = G - G0 (decaying like 1/w^2 or faster), while the slowly
+  !> decaying 1/(iw) reference part is evaluated analytically in imaginary time
+  !> (chi0_ref_tau).  Sharp-cutoff error: O(1/Nw) -> O(1/Nw^2).
+  !> G0 is built from (eig, uni) at the SAME chemical potential mu as Gk so the
+  !> 1/(iw) coefficients cancel exactly.
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  implicit none
+  integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
+  integer(c_int32_t),intent(in),dimension(Nchi,Nchi,2):: chi_map
+  integer(c_int32_t),intent(in),dimension(Nchi*(Nchi+1)/2,2):: irr_chi
+  real(c_double),intent(in):: temp,mu
+  real(c_double),intent(in),dimension(Norb,Nk):: eig
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
+  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
+  complex(c_double),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
+
+  complex(c_double),allocatable:: G0(:,:,:,:)
+
+  !$omp parallel workshare
+  chi(:,:,:,:)=(0.0d0,0.0d0)
+  !$omp end parallel workshare
+  call chi0_conv_acc(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,1.0d0,&
+       Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+  allocate(G0(Nk,Nw,Norb,Norb))
+  !$omp parallel workshare
+  G0(:,:,:,:)=(0.0d0,0.0d0)
+  !$omp end parallel workshare
+  call gen_green0(G0,eig,uni,mu,temp,Nk,Nw,Norb)
+  call chi0_conv_acc(chi,G0,kmap,invk,irr_chi,chi_map,olist,temp,-1.0d0,&
+       Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+  deallocate(G0)
+  call chi0_ref_tau(chi,eig,uni,mu,kmap,invk,irr_chi,chi_map,olist,temp,&
+       Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+  call chi0_threshold(chi,Nk,Nw,Nchi)
+end subroutine chi0_tail_impl
+
+subroutine get_chi0_tail(chi,Smat,Cmat,Gk,eig,uni,kmap,invk,olist,mu,temp,&
+     Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,maxchi0s_out) bind(C)
+  !> Tail-corrected variant of get_chi0 (see chi0_tail_impl); needs the band
+  !> data (eig, uni) and the chemical potential of Gk in addition.
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  implicit none
+  integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
+  real(c_double),intent(in):: temp,mu
+  real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  real(c_double),intent(in),dimension(Norb,Nk):: eig
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
+  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
+  complex(c_double),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
+  real(c_double),intent(out):: maxchi0s_out
+
+  integer(c_int32_t),dimension(Nchi,Nchi,2)::chi_map
+  integer(c_int32_t),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
+
+  call get_chi_map(chi_map,irr_chi,olist,Nchi)
+  call chi0_tail_impl(chi,Gk,eig,uni,mu,kmap,invk,irr_chi,chi_map,olist,temp,&
+       Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+  call ckchi_impl(chi,Smat,Cmat,kmap,invk,Nk,Nkall,Nchi,Nw,maxchi0s_out)
+end subroutine get_chi0_tail
 
 subroutine get_chi0_sum(chi,Gk,klist,invk,irr_chi,chi_map,olist,temp,Nw,Nk,Nkall,Norb,Nchi) bind(C)
   !> It obtains chi_0 using summation. Its cost is O(Nk^2), so it is heavy. You should use get_chi0_conv.

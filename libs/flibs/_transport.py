@@ -234,7 +234,11 @@ def calc_tau_epa(eig: np.ndarray, gavg: np.ndarray, wavg: np.ndarray,
                  mu: float, temp: float) -> np.ndarray:
     """
     @fn calc_tau_epa
-    @brief Compute EPA relaxation time from epa.x (job='egrid') output.
+    @brief Compute EPA relaxation time from epa.x (job='egrid') output, using the
+    energy-conserving EPA rate (Samsonidze-Kozinsky):
+    1/tau(e) = 2*pi*sum_nu { g2(e,e+w)[nB+f(e+w)]rho(e+w) + g2(e,e-w)[nB+1-f(e-w)]rho(e-w) },
+    with rho the electronic DOS per spin per unit cell (binned from eig).
+    Final states falling outside the tabulated EPA energy grid are dropped.
     @param   eig: Eigenvalues [Nk, Norb] float64 (eV)
     @param  gavg: EPA averaged |g|^2 [ngrid, nbin_max, nbin_max, nmodes] float64 (eV^2)
     @param  wavg: Averaged phonon frequencies per mode [nmodes] float64 (eV)
@@ -243,7 +247,7 @@ def calc_tau_epa(eig: np.ndarray, gavg: np.ndarray, wavg: np.ndarray,
     @param  nbin: Number of bins per grid [ngrid] int64
     @param    mu: Chemical potential (eV)
     @param  temp: Temperature kB*T (eV)
-    @return  tau: Relaxation time [Nk, Norb] float64
+    @return  tau: Relaxation time [Nk, Norb] float64 (hbar/eV units)
     """
     Nk = len(eig)
     Norb = eig.shape[1]
