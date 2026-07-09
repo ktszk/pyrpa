@@ -31,7 +31,8 @@ _lib.mkself.argtypes = [
     POINTER(c_int64), POINTER(c_bool), POINTER(c_bool),
     POINTER(c_int64),
     POINTER(c_bool),
-    POINTER(c_bool)   # sw_tail
+    POINTER(c_bool),  # sw_tail
+    POINTER(c_double) # sigma_scale
 ]
 _lib.mkself.restype = None
 _lib.mkself_soc.argtypes = [
@@ -53,7 +54,8 @@ _lib.mkself_soc.argtypes = [
     POINTER(c_int64), POINTER(c_int64),
     POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),
     POINTER(c_int64), POINTER(c_bool), POINTER(c_bool),
-    POINTER(c_int64), POINTER(c_bool)
+    POINTER(c_int64), POINTER(c_bool),
+    POINTER(c_double) # sigma_scale
 ]
 _lib.mkself_soc.restype = None
 
@@ -76,7 +78,7 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
            fill: float, temp: float, Nw: int, Nx: int, Ny: int, Nz: int, sw_out: bool,
            sw_in: bool, sub_sigma: int = 1, scf_loop: int = 300, eps: float = 1.0e-4,
            pp: float = 0.3, m_diis: int = 5, sw_rescale: bool = False,
-           sw_tail: bool = False) -> tuple[np.ndarray, float]:
+           sw_tail: bool = False, sigma_scale: float = 1.0) -> tuple[np.ndarray, float]:
     """
     @fn mkself
     @brief Iteratively compute the self-energy Sigma(k, iw_n) via FLEX self-consistency loop (without SOC).
@@ -103,6 +105,8 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
     @param   sw_rescale: If True, rescale chi0 when Stoner factor >= 1
     @param      sw_tail: If True, use the tail-corrected chi0 (conv[G]-conv[G0]+analytic
                          reference; O(1/Nw^2) Matsubara truncation error instead of O(1/Nw))
+    @param  sigma_scale: Factor multiplying the sigma seed loaded via sw_in (only used when
+                         sw_in=True). For U-annealing set ~(U_new/U_old)^2 since Sigma ~ U^2.
     @retval      sigmak: Converged self-energy [Norb, Norb, Nw, Nk] complex128
     @retval     mu_self: Final chemical potential in eV
     """
@@ -119,7 +123,7 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
         i64(Nw), i64(Norb), i64(Nchi), i64(Nx),
         i64(Ny), i64(Nz), i64(sub_sigma), byref(c_bool(sw_out)),
         byref(c_bool(sw_in)), i64(m_diis), byref(c_bool(sw_rescale)),
-        byref(c_bool(sw_tail)))
+        byref(c_bool(sw_tail)), dbl(sigma_scale))
     return sigmak, mu_self.value
 
 def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.ndarray,
@@ -127,7 +131,8 @@ def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.nd
                uni: np.ndarray, mu: float, fill: float, temp: float, Nw: int,
                Nx: int, Ny: int, Nz: int, sw_out: bool, sw_in: bool,
                sub_sigma: int = 1, scf_loop: int = 300, eps: float = 1.0e-4,
-               pp: float = 0.3, m_diis: int = 5, sw_rescale: bool = False) -> tuple[np.ndarray, float]:
+               pp: float = 0.3, m_diis: int = 5, sw_rescale: bool = False,
+               sigma_scale: float = 1.0) -> tuple[np.ndarray, float]:
     """
     @fn mkself_soc
     @brief Iteratively compute the self-energy Sigma(k, iw_n) via FLEX self-consistency loop with SOC.
@@ -152,6 +157,8 @@ def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.nd
     @param          eps: Convergence tolerance
     @param           pp: Linear mixing rate (0 < pp < 1)
     @param       m_diis: DIIS history length (m_diis=1: equivalent to linear mixing)
+    @param  sigma_scale: Factor multiplying the sigma seed loaded via sw_in (only used when
+                         sw_in=True). For U-annealing set ~(U_new/U_old)^2 since Sigma ~ U^2.
     @retval      sigmak: Converged self-energy [Norb, Norb, Nw, Nk] complex128
     @retval     mu_self: Final chemical potential in eV
     """
@@ -165,5 +172,6 @@ def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.nd
                dbl(pp), dbl(eps), i64(Nkall), i64(Nk),
                i64(Nw), i64(Norb), i64(Nchi), i64(Nx),
                i64(Ny), i64(Nz), i64(sub_sigma), byref(c_bool(sw_out)),
-               byref(c_bool(sw_in)), i64(m_diis), byref(c_bool(sw_rescale)))
+               byref(c_bool(sw_in)), i64(m_diis), byref(c_bool(sw_rescale)),
+               dbl(sigma_scale))
     return sigmak, mu_self.value

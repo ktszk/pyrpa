@@ -372,6 +372,51 @@ def test_mkself_sw_tail_smoke():
     assert np.abs(sg1-sg2).max() < 0.6*smax    # a correction, not a different answer
 
 
+def test_regrid_sigma_bin_roundtrip_and_reseed(tmp_path):
+    """plibs.regrid_sigma_bin (T-annealing helper): the scipy reader/writer is
+    binary-compatible with io_sigma, an identity re-grid reproduces the stored
+    sigma exactly at every kept frequency (the dropped last point carries the
+    wrap-around artifact), the result is causal, and a re-gridded seed with
+    changed (T, Nw) is accepted by mkself via sw_in."""
+    from scipy.io import FortranFile
+    m = _tiny_one_orbital_model(Nx=4, Ny=4, Nw=32, temp=0.1)
+    Smat, Cmat = F.gen_SCmatrix(m['olist'], m['site'], U=1.0, J=0.0)
+
+    def run_mkself(temp, Nw, sw_out, sw_in):
+        return F.mkself(Smat, Cmat, m['kmap'], m['invk'], m['olist'], m['hamk'],
+                        m['eig'], m['uni'], 0.0, 0.8, temp, Nw,
+                        m['Nx'], m['Ny'], m['Nz'], sw_out, sw_in, eps=1.0e-6)
+
+    def read_sigma_bin(Nw):
+        with FortranFile('sigma.bin', 'r') as f:
+            f.read_record(np.float64)
+            f.read_record(np.float64)
+            return f.read_record(np.complex128).reshape((-1, Nw, 1, 1), order='F')
+
+    olddir = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        with _silence_stdout():
+            run_mkself(0.1, 32, sw_out=True, sw_in=False)
+            orig = read_sigma_bin(32)
+            Nk, Nw2 = P.regrid_sigma_bin(0.1, 0.1, Norb=1, Nw_old=32)
+            new = read_sigma_bin(32)
+        assert (Nk, Nw2) == (orig.shape[0], 32)
+        # spline is exact on the kept nodes; only the dropped last point changes
+        assert np.abs(new[:, :31] - orig[:, :31]).max() < 1e-10
+        assert (new[:, :, 0, 0].imag <= 1e-12).all()          # causality
+        # cool + enlarge Nw (impossible with raw reuse), index-map-like w_scale
+        with _silence_stdout():
+            run_mkself(0.1, 32, sw_out=True, sw_in=False)
+            P.regrid_sigma_bin(0.1, 0.08, Norb=1, Nw_old=32, Nw_new=48,
+                               w_scale=0.1 / 0.08)
+            sg, mu_s = run_mkself(0.08, 48, sw_out=False, sw_in=True)
+        assert np.isfinite(sg).all() and np.isfinite(mu_s)
+        assert np.abs(sg).max() > 0
+    finally:
+        os.chdir(olddir)
+
+
 # --------------------------------------------------------------------------- #
 #  standalone runner (no pytest required)
 # --------------------------------------------------------------------------- #

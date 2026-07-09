@@ -286,7 +286,7 @@ end subroutine calc_sigma
 
 subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill,temp,&
      scf_loop,pp,eps,Nkall,Nk,Nw,Norb,Nchi,Nx,Ny,Nz,sub_sigma,sw_out,sw_in,m_diis,sw_rescale,&
-     sw_tail) bind(C)
+     sw_tail,sigma_scale) bind(C)
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz,scf_loop,m_diis
@@ -296,6 +296,7 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   logical(1),intent(in):: sw_tail  !< tail-corrected chi0 (chi0_tail_impl) instead of the sharp-cutoff convolution
   integer(c_int64_t),intent(in):: sub_sigma
   real(c_double),intent(in):: temp,eps,pp,rfill,mu_init
+  real(c_double),intent(in):: sigma_scale  !< multiply the sigma seed loaded via sw_in (U-annealing: ~(U_new/U_old)^2)
   real(c_double),intent(in),dimension(Norb,Nk):: eig
   real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
   real(c_double),intent(out):: mu
@@ -324,6 +325,12 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   if(sw_in)then
      print*,"load self"
      call io_sigma(.false.)
+     if(sigma_scale/=1.0d0)then
+        print'(A,F10.6)','[FLEX] scale loaded sigma seed by',sigma_scale
+        !$omp parallel workshare
+        sigmak(:,:,:,:)=sigmak(:,:,:,:)*sigma_scale
+        !$omp end parallel workshare
+     end if
      !$omp parallel
      !$omp workshare
      sigmak0(:,:,:,:)=sigmak(:,:,:,:)

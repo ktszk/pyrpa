@@ -49,11 +49,107 @@ def _load_sigma_from_file():
         return None
 
 
+def regrid_sigma_bin(temp_old:float, temp_new:float, Norb:int, Nw_old:int,
+                     Nw_new:int=None, w_scale:float=None, path:str='sigma.bin',
+                     out_path:str=None):
+    """Re-grid the FLEX self-energy seed sigma.bin from the Matsubara mesh at
+    temp_old onto the mesh at temp_new (T-annealing helper for sw_in_self).
+
+    Sigma(k, i w_n) is interpolated along the imaginary axis by a cubic spline
+    after extending the data to negative frequencies with the conjugate
+    symmetry Sigma_lm(-iw) = Sigma_ml(iw)^* (TRS), so the low-frequency end
+    needs no extrapolation.  The outermost stored frequency is discarded
+    beforehand: it carries the wrap-around artifact of the circular Sigma
+    convolution (its Im part can even flip sign) and would poison both the
+    spline end and the tail fit.  New points beyond the remaining cutoff are
+    filled with the two-parameter tail Sigma ~ c0 + c1/(iw) fitted to the two
+    outermost kept points.  Interpolated diagonal elements are clipped to
+    Im Sigma_ll <= 0 (causality).
+
+    w_scale: the stored Sigma is evaluated at w_scale * w_n(temp_new) instead
+    of w_n(temp_new).  The default 1.0 gives the faithful Sigma(T_old) on the
+    new mesh.  w_scale = temp_old/temp_new reproduces the frequency
+    compression of the raw index-mapped reuse (same file, no regrid) on an
+    ARBITRARY Nw_new: empirically this seeds near-critical cooling runs much
+    better, because the compression inflates the low-frequency Sigma by
+    T_old/T_new, mimicking the physical growth of Sigma upon cooling.
+
+    mu and mu_OLD stored in the file are passed through unchanged.  The file
+    layout matches io_sigma in fself.f90 (sequential unformatted, 4-byte
+    record markers; records: mu, mu_OLD, sigmak(Nk,Nw,Norb,Norb) in Fortran
+    order).  Records larger than 2 GiB (compiler subrecords) are not handled.
+
+    @param temp_old: temperature [eV] the file was written at
+    @param temp_new: target temperature [eV]
+    @param     Norb: number of orbitals
+    @param   Nw_old: Matsubara count of the stored sigma
+    @param   Nw_new: Matsubara count of the target mesh (default: Nw_old)
+    @param  w_scale: evaluation-frequency factor (default 1.0 = faithful;
+                     temp_old/temp_new = index-map-like compression, see above)
+    @param     path: input file (default 'sigma.bin')
+    @param out_path: output file (default: overwrite path)
+    @return (Nk, Nw_new): shape information of the written sigma
+    """
+    from scipy.io import FortranFile
+    from scipy.interpolate import CubicSpline
+    if Nw_new is None:
+        Nw_new = Nw_old
+    if w_scale is None:
+        w_scale = 1.0
+    with FortranFile(path, 'r') as f:
+        mu = f.read_record(np.float64)
+        mu_old = f.read_record(np.float64)
+        flat = f.read_record(np.complex128)
+    Nk, rem = divmod(flat.size, Nw_old * Norb * Norb)
+    if rem != 0:
+        raise ValueError(f"sigma.bin size {flat.size} is not divisible by "
+                         f"Nw_old*Norb^2 = {Nw_old * Norb * Norb}: wrong Norb/Nw_old?")
+    sig = flat.reshape((Nk, Nw_old, Norb, Norb), order='F')
+    # drop the outermost frequency (circular-convolution wrap-around artifact)
+    sig = sig[:, :Nw_old - 1]
+    w_old = (2.0 * np.arange(Nw_old - 1) + 1.0) * np.pi * temp_old
+    w_new = w_scale * (2.0 * np.arange(Nw_new) + 1.0) * np.pi * temp_new
+    # conjugate-symmetric extension to negative frequencies
+    mirror = np.conj(np.swapaxes(sig, 2, 3))[:, ::-1, :, :]
+    wext = np.concatenate([-w_old[::-1], w_old])
+    ext = np.concatenate([mirror, sig], axis=1)
+    out = CubicSpline(wext, ext, axis=1, extrapolate=False)(w_new)
+    beyond = w_new > w_old[-1]
+    if beyond.any():
+        # tail Sigma ~ c0 + c1/(iw), least-squares over an interior window:
+        # the last ~10-20% of the stored frequencies carry the growing
+        # wrap-around contamination of the circular convolution, so fitting
+        # at the very edge produces wildly wrong coefficients
+        nk = len(w_old)
+        i0, i1 = int(0.55 * nk), max(int(0.85 * nk), int(0.55 * nk) + 4)
+        basis = np.stack([np.ones(i1 - i0), 1.0 / (1j * w_old[i0:i1])], axis=1)
+        rhs = sig[:, i0:i1].reshape(Nk, i1 - i0, Norb * Norb).transpose(1, 0, 2)
+        coef, *_ = np.linalg.lstsq(basis, rhs.reshape(i1 - i0, -1), rcond=None)
+        c0 = coef[0].reshape(Nk, Norb, Norb)
+        c1 = coef[1].reshape(Nk, Norb, Norb)
+        out[:, beyond, :, :] = (c0[:, None] +
+                                c1[:, None] / (1j * w_new[beyond])[None, :, None, None])
+    di = np.arange(Norb)
+    imdiag = out[:, :, di, di].imag
+    nbad = int((imdiag > 1e-12).sum())
+    if nbad:
+        print(f"regrid_sigma_bin: clipped {nbad} causality-violating "
+              f"diagonal points (Im Sigma_ll > 0)", flush=True)
+    out[:, :, di, di] = out[:, :, di, di].real + 1j * np.minimum(imdiag, 0.0)
+    with FortranFile(out_path or path, 'w') as f:
+        f.write_record(mu)
+        f.write_record(mu_old)
+        f.write_record(np.ascontiguousarray(out.ravel(order='F')))
+    print(f"regrid_sigma_bin: sigma.bin re-gridded T={temp_old:.6f} -> {temp_new:.6f} eV, "
+          f"Nw={Nw_old} -> {Nw_new} (Nk={Nk}, Norb={Norb})", flush=True)
+    return Nk, Nw_new
+
+
 def _prepare_green_state_normal(state, olist, interaction, mu:float, fill:float, temp:float,
                                 Nw:int, Nx:int, Ny:int, Nz:int, sw_self:bool,
                                 sw_from_file:bool=False, sw_out_self:bool=False, sw_in_self:bool=False,
                                 eps:float=1.0e-4, pp:float=0.5, m_diis:int=5, sw_rescale:bool=True,
-                                sw_tail:bool=False):
+                                sw_tail:bool=False, sigma_scale:float=1.0):
     Smat, Cmat = interaction
     if sw_self:
         if sw_from_file:
@@ -66,7 +162,7 @@ def _prepare_green_state_normal(state, olist, interaction, mu:float, fill:float,
                                            state['ham_k'], state['eig'], state['uni'],
                                            mu, fill, temp, Nw, Nx, Ny, Nz, sw_out_self, sw_in_self,
                                            eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale,
-                                           sw_tail=sw_tail)
+                                           sw_tail=sw_tail, sigma_scale=sigma_scale)
         print(f'chem. pot. with self= {mu_self:.4f} eV', flush=True)
         Gk = flibs.gen_green(sigmak, state['ham_k'], mu_self, temp)
     else:
@@ -79,7 +175,8 @@ def _prepare_green_state_normal(state, olist, interaction, mu:float, fill:float,
 def _prepare_green_state_soc(state, olist, slist, invs, interaction, mu:float, fill:float, temp:float,
                              Nw:int, Nx:int, Ny:int, Nz:int, sw_self:bool,
                              sw_from_file:bool=False, sw_out_self:bool=False, sw_in_self:bool=False,
-                             eps:float=1.0e-4, pp:float=0.5, m_diis:int=5, sw_rescale:bool=True):
+                             eps:float=1.0e-4, pp:float=0.5, m_diis:int=5, sw_rescale:bool=True,
+                             sigma_scale:float=1.0):
     Vmat = interaction
     if sw_self:
         if sw_from_file:
@@ -91,7 +188,8 @@ def _prepare_green_state_soc(state, olist, slist, invs, interaction, mu:float, f
             sigmak, mu_self = flibs.mkself_soc(Vmat, state['kmap'], state['invk'], invs, olist, slist,
                                                state['ham_k'], state['eig'], state['uni'],
                                                mu, fill, temp, Nw, Nx, Ny, Nz, sw_out_self, sw_in_self,
-                                               eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale)
+                                               eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale,
+                                               sigma_scale=sigma_scale)
         print(f'chem. pot. with self= {mu_self:.4f} eV', flush=True)
         Gk = flibs.gen_green(sigmak, state['ham_k'], mu_self, temp)
     else:
@@ -202,14 +300,16 @@ def output_gap_function(invk, kmap, gap, uni, plist, gap_sym, Nx:int,
 
 def calc_flex(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, mu:float, temp:float,
               olist, site, orb_dep:bool, U:float, J:float, fill:float, sw_out_self:bool, sw_in_self:bool, 
-              Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True, sw_tail:bool=False):
+              Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True, sw_tail:bool=False,
+              sigma_scale:float=1.0):
     state = _prepare_kspace_state(Nx, Ny, Nz, ham_r, S_r, rvec, need_ham=True)
     # FLEX uses the irreducible k-mesh Green's function together with the same orbital-pair
     # interaction basis used in the response routines above.
     Smat, Cmat = _prepare_normal_interaction(olist, site, orb_dep, U, J, Umat, Jmat)
     sigmak, mu_self = flibs.mkself(Smat, Cmat, state['kmap'], state['invk'], olist, state['ham_k'], state['eig'], state['uni'],
                                    mu, fill, temp, Nw, Nx, Ny, Nz, sw_out_self, sw_in_self,
-                                   eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale, sw_tail=sw_tail)
+                                   eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale, sw_tail=sw_tail,
+                                   sigma_scale=sigma_scale)
     if sw_out_self:
         np.savez('self_en', sigmak, mu_self)
         output_self_wannier(sigmak, mu_self, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
@@ -218,12 +318,14 @@ def calc_flex_soc(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, mu:float, te
                   olist, slist, invs, site,
                   orb_dep:bool, U:float, J:float, fill:float,
                   sw_out_self:bool, sw_in_self:bool,
-                  Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True):
+                  Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True,
+                  sigma_scale:float=1.0):
     state = _prepare_kspace_state(Nx, Ny, Nz, ham_r, S_r, rvec, need_ham=True)
     Vmat = _prepare_soc_interaction(olist, slist, site, invs, orb_dep, U, J, Umat, Jmat)
     sigmak, mu_self = flibs.mkself_soc(Vmat, state['kmap'], state['invk'], invs, olist, slist, state['ham_k'], state['eig'], state['uni'],
                                        mu, fill, temp, Nw, Nx, Ny, Nz, sw_out_self, sw_in_self,
-                                       eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale)
+                                       eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale,
+                                       sigma_scale=sigma_scale)
     if sw_out_self:
         np.savez('self_en', sigmak, mu_self)
         output_self_wannier(sigmak, mu_self, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
@@ -232,12 +334,13 @@ def calc_lin_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, chi
                            mu:float, temp:float, gap_sym:int, sw_self:bool, orb_dep:bool, U:float, J:float,
                            fill:float, sw_from_file:bool, sw_out_self:bool, sw_in_self:bool,
                            Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True,
-                           sw_tail:bool=False):
+                           sw_tail:bool=False, sigma_scale:float=1.0):
     state = _prepare_kspace_state(Nx, Ny, Nz, ham_r, S_r, rvec, need_ham=sw_self)
     Smat, Cmat = _prepare_normal_interaction(chiolist, site, orb_dep, U, J, Umat, Jmat)
     green_state = _prepare_green_state_normal(state, chiolist, (Smat, Cmat), mu, fill, temp, Nw,
                                               Nx, Ny, Nz, sw_self, sw_from_file, sw_out_self,
-                                              sw_in_self, eps, pp, m_diis, sw_rescale, sw_tail)
+                                              sw_in_self, eps, pp, m_diis, sw_rescale, sw_tail,
+                                              sigma_scale)
     if green_state is None:
         return
     Gk = green_state['Gk']
@@ -267,12 +370,14 @@ def calc_lin_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, chi
 def calc_lin_eliash_soc(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, mu:float, temp:float,
                         chiolist, slist, plist, invs, site, orb_dep:bool, U:float, J:float, fill:float,
                         gap_sym:int, sw_self:bool, sw_from_file:bool, sw_out_self:bool, sw_in_self:bool,
-                        Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True):
+                        Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True,
+                        sigma_scale:float=1.0):
     state = _prepare_kspace_state(Nx, Ny, Nz, ham_r, S_r, rvec, need_ham=sw_self)
     Vmat = _prepare_soc_interaction(chiolist, slist, site, invs, orb_dep, U, J, Umat, Jmat)
     green_state = _prepare_green_state_soc(state, chiolist, slist, invs, Vmat, mu, fill, temp, Nw,
                                            Nx, Ny, Nz, sw_self, sw_from_file, sw_out_self,
-                                           sw_in_self, eps, pp, m_diis, sw_rescale)
+                                           sw_in_self, eps, pp, m_diis, sw_rescale,
+                                           sigma_scale)
     if green_state is None:
         return
     Gk = green_state['Gk']
@@ -302,7 +407,7 @@ def calc_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec,
                        chiolist, site, plist, mu:float, temp:float, gap_sym:int, sw_self:bool,
                        orb_dep:bool, U:float, J:float, fill:float, sw_from_file:bool, sw_out_self:bool,
                        sw_in_self:bool, Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True,
-                       sw_check_only:bool=False, sw_tail:bool=False):
+                       sw_check_only:bool=False, sw_tail:bool=False, sigma_scale:float=1.0):
     """
     @param sw_check_only: If True, stop after the linearized Eliashberg solve (before the
                           nonlinear loop) and report the Stoner factor and lambda_eliash.
@@ -314,7 +419,8 @@ def calc_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec,
     Smat, Cmat = _prepare_normal_interaction(chiolist, site, orb_dep, U, J, Umat, Jmat)
     green_state = _prepare_green_state_normal(state, chiolist, (Smat, Cmat), mu, fill, temp, Nw,
                                               Nx, Ny, Nz, sw_self, sw_from_file, sw_out_self,
-                                              sw_in_self, eps, pp, m_diis, sw_rescale, sw_tail)
+                                              sw_in_self, eps, pp, m_diis, sw_rescale, sw_tail,
+                                              sigma_scale)
     if green_state is None:
         return
     Gk = green_state['Gk']

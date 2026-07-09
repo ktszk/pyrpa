@@ -166,6 +166,7 @@ sw_chi0_tail=True #True: tail-corrected chi0 in FLEX/Eliashberg (conv[G]-conv[G0
 sw_self=True  #True: use calculated self energy for spectrum band plot
 sw_out_self=True #True: write the FLEX self-energy to sigma.bin/self_en.npz (also triggers gap output in option 15)
 sw_in_self=False #True: load the previous self-energy from sigma.bin as the initial guess for the SC loop
+sigma_in_scale=1.0 #factor multiplying the sigma seed loaded via sw_in_self; for U-annealing set (U_new/U_old)**2 (Sigma ~ U^2)
 sw_from_file=False #True: read the self-energy from sigma.bin and skip FLEX (solve Eliashberg with it directly)
 sw_check_only=False #True: stop after linear Eliashberg (also stops if Stoner factor>=1 or lambda<1)
 #----- EILENBERGER (homogeneous quasiclassical) parameters -----
@@ -1386,11 +1387,13 @@ def main():
                 plibs.calc_flex_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,invs,site,
                                     orb_dep,U,J,fill,sw_out_self,sw_in_self,
                                     Umat if orb_dep else None,Jmat if orb_dep else None,
-                                    m_diis=m_diis_num,sw_rescale=sw_rescale_flex)
+                                    m_diis=m_diis_num,sw_rescale=sw_rescale_flex,
+                                    sigma_scale=sigma_in_scale)
             elif option==CalcMode.LIN_ELIASHBERG: #calc gap function
                 plibs.calc_lin_eliash_soc(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,slist,plist,invs,site,
                                           orb_dep,U,J,fill,gap_sym,sw_self,sw_from_file,sw_out_self,sw_in_self,
-                                          Umat if orb_dep else None,Jmat if orb_dep else None)
+                                          Umat if orb_dep else None,Jmat if orb_dep else None,
+                                          sigma_scale=sigma_in_scale)
             elif option==CalcMode.GAP_FUNCTION: #post gap calculation, output gap function/anomalous green's function
                 output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,plist,mu,temp,sw_self,sw_soc,invs,slist,gap_sym)
         else: #without soc
@@ -1398,12 +1401,13 @@ def main():
                 plibs.calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,site,
                                 orb_dep,U,J,fill,sw_out_self,sw_in_self,
                                 Umat if orb_dep else None,Jmat if orb_dep else None,
-                                m_diis=m_diis_num,sw_rescale=sw_rescale_flex,sw_tail=sw_chi0_tail)
+                                m_diis=m_diis_num,sw_rescale=sw_rescale_flex,sw_tail=sw_chi0_tail,
+                                sigma_scale=sigma_in_scale)
             elif option==CalcMode.LIN_ELIASHBERG: #calc gap function
                 plibs.calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,site,plist,mu,temp,gap_sym,sw_self,
                                              orb_dep,U,J,fill,sw_from_file,sw_out_self,sw_in_self,
                                              Umat if orb_dep else None,Jmat if orb_dep else None,
-                                             sw_tail=sw_chi0_tail)
+                                             sw_tail=sw_chi0_tail,sigma_scale=sigma_in_scale)
             elif option==CalcMode.GAP_FUNCTION: #post gap calculation, output gap function/anomalous green's function
                 output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,plist,mu,temp,sw_self)
     elif option==CalcMode.EILENBERGER: #solve homogeneous quasiclassical Eilenberger equation
@@ -1552,7 +1556,8 @@ def main():
                                  orb_dep,U,J,fill,sw_from_file,sw_out_self,sw_in_self,
                                  Umat if orb_dep else None,Jmat if orb_dep else None,
                                  m_diis=m_diis_num,sw_rescale=sw_rescale_flex,
-                                 sw_check_only=sw_check_only,sw_tail=sw_chi0_tail)
+                                 sw_check_only=sw_check_only,sw_tail=sw_chi0_tail,
+                                 sigma_scale=sigma_in_scale)
 
 if __name__=="__main__":
     main()
