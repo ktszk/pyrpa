@@ -223,16 +223,5 @@ def test_interband_L22_nonnegative():
 #  standalone runner (no pytest required)
 # --------------------------------------------------------------------------- #
 if __name__ == '__main__':
-    import time
-    tests = [v for k, v in sorted(globals().items()) if k.startswith('test_') and callable(v)]
-    npass = 0
-    for t in tests:
-        t0 = time.time()
-        try:
-            t()
-            print(f"  PASS  {t.__name__:42s} ({time.time()-t0:5.1f}s)", flush=True)
-            npass += 1
-        except Exception as e:
-            print(f"  FAIL  {t.__name__:42s} ({time.time()-t0:5.1f}s)  -> {type(e).__name__}: {e}", flush=True)
-    print(f"\n{npass}/{len(tests)} passed")
-    sys.exit(0 if npass == len(tests) else 1)
+    import _tools
+    sys.exit(_tools.run_standalone(globals()))
