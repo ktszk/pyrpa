@@ -30,7 +30,8 @@ _lib.mkself.argtypes = [
     POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),
     POINTER(c_int64), POINTER(c_bool), POINTER(c_bool),
     POINTER(c_int64),
-    POINTER(c_bool)
+    POINTER(c_bool),
+    POINTER(c_bool)   # sw_tail
 ]
 _lib.mkself.restype = None
 _lib.mkself_soc.argtypes = [
@@ -74,7 +75,8 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
            olist: np.ndarray, hamk: np.ndarray, eig: np.ndarray, uni: np.ndarray, mu: float,
            fill: float, temp: float, Nw: int, Nx: int, Ny: int, Nz: int, sw_out: bool,
            sw_in: bool, sub_sigma: int = 1, scf_loop: int = 300, eps: float = 1.0e-4,
-           pp: float = 0.3, m_diis: int = 5, sw_rescale: bool = False) -> tuple[np.ndarray, float]:
+           pp: float = 0.3, m_diis: int = 5, sw_rescale: bool = False,
+           sw_tail: bool = False) -> tuple[np.ndarray, float]:
     """
     @fn mkself
     @brief Iteratively compute the self-energy Sigma(k, iw_n) via FLEX self-consistency loop (without SOC).
@@ -99,10 +101,14 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
     @param           pp: Linear mixing rate (0 < pp < 1)
     @param       m_diis: DIIS history length (m_diis=1: equivalent to linear mixing)
     @param   sw_rescale: If True, rescale chi0 when Stoner factor >= 1
+    @param      sw_tail: If True, use the tail-corrected chi0 (conv[G]-conv[G0]+analytic
+                         reference; O(1/Nw^2) Matsubara truncation error instead of O(1/Nw))
     @retval      sigmak: Converged self-energy [Norb, Norb, Nw, Nk] complex128
     @retval     mu_self: Final chemical potential in eV
     """
     print("mixing rate: pp = %3.1f, DIIS m = %d" % (pp, m_diis))
+    if sw_tail:
+        print("chi0: tail-corrected convolution (analytic G0 reference)")
     Nkall, Nk, Nchi = len(kmap), len(hamk), len(Smat)
     Norb = hamk.shape[1]
     mu_self = c_double()
@@ -112,7 +118,8 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
         dbl(pp), dbl(eps), i64(Nkall), i64(Nk),
         i64(Nw), i64(Norb), i64(Nchi), i64(Nx),
         i64(Ny), i64(Nz), i64(sub_sigma), byref(c_bool(sw_out)),
-        byref(c_bool(sw_in)), i64(m_diis), byref(c_bool(sw_rescale)))
+        byref(c_bool(sw_in)), i64(m_diis), byref(c_bool(sw_rescale)),
+        byref(c_bool(sw_tail)))
     return sigmak, mu_self.value
 
 def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.ndarray,

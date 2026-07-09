@@ -1,0 +1,860 @@
+#!/usr/bin/env python
+#-*- coding:utf-8 -*-
+"""
+Regression tests for the quasiclassical Eilenberger / Riccati suite (libs/plibs/
+_eilenberger*.py and the Fortran kernels in libs/flibs/_eilenberger.py).
+
+These lock in the physics benchmarks that were validated by hand while the suite
+was built: Matsubara cutoff scaling, the Anderson theorem vs Abrikosov-Gor'kov
+pair breaking, the Fortran<->Python equivalence of both Riccati kernels, the
+surface gap suppression and zero-energy bound state, the vortex-core CdGM peak,
+the Volovik field dependence, the model-FS reproduction of the cylinder, Pauli
+limiting vs triplet immunity, and the surface / vortex-core d-vector textures.
+
+Runs standalone (no pytest needed):  python tests/test_eilenberger.py
+Also works under pytest if installed:  pytest tests/test_eilenberger.py
+Requires the Fortran library libfmod.so (cd libs && make FC=ifx SL=MKL).
+"""
+import os
+import sys
+import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from libs.plibs import _eilenberger as E
+from libs.plibs import _eilenberger_surface as S
+from libs.plibs import _eilenberger_vortex as V
+from libs.plibs import _eilenberger_spin as SP
+import libs.flibs as F
+
+
+# --------------------------------------------------------------------------- #
+#  helpers
+# --------------------------------------------------------------------------- #
+def _cyl(Nb=120, gap_sym='d'):
+    """Synthetic cylindrical FS: uniform weights and the normalized form factor."""
+    beta = np.linspace(0.0, 2.0 * np.pi, Nb, endpoint=False)
+    wf = np.ones(Nb)
+    if gap_sym == 's':
+        phi = np.ones(Nb)
+    elif gap_sym == 'd':
+        phi = np.sqrt(2.0) * np.cos(2.0 * beta)
+    elif gap_sym == 'dxy':
+        phi = np.sqrt(2.0) * np.sin(2.0 * beta)
+    else:
+        raise ValueError(gap_sym)
+    return wf, phi
+
+
+def _ref_chord(om, dd, hvf, ds):
+    """Pure-Python reference for one scalar chord (the deleted _integrate_vec/_chord_gf
+    algorithm), to guard the Fortran riccati_chords.  om, dd are [Ns, Nw]."""
+    Ns, Nw = dd.shape
+    t = ds / hvf
+
+    def integ(omp, ddp, g0):
+        out = np.empty((Ns, Nw), dtype=np.complex128)
+        g = g0.copy()
+        out[0] = g
+        for i in range(Ns - 1):
+            D = 0.5 * (ddp[i] + ddp[i + 1])
+            o = 0.5 * (omp[i] + omp[i + 1])
+            R = np.sqrt(o ** 2 + (D * np.conj(D)).real)
+            T = np.tanh(R * t) / R
+            g = (g + T * (D - o * g)) / (1.0 + T * (o + np.conj(D) * g))
+            out[i + 1] = g
+        return out
+
+    R0 = np.sqrt(om[0] ** 2 + dd[0] * np.conj(dd[0]))
+    ga0 = np.where(np.abs(dd[0]) > 0, (R0 - om[0]) / np.where(np.abs(dd[0]) > 0, np.conj(dd[0]), 1.0), 0.0)
+    gamma = integ(om, dd, ga0)
+    Rn = np.sqrt(om[-1] ** 2 + dd[-1] * np.conj(dd[-1]))
+    gb0 = np.where(np.abs(dd[-1]) > 0, (Rn - om[-1]) / np.where(np.abs(dd[-1]) > 0, dd[-1], 1.0), 0.0)
+    gammat = integ(om[::-1], np.conj(dd[::-1]), gb0)[::-1]
+    den = 1.0 + gamma * gammat
+    return (1.0 - gamma * gammat) / den, 2.0 * gamma / den   # g, f
+
+
+def _ref_matrix_traj(omega, Dpath, hvf, ds, h):
+    """Pure-Python reference for the 2x2 spin-matrix Mobius Riccati along one path
+    (the deleted matrix_trajectory_gf), to guard the Fortran matrix kernel."""
+    from scipy.linalg import expm
+    sz = np.array([[1, 0], [0, -1]], dtype=np.complex128)
+    I2 = np.eye(2, dtype=np.complex128)
+    Ns = len(Dpath)
+    t = ds / hvf
+
+    def gen(D, sgn):
+        N = np.empty((4, 4), dtype=np.complex128)
+        N[:2, :2] = -2.0 * omega * I2 + 1j * sgn * h * sz
+        N[:2, 2:] = D
+        N[2:, :2] = np.conj(D).T
+        N[2:, 2:] = 1j * sgn * h * sz
+        return N
+
+    def root(D, is_a):
+        d2 = 0.5 * np.trace(D @ np.conj(D).T).real
+        E = np.sqrt(omega ** 2 + d2)
+        return (D if is_a else np.conj(D).T) / (omega + E)
+
+    def step(a, D, sgn):
+        M = expm(gen(D, sgn) * t)
+        u = M[:2, :2] @ a + M[:2, 2:]
+        w = M[2:, :2] @ a + M[2:, 2:]
+        return u @ np.linalg.inv(w)
+
+    a = np.empty((Ns, 2, 2), dtype=np.complex128)
+    b = np.empty((Ns, 2, 2), dtype=np.complex128)
+    a[0] = root(Dpath[0], True)
+    for i in range(Ns - 1):
+        a[i + 1] = step(a[i], 0.5 * (Dpath[i] + Dpath[i + 1]), 1.0)
+    b[Ns - 1] = root(Dpath[-1], False)
+    for i in range(Ns - 1, 0, -1):
+        b[i - 1] = step(b[i], 0.5 * (Dpath[i] + Dpath[i - 1]), -1.0)
+    g = np.empty((Ns, 2, 2), dtype=np.complex128)
+    f = np.empty((Ns, 2, 2), dtype=np.complex128)
+    for i in range(Ns):
+        P = np.linalg.inv(I2 + a[i] @ b[i])
+        g[i] = P @ (I2 - a[i] @ b[i])
+        f[i] = P @ (2.0 * a[i])
+    return g, f
+
+
+# --------------------------------------------------------------------------- #
+#  homogeneous
+# --------------------------------------------------------------------------- #
+def test_matsubara_cutoff_scaling():
+    """Number of Matsubara frequencies below a fixed cutoff grows as ~1/T."""
+    wc = 0.5
+    for T in (1e-3, 5e-4, 2e-4):
+        n = len(E.matsubara(T, wc))
+        expect = int(np.floor((wc / (np.pi * T) - 1.0) / 2.0)) + 1
+        assert n == expect
+    assert len(E.matsubara(2e-4, wc)) > len(E.matsubara(1e-3, wc))
+
+
+def test_anderson_theorem_vs_AG():
+    """Non-magnetic impurities leave the s-wave gap (Anderson) almost unchanged but
+    suppress the sign-changing d-wave gap (Abrikosov-Gor'kov pair breaking)."""
+    wc, T = 0.5, 5e-4
+    om = E.matsubara(T, wc)
+    g_imp = 5.0e-4
+    wf_s, phi_s = _cyl(gap_sym='s')
+    wf_d, phi_d = _cyl(gap_sym='d')
+    Ds0 = E.solve_gap(T, wf_s, phi_s, om, 0.0, 1e8, 0.5)
+    Ds1 = E.solve_gap(T, wf_s, phi_s, om, g_imp, 1e8, 0.5)
+    Dd0 = E.solve_gap(T, wf_d, phi_d, om, 0.0, 1e8, 0.5)
+    Dd1 = E.solve_gap(T, wf_d, phi_d, om, g_imp, 1e8, 0.5)
+    assert Ds0 > 0 and Dd0 > 0
+    assert Ds1 / Ds0 > 0.97                  # s-wave protected
+    assert Dd1 / Dd0 < 0.9                    # d-wave pair-broken
+    assert Dd1 / Dd0 < Ds1 / Ds0
+
+
+def test_tc_bcs_ratio():
+    """Weak-coupling BCS gap ratio 2 Delta0 / kTc ~ 3.53 (Delta0/Tc ~ 1.76)."""
+    wc = 0.3
+    wf, phi = _cyl(gap_sym='s')
+    Tc = E.find_tc(wf, phi, 0.0, 1e8, 0.4, wc, 1e-5, 0.05)
+    assert Tc > 0
+    D0 = E.solve_gap(0.02 * Tc, wf, phi, E.matsubara(0.02 * Tc, wc), 0.0, 1e8, 0.4)
+    assert 1.55 < D0 / Tc < 1.95             # ~1.76
+
+
+# --------------------------------------------------------------------------- #
+#  Fortran <-> reference kernels
+# --------------------------------------------------------------------------- #
+def test_riccati_chords_matches_reference():
+    """Fortran scalar tanh-step kernel == the pure-Python reference (to ~1e-13)."""
+    rng = np.random.default_rng(1)
+    Ns, Nw = 40, 8
+    om = ((2 * np.arange(Nw) + 1) * np.pi * 1e-3)[None, :] * np.ones((Ns, 1))
+    om = om + 1j * 3e-4 * rng.standard_normal((Ns, 1))         # position-dependent
+    dd = (rng.standard_normal((Ns, Nw)) + 1j * rng.standard_normal((Ns, Nw))) * 1e-3
+    hvf, ds = 1.3, 0.7
+    gR, fR = _ref_chord(om, dd, hvf, ds)
+    gF, fF = F.riccati_chords(om[:, None, :], dd[:, None, :], hvf, ds)
+    assert np.abs(gF[:, 0] - gR).max() < 1e-12
+    assert np.abs(fF[:, 0] - fR).max() < 1e-12
+
+
+def test_matrix_riccati_matches_python():
+    """Fortran 2x2 matrix Mobius kernel == the pure-Python reference (to ~1e-11),
+    including a finite Zeeman field."""
+    rng = np.random.default_rng(2)
+    ch = SP._default_dvector_channels()
+    Smats = [c[2] for c in ch]
+    Ns = 30
+    Dpath = np.zeros((Ns, 2, 2), dtype=np.complex128)
+    for a in range(2):
+        Dpath += (rng.standard_normal(Ns) * 1e-3)[:, None, None] * Smats[a]
+    om = (2 * np.arange(5) + 1) * np.pi * 1.5e-3
+    for h in (0.0, 2e-3):
+        gF, fF = F.matrix_riccati_batch(om.astype(complex), Dpath, 1.0, 0.6, h)
+        for iw, wn in enumerate(om):
+            gp, fp = _ref_matrix_traj(complex(wn), Dpath, 1.0, 0.6, h)
+            assert np.abs(gF[:, iw] - gp).max() < 1e-11
+            assert np.abs(fF[:, iw] - fp).max() < 1e-11
+    # the batched-chords kernel must agree with the single-trajectory kernel
+    gB, fB = F.matrix_riccati_batch(om.astype(complex), Dpath, 1.0, 0.6, 0.0)
+    gC, fC = F.matrix_riccati_chords(om.astype(complex), Dpath[:, None], 1.0, 0.6, 0.0)
+    assert np.abs(gC[:, 0] - gB).max() < 1e-13
+
+
+# --------------------------------------------------------------------------- #
+#  surface
+# --------------------------------------------------------------------------- #
+def test_surface_sign_changing_suppression():
+    """The sign-changing d[110] gap is suppressed at a specular surface and heals to
+    the bulk; the non-sign-changing d[100] stays close to flat."""
+    wc, T = 0.5, 5e-4
+    om = E.matsubara(T, wc)
+    x, D110, Db = S.solve_surface(0.5, T, om, 'd', np.pi / 4, Nbeta=24, Lxi=8, nper=10)
+    x, D100, Db2 = S.solve_surface(0.5, T, om, 'd', 0.0, Nbeta=24, Lxi=8, nper=10)
+    assert D110[0] / Db < 0.1                 # strongly suppressed at the surface
+    assert D110[-1] / Db > 0.95               # heals to bulk
+    assert D100[0] / Db2 > 0.8                 # [100] surface barely suppressed
+
+
+def test_surface_zero_energy_bound_state():
+    """d[110] has a zero-energy surface bound state (large N(0,0)); d[100] does not."""
+    wc, T = 0.5, 5e-4
+    om = E.matsubara(T, wc)
+    x, D110, Db = S.solve_surface(0.5, T, om, 'd', np.pi / 4, Nbeta=24, Lxi=8, nper=10)
+    w = np.linspace(-2 * Db, 2 * Db, 41)
+    n110 = S.surface_ldos(D110, x, w, 'd', np.pi / 4, ix=0, Dbulk=Db, Nbeta=48)
+    x, D100, Db2 = S.solve_surface(0.5, T, om, 'd', 0.0, Nbeta=24, Lxi=8, nper=10)
+    n100 = S.surface_ldos(D100, x, w, 'd', 0.0, ix=0, Dbulk=Db2, Nbeta=48)
+    i0 = np.argmin(np.abs(w))
+    assert n110[i0] > 5.0                      # zero-bias peak
+    assert n110[i0] > 3.0 * n100[i0]           # absent for [100]
+
+
+# --------------------------------------------------------------------------- #
+#  vortex / lattice
+# --------------------------------------------------------------------------- #
+def test_vortex_core_peak():
+    """Order parameter vanishes at the vortex core and a CdGM zero-energy peak sits
+    there (N(core,0) well above the bulk N=1)."""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    xg, Psi, Db, xi = V.solve_vortex2d(0.6, T, om, 'd', Lxi=7, ngrid=31, nbeta=18)
+    ic = len(xg) // 2
+    assert abs(Psi[ic, ic]) / Db < 0.05       # |Psi|->0 at the core
+    n0 = V.vortex_ldos2d(Psi, xg, xi, np.array([0.0]), 'd', Db, nbeta=36)[ic, ic, 0]
+    assert n0 > 5.0                            # core bound-state peak
+
+
+def test_multivortex_supercell_reduces():
+    """A regular n^2-flux supercell of the periodic lattice reproduces the single-
+    vortex cell DOS (the structure factor selects the primitive reciprocal lattice)."""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    n0 = []
+    for nfl, Ng in ((1, 14), (4, 28)):
+        st = V.solve_lattice(0.6, T, om, gap_sym='d', field=0.2, kappa=5.0, Ng=Ng, nbeta=12, nflux=nfl)
+        assert abs(st['S'] / nfl - V.solve_lattice(0.6, T, om, gap_sym='d', field=0.2,
+                   kappa=5.0, Ng=14, nbeta=12, nflux=1)['S']) < 1e-6 * st['S']   # area/vortex fixed
+        n0.append(float(V.lattice_dos(st, 'd', np.array([0.0]), nbeta=48, delta=0.02 * st['Dbulk'])[0]))
+    assert abs(n0[0] - n0[1]) < 0.03 * n0[0]            # same DOS as the primitive cell
+
+
+def test_field_tilt_enhances_zeeman():
+    """A field tilt away from the c-axis raises the effective Maki energy (h/cos theta),
+    splitting the s-wave vortex-core zero-energy peak: N(core,0) decreases with tilt."""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    xg, Psi, Db, xi = V.solve_vortex2d(0.6, T, om, 's', Lxi=7, ngrid=29, nbeta=14, field=0.1)
+    ic = len(xg) // 2
+    h0 = 1.0e-3
+    n_lo = V.vortex_ldos2d(Psi, xg, xi, np.array([0.0]), 's', Db, nbeta=24, field=0.1, h=h0)[ic, ic, 0]
+    n_hi = V.vortex_ldos2d(Psi, xg, xi, np.array([0.0]), 's', Db, nbeta=24, field=0.1,
+                           h=h0 / np.cos(np.radians(60.0)))[ic, ic, 0]
+    assert n_hi < 0.8 * n_lo                            # tilt (larger h_eff) splits the core peak
+
+
+def test_lattice_volovik_field_dependence():
+    """The spatially-averaged zero-energy DOS of a d-wave vortex lattice grows with
+    field (Volovik)."""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    n = []
+    for b in (0.1, 0.3):
+        st = V.solve_lattice(0.6, T, om, gap_sym='d', field=b, kappa=5.0, Ng=14, nbeta=12)
+        n.append(float(V.lattice_dos(st, 'd', np.array([0.0]), nbeta=48, delta=0.02 * st['Dbulk'])[0]))
+    assert 0.0 < n[0] < n[1]                   # rises with B
+
+
+def test_lattice_sc_formulation_a_node_and_volovik():
+    """je-style self-consistent periodic lattice (formulation A): the complex order
+    parameter develops a TRUE node at every core (|Psi|->0 there), the amplitude stays
+    bounded (no binning blow-up), and the zero-energy DOS grows with field, sub-linearly
+    (d-wave Volovik: between sqrt(B) and linear over this moderate field range)."""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    n0 = {}
+    for b in (0.1, 0.2):
+        st = V.solve_lattice_sc(0.6, T, om, gap_sym='d', field=b, Ng=14, nbeta=12,
+                                itemax=60, mix=0.4, eps=3e-3)
+        D, Db = st['absD'], st['Dbulk']
+        assert D.min() / Db < 0.3                   # core node (sampled at the nearest grid point)
+        assert D.max() / Db < 1.05                  # bounded amplitude (no scatter blow-up)
+        n0[b] = float(V.lattice_dos_sc(st, 'd', np.array([0.0]), nbeta=36, delta=0.03 * Db)[0])
+    assert 0.0 < n0[0.1] < n0[0.2]                  # Volovik: DOS grows with B
+    assert 1.25 < n0[0.2] / n0[0.1] < 2.1           # sub-linear growth (sqrt(B)..linear)
+
+
+def test_lattice_sc_triangular_and_giant_vortex():
+    """The formulation-A lattice supports the triangular (Abrikosov ground-state) cell
+    and a multiply-quantized (Vw>1) giant vortex: both keep the core node and a Volovik
+    zero-energy DOS, and the Vw=2 cell holds two flux quanta (area doubled)."""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    sq = V.solve_lattice_sc(0.6, T, om, gap_sym='d', field=0.2, lattice='triangular',
+                            Ng=16, nbeta=12, itemax=70, mix=0.4, eps=2.5e-3)
+    assert abs(sq['S'] - 2 * np.pi / 0.2 * sq['xi'] ** 2) / sq['S'] < 1e-6   # one quantum/cell
+    assert sq['absD'].min() / sq['Dbulk'] < 0.3 and sq['absD'].max() / sq['Dbulk'] < 1.05
+    n0_tri = float(V.lattice_dos_sc(sq, 'd', np.array([0.0]), nbeta=36, delta=0.03 * sq['Dbulk'])[0])
+    assert 0.0 < n0_tri < 1.2                         # finite Volovik DOS
+    gv = V.solve_lattice_sc(0.6, T, om, gap_sym='d', field=0.2, Vw=2, Ng=18, nbeta=12,
+                            itemax=90, mix=0.4, eps=2.5e-3)
+    assert abs(gv['S'] - 2 * (2 * np.pi / 0.2) * gv['xi'] ** 2) / gv['S'] < 1e-6  # two quanta/cell
+    assert gv['absD'].min() / gv['Dbulk'] < 0.1      # deep (multiply-quantized) core node
+
+
+def test_lattice_free_energy_triangular():
+    """The Eilenberger free-energy functional (Ichioka-Machida, lattice_free_energy)
+    selects the vortex-lattice symmetry: for an isotropic s-wave gap the triangular
+    lattice has the lower free energy, F(square) - F(triangular) > 0 (the generic
+    Abrikosov result).  [The gap-anisotropy-driven square transition is a small fourfold
+    term not resolved by this real-space framework -- see calc_vortex_lattice_symmetry.]"""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    F = {}
+    for latt in ('square', 'triangular'):
+        st = V.solve_lattice_sc(0.6, T, om, gap_sym='s', field=0.2, lattice=latt,
+                                Ng=18, nbeta=24, kappa=None, itemax=150, mix=0.4, eps=1e-3)
+        F[latt] = V.lattice_free_energy(st, 0.6, T, om, 's', nbeta=48)
+    assert F['square'] < 0 and F['triangular'] < 0       # condensed (free energy lowered)
+    assert F['square'] - F['triangular'] > 1e-4          # triangular favored (isotropic)
+
+
+def test_lattice_symmetry_gap_anisotropy_resolved():
+    """The free energy resolves the gap anisotropy that selects the vortex-lattice
+    symmetry: for d-wave it depends on the orientation theta0 of the gap relative to the
+    lattice (fourfold ~cos4 theta0), enabling the triangular<->square transition scan;
+    for the isotropic s-wave it is theta0-independent.  (The full apex+theta0 scan,
+    calc_vortex_lattice_symmetry, reproduces d-wave triangular at low field -> square
+    near Hc2.)"""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    def Fth(gs, th):
+        st = V.solve_lattice_sc(0.6, T, om, gap_sym=gs, field=0.2, lattice='square',
+                                Ng=18, nbeta=24, kappa=None, itemax=150, mix=0.4,
+                                eps=1e-3, theta0=th)
+        return V.lattice_free_energy(st, 0.6, T, om, gs, nbeta=48, theta0=th)
+    ds = abs(Fth('s', 0.0) - Fth('s', np.pi / 8))        # isotropic: no theta0 dependence
+    dd = abs(Fth('d', 0.0) - Fth('d', np.pi / 8))        # d-wave: fourfold theta0 dependence
+    assert ds < 1e-5
+    assert dd > 1e-4 and dd > 30 * ds                    # d-wave clearly anisotropic vs s-wave
+
+
+def test_lattice_symmetry_wannier_fs_rotation():
+    """theta0 rotates the WHOLE crystal (Wannier/model FS + gap) rigidly against the vortex
+    lattice -- not just the model gap.  Decisive invariance check on the C4-symmetric 'tb'
+    FS: the lattice free energy is exactly invariant under a C4 symmetry rotation
+    (theta0 -> theta0 + pi/2) yet changes under the non-symmetry pi/4 rotation, for BOTH
+    s- and d-wave (the FS velocity anisotropy itself also couples to the lattice -- e.g.
+    s-wave square lattices in the borocarbides -- so theta0 feeds FS *and* gap anisotropy
+    into the symmetry selection)."""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    fm = E.build_model_fs('tb', Nth=160, mu=-1.0, params=1.0)
+    def Fth(gs, th):
+        st = V.solve_lattice_sc(0.6, T, om, gap_sym=gs, field=0.2, Ng=16, nbeta=24,
+                                kappa=None, itemax=140, mix=0.4, eps=1e-3, theta0=th, fs=fm)
+        return V.lattice_free_energy(st, 0.6, T, om, gs, nbeta=48, theta0=th, fs=fm)
+    for gs in ('s', 'd'):
+        dsym = abs(Fth(gs, 0.0) - Fth(gs, np.pi / 2))    # C4 rotation: must be invariant
+        dnon = abs(Fth(gs, 0.0) - Fth(gs, np.pi / 4))    # non-symmetry: must change
+        assert dsym < 1e-10
+        assert dnon > 1e-4 and dnon > 1e5 * dsym
+
+
+def test_lattice_sc_finite_kappa_screening():
+    """Finite-kappa A(r) back-reaction (je #2 connection) on the formulation-A lattice:
+    the London-screened smooth vector potential keeps the core node (the complex Delta
+    still winds) yet reduces the Volovik DOS -- weaker screening (larger kappa) gives a
+    higher N(0), and all finite-kappa values lie below the bare (uniform-A-overcounting)
+    extreme limit."""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    n0 = {}
+    for kap in (None, 2.0, 10.0):
+        st = V.solve_lattice_sc(0.6, T, om, gap_sym='d', field=0.2, Ng=16, nbeta=14,
+                                kappa=kap, itemax=90, mix=0.35, eps=2.5e-3)
+        assert st['absD'].min() / st['Dbulk'] < 0.35     # core still suppressed (node)
+        n0[kap] = float(V.lattice_dos_sc(st, 'd', np.array([0.0]), nbeta=30,
+                                         delta=0.03 * st['Dbulk'])[0])
+    assert n0[2.0] < n0[10.0] < n0[None]                 # screening: smaller kappa -> lower N(0)
+
+
+def test_lattice_sc_dvector_texture():
+    """je-style d-vector triplet on the TRUE periodic lattice (2x2 spin-matrix Riccati,
+    formulation A): the dominant p_x(e_x) winds with the Abrikosov lattice and nodes at
+    every core, while the subdominant p_y(e_z) nucleates core-localized (core > bulk) --
+    the vortex-core d-vector texture, now on the periodic cell."""
+    wc, T = 0.3, 3e-3
+    om = E.matsubara(T, wc)
+    st = SP.solve_lattice_sc_dvector((0.7, 0.66), T, om, windings=(1, 0), field=0.1,
+                                     lattice='square', Ng=10, nbeta=8, Lchord=5.0,
+                                     itemax=35, mix=0.4, eps=5e-3)
+    A, Db = st['A'], st['Dbulk']; Dref = max(Db)
+    assert Db[0] > 0 and Db[1] < 1e-3 * Db[0]          # dominant supercritical, subdom subcritical
+    assert np.abs(A[0]).min() / Dref < 0.15           # dominant: node at the core
+    r = np.sqrt(st['X'] ** 2 + st['Y'] ** 2); xi = st['xi']
+    core, bulk = r < 0.8 * xi, r > 2.5 * xi
+    assert np.abs(A[1])[core].mean() > 1.3 * np.abs(A[1])[bulk].mean()   # subdom core-localized
+    # spatially-averaged DOS: finite, recovers to the normal state at high energy
+    Nw = SP.lattice_dos_sc_dvector(st, np.array([0.0, 2.0 * Dref]), nbeta=20, delta=0.05 * Dref)
+    assert Nw[0] > 0.0 and abs(Nw[1] - 1.0) < 0.25     # N(0)>0 (core states), N(large w)->1
+
+
+def test_lattice_sc_self_consistent_A():
+    """Fully self-consistent vector potential (je A_renew): A(K)=j_{s,T}(K)/K^2 from the
+    actual quasiclassical current j_s=<v_F Im g>, solved together with Delta.  It keeps
+    the core node, converges, and at weak field (near-uniform |Psi|) reduces to the
+    analytic-London A (the current there equals the London (1/lambda^2) p_s)."""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    stL = V.solve_lattice_sc(0.6, T, om, gap_sym='d', field=0.1, Ng=14, nbeta=12,
+                             kappa=3.0, itemax=120, mix=0.4, eps=2.5e-3)
+    stA = V.solve_lattice_sc(0.6, T, om, gap_sym='d', field=0.1, Ng=14, nbeta=12,
+                             kappa=3.0, itemax=120, mix=0.4, eps=2.5e-3, self_consistent_A=True)
+    assert stA['Afield'] is not None and stA['iters'] < 120          # converged with an A field
+    assert stA['absD'].min() / stA['Dbulk'] < 0.3                    # core node preserved
+    nL = float(V.lattice_dos_sc(stL, 'd', np.array([0.0]), nbeta=30, delta=0.03 * stL['Dbulk'])[0])
+    nA = float(V.lattice_dos_sc(stA, 'd', np.array([0.0]), nbeta=30, delta=0.03 * stA['Dbulk'])[0])
+    assert nA > 0 and abs(nA - nL) / nL < 0.20                       # ~reduces to London at weak field
+
+
+def test_lattice_sc_grid_convergent():
+    """The formulation-A gap map is interpolation-based (per-grid-point anchored
+    trajectories), so the converged amplitude is grid-convergent -- unlike a scatter/
+    binning estimator whose max|Psi| diverges as the grid is refined."""
+    wc, T = 0.4, 1e-3
+    om = E.matsubara(T, wc)
+    mx = []
+    for Ng in (12, 20):
+        st = V.solve_lattice_sc(0.6, T, om, gap_sym='d', field=0.2, Ng=Ng, nbeta=12,
+                                itemax=60, mix=0.4, eps=3e-3)
+        mx.append(st['absD'].max() / st['Dbulk'])
+    assert abs(mx[0] - mx[1]) < 0.06                # max|Psi| stable under refinement
+
+
+# --------------------------------------------------------------------------- #
+#  condensation free energy / supercurrent (je observables)
+# --------------------------------------------------------------------------- #
+def test_condensation_energy_universal():
+    """The homogeneous condensation free energy is negative and coupling-independent:
+    dOmega(0)/Damp0^2 -> a universal constant (~ -1/4 per spin)."""
+    vals = []
+    for g in (0.45, 0.5, 0.55):
+        dO, D = E.condensation_energy(g, 1e-5, 0.3, 's')
+        assert D > 0 and dO < 0
+        vals.append(dO / D ** 2)
+    assert max(vals) - min(vals) < 5e-3            # coupling-independent
+    assert abs(np.mean(vals) - (-0.25)) < 0.02     # per-spin BCS value
+
+
+def test_condensation_energy_vanishes_at_tc():
+    """dOmega -> 0 as T -> Tc and grows in magnitude as T decreases."""
+    g, wc = 0.4, 0.3
+    Tc = E.find_tc(np.ones(240), np.ones(240), 0.0, 1e8, g, wc, 1e-5, 0.05)
+    dO_lo, _ = E.condensation_energy(g, 0.2 * Tc, wc, 's')
+    dO_hi, _ = E.condensation_energy(g, 0.95 * Tc, wc, 's')
+    assert dO_lo < dO_hi < 0                        # |dOmega| larger at low T, ->0 at Tc
+    assert abs(dO_hi) < 0.1 * abs(dO_lo)
+
+
+def test_vortex_supercurrent_circulates():
+    """The vortex supercurrent vanishes at the core, peaks near a coherence length,
+    circulates with a single sign, and decays outward."""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    xg, Psi, Db, xi = V.solve_vortex2d(0.6, T, om, 'd', Lxi=7, ngrid=31, nbeta=18)
+    jx, jy = V.vortex_current2d(Psi, xg, xi, om, T, 'd', nbeta=18)
+    rho, jphi = V.vortex_current_profile(jx, jy, xg)
+    ipk = np.argmax(np.abs(jphi))
+    assert abs(jphi[0]) < 0.05 * abs(jphi[ipk])    # ~0 at the core
+    assert 0.5 < rho[ipk] / xi < 2.5               # peak near xi
+    s = np.sign(jphi[ipk])
+    assert np.all(jphi[1:] * s > -0.02 * abs(jphi[ipk]))   # single-sign circulation
+    assert abs(jphi[-1]) < abs(jphi[ipk])          # decays outward
+
+
+# --------------------------------------------------------------------------- #
+#  model Fermi surface
+# --------------------------------------------------------------------------- #
+def test_model_fs_basics_and_cylinder_limit():
+    """build_model_fs is normalized (sum nf=1), the isotropic FS has |v_F|=const, and
+    its bulk gap matches the cylinder."""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    fi = E.build_model_fs('iso', 120)
+    assert abs(fi['nf'].sum() - 1.0) < 1e-12
+    assert fi['vabs'].std() / fi['vabs'].mean() < 1e-6     # |v_F| isotropic
+    D_fs = E.bulk_gap_fs(0.6, T, om, fi, 's')
+    wf, phi = _cyl(gap_sym='s')
+    D_cyl = E.solve_gap(T, wf, phi, om, 0.0, 1e8, 0.6)
+    assert abs(D_fs - D_cyl) / D_cyl < 0.02
+
+
+def test_wannier_fs_matches_model_tb():
+    """The real Wannier FS of the 1-orbital square lattice (inputs/square.hop) matches
+    the analytic 'tb' model FS: same velocity convention, C4 isotropy, FS shape, and
+    (decisively) the same d-wave bulk gap."""
+    import libs.plibs as p
+    hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       'inputs', 'square.hop')
+    if not os.path.exists(hop):
+        return                                          # skip if the input is absent
+    rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
+    avec = np.eye(3)
+    mu = -1.0
+    fw = E.build_wannier_fs(rvec, ham_r, [], avec, mu, mesh=240)
+    fm = E.build_model_fs('tb', Nth=240, mu=mu, params=1.0)
+    assert abs(fw['nf'].sum() - 1.0) < 1e-12
+    # velocity convention: square analytic v_cart = (2 sin kx, 2 sin ky)
+    i = len(fw['kx']) // 5
+    assert abs(fw['vx'][i] - 2 * np.sin(fw['kx'][i])) < 1e-6
+    assert abs(fw['vy'][i] - 2 * np.sin(fw['ky'][i])) < 1e-6
+    # FS shape cos kx + cos ky = 0.5, and C4 isotropy
+    res = np.cos(fw['kx']) + np.cos(fw['ky'])
+    assert abs(res.mean() - 0.5) < 1e-3 and res.std() < 1e-3
+    vx2 = (fw['nf'] * fw['vhx'] ** 2).sum()
+    vy2 = (fw['nf'] * fw['vhy'] ** 2).sum()
+    assert abs(vx2 / vy2 - 1.0) < 1e-3
+    # decisive: same d-wave bulk gap as the model FS (same band physics)
+    om = E.matsubara(8e-4, 0.5)
+    Dw = E.bulk_gap_fs(0.6, 8e-4, om, fw, 'd')
+    Dm = E.bulk_gap_fs(0.6, 8e-4, om, fm, 'd')
+    assert abs(Dw - Dm) / Dm < 0.01
+
+
+def test_multiband_gap_projection():
+    """Low-energy projection of an orbital-basis pair potential onto the FS bands
+    (Nagai-Nakamura JPSJ 85, 074707 (2016), Eq. 43): build_wannier_fs stores the band
+    eigenvectors u(k_F), u(-k_F) and project_gap_to_band forms phi=u^dag Delta_orb u*(-k).
+    On a 2-orbital model: an intra-orbital equal pairing (Delta=I) gives a band-uniform
+    gap; an orbital-selective pairing (diag(1,0)) makes the band gap track the orbital
+    weight; diag(1,-1) yields an s+-like sign change driven by the orbital character.
+    The projected gap then feeds the quasiclassical solvers (bulk_gap_fs)."""
+    import libs.plibs as p
+    hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       'inputs', 'hop2.input')
+    if not os.path.exists(hop):
+        return
+    rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
+    assert Norb == 2
+    fw = E.build_wannier_fs(rvec, ham_r, [], np.eye(3), 0.0, mesh=140)
+    assert fw['evec'].shape == (len(fw['kx']), 2)            # (a) eigenvectors stored
+    assert np.allclose((np.abs(fw['evec']) ** 2).sum(1), 1.0)   # orbital-weight normalized
+    # (b) Delta = I  -> band-uniform gap (no orbital selectivity)
+    E.project_gap_to_band(fw, np.eye(2))
+    assert fw['phi'].real.std() / abs(fw['phi'].real.mean()) < 1e-6
+    # (b) Delta = diag(1,0) -> band gap == orbital-0 weight |u_0|^2
+    E.project_gap_to_band(fw, np.diag([1.0, 0.0]), normalize=False)
+    assert np.allclose(fw['phi'].real, np.abs(fw['evec'][:, 0]) ** 2, atol=1e-6)
+    w0 = np.abs(fw['evec'][:, 0]) ** 2
+    assert w0.max() - w0.min() > 0.3                          # genuinely orbital-resolved
+    # (b) Delta = diag(1,-1) -> s+- sign change from the orbital character
+    E.project_gap_to_band(fw, np.diag([1.0, -1.0]), normalize=False)
+    assert fw['phi'].real.min() < 0 < fw['phi'].real.max()
+    # the projected gap drives the solver: build with gap_orbital=I gives a finite Tc gap
+    fwp = E.build_wannier_fs(rvec, ham_r, [], np.eye(3), 0.0, mesh=140, gap_orbital=np.eye(2))
+    D = E.bulk_gap_fs(0.6, 8e-4, E.matsubara(8e-4, 0.5), fwp, 0)
+    assert D > 0
+
+
+def test_gap_orbital_from_wannier(tmp_path):
+    """The bridge that uses an RPA/FLEX gap exported as Wannier "hopping" (output_gap_wannier)
+    as the quasiclassical pairing form factor: gap_orbital_from_wannier loads Delta(R,iw)
+    and returns the inverse-FT callable kfrac->Delta_orb(k), which build_wannier_fs projects
+    onto the FS bands (Nagai Eq 43).  Validated on a synthetic 1-orbital d-wave gap
+    Delta(k)=cos2pi kx - cos2pi ky exported as Delta(R), recovering exactly that on the
+    real square FS; n_avg averages consecutive Matsubara slices."""
+    import libs.plibs as p
+    # 1-orbital d-wave gap Delta(k)=cos2pi kx - cos2pi ky  ->  Delta(R) at (+-1,0),(0,+-1)
+    rvec = np.array([[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]])
+    gap = np.zeros((1, 1, 2, 4), dtype=complex)
+    gap[0, 0, 0, :] = [0.5, 0.5, -0.5, -0.5]                  # iw_0 slice: d-wave
+    gap[0, 0, 1, :] = [0.5, 0.5, 0.5, 0.5]                    # iw_1 slice: extended-s (cos+cos)
+    base = str(tmp_path / 'gap_wannier')
+    np.savez(base, gap=gap, rvec=rvec, iw=np.array([0.1, 0.3]), temp=1e-3)
+    g0 = p.gap_orbital_from_wannier(base)                     # iw_0 (d-wave)
+    assert abs(g0(np.array([0.25, 0.0, 0.0]))[0, 0] - (np.cos(2 * np.pi * 0.25) - 1.0)) < 1e-12
+    assert abs(g0(np.array([0.0, 0.25, 0.0]))[0, 0] - (1.0 - np.cos(2 * np.pi * 0.25))) < 1e-12
+    # n_avg=2 averages the d-wave and extended-s slices -> (cos2pi kx - cos2pi ky + cos+cos)/2 = cos2pi kx
+    g_avg = p.gap_orbital_from_wannier(base, iw_index=0, n_avg=2)
+    assert abs(g_avg(np.array([0.1, 0.3, 0.0]))[0, 0] - np.cos(2 * np.pi * 0.1)) < 1e-12
+    # end-to-end on the real square FS: projected fs['phi'] == the analytic d-wave shape
+    hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       'inputs', 'square.hop')
+    if not os.path.exists(hop):
+        return
+    rv, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
+    fw = E.build_wannier_fs(rv, ham_r, [], np.eye(3), -1.0, mesh=200, gap_orbital=g0)
+    assert abs((fw['nf'] * np.abs(fw['phi']) ** 2).sum() - 1.0) < 1e-9   # normalized
+    assert fw['phi'].real.min() < -0.3 and fw['phi'].real.max() > 0.3    # d-wave sign change
+    fd = E.build_wannier_fs(rv, ham_r, [], np.eye(3), -1.0, mesh=200, gap_sym=1)
+    assert abs(np.corrcoef(fw['phi'].real, fd['phi'].real)[0, 1]) > 0.99 # matches analytic d
+
+
+def test_gap_color_3d():
+    """gap_color_3d (used by main.py's FERMI_3D, color_option=GAP) must reproduce the
+    EXACT same phi(k) as the Eilenberger FS pipeline at arbitrary k-points, for both the
+    phenomenological gap_sym/delta0 path and the gap_orbital (Nagai projection) path.  On
+    the 1-orbital square model the eigenvector is gauge-trivial (u(k)=1), so phi(k) should
+    equal the bare form factor exactly."""
+    import libs.plibs as p
+    hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       'inputs', 'square.hop')
+    if not os.path.exists(hop):
+        return
+    rv, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
+    centers = [np.array([[0.1, 0.2, 0.0], [0.3, -0.1, 0.0], [-0.2, 0.4, 0.0]])]
+    blist = [0]
+    # gap_sym (d-wave) path == gap_symms directly
+    c_sym = p.gap_color_3d(centers, blist, rv, ham_r, [], gap_sym=1)
+    expect = np.cos(2 * np.pi * centers[0][:, 0]) - np.cos(2 * np.pi * centers[0][:, 1])
+    assert np.allclose(c_sym[0], expect, atol=1e-12)
+    # delta0 rescales the s-wave (gap_sym=0) row uniformly
+    c_delta = p.gap_color_3d(centers, blist, rv, ham_r, [], gap_sym=0, delta0=[2.5])
+    assert np.allclose(c_delta[0], 2.5, atol=1e-12)
+    # gap_orbital callable (1x1 matrix) path: u(k)=u(-k)=1 for a single orbital, so
+    # phi(k) == the bare orbital gap, matching the same d-wave form factor as gap_sym=1
+    gorb = lambda kfrac: np.array([[np.cos(2 * np.pi * kfrac[0]) - np.cos(2 * np.pi * kfrac[1])]])
+    c_orb = p.gap_color_3d(centers, blist, rv, ham_r, [], gap_orbital=gorb)
+    assert np.allclose(c_orb[0], expect, atol=1e-12)
+
+
+def test_gap_sym_index_and_delta0():
+    """The gap symmetry can be set by the pyrpa integer gap_sym index (lattice
+    harmonics via gap_symms, baked into the FS), and delta0 sets per-band gap
+    amplitudes and signs (s+- = opposite signs on different sheets)."""
+    import libs.plibs as p
+    hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       'inputs', 'square.hop')
+    if not os.path.exists(hop):
+        return
+    rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
+    avec = np.eye(3)
+    mu = -1.0
+    fs_s = E.build_wannier_fs(rvec, ham_r, [], avec, mu, mesh=200, gap_sym=0)   # s
+    fs_d = E.build_wannier_fs(rvec, ham_r, [], avec, mu, mesh=200, gap_sym=1)   # dx2-y2
+    # phi is baked, normalized to <|phi|^2>=1, and returned by fs_form_factor
+    assert 'phi' in fs_s
+    assert abs((fs_s['nf'] * abs(fs_s['phi']) ** 2).sum() - 1.0) < 1e-9
+    assert np.allclose(E.fs_form_factor(fs_s, 0), fs_s['phi'])
+    assert fs_s['phi'].real.min() > 0.5                       # s: nodeless (one sign)
+    assert fs_d['phi'].real.min() < -0.3 and fs_d['phi'].real.max() > 0.3   # d: sign-changing
+    # delta0 per-band ratio + sign on a synthetic two-band FS
+    n = len(fs_s['kx'])
+    fs2 = E.build_wannier_fs(rvec, ham_r, [], avec, mu, mesh=160)
+    m = len(fs2['kx'])
+    fs2['band'] = np.where(np.arange(m) < m // 2, 0, 1)
+    E.set_fs_gap(fs2, 0, delta0=[1.0, -2.0])
+    b0 = fs2['phi'].real[fs2['band'] == 0]
+    b1 = fs2['phi'].real[fs2['band'] == 1]
+    assert b0.mean() > 0 and b1.mean() < 0                    # opposite signs (s+-)
+    assert abs(abs(b1.mean()) / abs(b0.mean()) - 2.0) < 0.05  # |delta0| ratio 2
+    assert abs((fs2['nf'] * abs(fs2['phi']) ** 2).sum() - 1.0) < 1e-9
+
+
+def test_wannier_surface_zebs():
+    """The specular surface works on a real Wannier FS (general-FS reflection): on the
+    square lattice [100] surface the sign-changing dxy gap is suppressed with a
+    zero-energy bound state, while the even d_{x^2-y^2} gap stays flat with none."""
+    import libs.plibs as p
+    hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       'inputs', 'square.hop')
+    if not os.path.exists(hop):
+        return
+    rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
+    avec = np.eye(3)
+    mu = -1.0
+    om = E.matsubara(5e-4, 0.5)
+    res = {}
+    for gs in (3, 1):                                 # dxy (sign-changing), d (even)
+        fw = E.build_wannier_fs(rvec, ham_r, [], avec, mu, mesh=100, gap_sym=gs)
+        x, D, Db = S.solve_surface_fs(0.5, 5e-4, om, fw, gs, Lxi=7, nper=6)
+        w = np.linspace(-Db, Db, 31)
+        ld = S.surface_ldos_fs(fw, D, x, w, gs, ix=0, Dbulk=Db)
+        res[gs] = (D[0] / Db, ld[np.argmin(np.abs(w))])
+    assert res[3][0] < 0.1 and res[3][1] > 5.0        # dxy: suppressed + ZEBS
+    assert res[1][0] > 0.8 and res[1][1] < 1.0        # d: flat + no ZEBS
+
+
+def test_spin_vortex_lattice_doppler():
+    """The self-consistent d-vector vortex lattice (field>0, circular cell): converges
+    with the supercurrent Doppler, keeps the core d-vector texture (theta_d ~ 90 deg at
+    the core), and the Doppler modifies the inter-vortex subdominant vs the isolated
+    vortex."""
+    wc, T = 0.2, 1.5e-3
+    om = E.matsubara(T, wc)
+    prof = {}
+    for field in (0.0, 0.5):
+        xg, A, Db, xi = SP.solve_vortex2d_dvector((0.8, 0.8 * 0.95), T, om, windings=(1, 0),
+                                                  Lxi=7, ngrid=23, nbeta=10, itemax=25, field=field)
+        ic = len(xg) // 2
+        Dref = np.max(np.abs(Db))
+        apx = np.abs(A[0, ic:, ic]) / Dref
+        apz = np.abs(A[1, ic:, ic]) / Dref
+        thc = np.degrees(np.arctan2(apz[0], max(apx[0], 1e-12)))
+        assert apx[0] < 0.1                            # dominant pair-broken in the core
+        assert thc > 75.0                              # d-vector ~ pure subdominant at core
+        prof[field] = apz
+    assert np.abs(prof[0.5] - prof[0.0]).max() > 1e-4   # the supercurrent Doppler modifies the gap
+
+
+def test_wannier_dvector_vortex():
+    """The self-consistent d-vector vortex runs on a real Wannier FS (FS directions,
+    Fermi velocities and nf from the band, downsampled to nbeta directions): the
+    dominant component is pair-broken in the core and the d-vector tilts to ~90 deg."""
+    import libs.plibs as p
+    hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       'inputs', 'square.hop')
+    if not os.path.exists(hop):
+        return
+    rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
+    fw = E.build_wannier_fs(rvec, ham_r, [], np.eye(3), -1.0, mesh=120)   # FS geometry only
+    om = E.matsubara(1.5e-3, 0.2)
+    xg, A, Db, xi = SP.solve_vortex2d_dvector((0.8, 0.8 * 0.95), 1.5e-3, om, windings=(1, 0),
+                                              Lxi=7, ngrid=23, nbeta=16, itemax=22, fs=fw)
+    ic = len(xg) // 2
+    apx = np.abs(A[0, ic:, ic]); apz = np.abs(A[1, ic:, ic])
+    Dref = np.max(np.abs(Db))
+    assert apx[0] / Dref < 0.1                          # dominant pair-broken in the core
+    assert np.degrees(np.arctan2(apz[0], max(apx[0], 1e-12))) > 75.0   # d ~ pure subdominant at core
+
+
+def test_vortex_maxwell_selfA():
+    """The self-consistent finite-kappa vector potential (Maxwell back-reaction): the
+    A_theta(rho) loop converges; the enclosed-flux edge value is fixed (A_theta(Rc) ~
+    the extreme type-II value); and as kappa->infinity it reduces to extreme type-II
+    (same core DOS)."""
+    rg, aphi, n0_sc, n0_ex = V.calc_vortex_maxwell(0.6, 8e-4, 0.5, gap_sym='d', field=0.3,
+                                                   kappa=80.0, ngrid=27, nbeta=14, itemax_a=3)
+    Rc = rg[-1]
+    a_edge_ext = rg[-1] / (2.0 * Rc ** 2)
+    assert abs(aphi[-1] - a_edge_ext) / a_edge_ext < 0.1   # edge A fixed by enclosed flux
+    assert abs(n0_sc - n0_ex) / n0_ex < 0.05               # kappa->inf reduces to extreme type-II
+
+
+def test_chiral_pip_gap_sym_minus3():
+    """gap_sym = -3 is the chiral p+ip state: a complex form factor (px + i py) that
+    is fully gapped (|phi| > 0 everywhere)."""
+    from libs.plibs._response import gap_symms
+    kl = np.array([[0.25, 0.0, 0.0], [0.0, 0.25, 0.0]])
+    row = gap_symms(kl, 1, -3)[0]
+    assert np.iscomplexobj(row)
+    assert abs(row[0] - 2.0) < 1e-9 and abs(row[1] - 2.0j) < 1e-9   # px + i py
+    import libs.plibs as p
+    hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       'inputs', 'square.hop')
+    if not os.path.exists(hop):
+        return
+    rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
+    fw = E.build_wannier_fs(rvec, ham_r, [], np.eye(3), -1.0, mesh=200, gap_sym=-3)
+    assert np.iscomplexobj(fw['phi'])
+    assert abs((fw['nf'] * abs(fw['phi']) ** 2).sum() - 1.0) < 1e-9
+    assert abs(fw['phi']).min() > 0.3                 # chiral: fully gapped (no nodes)
+
+
+# --------------------------------------------------------------------------- #
+#  spin: Pauli limiting vs triplet immunity
+# --------------------------------------------------------------------------- #
+def test_pauli_singlet_vs_triplet_immunity():
+    """A Zeeman field suppresses the singlet gap (Pauli) but not a triplet with the
+    d-vector perpendicular to the field (equal-spin pairing)."""
+    wc, T = 0.5, 6e-4
+    om = E.matsubara(T, wc)
+    wf, phi = _cyl(Nb=64, gap_sym='s')
+    D0 = SP.solve_gap_spin(0.6, T, om, wf, phi, 'singlet', h=0.0, damp_init=2e-3)
+    h = 0.7 * D0                               # below the Chandrasekhar-Clogston jump
+    Ds = SP.solve_gap_spin(0.6, T, om, wf, phi, 'singlet', h=h, damp_init=D0)
+    Dt = SP.solve_gap_spin(0.6, T, om, wf, phi, 'triplet', dvec=(1, 0, 0), h=h, damp_init=D0)
+    assert Ds / D0 < 0.98                      # singlet Pauli-suppressed
+    assert Dt / D0 > 0.99                      # triplet d_|_h immune
+    assert Dt / D0 > Ds / D0 + 0.02            # triplet clearly less suppressed
+
+
+# --------------------------------------------------------------------------- #
+#  d-vector textures
+# --------------------------------------------------------------------------- #
+def test_dvector_texture_surface():
+    """At a surface the sign-changing dominant component is pair-broken and the
+    subdominant rotates the d-vector (theta_d larger at the surface than in bulk)."""
+    wc, T = 0.2, 1.5e-3
+    om = E.matsubara(T, wc)
+    x, D, Db = SP.solve_surface_dvector((0.8, 0.8 * 0.9), T, om, Lxi=7, nper=6, Nbeta=10, itemax=40)
+    th = lambda j: np.degrees(np.arctan2(abs(D[1, j]), abs(D[0, j])))
+    assert th(0) > th(-1) + 20.0               # d-vector rotates toward the surface
+    assert th(0) > 70.0                         # nearly pure subdominant at the surface
+
+
+def test_dvector_texture_vortex_core():
+    """Around a vortex the winding dominant vanishes in the core where the
+    core-localized subdominant survives; the d-vector tilts to ~90 deg at the core."""
+    wc, T = 0.2, 1.5e-3
+    om = E.matsubara(T, wc)
+    xg, A, Db, xi = SP.solve_vortex2d_dvector((0.8, 0.8 * 0.95), T, om, windings=(1, 0),
+                                              Lxi=7, ngrid=25, nbeta=10, itemax=30)
+    ic = len(xg) // 2
+    th = lambda j: np.degrees(np.arctan2(abs(A[1, ic + j, ic]), abs(A[0, ic + j, ic])))
+    assert abs(A[0, ic, ic]) / np.max(np.abs(Db)) < 0.1    # dominant ->0 in the core
+    assert th(0) > 75.0                                     # d ~ pure subdominant at core
+    assert th(0) > th(len(xg) // 2 - 1) + 20.0             # texture: core vs edge
+
+
+def test_scalar_vortex_rejects_chiral():
+    """The scalar self-consistent vortex solvers project onto a REAL amplitude
+    ansatz, which is exact only for real form factors; a chiral phi (p+ip, ...)
+    must be rejected (the d-vector solvers handle multi-component complex
+    amplitudes), while real odd-parity harmonics (px/py) stay allowed."""
+    T = 2e-3
+    om = E.matsubara(T, 0.2)
+    for gs in ('p+ip', 'p-ip', -3):
+        for call in (lambda: V.solve_vortex2d(0.6, T, om, gap_sym=gs,
+                                              ngrid=9, nbeta=4, itemax=1),
+                     lambda: V.solve_lattice_sc(0.6, T, om, gap_sym=gs,
+                                                field=0.2, Ng=6, nbeta=4, itemax=1)):
+            try:
+                call()
+                raise AssertionError(f"chiral gap_sym={gs!r} must be rejected "
+                                     "by the scalar vortex solvers")
+            except ValueError:
+                pass
+    xg, Psi, Db, xi = V.solve_vortex2d(0.6, T, om, gap_sym='px',
+                                       ngrid=9, nbeta=4, itemax=1)
+    assert np.isfinite(np.abs(Psi)).all()                   # real px still runs
+
+
+# --------------------------------------------------------------------------- #
+#  standalone runner (no pytest required)
+# --------------------------------------------------------------------------- #
+if __name__ == '__main__':
+    import time
+    tests = [v for k, v in sorted(globals().items()) if k.startswith('test_') and callable(v)]
+    npass = 0
+    for t in tests:
+        t0 = time.time()
+        try:
+            t()
+            print(f"  PASS  {t.__name__:42s} ({time.time()-t0:5.1f}s)", flush=True)
+            npass += 1
+        except Exception as e:
+            print(f"  FAIL  {t.__name__:42s} ({time.time()-t0:5.1f}s)  -> {type(e).__name__}: {e}", flush=True)
+    print(f"\n{npass}/{len(tests)} passed")
+    sys.exit(0 if npass == len(tests) else 1)

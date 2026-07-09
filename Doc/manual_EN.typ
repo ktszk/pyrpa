@@ -121,7 +121,7 @@ Draws the Fermi surface in the $k_x$-$k_y$ plane at a specified $k_z$ slice (def
 
 === option=3: 3D Fermi Surface (`FERMI_3D`)
 
-Renders the three-dimensional Fermi surface as a polygon mesh using the Marching Cubes algorithm. The display scale along each axis can be adjusted with `kscale`.
+Renders the three-dimensional Fermi surface as a polygon mesh using the Marching Cubes algorithm. The display scale along each axis can be adjusted with `kscale`. With `color_option=ColorMode.GAP` (3), the surface is colored by $"Re"[phi(bold(k))]$, the *same* pairing form factor that drives the Eilenberger calculations (`gap_sym`/`delta0`, or `eil_gap_orbital`/`eil_gap_file` if set) — a quick way to check the actual gap (sign, nodes, anisotropy) on the real 3D Wannier Fermi surface (all sheets/$k_z$, not just the fixed-$k_z$ cut used by the vortex/surface solvers).
 
 === option=4: Spectral Function (`SPECTRUM`)
 
@@ -199,7 +199,14 @@ Solves the FLEX equations self-consistently to obtain the electron self-energy $
 - `sw_out_self=True`: write the self-energy to file
 - `sw_in_self=True`: load the previous self-energy (`sigma.bin`) as the initial guess
 - `m_diis_num`: DIIS history length (default 5 if undefined)
-- `sw_rescale_flex=True`: dynamically rescale the self-energy so that max$|Sigma| approx U$, useful when Stoner factor is close to 1
+- `sw_rescale_flex=True`: if the Stoner factor $S = max_bold(q) "eig"[chi_0(bold(q), 0) hat(S)]$ reaches 1 during the iteration, uniformly rescale $chi_0(bold(q), i nu_n)$ by $(1 - 10^(-4))\/S$ to avoid the magnetic-instability divergence
+- `sw_chi0_tail=True`: evaluate $chi_0$ with a tail correction (default False; no-SOC path of option=14,15,23).  The bubble is split bilinearly as $chi_0 = "conv"[G] - "conv"[G_0] + chi_0^"ref"$: the slowly decaying $1\/(i omega)$ reference part (the $G_0$ bubble) is evaluated exactly in imaginary time, and only the fast-decaying residual ($G - G_0 tilde 1\/omega^2$) passes through the FFT convolution.  The Matsubara truncation error improves from $O(1\/N_w)$ to $O(1\/N_w^2)$ (validated against the exact Lindhard function: convergence order 1.0 -> 2.0).  The $chi_0$ stage costs about 3x; effective for $N_w gt.eq 64$ (at very small $N_w$ the tau-discretization prefactor of the reference bubble can dominate).  The improved $chi_0$ propagates automatically into $chi_s$/$chi_c$, the FLEX vertex $V_sigma$ and the pairing vertex $V_Delta$.
+
+*Notes on the built-in approximations* (all are deliberate choices made for computational cost and numerical stability):
+
+- The `sw_rescale_flex` rescaling shrinks $chi_0$ uniformly at ALL momenta and frequencies, not just the diverging mode. When the rescaling is triggered (stdout shows `[FLEX] Stoner factor= ... : rescaling chi0`) the self-energy is uniformly weakened as well, so results close to the magnetic instability should be interpreted qualitatively.
+- A static part of the self-energy is subtracted at every iteration (wrapper argument `sub_sigma`; `1`: Hermitian part of $Sigma(bold(k), i omega_0)$, the default; `2`: frequency average; `0`: no subtraction). This is a prescription that absorbs the static band shift into the chemical-potential adjustment and stabilizes the Fermi surface; it is NOT a strict Hartree--Fock-only subtraction (the value at $i omega_0$ also contains low-energy dynamical components). Use `sub_sigma=0` if absolute band shifts are of interest.
+- The Matsubara-frequency convolutions ($chi_0$, $Sigma$, Eliashberg kernel) are circular FFT convolutions of length $2 N_w$ with a sharp cutoff and, by default, no high-frequency tail correction (only the farthest point of $V$ is approximated by the bare vertex). The effective cutoff $omega_c = (2 N_w - 1) pi T$ shrinks proportionally to $T$, so a temperature scan at fixed $N_w$ carries an $O(1\/N_w)$ systematic drift. Choose $N_w$ so that $omega_c$ safely exceeds the bandwidth and `U` even at the lowest temperature. `sw_chi0_tail=True` improves the $chi_0$ truncation error to $O(1\/N_w^2)$. The tail error of the $Sigma$ convolution itself is dominated by an $omega$-independent constant (an HF-like static shift) that is absorbed by `sub_sigma`/the chemical-potential adjustment, and the Eliashberg-kernel tail error only enters the uniform ($s$-wave) component of the gap and vanishes by symmetry for sign-changing gaps — hence no separate corrections are implemented for those ($V_Delta$ and $V_sigma$ still benefit through the corrected $chi_0$).
 
 === option=15: Linearized Eliashberg Equation (`LIN_ELIASHBERG`)
 
@@ -267,6 +274,39 @@ The initial gap is now generated automatically inside the solver — there is no
 - Amplitude-direction Newton acceleration speeds up convergence of the gap magnitude (see the `sw_amp_newton` comments in `libs/src/ffeliash.f90`)
 - See `libs/src/ffeliash.f90` for implementation details
 
+== Quasiclassical Eilenberger Modes (option=24,25,26)
+
+Options 24–26 solve the *quasiclassical Eilenberger equations* of superconductivity — the energy-integrated Gor'kov equations valid when the gap and disorder vary slowly on the scale of the Fermi wavelength ($Delta, T_c, hbar/tau << E_F$). This is the natural framework for $T_c$, the density of states, surface Andreev bound states, and the vortex/vortex-lattice state. The unknowns are the quasiclassical propagators $g(bold(k)_F, bold(r), omega_n)$ (normal) and $f$ (anomalous), parametrized by a single *Riccati amplitude* $a$ ($f = 2a\/(1+a a^*)$, $g = (1-a a^*)\/(1+a a^*)$), which is integrated along straight Fermi-velocity trajectories with a numerically stable Fortran kernel (`riccati_chords`; the $2 times 2$ spin version `matrix_riccati_chords` for the d-vector). The pairing is separable, $Delta(bold(k)_F, bold(r)) = Delta(bold(r)) phi(bold(k)_F)$, with the form factor $phi$ fixed by `gap_sym` and normalized to $⟨ |phi|^2 ⟩_"FS" = 1$, so the coupling `eil_coupling` is the dimensionless $lambda$.
+
+The Fermi surface is shared by all three modes via `eil_fs_kind`: `None` is an isotropic cylinder (analytic angular average), `'iso'`/`'ellipse'`/`'tb'` are model FSs built from `eil_fs_params`, and `'wannier'` builds the real FS and Fermi velocities from the loaded Wannier band (the gap symmetry / multiband structure then comes from `gap_sym`, `delta0`, or `eil_gap_orbital`). The temperature is the global `tempK`/`temp`, and the gap symmetry is the global `gap_sym` (the model-FS routines map the integer index to its continuum harmonic, with $2$ ($s^plus.minus$) $-> s$).
+
+=== option=24: Homogeneous Eilenberger (`EILENBERGER`)
+
+The bulk (spatially uniform) solver. With all `eil_*` sub-mode flags off it self-consistently solves the gap $Delta(T)$ and reports $T_c$; `eil_find_tc=True` brackets $T_c$ by bisection. The sub-mode flags (mutually exclusive) select:
+
+- `eil_imp_sweep=True`: sweep the non-magnetic impurity rate $Gamma$ (`eil_imp_list`) and write $T_c(Gamma)$ to `eilenberger_tc.dat` — the Abrikosov–Gor'kov pair-breaking curve (no suppression for an isotropic $s$-wave by Anderson's theorem; strong suppression for sign-changing gaps). `eil_imp_c` interpolates Born ($-> infinity$) to unitary ($-> 0$) scattering.
+- `eil_pauli=True`: Zeeman (Maki) Pauli-limiting sweep — the singlet gap $Delta(h)$, the first-order spinodal/Chandrasekhar–Clogston transition, and the Zeeman-split DOS.
+- `eil_spin=True`: the spin-resolved ($2 times 2$) Zeeman response, contrasting a singlet/parallel d-vector ($bold(d) parallel bold(h)$, Pauli-limited) with a perpendicular d-vector ($bold(d) perp bold(h)$, Zeeman-immune).
+- `eil_lambda=True`: the superfluid density $rho_s(T)$ and penetration depth $lambda(T)$ (exponentially flat for a full gap, linear-in-$T$ for a nodal gap) → `penetration_depth.dat`.
+- `eil_fs=True`: the same on a model FS with Fermi velocities, giving the anisotropic $lambda_(x x), lambda_(y y)$ → `fs_penetration.dat`.
+- `eil_free_energy=True`: the condensation free energy $(Omega_s - Omega_n)\/N_0$ vs $T$ (coupling-constant integration) → `free_energy.dat`.
+
+=== option=25: Surface Andreev Bound States (`EILENBERGER_SURFACE`)
+
+Solves the self-consistent gap profile $Delta(x)$ near a specular surface by Riccati integration along reflected trajectories, and (with `eil_ldos=True`) the surface LDOS. The surface orientation is `eil_surf_beta` (for $d$-wave, $0 = [100]$ has no bound state; $pi\/4 = [110]$ produces the zero-energy Andreev bound state, the ZEBS, from the sign change felt on reflection). A Zeeman field `eil_zeeman` splits the ZEBS into $plus.minus h$. With `eil_surf_dvector=True` it instead solves the self-consistent triplet *d-vector texture* at the surface (a dominant + a subdominant component via the spin-matrix Riccati, coupling ratio `eil_dvec_subratio`).
+
+=== option=26: Vortex and Vortex Lattice (`EILENBERGER_VORTEX`)
+
+The inhomogeneous solver around a magnetic vortex. `eil_field` $= B\/H_(c 2)$ selects the geometry: `0` is an isolated vortex in a large circular cell (radius `eil_vort_lxi` in units of $xi$, grid `eil_vort_ngrid`); `>0` is a circular-cell vortex lattice with the Doppler shift. It writes the gap profile $Delta(rho)$ and (with `eil_ldos`) the zero-energy core LDOS (the Caroli–de Gennes–Matricon bound state; the Volovik $sqrt(B)$ DOS in the lattice). A Zeeman field `eil_zeeman` spin-splits the core states. Sub-modes:
+
+- `eil_vort_current=True`: the circulating supercurrent $j_phi(rho)$ → `vortex_current.dat`.
+- `eil_vort_field=True` / `eil_vort_maxwell=True`: the self-consistent finite-$kappa$ magnetic field $B(rho)$ / vector potential $bold(A)(bold(r))$ (Maxwell back-reaction; uses `eil_kappa`).
+- `eil_vort_lattice_sc=True` with `eil_field_list`: the *true periodic* magnetic-Bloch vortex lattice (formulation A, extreme type-II): a complex order parameter $Psi(bold(r))$ with a real node at every core and the full Abrikosov supercurrent phase, swept over $B\/H_(c 2)$ to give $⟨ N(0) ⟩ (B)$ ($d$-wave $tilde sqrt(B)$ Volovik). `eil_lattice` is `'square'` or `'triangular'`, `eil_nvortex` sets the flux quanta per cell, finite `eil_kappa` adds London screening (and `eil_vort_scA=True` makes $bold(A)$ fully self-consistent from the quasiclassical current $bold(j)_s = ⟨ bold(v)_F "Im" g ⟩$, the `je` `A_renew` scheme).
+- `eil_vort_dvector=True`: the self-consistent triplet d-vector vortex/lattice texture (dominant winding + core-localized subdominant; spin-matrix Riccati).
+- `eil_gap_orbital`: an orbital-basis pair potential whose *low-energy projection* onto the FS bands sets the gap (Nagai–Nakamura multiband Eilenberger, JPSJ *85*, 074707 (2016), Eq. 43; needs a Wannier FS), superseding `gap_sym`/`delta0`.
+
+The companion driver `calc_vortex_lattice_symmetry` (called from the library) minimizes the Ichioka–Machida lattice free energy over the cell apex angle and the gap-vs-lattice orientation $theta_0$ to determine the *stable vortex-lattice symmetry* and its field evolution (e.g. the $d$-wave triangular → square transition near $H_(c 2)$). When a Wannier FS is supplied, $theta_0$ rigidly rotates the whole crystal (FS + gap), so the Fermi-velocity anisotropy also enters the selection.
+
 = Color Plot Settings (`color_option`)
 
 For option=0, 2, and 3, each point on the band or Fermi surface can be colored according to a physical quantity.
@@ -277,6 +317,7 @@ For option=0, 2, and 3, each point on the band or Fermi surface can be colored a
   [0], [No color (black)],
   [1], [Orbital weights specified by `olist` are mapped to RGB (red/green/blue)],
   [2], [Group velocity magnitude $|bold(v)(bold(k))|$ is shown as a color gradient],
+  [3], [(option=3, `FERMI_3D`, only) the Eilenberger pairing gap $"Re"[phi(bold(k))]$ — from `gap_sym`/`delta0`, or the Nagai–Nakamura projection of `eil_gap_orbital`/`eil_gap_file` if set],
 )
 
 For `color_option=1`, specify orbital indices in `olist` as `[R component, G component, B component]`. To assign multiple orbitals to the same color, use a nested list. Example:
@@ -304,7 +345,7 @@ This section explains all parameters in the upper part of `main.py`, including t
 
 - `Nx, Ny, Nz` (integer): Number of $bold(k)$-point mesh divisions in the first Brillouin zone along $x$, $y$, $z$. Used for 3D $bold(k)$-space integrations and FFT-based convolutions (FLEX, Eliashberg, chi). For 2D systems, set `Nz=1`. Powers of 2 (32, 64, ...) are preferred for FFT efficiency. Memory consumption scales as $tilde.equiv N_x N_y N_z dot N_w dot N_"orb"^2$.
 
-- `Nw` (integer): Number of Matsubara frequencies for FLEX/Eliashberg/SC-chi calculations (option=12,13,14,15,16,23), or number of real-frequency points for DOS/spectral function calculations (option=1,4, etc.). Matsubara frequencies are $omega_n = (2n+1) pi T$ for $n = 0, 1, \ldots, N_w - 1$. Lower temperatures require larger $N_w$ (typical: 256–1024).
+- `Nw` (integer): Number of Matsubara frequencies for FLEX/Eliashberg/SC-chi calculations (option=12,13,14,15,16,23), or number of real-frequency points for DOS/spectral function calculations (option=1,4, etc.). Matsubara frequencies are $omega_n = (2n+1) pi T$ for $n = 0, 1, \ldots, N_w - 1$. Lower temperatures require larger $N_w$ (typical: 256–1024). The effective frequency cutoff $omega_c = (2 N_w - 1) pi T$ shrinks proportionally to $T$, and the Matsubara convolutions use a sharp cutoff (no tail correction), so a temperature scan at fixed `Nw` accumulates a systematic drift; choose `Nw` so that $omega_c$ safely exceeds the bandwidth and `U` at the lowest temperature (see also the notes under option=14).
 
 - `kmesh` (integer): Number of $bold(k)$ points along the symmetry line for band and spectral function plots. Larger values yield smoother plots (200–500 is typical).
 
@@ -399,9 +440,58 @@ Specifies the symmetry of the initial gap function when solving the Eliashberg e
 
 - `sw_check_only` (bool): Used only by option=23 (nonlinear Eliashberg). If `True`, the routine stops right after the internal linearized-Eliashberg solve (reporting the Stoner factor $S$ and eigenvalue $lambda_"eliash"$) without running the nonlinear loop — handy for quickly bracketing $T_c$ via a temperature scan. Regardless of this flag, the nonlinear loop is also skipped automatically whenever $S >= 1$ or $lambda_"eliash" < 1$.
 
-- `sw_rescale_flex` (bool): For FLEX (option=14), dynamically rescale the self-energy when max$|Sigma|$ approaches `U` to prevent divergence. Useful when the Stoner factor is close to 1.
+- `sw_rescale_flex` (bool): For FLEX (option=14), uniformly rescale $chi_0$ by $(1-10^(-4))\/S$ whenever the Stoner factor $S$ reaches 1 during the iteration, preventing the magnetic-instability divergence. Useful when the Stoner factor is close to 1, but note that this regularization modifies $chi_0$ at ALL $(bold(q), i nu_n)$ uniformly; results obtained with active rescaling should be treated as qualitative near the magnetic instability (see the notes under option=14).
+
+- `sw_chi0_tail` (bool): For option=14,15,23 (no-SOC path), evaluate $chi_0$ with the tail-corrected convolution (default False). The Matsubara truncation error improves from $O(1\/N_w)$ to $O(1\/N_w^2)$, so a smaller `Nw` reaches the same accuracy (the $chi_0$ stage costs about 3x; effective for $N_w gt.eq 64$). See the notes under option=14.
 
 - `sw_dec_axis` (bool): If `True`, lattice vectors are decomposed appropriately to set up the reciprocal lattice vectors.
+
+=== Eilenberger Parameters (option=24,25,26)
+
+These drive the quasiclassical Eilenberger solvers. The temperature is the global `tempK`/`temp` and the gap symmetry is the global `gap_sym`.
+
+*Common (all three modes):*
+
+- `eil_coupling` (float): the dimensionless separable pairing coupling $lambda$ (with $⟨ |phi|^2 ⟩_"FS" = 1$). Larger $lambda$ → higher $T_c$.
+- `eil_wc` (float, unit: eV): the fixed Matsubara cutoff energy, which sets the pairing scale / $T_c$.
+- `eil_fs_kind` (`None`/`'iso'`/`'ellipse'`/`'tb'`/`'wannier'`): the Fermi surface. `None` = isotropic cylinder (the homogeneous penetration calc falls back to `'ellipse'`); `'iso'`/`'ellipse'`/`'tb'` = model FS from `eil_fs_params`; `'wannier'` = the real FS + Fermi velocities of the loaded band (gap symmetry/multiband from `gap_sym`, `delta0`, `eil_gap_orbital`).
+- `eil_fs_params` (tuple): model-FS parameters — ellipse masses $(m_x, m_y)$ or the `tb` hopping.
+- `eil_imp_gamma` (float, unit: eV): the non-magnetic impurity scattering rate $Gamma$ ($0$ = clean).
+- `eil_imp_c` (float): the T-matrix $cot delta_0$ — large = Born limit, $0$ = unitary limit.
+- `eil_fs_width` (float, unit: eV): the Gaussian Fermi-surface broadening.
+- `eil_zeeman` (float, unit: eV): the Zeeman (Maki) field for the LDOS (surface: splits the $d_[110]$ ZEBS into $plus.minus h$; vortex: spin-splits the core states).
+
+*Homogeneous (option=24):*
+
+- `eil_method` (`'normalization'`/`'riccati'`): the $(g, f)$ route — `'normalization'` is fast; `'riccati'` matches the inhomogeneous kernel.
+- `eil_find_tc` (bool): bisect for $T_c$ at the current impurity setting.
+- `eil_imp_sweep` (bool), `eil_imp_list` (array): sweep $Gamma$ over `eil_imp_list` and write $T_c(Gamma)$ to `eilenberger_tc.dat`.
+- `eil_pauli`, `eil_spin`, `eil_lambda`, `eil_fs`, `eil_free_energy` (bool): the mutually-exclusive sub-modes described under option=24 above.
+
+*Surface (option=25):*
+
+- `eil_surf_beta` (float, unit: rad): the surface orientation — $0 = [100]$, $pi\/4 approx 0.785 = [110]$ (the $d$-wave ZEBS).
+- `eil_surf_dvector` (bool): self-consistent triplet d-vector surface texture.
+- `eil_dvec_subratio` (float): the subdominant/dominant coupling ratio for the d-vector texture ($tilde 0.85$ is the bulk threshold).
+- `eil_ldos` (bool): also compute the real-frequency surface/core LDOS.
+
+*Vortex / vortex lattice (option=26):*
+
+- `eil_field` (float): $B\/H_(c 2)$ — $0$ = isolated vortex, $>0$ = circular-cell lattice with the Doppler shift.
+- `eil_field_list` (list): the $B\/H_(c 2)$ values to sweep on the *true periodic* lattice (e.g. `[0.04,0.08,0.16,0.32]`); `None` = single field.
+- `eil_lattice` (`'square'`/`'triangular'`): the periodic-lattice geometry.
+- `eil_kappa` (float): the GL parameter $kappa = lambda\/xi$ — large ($gt.eq 10^3$) = extreme type-II (no screening); finite = London screening / Maxwell back-reaction.
+- `eil_nvortex` (int): flux quanta per computational cell (supercell).
+- `eil_vort_lxi` (float), `eil_vort_ngrid` (int): the isolated-vortex cell half-width (in $xi$) and 2D grid size.
+- `eil_vort_field`, `eil_vort_maxwell` (bool): the self-consistent finite-$kappa$ field $B(rho)$ / vector potential $bold(A)(bold(r))$.
+- `eil_vort_current` (bool): the circulating supercurrent $j_phi(rho)$.
+- `eil_vort_lattice_sc` (bool): the je-style fully self-consistent true periodic lattice; `eil_vort_scA=True` makes $bold(A)$ self-consistent from the quasiclassical current.
+- `eil_vort_dvector` (bool): the self-consistent triplet d-vector vortex/lattice texture.
+- `eil_vort_tilt` (float, unit: deg): the field tilt from the $c$-axis (quasi-2D: orbital $B_z = B cos theta$, Zeeman $-> h\/cos theta$).
+- `eil_gap_orbital` (`None` / $N_"orb" times N_"orb"$ matrix or callable): an orbital-basis pair potential whose low-energy projection onto the FS bands sets the gap (Nagai–Nakamura, JPSJ *85*, 074707 (2016), Eq. 43; needs a Wannier FS), superseding `gap_sym`/`delta0`.
+- `eil_gap_file` (`None` / string): the base name (no extension) of a self-consistent RPA/FLEX gap exported as a Wannier-real-space "hopping" file by option=15/23 (`LIN_ELIASHBERG`/`NONLIN_ELIASHBERG`) with `sw_out_self=True` (`output_gap_wannier`, e.g. `'gap_wannier'`). When set, $Delta(bold(R), i omega_n)$ is loaded and used as `eil_gap_orbital` — its inverse Fourier transform $Delta_"orb"(bold(k)) = sum_bold(R) e^(i 2 pi bold(k) dot bold(R)) Delta(bold(R))$ is projected onto the FS bands. This is the route to use a *previously computed RPA gap* (e.g. for $"KFe"_2"As"_2$, PRB *84*, 144514) as the vortex pairing form factor. The exporting RPA run and the Eilenberger run must use the *same* Wannier Hamiltonian (same orbital basis, $bold(R)$/$bold(a)$ convention, and ideally $mu$/filling) so that the band eigenvectors and $Delta_"orb"$ share a basis. Supersedes `eil_gap_orbital`/`gap_sym`.
+- `eil_gap_iw` (int): the starting Matsubara index for `eil_gap_file` ($0$ = lowest $i omega_0$). The Eilenberger form factor is static; $i omega_0$ carries the symmetry / sign / node / anisotropy structure most sharply and matches the gap usually quoted on the Fermi surface.
+- `eil_gap_navg` (int): number of consecutive Matsubara slices averaged for `eil_gap_file` ($1$ = single $i omega_("eil_gap_iw")$ slice). $> 1$ smooths slice noise at the cost of slightly diluting the anisotropy (since $Delta(bold(k), i omega_n)$ gets more isotropic with $n$). The absolute scale is irrelevant — the projected $phi$ is renormalized to $⟨ |phi|^2 ⟩ = 1$.
 
 = Typical Calculation Workflows
 
@@ -495,6 +585,72 @@ tempK = 50
 ```
 
 Setting `option = 13` instead computes $chi_s^"SC"(omega)$ at the single $bold(q)$ point given by `at_point`.
+
+= Test Suite
+
+The `tests/` directory contains regression tests for the main numerical kernels and physics benchmarks. Each test file can be run directly as a Python script, so `pytest` is optional.
+
+Before running the tests, the Fortran shared library `libs/libfmod.so` must be compiled. If it is missing, enter the `libs` directory and run `make FC=<compiler> SL=<library>`.
+
+=== How to Run
+
+Run individual test files directly:
+
+```bash
+python tests/test_eilenberger.py
+python tests/test_rpa_flex.py
+```
+
+If `pytest` is available, the whole test directory can also be run with:
+
+```bash
+pytest tests
+```
+
+=== `tests/test_eilenberger.py`
+
+This file tests the quasiclassical Eilenberger / Riccati solvers. It covers homogeneous systems, surfaces, vortices, vortex lattices, model Fermi surfaces, Pauli limiting, and triplet $d$-vector textures.
+
+Main checks:
+
+- Matsubara cutoff scaling with temperature
+- Anderson theorem and Abrikosov--Gor'kov pair breaking
+- Weak-coupling BCS ratio $2 Delta_0 / k_B T_c approx 3.53$
+- Agreement between Fortran Riccati kernels and Python reference implementations
+  - scalar `riccati_chords`
+  - spin-matrix `matrix_riccati_batch`
+  - batched chord `matrix_riccati_chords`
+- Gap suppression and zero-energy bound states at a $d$-wave surface
+- CdGM zero-energy peak at a vortex core
+- Volovik-like field dependence in a vortex lattice
+- Normalization of `build_model_fs` and the isotropic Fermi-surface limit
+- Singlet Pauli suppression and robustness of triplet equal-spin pairing
+- Triplet $d$-vector textures near surfaces and vortex cores
+
+This is a physics-oriented benchmark suite and may take several tens of seconds depending on the machine.
+
+=== `tests/test_rpa_flex.py`
+
+This file provides lightweight regression tests for the RPA / FLEX / Eliashberg building blocks outside the Eilenberger suite. It targets Fortran wrappers, RPA matrix algebra, FLEX bubble / vertex kernels, and Eliashberg smoke tests.
+
+Main checks:
+
+- Consistency of multi-site orbital-pair and site-index generation in `get_chi_orb_list`
+- Reference values of the two-orbital Kanamori-type vertex from `gen_SCmatrix`
+- Reference values of orbital-dependent `Umat`, `Jmat` vertices from `gen_SCmatrix_orb`
+- One-orbital RPA formula
+  $ chi_s = chi^0 / (1 - U chi^0) $
+- `get_chis_chic` reduces to bare $chi^0$ when `S=C=0`
+- Analytic one-orbital Green's function check for `gen_Green0`:
+  $ G^0(k,i omega_n) = 1 / (i omega_n + mu - epsilon_k) $
+- Agreement between `get_chi0` and `get_chi0_conv`
+- `get_Vsigma_nosoc_flex` returns a zero vertex at zero interaction
+- `linearized_eliashberg` returns $lambda = 0$ and finite arrays at zero interaction
+- `nonlinear_eliashberg` preserves the trivial solution $Delta=0$ for zero seed and zero interaction
+- `_load_sigma_from_file` returns `None` without crashing when `self_en.npz` is absent
+- One-orbital smoke test for `output_gap_function`
+
+This test uses a very small one-orbital model and a small $k$ mesh, so it is intended to catch RPA/FLEX API regressions quickly.
 
 = Troubleshooting
 

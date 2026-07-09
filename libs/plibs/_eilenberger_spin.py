@@ -1,0 +1,821 @@
+#!/usr/bin/env python
+#-*- coding:utf-8 -*-
+"""
+Spin-resolved (2x2) homogeneous quasiclassical Eilenberger solver: singlet and
+triplet (d-vector) pairing with a Zeeman (Maki) field.
+
+Where the scalar solver treats one pseudo-spin sector, this works in the full
+Nambu (x) spin 4x4 space.  For a homogeneous superconductor the Eilenberger
+equation reduces to the algebraic normalization
+
+    g_hat = N_hat / sqrt(N_hat^2),   N_hat = [[ w_tilde , Delta_hat ],
+                                              [ Delta_hat^dag , -w_tilde ]],
+
+with the renormalized frequency carrying the Zeeman shift along z,
+    w_tilde = w_n * I + i h sigma_z,   h = mu * B (Maki),
+and the 2x2 spin gap matrix
+    singlet : Delta_hat = i sigma_y                       (Delta = phi(k) Damp)
+    triplet : Delta_hat = (d_hat . sigma) i sigma_y       (d-vector along d_hat).
+
+The matrix square root is taken by eigendecomposition of N_hat^2 (batched over
+Fermi-surface points and Matsubara frequencies).  The normal (g) and anomalous
+(f) 2x2 blocks of g_hat give the DOS and the gap equation (projected onto the
+pairing channel).  This reproduces singlet Pauli limiting and, for triplet,
+the Pauli immunity when the d-vector is perpendicular to the field (equal-spin
+pairing) versus depairing when d || h.
+"""
+import numpy as np
+from ._eilenberger import matsubara, build_fs, BCS_RATIO
+from ..flibs import matrix_riccati_batch, matrix_riccati_chords
+
+
+def _mat_batch(om, Dpath, hvf, ds, h):
+    """g, f [Ns, Nw, 2, 2] along one trajectory, batched over frequencies, via the
+    Fortran 2x2 spin-matrix Mobius Riccati kernel (the single matrix-Riccati path)."""
+    return matrix_riccati_batch(np.ascontiguousarray(om, dtype=np.complex128),
+                                np.ascontiguousarray(Dpath, dtype=np.complex128), hvf, ds, h)
+
+
+def _pauli():
+    sx = np.array([[0, 1], [1, 0]], dtype=np.complex128)
+    sy = np.array([[0, -1j], [1j, 0]], dtype=np.complex128)
+    sz = np.array([[1, 0], [0, -1]], dtype=np.complex128)
+    return sx, sy, sz
+
+
+def gap_matrix(channel: str, dvec=(0.0, 0.0, 1.0)) -> np.ndarray:
+    """2x2 spin gap matrix Delta_hat (unit amplitude).
+    @param channel: 'singlet' or 'triplet'
+    @param   dvec: triplet d-vector direction (ignored for singlet)
+    """
+    sx, sy, sz = _pauli()
+    isy = 1j * sy                                   # [[0,1],[-1,0]]
+    if channel == 'singlet':
+        return isy
+    d = np.asarray(dvec, dtype=np.complex128)
+    d = d / np.sqrt((np.abs(d) ** 2).sum())
+    return (d[0] * sx + d[1] * sy + d[2] * sz) @ isy
+
+
+def _ghat_homogeneous(omega: np.ndarray, Dk: np.ndarray, Shat: np.ndarray, h: float):
+    """Nambu(x)spin g_hat = N/sqrt(N^2) for all (FS point, frequency).
+    @param omega: Matsubara frequencies [Nw] (use the full +/- set)
+    @param    Dk: complex gap amplitude phi(k)*Damp per FS point [Nfs]
+    @param  Shat: 2x2 spin gap matrix (unit amplitude)
+    @param     h: Zeeman energy along z
+    @return (g, f): 2x2 normal / anomalous blocks [Nfs, Nw, 2, 2]
+    """
+    _, _, sz = _pauli()
+    Nfs, Nw = len(Dk), len(omega)
+    I2 = np.eye(2, dtype=np.complex128)
+    wn = omega[None, :, None, None] * I2                        # frequency (tau3 in Nambu)
+    zee = 1j * h * sz                                           # Zeeman (tau0: SAME sign in both blocks)
+    upper = np.broadcast_to(wn + zee, (Nfs, Nw, 2, 2))
+    lower = np.broadcast_to(-wn + zee, (Nfs, Nw, 2, 2))
+    D = Dk[:, None, None, None] * Shat                          # [Nfs,1,2,2] gap matrix
+    D = np.broadcast_to(D, (Nfs, Nw, 2, 2))
+    Dd = np.conj(np.swapaxes(D, -1, -2))                        # Delta_hat^dag
+    N = np.empty((Nfs, Nw, 4, 4), dtype=np.complex128)
+    N[..., :2, :2] = upper
+    N[..., :2, 2:] = D
+    N[..., 2:, :2] = Dd
+    N[..., 2:, 2:] = lower
+    N2 = N @ N
+    lam, V = np.linalg.eig(N2)                                  # batched [..,4],[..,4,4]
+    inv_sqrt = 1.0 / np.sqrt(lam)                               # principal branch (Re>0)
+    Vinv = np.linalg.inv(V)
+    sq = V @ (inv_sqrt[..., None] * Vinv)                       # (N^2)^{-1/2}
+    ghat = N @ sq
+    return ghat[..., :2, :2], ghat[..., :2, 2:]
+
+
+def solve_gap_spin(coupling, temp, omega, wf, phif, channel='singlet',
+                   dvec=(0, 0, 1), h=0.0, damp_init=None, eps=1e-8, itemax=400, mix=0.5):
+    """
+    @fn solve_gap_spin
+    @brief Self-consistent homogeneous gap amplitude for a singlet or triplet
+    (d-vector) channel in a Zeeman field h (Maki), via the 4x4 Nambu(x)spin g_hat.
+    Gap equation: Damp = lambda * T sum_n < phi* tr(Shat^dag f)/tr(Shat^dag Shat) >.
+    @return Damp [eV]
+    """
+    Shat = gap_matrix(channel, dvec)
+    trSS = np.trace(np.conj(Shat).T @ Shat).real               # tr(S^dag S)
+    Sd = np.conj(Shat).T
+    om = np.concatenate([omega, -omega])                       # full +/- Matsubara set
+    if damp_init is None:
+        damp_init = BCS_RATIO * temp
+    damp = damp_init
+    Wn = wf.sum()
+    for _ in range(itemax):
+        Dk = phif * damp                                       # [Nfs] (real form factor)
+        _, f = _ghat_homogeneous(om, Dk.astype(np.complex128), Shat, h)   # [Nfs,Nw,2,2]
+        proj = np.einsum('ij,kwji->kw', Sd, f) / trSS          # tr(S^dag f) [Nfs,Nw]
+        # gap channel amplitude: FS average of phi* proj, Matsubara sum
+        amp = np.tensordot(wf, np.conj(phif)[:, None] * proj, axes=(0, 0)).sum() / Wn
+        damp_new = coupling * temp * amp.real
+        if damp_new <= 0.0:
+            return 0.0
+        if abs(damp_new - damp) < eps * max(damp_new, eps):
+            return damp_new
+        damp = (1.0 - mix) * damp + mix * damp_new
+    return damp
+
+
+def calc_spin_pauli(Nx, Ny, Nz, wc, ham_r, S_r, rvec, avec, mu, temp, coupling,
+                    gap_sym=0, h_list=None, fs_width=5.0e-3, kb=1.0):
+    """
+    @fn calc_spin_pauli
+    @brief Compare the Zeeman (Maki) field response of singlet vs triplet pairing
+    using the 2x2 spin solver: singlet and triplet d||h are Pauli-limited, triplet
+    d perpendicular to h is Pauli-immune (equal-spin pairing).  Sweeps h and writes
+    'spin_pauli.dat' (Delta(h)/Delta0 for each channel).
+    """
+    from ._bands import get_emesh
+    omega = matsubara(temp, wc)
+    Nk, klist, eig, uni, kweight = get_emesh(Nx, Ny, Nz, ham_r, S_r, rvec, avec, sw_uni=True)
+    wf, phif = build_fs(eig, klist, mu, gap_sym, fs_width)
+    cases = [('singlet', (0, 0, 1), 'singlet'),
+             ('triplet', (0, 0, 1), 'triplet d||h (z)'),
+             ('triplet', (1, 0, 0), 'triplet d_|_h (x)')]
+    D0 = {}
+    for ch, dv, name in cases:
+        D0[name] = solve_gap_spin(coupling, temp, omega, wf, phif, ch, dv, h=0.0, damp_init=2e-3)
+    print(f"spin/Zeeman (Maki) response, T={temp/kb:.2f} K:", flush=True)
+    for name in D0:
+        print(f"  Delta0[{name}] = {D0[name]:.4e} eV", flush=True)
+    Dref = max(D0.values())
+    if Dref <= 0:
+        print("normal state; nothing to sweep", flush=True)
+        return
+    if h_list is None:
+        h_list = Dref * np.array([0.0, 0.3, 0.5, 0.7, 0.9, 1.1, 1.4, 1.8])
+    try:
+        with open('spin_pauli.dat', 'w') as fh:
+            fh.write("# h/Delta0  " + "  ".join(n.replace(' ', '_') for _, _, n in cases) + "\n")
+            print("  h/D0   " + "   ".join(f"{n[:12]:>12}" for _, _, n in cases), flush=True)
+            for h in h_list:
+                row = []
+                for ch, dv, name in cases:
+                    Dh = solve_gap_spin(coupling, temp, omega, wf, phif, ch, dv,
+                                        h=float(h), damp_init=D0[name] if D0[name] > 0 else 2e-3)
+                    row.append(Dh / Dref)
+                fh.write(f"{h/Dref:8.4f} " + " ".join(f"{r:10.4f}" for r in row) + "\n")
+                print(f"  {h/Dref:5.2f}  " + "   ".join(f"{r:12.4f}" for r in row), flush=True)
+    except IOError as e:
+        print(f"Error writing spin_pauli.dat: {e}", flush=True)
+    return D0
+
+
+# --------------------------------------------------------------------------- #
+#  Self-consistent d-vector TEXTURE at a specular surface (triplet)
+# --------------------------------------------------------------------------- #
+def _default_dvector_channels():
+    """Triplet d = cos(b) e_x (orbital p_x, sign-changing at an x-surface) +
+    sin(b) e_z (orbital p_y, even).  Spin matrices Shat_x = sigma_x i sigma_y =
+    diag(-1,1) and Shat_z = sigma_z i sigma_y = sigma_x are both traceless and give
+    a unitary gap; the e_y component (Shat_y proportional to identity) is avoided
+    because the identity piece is not handled by the unitary matrix Riccati bulk
+    seed.  Each orbital factor is normalized to <|phi|^2>=1 over the circle."""
+    sx, sy, sz = _pauli()
+    isy = 1j * sy
+    return [('px(e_x)', (lambda b: np.sqrt(2.0) * np.cos(b)), sx @ isy),
+            ('py(e_z)', (lambda b: np.sqrt(2.0) * np.sin(b)), sz @ isy)]
+
+
+def _bulk_dvector(couplings, temp, om, beta, w, phitil, eps=1e-10, itemax=2000, mix=0.5):
+    """Coupled bulk amplitudes D_a of a multi-component unitary triplet with per-
+    channel couplings.  R(beta) = sqrt(w^2 + sum_b (D_b phi_b)^2) couples the
+    channels; gap_a: D_a = lambda_a T sum_n < phi_a^2 D_a / R > over the full
+    direction set.  Returns the vector (D_a).  Subcritical channels relax to 0."""
+    nc = len(phitil)
+    lam = np.asarray(couplings, dtype=float)
+    phi = np.array([phitil[a](beta) for a in range(nc)])               # [nc, Nb] outgoing
+    phii = np.array([phitil[a](np.pi - beta) for a in range(nc)])      # reflected branch
+    D = np.full(nc, BCS_RATIO * temp)
+    for _ in range(itemax):
+        s2 = ((D[:, None] * phi) ** 2).sum(axis=0)                     # sum_b (D_b phi_b)^2 [Nb]
+        s2i = ((D[:, None] * phii) ** 2).sum(axis=0)
+        Ro = np.sqrt(om[None, :] ** 2 + s2[:, None])                   # [Nb, Nw]
+        Ri = np.sqrt(om[None, :] ** 2 + s2i[:, None])
+        Dnew = np.empty(nc)
+        for a in range(nc):
+            amp = (w * (phi[a][:, None] ** 2 / Ro).sum(axis=1)).sum() \
+                + (w * (phii[a][:, None] ** 2 / Ri).sum(axis=1)).sum()
+            Dnew[a] = max(lam[a] * temp * D[a] * amp, 0.0)
+        if np.abs(Dnew - D).max() < eps * max(Dnew.max(), eps):
+            return Dnew
+        D = (1.0 - mix) * D + mix * Dnew
+    return D
+
+
+def _coupled_bulk_gap(lam, temp, om, phid_b, wfull):
+    """Coupled multi-channel bulk amplitudes D_a on a dense (nf-weighted) direction
+    set: same channel-coupled gap equation as _bulk_dvector but with a single
+    branch and explicit FS weights (used by the vortex / lattice d-vector solvers).
+    @param     lam: per-channel couplings [nc]
+    @param      om: full +/- Matsubara set
+    @param  phid_b: normalized form factors on the dense set [nc, ndense]
+    @param   wfull: FS weights on the dense set [ndense] (sum 1)
+    """
+    nc = len(phid_b)
+    a2 = np.abs(phid_b) ** 2                            # [nc, ndense]
+    D = np.full(nc, BCS_RATIO * temp)
+    for _ in range(2000):
+        s2 = ((D[:, None] ** 2) * a2).sum(axis=0)       # sum_b (D_b|phi_b|)^2  [ndense]
+        R = np.sqrt(om[None, :] ** 2 + s2[:, None])
+        Dn = np.array([max(lam[a] * temp * D[a] * (wfull[:, None] * a2[a][:, None] / R).sum(), 0.0)
+                       for a in range(nc)])
+        if np.abs(Dn - D).max() < 1e-10 * max(Dn.max(), 1e-12):
+            return Dn
+        D = 0.5 * (D + Dn)
+    return D
+
+
+def solve_surface_dvector(couplings, temp, omega, channels=None, Dbulk=None,
+                          Lxi=8.0, nper=8, Nbeta=16, hvf=1.0, cos_min=0.06,
+                          eps=3e-3, itemax=60, mix=0.4):
+    """
+    @fn solve_surface_dvector
+    @brief Self-consistent d-vector TEXTURE at a specular surface (x>=0) for a
+    multi-component unitary triplet, via the 2x2 spin-matrix Riccati.  Each spin
+    component a has an orbital form factor phi_a(beta), a spin matrix Shat_a, and its
+    own coupling lambda_a; the (complex) spatial amplitude Delta_a(x) is solved
+    self-consistently.  Components whose orbital factor is sign-changing under
+    specular reflection (beta -> pi-beta) are suppressed at the surface, so a
+    dominant + subdominant pair makes the net d-vector reorient in spin space as the
+    surface is approached -- the texture.
+    @param couplings: per-channel lambda_a (use a dominant + subdominant pair).
+    @return (x, Damp [Ncomp, Ng] complex, Dbulk [Ncomp])
+    """
+    if channels is None:
+        channels = _default_dvector_channels()
+    nc = len(channels)
+    lam = np.asarray(couplings, dtype=float)
+    Smats = [S for _, _, S in channels]
+    Sd = [np.conj(S).T for S in Smats]
+    trSS = [np.trace(Sd[a] @ Smats[a]).real for a in range(nc)]
+    phitil = [ch[1] for ch in channels]
+    om = np.concatenate([omega, -omega])                  # full +/- Matsubara set
+    bmax = 0.5 * np.pi * (1.0 - cos_min)
+    beta = np.linspace(-bmax, bmax, Nbeta)
+    cosb = np.cos(beta)
+    w = 1.0 / (2.0 * Nbeta)                               # per branch (full circle uniform)
+    if Dbulk is None:
+        Dbulk = _bulk_dvector(lam, temp, om, beta, w, phitil)
+    Dref = float(np.max(Dbulk))
+    if Dref <= 1.0e-6 * temp:
+        xi = hvf / (np.pi * max(temp, 1e-12))
+        x = np.linspace(0.0, Lxi * xi, int(Lxi * nper))
+        return x, np.zeros((nc, len(x)), dtype=np.complex128), Dbulk
+    xi = hvf / (np.pi * Dref)
+    Ng = int(Lxi * nper)
+    x = np.linspace(0.0, Lxi * xi, Ng)
+    dx = x[1] - x[0]
+    # seed: each channel toward its bulk value (texture emerges from self-consistency)
+    Damp = np.array([Dbulk[a] * np.tanh(x / xi) for a in range(nc)], dtype=np.complex128)
+    fo = np.array([phitil[a](beta) for a in range(nc)])         # [nc, Nb] outgoing
+    fi = np.array([phitil[a](np.pi - beta) for a in range(nc)]) # [nc, Nb] incoming
+    for it in range(itemax):
+        acc = np.zeros((nc, Ng), dtype=np.complex128)
+        for ib in range(Nbeta):
+            ds = dx / cosb[ib]
+            # unfolded gap matrix path: incoming (x=L..0) then outgoing (x=0..L)
+            Dpath = np.zeros((2 * Ng, 2, 2), dtype=np.complex128)
+            for a in range(nc):
+                amp_path = np.concatenate([fi[a, ib] * Damp[a][::-1], fo[a, ib] * Damp[a]])
+                Dpath += amp_path[:, None, None] * Smats[a]
+            _, fmat = _mat_batch(om, Dpath, hvf, ds, 0.0)          # [2Ng, Nw, 2, 2]
+            f_out = fmat[Ng:]
+            f_in = fmat[:Ng][::-1]
+            for a in range(nc):
+                po = np.einsum('ij,xwji->x', Sd[a], f_out) / trSS[a]   # summed over freq
+                pi_ = np.einsum('ij,xwji->x', Sd[a], f_in) / trSS[a]
+                acc[a] += w * (np.conj(fo[a, ib]) * po + np.conj(fi[a, ib]) * pi_)
+        Damp_new = (lam[:, None] * temp) * acc            # complex (allows TRSB phase)
+        err = np.abs(Damp_new - Damp).max() / Dref
+        Damp = (1.0 - mix) * Damp + mix * Damp_new
+        if err < eps:
+            break
+    return x, Damp, Dbulk
+
+
+def surface_dvector_ldos(x, Damp, wlist, channels=None, Dbulk=None, delta=None,
+                         Nbeta=16, hvf=1.0, cos_min=0.06):
+    """
+    @fn surface_dvector_ldos
+    @brief Surface local density of states N(x=0, w)/N0 of a converged d-vector
+    texture state, via the retarded 2x2 spin-matrix Riccati (w -> w + i delta).
+    The sign-changing dominant component gives a zero-energy surface bound state
+    (Andreev/ZEBS of the triplet edge); the subdominant / d-vector texture splits
+    or shifts it.  Angle-averaged over the trajectory directions.
+    @param x, Damp: grid and converged complex amplitudes [Ncomp, Ng] from solve_surface_dvector
+    @return N(0, w)/N0 [Nw]
+    """
+    if channels is None:
+        channels = _default_dvector_channels()
+    nc = len(channels)
+    Smats = [S for _, _, S in channels]
+    phitil = [ch[1] for ch in channels]
+    Ng = Damp.shape[1]
+    Dref = float(np.max(np.abs(Damp))) if Dbulk is None else float(np.max(np.abs(Dbulk)))
+    if delta is None:
+        delta = 0.03 * Dref
+    dx = x[1] - x[0]
+    bmax = 0.5 * np.pi * (1.0 - cos_min)
+    beta = np.linspace(-bmax, bmax, Nbeta)
+    cosb = np.cos(beta)
+    w = 1.0 / (2.0 * Nbeta)
+    fo = np.array([phitil[a](beta) for a in range(nc)])
+    fi = np.array([phitil[a](np.pi - beta) for a in range(nc)])
+    Nw = len(wlist)
+    zw = delta - 1j * wlist                                     # retarded continuation [Nw]
+    ldos = np.zeros(Nw)
+    for ib in range(Nbeta):                                     # batch all frequencies per direction
+        ds = dx / cosb[ib]
+        Dpath = np.zeros((2 * Ng, 2, 2), dtype=np.complex128)
+        for a in range(nc):
+            amp_path = np.concatenate([fi[a, ib] * Damp[a][::-1], fo[a, ib] * Damp[a]])
+            Dpath += amp_path[:, None, None] * Smats[a]
+        g, _ = _mat_batch(zw, Dpath, hvf, ds, 0.0)             # [2Ng, Nw, 2, 2]
+        tr0 = np.einsum('wii->w', g[Ng]) + np.einsum('wii->w', g[Ng - 1])  # x=0 both branches
+        ldos += w * tr0.real / 2.0
+    return ldos
+
+
+def calc_surface_dvector(coupling, temp, wc, kb=1.0, Lxi=8.0, nper=8, Nbeta=16,
+                         sub_ratio=0.9, sw_ldos=True):
+    """
+    @fn calc_surface_dvector
+    @brief Driver: self-consistent d-vector texture at a specular surface of a
+    triplet superconductor.  The bulk orders in the dominant p_x channel (spin e_x,
+    orbital cos(b), sign-changing at an x-surface, lambda); a subdominant p_y channel
+    (spin e_z, orbital sin(b), even, lambda*sub_ratio) is also retained.  The dominant
+    p_x is pair-broken at the surface, so the (relatively enhanced) p_y component
+    rotates the net d-vector toward e_z -- the d-vector texture.  Reports the spatial
+    component amplitudes and the rotation angle theta_d(x) = atan2(|Dpy|,|Dpx|), the
+    relative phase (90 deg = time-reversal-broken p_x + i p_y surface state), and
+    writes 'surface_dvector.dat'.
+    @param sub_ratio: lambda_py / lambda_px (subdominant strength)
+    """
+    omega = matsubara(temp, wc)
+    couplings = (coupling, coupling * sub_ratio)
+    print("d-vector texture at a specular surface (triplet p_x + subdominant p_y, spin-matrix Riccati)", flush=True)
+    print(f"T={temp/kb:.2f} K, lambda_px={couplings[0]:.3f}, lambda_py={couplings[1]:.3f}, "
+          f"{len(omega)} Matsubara freqs, Nbeta={Nbeta}, grid={int(Lxi*nper)}", flush=True)
+    x, Damp, Dbulk = solve_surface_dvector(couplings, temp, omega, Lxi=Lxi, nper=nper, Nbeta=Nbeta)
+    Dref = float(np.max(np.abs(Dbulk)))
+    if Dref <= 0.0:
+        print("normal state (Dbulk=0); nothing to profile", flush=True)
+        return x, Damp
+    xi = 1.0 / (np.pi * Dref)
+    apx, apy = np.abs(Damp[0]), np.abs(Damp[1])
+    theta = np.degrees(np.arctan2(apy, np.maximum(apx, 1e-12)))            # d-vector tilt
+    relph = np.degrees(np.angle(Damp[1] / np.where(np.abs(Damp[0]) > 1e-12 * Dref, Damp[0], 1.0)))
+    print(f"Dbulk(px,py) = ({Dbulk[0].real:.4e}, {Dbulk[1].real:.4e}) eV,  xi = {xi:.4g}", flush=True)
+    print(f"  surface: |Dpx|(0)/Db={apx[0]/Dref:.3f}  |Dpy|(0)/Db={apy[0]/Dref:.3f}  "
+          f"theta_d(0)={theta[0]:.1f} deg  rel.phase={relph[0]:.1f} deg", flush=True)
+    print(f"  bulk:    |Dpx|(L)/Db={apx[-1]/Dref:.3f}  |Dpy|(L)/Db={apy[-1]/Dref:.3f}  "
+          f"theta_d(L)={theta[-1]:.1f} deg", flush=True)
+    print(f"  TEXTURE: d-vector tilt theta_d {theta[-1]:.1f} deg (bulk) -> {theta[0]:.1f} deg (surface)", flush=True)
+    try:
+        with open('surface_dvector.dat', 'w') as fh:
+            fh.write("# x/xi  |Dpx|/Db  |Dpy|/Db  theta_d[deg]  rel.phase[deg]\n")
+            for j in range(len(x)):
+                fh.write(f"{x[j]/xi:10.4f} {apx[j]/Dref:12.5e} {apy[j]/Dref:12.5e} "
+                         f"{theta[j]:9.3f} {relph[j]:9.3f}\n")
+    except IOError as e:
+        print(f"Error writing surface_dvector.dat: {e}", flush=True)
+    if sw_ldos:                                                # spectroscopic signature
+        wlist = np.linspace(-2.0 * Dref, 2.0 * Dref, 121)
+        ldos = surface_dvector_ldos(x, Damp, wlist, Dbulk=Dbulk, Nbeta=Nbeta)
+        i0 = np.argmin(np.abs(wlist))
+        print(f"  surface LDOS: N(0,0)/N0 = {ldos[i0]:.3f} "
+              f"(sign-changing dominant -> zero-energy surface bound state)", flush=True)
+        try:
+            with open('surface_dvector_ldos.dat', 'w') as fh:
+                fh.write("# w/Dbulk   N(0,w)/N0\n")
+                for wr, n in zip(wlist, ldos):
+                    fh.write(f"{wr/Dref:12.5e} {n:12.5e}\n")
+        except IOError as e:
+            print(f"Error writing surface_dvector_ldos.dat: {e}", flush=True)
+    return x, Damp
+
+
+# --------------------------------------------------------------------------- #
+#  d-vector TEXTURE around a vortex (2D spin-matrix Riccati)
+# --------------------------------------------------------------------------- #
+def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0),
+                           Dbulk=None, Lxi=7.0, ngrid=33, nbeta=16, hvf=1.0,
+                           field=0.0, fs=None, eps=4.0e-3, itemax=40, mix=0.4):
+    """
+    @fn solve_vortex2d_dvector
+    @brief Self-consistent d-vector order parameter of a multi-component unitary
+    triplet around a vortex (field=0: isolated vortex) or on the circular-cell vortex
+    LATTICE (field=B/Hc2>0: Wigner-Seitz cell of radius Rc=sqrt(2/field)*xi with the
+    supercurrent Doppler shift), via the 2x2 spin-matrix Riccati on the 2D plane.
+    Each spin component a has an orbital form factor phi_a(beta), spin matrix Shat_a,
+    coupling lambda_a and phase WINDING m_a; its complex amplitude field A_a(r) (winding
+    removed) is solved self-consistently, Delta_hat(r,k)=sum_a phi_a(k) A_a(r) e^{i m_a theta} Shat_a.
+    The dominant (m=1) component vanishes and is pair-broken in the core; a subdominant
+    with a different winding (default m=0, core-localized) survives there, so the net
+    d-vector reorients in spin space across the core -- the d-vector texture.  With
+    field>0 the supercurrent v_F.Q fills the inter-vortex states (Volovik), entering as
+    a position-dependent Doppler shift omega -> omega + i v_F.Q in the matrix Riccati.
+    @return (xg, A [Ncomp, ngrid, ngrid] complex, Dbulk [Ncomp], xi)
+    """
+    from scipy.interpolate import RegularGridInterpolator
+    from ._eilenberger_vortex import _eval_field, _doppler_chord
+    if channels is None:
+        channels = _default_dvector_channels()
+    nc = len(channels)
+    lam = np.asarray(couplings, dtype=float)
+    Smats = [S for _, _, S in channels]
+    Sd = [np.conj(S).T for S in Smats]
+    trSS = [np.trace(Sd[a] @ Smats[a]).real for a in range(nc)]
+    phitil = [ch[1] for ch in channels]
+    om = np.concatenate([omega, -omega])
+    # trajectory directions, per-direction |v_F| and FS weight, and the orbital form
+    # factor of each channel (evaluated at the k-direction); cylinder or a model/Wannier FS
+    def _norm(ph, wt):                                  # normalize nf-weighted <|phi|^2>=1
+        out = ph.copy()
+        for a in range(nc):
+            nrm = np.sqrt((wt * np.abs(out[a]) ** 2).sum())
+            if nrm > 0:
+                out[a] = out[a] / nrm
+        return out
+    # dense FS set for an accurate bulk gap, independent of the trajectory sampling
+    if fs is not None:
+        kfull = np.arctan2(fs['ky'], fs['kx'])
+        wfull = np.asarray(fs['nf'], dtype=float)
+    else:
+        bfull = np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False)
+        kfull = bfull
+        wfull = np.full(180, 1.0 / 180)
+    phid_b = _norm(np.array([phitil[a](kfull) for a in range(nc)], dtype=np.complex128), wfull)
+    # trajectory directions, per-direction |v_F| and FS weight, and the orbital form
+    # factor of each channel (evaluated at the k-direction); cylinder or a model/Wannier FS
+    if fs is not None:                                  # real FS: v_hat directions, nf weights
+        dirs = np.arctan2(fs['vy'], fs['vx'])          # trajectory along v_F
+        kang = kfull                                   # k-direction sets the gap form factor
+        hvfarr = np.asarray(fs['vabs'], dtype=float)
+        wt_dir = wfull
+        if len(dirs) > nbeta:                           # downsample to ~nbeta FS directions
+            sel = np.linspace(0, len(dirs) - 1, nbeta).round().astype(int)
+            dirs, kang = dirs[sel], kang[sel]
+            hvfarr = hvfarr[sel]
+            wt_dir = wt_dir[sel] / wt_dir[sel].sum()    # renormalize the FS weights
+        nbeta = len(dirs)
+        phid = _norm(np.array([phitil[a](kang) for a in range(nc)], dtype=np.complex128), wt_dir)
+        hvf_eff = float((np.asarray(fs['nf']) * np.asarray(fs['vabs'])).sum())
+    else:                                              # isotropic cylinder (v_hat = k_hat)
+        dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
+        hvfarr = np.full(nbeta, hvf)
+        wt_dir = np.full(nbeta, 1.0 / nbeta)
+        phid = np.array([phitil[a](dirs) for a in range(nc)], dtype=np.complex128)
+        hvf_eff = hvf
+    if Dbulk is None:                                   # coupled multi-channel bulk gap (dense set)
+        Dbulk = _coupled_bulk_gap(lam, temp, om, phid_b, wfull)
+    Dref = float(np.max(Dbulk))
+    xi = hvf_eff / (np.pi * Dref)
+    Rc = np.sqrt(2.0 / field) * xi if field > 0.0 else np.inf   # Wigner-Seitz cell radius
+    R = Rc if field > 0.0 else Lxi * xi
+    xg = np.linspace(-R, R, ngrid)
+    dx = xg[1] - xg[0]
+    rho_min = 0.5 * dx
+    X, Y = np.meshgrid(xg, xg, indexing='ij')
+    Rg = np.sqrt(X ** 2 + Y ** 2)
+    theta = np.arctan2(Y, X)
+    SS, BB = np.meshgrid(xg, xg, indexing='ij')
+    mwind = np.asarray(windings, dtype=int)
+    # seed: winding-1 components vanish at the core (tanh); core-localized (m=0)
+    # subcritical components get a small core-peaked seed so they can nucleate
+    A = np.empty((nc, ngrid, ngrid), dtype=np.complex128)
+    for a in range(nc):
+        if Dbulk[a] > 1.0e-3 * Dref:
+            A[a] = Dbulk[a] * (np.tanh(Rg / xi) if mwind[a] != 0 else 1.0)
+        else:
+            A[a] = 0.15 * Dref / np.cosh(Rg / xi)      # core-localized nucleation seed
+    ewind = np.exp(1j * theta)
+    for it in range(itemax):
+        Ai = [RegularGridInterpolator((xg, xg), A[a], bounds_error=False,
+                                      fill_value=complex(Dbulk[a])) for a in range(nc)]
+        accf = np.zeros((nc, ngrid, ngrid), dtype=np.complex128)
+        for ib in range(nbeta):
+            cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
+            Lx = SS * cb - BB * sb
+            Ly = SS * sb + BB * cb
+            thr = np.exp(1j * np.arctan2(Ly, Lx))
+            sxy = X * cb + Y * sb
+            bxy = -X * sb + Y * cb
+            Dpath = np.zeros((ngrid, ngrid, 2, 2), dtype=np.complex128)
+            for a in range(nc):
+                amp = phid[a, ib] * Ai[a]((Lx, Ly)) * thr ** mwind[a]   # [ns,nb]
+                Dpath += amp[:, :, None, None] * Smats[a]
+            if field > 0.0:           # supercurrent Doppler om -> om + i v_F.Q (position dependent)
+                dop = hvfarr[ib] * _doppler_chord(Lx, Ly, Rc, cb, sb, rho_min)
+                om_ch = om[None, None, :] + 1j * dop[:, :, None]    # [ns,nb,Nw]
+            else:
+                om_ch = om                                          # [Nw] (broadcast in wrapper)
+            _, fch = matrix_riccati_chords(om_ch, np.ascontiguousarray(Dpath),
+                                           hvfarr[ib], dx, 0.0)     # [ns,nb,Nw,2,2]
+            for a in range(nc):
+                fa = np.einsum('ij,snwji->sn', Sd[a], fch) / trSS[a]   # summed over freq
+                accf[a] += wt_dir[ib] * np.conj(phid[a, ib]) * _eval_field(fa, xg, sxy, bxy, fill=0.0)
+        err = 0.0
+        for a in range(nc):
+            A_new = (lam[a] * temp) * (accf[a] * np.conj(ewind) ** mwind[a])   # remove winding
+            err = max(err, np.abs(A_new - A[a]).max() / Dref)
+            A[a] = (1.0 - mix) * A[a] + mix * A_new
+        if err < eps:
+            break
+    return xg, A, Dbulk, xi
+
+
+def solve_lattice_sc_dvector(couplings, temp, omega, channels=None, windings=(1, 0),
+                             field=0.2, lattice='square', Ng=18, nbeta=16, hvf=1.0,
+                             fs=None, kappa=None, Lchord=6.0, ds_xi=0.3,
+                             eps=4.0e-3, itemax=60, mix=0.4, anderson=True, m_and=4):
+    """
+    @fn solve_lattice_sc_dvector
+    @brief Self-consistent d-vector (multi-component unitary triplet) on the TRUE
+    periodic vortex lattice, je-style (formulation A): the spin-matrix order parameter
+    Delta_hat(r,k)=sum_a phi_a(k) A_a(r) e^{i m_a chi(r)} Shat_a keeps the analytic
+    Abrikosov winding chi(r), and the gap equation is closed by per-grid-point anchored
+    2x2 matrix-Riccati trajectories (exact f-to-grid map, no binning) on the magnetic
+    cell (square/triangular, _cell_geom).  The dominant winding component (m=1) carries
+    the vortex lattice and vanishes at every core; a subdominant with a different winding
+    (default m=0) nucleates in the cores -> the d-vector reorients across each core.
+    Finite ``kappa`` adds the smooth London Doppler -v_F.A(r) (screening, je #2).
+    @return state dict (X,Y,A[nc,Ng,Ng],chi,Dbulk[nc],xi,geom,kappa,...) for lattice_dos_sc_dvector
+    """
+    from ._eilenberger_vortex import (_cell_geom, _abrikosov_unit_phase, _abrikosov_z,
+                                      _periodic_eval, _london_A)
+    if channels is None:
+        channels = _default_dvector_channels()
+    nc = len(channels)
+    lam = np.asarray(couplings, dtype=float)
+    Smats = [S for _, _, S in channels]
+    Sd = [np.conj(S).T for S in Smats]
+    trSS = [np.trace(Sd[a] @ Smats[a]).real for a in range(nc)]
+    phitil = [ch[1] for ch in channels]
+    om = np.concatenate([omega, -omega])
+    mwind = np.asarray(windings, dtype=int)
+
+    def _norm(ph, wt):                                  # normalize nf-weighted <|phi|^2>=1
+        out = ph.copy()
+        for a in range(nc):
+            nrm = np.sqrt((wt * np.abs(out[a]) ** 2).sum())
+            if nrm > 0:
+                out[a] = out[a] / nrm
+        return out
+    if fs is not None:                                  # dense FS for the bulk gap
+        kfull = np.arctan2(fs['ky'], fs['kx']); wfull = np.asarray(fs['nf'], float)
+    else:
+        kfull = np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False); wfull = np.full(180, 1.0 / 180)
+    phid_b = _norm(np.array([phitil[a](kfull) for a in range(nc)], dtype=np.complex128), wfull)
+    if fs is not None:                                  # trajectory directions / weights
+        dirs = np.arctan2(fs['vy'], fs['vx']); kang = kfull
+        hvfarr = np.asarray(fs['vabs'], float); wt_dir = wfull
+        if len(dirs) > nbeta:
+            sel = np.linspace(0, len(dirs) - 1, nbeta).round().astype(int)
+            dirs, kang, hvfarr = dirs[sel], kang[sel], hvfarr[sel]
+            wt_dir = wt_dir[sel] / wt_dir[sel].sum()
+        nbeta = len(dirs)
+        phid = _norm(np.array([phitil[a](kang) for a in range(nc)], dtype=np.complex128), wt_dir)
+        hvf_eff = float((np.asarray(fs['nf']) * np.asarray(fs['vabs'])).sum())
+    else:
+        dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
+        hvfarr = np.full(nbeta, hvf); wt_dir = np.full(nbeta, 1.0 / nbeta)
+        phid = np.array([phitil[a](dirs) for a in range(nc)], dtype=np.complex128)
+        hvf_eff = hvf
+    Dbulk = _coupled_bulk_gap(lam, temp, om, phid_b, wfull)   # coupled multi-channel bulk gap
+    Dref = float(np.max(Dbulk))
+    if Dref <= 0:
+        return None
+    xi = hvf_eff / (np.pi * Dref)
+    g = _cell_geom(field, xi, lattice, nflux=1)
+    fax = (np.arange(Ng) + 0.5) / Ng - 0.5
+    F1, F2 = np.meshgrid(fax, fax, indexing='ij')
+    X = F1 * g['a1'][0] + F2 * g['a2'][0]
+    Y = F1 * g['a1'][1] + F2 * g['a2'][1]
+    chi1 = _abrikosov_unit_phase(X, Y, g, 1)           # winding-1 phase on the grid
+    L = Lchord * xi; ds = ds_xi * xi
+    ns = int(2 * L / ds) | 1; ic = ns // 2
+    s = np.linspace(-L, L, ns)
+    ax = X.ravel(); ay = Y.ravel(); Nanch = ax.size
+    lamL = kappa * xi if kappa is not None else None
+    Axg, Ayg = _london_A(g, lamL, 1) if lamL is not None else (None, None)
+    chord = []                                          # fixed per-direction geometry
+    for ib in range(nbeta):
+        cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
+        px = ax[None, :] + s[:, None] * cb
+        py = ay[None, :] + s[:, None] * sb
+        eichi = _abrikosov_unit_phase(px, py, g, 1)
+        dch = (-(cb * _periodic_eval(Axg, g, px, py) + sb * _periodic_eval(Ayg, g, px, py))
+               if lamL is not None else None)
+        chord.append((px, py, eichi, dch))
+    Zg = np.abs(_abrikosov_z(X, Y, g))                  # ~0 at cores, ~1 between
+    A = np.empty((nc, Ng, Ng), dtype=np.complex128)
+    for a in range(nc):
+        if Dbulk[a] > 1.0e-3 * Dref:
+            A[a] = Dbulk[a] * (np.tanh(Zg / 0.5) if mwind[a] != 0 else 1.0)
+        else:
+            A[a] = 0.15 * Dref * (1.0 - np.tanh(Zg / 0.5))   # core-peaked nucleation seed
+    Nw = len(om)
+    om_dir = [om if dch is None
+              else np.ascontiguousarray(om[None, None, :] + 1j * hvfarr[ib] * dch[:, :, None])
+              for ib, (_, _, _, dch) in enumerate(chord)]
+    def gap_map_dv(Acur):                              # one pass: A[nc] -> A_new[nc]
+        accf = np.zeros((nc, Nanch), dtype=np.complex128)
+        for ib in range(nbeta):
+            px, py, eichi, _ = chord[ib]
+            Dpath = np.zeros((ns, Nanch, 2, 2), dtype=np.complex128)
+            for a in range(nc):
+                amp = phid[a, ib] * _periodic_eval(Acur[a], g, px, py) * eichi ** mwind[a]
+                Dpath += amp[:, :, None, None] * Smats[a]
+            _, fch = matrix_riccati_chords(om_dir[ib], np.ascontiguousarray(Dpath),
+                                           hvfarr[ib], ds, 0.0)
+            fc = fch[ic]                                # [Nanch, Nw, 2, 2]
+            for a in range(nc):
+                tmp = np.einsum('ij,nwji->n', Sd[a], fc) / trSS[a]   # spin-project, sum freq
+                accf[a] += wt_dir[ib] * np.conj(phid[a, ib]) * np.conj(eichi[ic] ** mwind[a]) * tmp
+        return np.array([(lam[a] * temp) * accf[a].reshape(Ng, Ng) for a in range(nc)])
+
+    xs, fs_h = [], []                                  # Anderson/Pulay history (stacked channels)
+    sh = A.shape
+    for it in range(itemax):
+        res = gap_map_dv(A) - A
+        err = np.abs(res).max() / Dref
+        if err < eps:
+            A = A + res
+            break
+        xs.append(A.ravel().copy()); fs_h.append(res.ravel().copy())
+        if len(fs_h) > m_and + 1:
+            xs.pop(0); fs_h.pop(0)
+        if not anderson or len(fs_h) == 1:
+            A = A + mix * res
+        else:
+            dF = np.column_stack([fs_h[i + 1] - fs_h[i] for i in range(len(fs_h) - 1)])
+            dX = np.column_stack([xs[i + 1] - xs[i] for i in range(len(xs) - 1)])
+            gam, *_ = np.linalg.lstsq(dF, fs_h[-1], rcond=None)
+            A = (xs[-1] + mix * fs_h[-1] - (dX + mix * dF) @ gam).reshape(sh)
+    return dict(X=X, Y=Y, A=A, chi=np.angle(chi1), Dbulk=Dbulk, xi=xi, geom=g,
+                a=np.sqrt(g['S']), kappa=kappa, channels=channels, windings=mwind,
+                iters=it + 1, err=err)
+
+
+def lattice_dos_sc_dvector(state, wlist, delta=None, nbeta=16, hvf=1.0, fs=None,
+                           Lchord=6.0, ds_xi=0.3):
+    """
+    @fn lattice_dos_sc_dvector
+    @brief Spatially-averaged DOS N(w)/N0 of the self-consistent d-vector periodic
+    lattice (state from solve_lattice_sc_dvector): per-grid-point anchored 2x2 matrix
+    Riccati on the retarded axis (z=delta-i*w), N(w)/N0 = <(1/2) Tr Re g(anchor)>_{grid,FS},
+    with the same Abrikosov winding and (finite kappa) London Doppler as the solver.
+    @return N(w)/N0 [Nw]
+    """
+    from ._eilenberger_vortex import _abrikosov_unit_phase, _periodic_eval, _london_A
+    A = state['A']; g = state['geom']; xi = state['xi']
+    Dbulk = state['Dbulk']; Dref = float(np.max(Dbulk)); Ng = A.shape[1]
+    X, Y = state['X'], state['Y']
+    channels = state['channels']; mwind = state['windings']
+    Smats = [S for _, _, S in channels]; phitil = [ch[1] for ch in channels]; nc = len(channels)
+    kappa = state.get('kappa'); lam = kappa * xi if kappa is not None else None
+    Axg, Ayg = _london_A(g, lam, 1) if lam is not None else (None, None)
+    if delta is None:
+        delta = 0.03 * Dref
+    zomega = delta - 1j * np.asarray(wlist); Nw = zomega.size
+    if fs is not None:
+        dirs = np.arctan2(fs['vy'], fs['vx']); kang = np.arctan2(fs['ky'], fs['kx'])
+        hvfarr = np.asarray(fs['vabs'], float); wt_dir = np.asarray(fs['nf'], float)
+        if len(dirs) > nbeta:
+            sel = np.linspace(0, len(dirs) - 1, nbeta).round().astype(int)
+            dirs, kang, hvfarr = dirs[sel], kang[sel], hvfarr[sel]
+            wt_dir = wt_dir[sel] / wt_dir[sel].sum()
+        nbeta = len(dirs)
+    else:
+        dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False); kang = dirs
+        hvfarr = np.full(nbeta, hvf); wt_dir = np.full(nbeta, 1.0 / nbeta)
+    phid = np.array([phitil[a](kang) for a in range(nc)], dtype=np.complex128)
+    nrm = np.array([np.sqrt((wt_dir * np.abs(phid[a]) ** 2).sum()) for a in range(nc)])
+    phid = phid / np.where(nrm[:, None] > 0, nrm[:, None], 1.0)
+    L = Lchord * xi; ds = ds_xi * xi
+    ns = int(2 * L / ds) | 1; ic = ns // 2
+    s = np.linspace(-L, L, ns)
+    ax = X.ravel(); ay = Y.ravel(); Nanch = ax.size
+    gsum = np.zeros(Nw)
+    for ib in range(nbeta):
+        cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
+        px = ax[None, :] + s[:, None] * cb; py = ay[None, :] + s[:, None] * sb
+        eichi = _abrikosov_unit_phase(px, py, g, 1)
+        Dpath = np.zeros((ns, Nanch, 2, 2), dtype=np.complex128)
+        for a in range(nc):
+            amp = phid[a, ib] * _periodic_eval(A[a], g, px, py) * eichi ** mwind[a]
+            Dpath += amp[:, :, None, None] * Smats[a]
+        if lam is None:
+            om_ch = zomega
+        else:
+            dch = -(cb * _periodic_eval(Axg, g, px, py) + sb * _periodic_eval(Ayg, g, px, py))
+            om_ch = zomega[None, None, :] + 1j * hvfarr[ib] * dch[:, :, None]
+        gch, _ = matrix_riccati_chords(om_ch, np.ascontiguousarray(Dpath), hvfarr[ib], ds, 0.0)
+        # N(w) = (1/2) Tr Re g at the anchor, averaged over anchors
+        trg = 0.5 * (gch[ic, :, :, 0, 0] + gch[ic, :, :, 1, 1]).real   # [Nanch, Nw]
+        gsum += wt_dir[ib] * trg.mean(axis=0)
+    return gsum
+
+
+def calc_vortex_dvector(coupling, temp, wc, kb=1.0, Lxi=7.0, ngrid=33, nbeta=16,
+                        sub_ratio=0.95, field=0.0, fs=None):
+    """
+    @fn calc_vortex_dvector
+    @brief Driver: self-consistent d-vector order parameter of a triplet superconductor
+    around an isolated vortex (field=0) or on the circular-cell vortex LATTICE
+    (field=B/Hc2>0, with the supercurrent Doppler shift) -- dominant p_x(e_x) +
+    subdominant p_y(e_z), 2D spin-matrix Riccati.  The dominant component winds and is
+    pair-broken in the core; the subdominant is relatively enhanced there, so the net
+    d-vector tilt theta_d(r) = atan2(|A_pz|,|A_px|) reorients across the core.  Reports
+    the radial texture (along +x) and writes 'vortex_dvector.dat'.
+    """
+    omega = matsubara(temp, wc)
+    couplings = (coupling, coupling * sub_ratio)
+    cell = 'isolated vortex' if field <= 0 else f'circular-cell lattice B/Hc2={field:.3f}'
+    fstxt = ', Wannier FS+v_F' if fs is not None else ''
+    print(f"d-vector vortex ({cell}{fstxt}): triplet p_x + subdominant p_y, 2D spin-matrix Riccati", flush=True)
+    print(f"T={temp/kb:.2f} K, lambda_px={couplings[0]:.3f}, lambda_py={couplings[1]:.3f}, "
+          f"{len(omega)} Matsubara freqs, grid={ngrid}x{ngrid}", flush=True)
+    xg, A, Dbulk, xi = solve_vortex2d_dvector(couplings, temp, omega, Lxi=Lxi,
+                                              ngrid=ngrid, nbeta=nbeta, field=field, fs=fs)
+    Dref = float(np.max(np.abs(Dbulk)))
+    if Dref <= 0.0:
+        print("normal state (Dbulk=0); nothing to profile", flush=True)
+        return xg, A
+    ic = ngrid // 2
+    r = xg[ic:]                                          # radial cut along +x (y=0)
+    apx = np.abs(A[0, ic:, ic])
+    apz = np.abs(A[1, ic:, ic])
+    theta = np.degrees(np.arctan2(apz, np.maximum(apx, 1e-12)))
+    print(f"Dbulk(px,pz) = ({Dbulk[0].real:.4e}, {Dbulk[1].real:.4e}) eV,  xi = {xi:.4g}", flush=True)
+    print(f"  core r=0:  |A_px|/Db={apx[0]/Dref:.3f}  |A_pz|/Db={apz[0]/Dref:.3f}  theta_d={theta[0]:.1f} deg", flush=True)
+    print(f"  bulk r=R:  |A_px|/Db={apx[-1]/Dref:.3f}  |A_pz|/Db={apz[-1]/Dref:.3f}  theta_d={theta[-1]:.1f} deg", flush=True)
+    print(f"  TEXTURE: d-vector tilt theta_d {theta[-1]:.1f} deg (bulk) -> {theta[0]:.1f} deg (core)", flush=True)
+    try:
+        with open('vortex_dvector.dat', 'w') as fh:
+            fh.write("# r/xi  |A_px|/Db  |A_pz|/Db  theta_d[deg]\n")
+            for j in range(len(r)):
+                fh.write(f"{r[j]/xi:10.4f} {apx[j]/Dref:12.5e} {apz[j]/Dref:12.5e} {theta[j]:9.3f}\n")
+    except IOError as e:
+        print(f"Error writing vortex_dvector.dat: {e}", flush=True)
+    return xg, A
+
+
+def calc_vortex_lattice_sc_dvector(coupling, temp, wc, kb=1.0, field=0.2, lattice='square',
+                                   Ng=12, nbeta=10, sub_ratio=0.92, kappa=None, fs=None):
+    """
+    @fn calc_vortex_lattice_sc_dvector
+    @brief Driver: self-consistent d-vector triplet on the TRUE periodic vortex lattice
+    (je-style formulation A, square/triangular cell) -- dominant p_x(e_x) winding with
+    the Abrikosov lattice (node at every core) + subdominant p_y(e_z) that nucleates,
+    core-localized, where the dominant is suppressed (the d-vector texture).  Finite
+    ``kappa`` adds the London screening Doppler.  Writes the converged fields to
+    'lattice_dvector.dat'.
+    """
+    omega = matsubara(temp, wc)
+    couplings = (coupling, coupling * sub_ratio)
+    print(f"d-vector periodic vortex lattice (formulation A, {lattice}, B/Hc2={field:.3f}"
+          f"{', finite kappa=%g' % kappa if kappa is not None else ', extreme'}"
+          f"{', Wannier FS' if fs is not None else ''}): dominant p_x(e_x) + subdominant p_y(e_z)",
+          flush=True)
+    print(f"T={temp/kb:.2f} K, lambda=({couplings[0]:.3f},{couplings[1]:.3f}), "
+          f"{len(omega)} Matsubara freqs, grid={Ng}x{Ng}", flush=True)
+    st = solve_lattice_sc_dvector(couplings, temp, omega, windings=(1, 0), field=field,
+                                  lattice=lattice, Ng=Ng, nbeta=nbeta, kappa=kappa, fs=fs)
+    if st is None:
+        print("normal state (Dbulk=0)", flush=True)
+        return None
+    A = st['A']; Db = st['Dbulk']; Dref = float(np.max(Db)); xi = st['xi']
+    X, Y = st['X'], st['Y']; r = np.sqrt(X ** 2 + Y ** 2)
+    core = r < 0.8 * xi; bulk = r > 2.0 * xi
+    adom_core, adom_bulk = np.abs(A[0])[core].mean() / Dref, np.abs(A[0])[bulk].mean() / Dref
+    asub_core = np.abs(A[1])[core].mean() / Dref
+    asub_bulk = np.abs(A[1])[bulk].mean() / Dref if bulk.any() else 0.0
+    print(f"Dbulk(dom,sub) = ({Db[0]:.4e}, {Db[1]:.4e}) eV,  xi = {xi:.4g},  iters={st['iters']}", flush=True)
+    print(f"  dominant p_x(e_x):  min|A|/Db={np.abs(A[0]).min()/Dref:.3f} (core node)  "
+          f"core={adom_core:.3f}  bulk={adom_bulk:.3f}", flush=True)
+    print(f"  subdom  p_y(e_z):   core={asub_core:.4f}  bulk={asub_bulk:.4f}  "
+          f"({'core-localized TEXTURE' if asub_core > 1.3 * max(asub_bulk, 1e-9) else 'uniform/absent'})",
+          flush=True)
+    n0 = float(lattice_dos_sc_dvector(st, np.array([0.0]), nbeta=max(nbeta, 20),
+                                      delta=0.05 * Dref, fs=fs)[0])
+    print(f"  spatially-averaged zero-energy DOS <N(0)>/N0 = {n0:.3f} "
+          f"(triplet: core-bound-state + nodal contributions)", flush=True)
+    try:
+        with open('lattice_dvector.dat', 'w') as fh:
+            fh.write("# x/xi  y/xi  |A_px|/Db  |A_pz|/Db\n")
+            for i in range(Ng):
+                for j in range(Ng):
+                    fh.write(f"{X[i,j]/xi:10.4f} {Y[i,j]/xi:10.4f} "
+                             f"{np.abs(A[0,i,j])/Dref:12.5e} {np.abs(A[1,i,j])/Dref:12.5e}\n")
+                fh.write("\n")
+    except IOError as e:
+        print(f"Error writing lattice_dvector.dat: {e}", flush=True)
+    return st

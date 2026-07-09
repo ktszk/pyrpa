@@ -23,6 +23,7 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
   
   integer(c_int64_t) i,j,k,l,m
   complex(c_double) tmp
+  real(c_double) ebar
   complex(c_double),parameter::ii=(0.0d0,1.0d0)
 
   !$omp parallel
@@ -31,10 +32,12 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
   L12(:,:)=0.0d0
   L22(:,:)=0.0d0
   !$omp end workshare
-  !$omp do reduction(+: L11,L12,L22) private(i,l,m,j,k,tmp)
+  !$omp do reduction(+: L11,L12,L22) private(i,l,m,j,k,tmp,ebar)
   ! Kubo formula: L_ij = (i/Nk) sum_{k,n,m} v_n(k) v_m(k) * [occupation factor] / [energy denominator]
   ! Intraband (n==m, degenerate): weight = f*(1-f)/T  — Drude-like term (dc limit when w->0)
   ! Interband (n/=m):             weight = (f_l-f_m)/[(e_m-e_l)*(w+e_m-e_l+i*delta)]
+  ! The thermoelectric/thermal moments use the symmetrized heat-current vertex
+  ! ebar = (e_l+e_m)/2 - mu (reduces to (e-mu) intraband; keeps L12 = L21^T / Onsager).
   k_loop: do i=1,Nk
      band_loop1: do l=1,Norb
         band_loop2: do m=1,Norb
@@ -48,11 +51,12 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
                     L22(k,j)=L22(k,j)+tmp*(eig(m,i)-mu)*(eig(m,i)-mu)
                  else if(abs(ffermi(l,i)-ffermi(m,i))>eps)then
                     ! Interband contribution: skip when both states have the same occupation
+                    ebar=0.5d0*(eig(l,i)+eig(m,i))-mu
                     tmp=vk(k,m,l,i)*vk(j,l,m,i)*(ffermi(l,i)-ffermi(m,i))/((eig(m,i)-eig(l,i))&
                        *cmplx(w+eig(m,i)-eig(l,i),idelta,kind=c_double))
                     L11(k,j)=L11(k,j)+tmp
-                    L12(k,j)=L12(k,j)+tmp*(eig(l,i)-mu)
-                    L22(k,j)=L22(k,j)+tmp*(eig(m,i)-mu)*(eig(l,i)-mu)
+                    L12(k,j)=L12(k,j)+tmp*ebar
+                    L22(k,j)=L22(k,j)+tmp*ebar*ebar
                  end if
               end do
            end do
@@ -96,7 +100,7 @@ subroutine calc_lij_wl(L11,L22,L12,vk,eig,ffermi,Norb,Nk,Nw,mu,wl,idelta,eps,tem
   complex(c_double),intent(out),dimension(Nw,3,3):: L11,L12,L22
 
   integer(c_int64_t) i,j,k,l,m,iw
-  real(c_double) de,fl,fm,el,em
+  real(c_double) de,fl,fm,el,em,ebar
   complex(c_double) p11,p12,p22,denom
   complex(c_double),parameter::ii=(0.0d0,1.0d0)
 
@@ -104,7 +108,7 @@ subroutine calc_lij_wl(L11,L22,L12,vk,eig,ffermi,Norb,Nk,Nw,mu,wl,idelta,eps,tem
   L12(:,:,:)=(0.0d0,0.0d0)
   L22(:,:,:)=(0.0d0,0.0d0)
 
-  !$omp parallel do reduction(+: L11,L12,L22) private(i,l,m,j,k,iw,de,fl,fm,el,em,p11,p12,p22,denom)
+  !$omp parallel do reduction(+: L11,L12,L22) private(i,l,m,j,k,iw,de,fl,fm,el,em,ebar,p11,p12,p22,denom)
   k_loop: do i=1,Nk
      band_loop1: do l=1,Norb
         fl=ffermi(l,i); el=eig(l,i)
@@ -124,9 +128,11 @@ subroutine calc_lij_wl(L11,L22,L12,vk,eig,ffermi,Norb,Nk,Nw,mu,wl,idelta,eps,tem
                        L22(iw,j,k)=L22(iw,j,k)+p22/denom
                     end do
                  else if(abs(fl-fm)>eps)then
+                    ! symmetrized heat-current vertex ebar = (e_l+e_m)/2 - mu
+                    ebar=0.5d0*(el+em)-mu
                     p11=vk(k,m,l,i)*vk(j,l,m,i)*(fl-fm)/de
-                    p12=p11*(el-mu)
-                    p22=p11*(em-mu)*(el-mu)
+                    p12=p11*ebar
+                    p22=p11*ebar*ebar
                     do iw=1,Nw
                        denom=cmplx(wl(iw)+de,idelta,kind=c_double)
                        L11(iw,j,k)=L11(iw,j,k)+p11/denom
@@ -249,11 +255,16 @@ subroutine calc_sigma_hall(eig,veloc,imass,kweight,tau,temp,mu,Nk,Norb,sigma_hal
   !$omp end do
 
   !$omp do private(i,j) reduction(+:sigma_hall)
-  ! sigma_Hall ~ sum_{k,n} (vx^2 * m^-1_yy - vx*vy * m^-1_xy) * (-df/de) * tau^2
-  ! From the semi-classical Hall formula in the relaxation-time approximation
+  ! sigma_Hall ~ sum_{k,n} 0.5*(vx^2*m^-1_yy + vy^2*m^-1_xx - 2*vx*vy*m^-1_xy) * (-df/de) * tau^2
+  ! Semi-classical Hall formula (B||z) in the relaxation-time approximation.
+  ! The x<->y symmetrized integrand equals the one-sided form (vx^2*m^-1_yy - vx*vy*m^-1_xy)
+  ! over the full BZ (integration by parts), but converges better on a finite mesh and is
+  ! the manifestly antisymmetric Hall response.
   get_Kn: do i=1,Nk
      band_loop: do j=1,Norb
-        sigma_hall=sigma_hall+(veloc(1,j,i)*veloc(1,j,i)*imass(2,2,j,i)-veloc(1,j,i)*veloc(2,j,i)*imass(1,2,j,i))&
+        sigma_hall=sigma_hall+0.5d0*(veloc(1,j,i)*veloc(1,j,i)*imass(2,2,j,i)&
+             +veloc(2,j,i)*veloc(2,j,i)*imass(1,1,j,i)&
+             -2.0d0*veloc(1,j,i)*veloc(2,j,i)*imass(1,2,j,i))&
              *dfermi(j,i)*kweight(i)*tau(j,i)**2
      end do band_loop
   end do get_Kn
@@ -349,10 +360,19 @@ end subroutine get_tau
 subroutine calc_tau_epa(tau,gavg,wavg,eig,edge,step,mu,temp,&
      Nk,Norb,nmodes,nbin,ngrid,nbin_max) bind(C)
   !> calc_tau_epa
-  !> Compute EPA relaxation time from epa.x output (job='egrid').
-  !> Scattering rate: Gamma = 2*pi * sum_nu sum_j <|g_nu(ei,ej)|^2> *
-  !>   [(nB(w_nu)+1-f(ej)) + (nB(w_nu)+f(ej))] * |dE|
-  !!@param        tau,out: relaxation time [Norb,Nk]
+  !> Compute EPA relaxation time from epa.x output (job='egrid'), following the
+  !> energy-conserving EPA rate (Samsonidze & Kozinsky, Adv. Energy Mater. 8,
+  !> 1800246 (2018)):
+  !>
+  !>   1/tau(e) = 2*pi * sum_nu { <|g_nu(e, e+w_nu)|^2> * [nB(w_nu) +   f(e+w_nu)] * rho(e+w_nu)
+  !>                            + <|g_nu(e, e-w_nu)|^2> * [nB(w_nu) + 1-f(e-w_nu)] * rho(e-w_nu) }
+  !>
+  !> The final state is fixed by energy conservation to e +- w_nu (phonon
+  !> absorption / emission) and weighted by the electronic DOS rho there.
+  !> rho is per spin per unit cell, computed here from ``eig`` by linear
+  !> (cloud-in-cell) binning onto the EPA energy bins.  With hbar = 1 and
+  !> energies in eV, tau is returned in units of hbar/eV.
+  !!@param        tau,out: relaxation time [Norb,Nk] (hbar/eV)
   !!@param       gavg, in: EPA averaged |g|^2 [nmodes,nbin_max,nbin_max,ngrid] (eV^2)
   !!@param       wavg, in: averaged phonon freq per mode [nmodes] (eV)
   !!@param        eig, in: electronic eigenvalues [Norb,Nk] (eV)
@@ -377,14 +397,35 @@ subroutine calc_tau_epa(tau,gavg,wavg,eig,edge,step,mu,temp,&
   real(c_double),intent(in),dimension(Norb,Nk):: eig
   real(c_double),intent(out),dimension(Norb,Nk):: tau
 
-  integer(c_int32_t) ik,ib,ig,ig_found,jbin,kk,nu
-  real(c_double) eps,gamma,w,nB,ff,xb,xf,g2,de
+  integer(c_int32_t) ik,ib,ig,ig_found,jbin,kk,nu,isgn
+  real(c_double) eps,gamma,w,nB,ff,xb,xf,g2,ef,dosv,xc,wlo
   real(c_double),parameter:: pi=acos(-1.0d0)
   real(c_double),parameter:: tau_max=1.0d+15
   real(c_double),parameter:: xcut=500.0d0
-  real(c_double) ecenter
+  real(c_double),dimension(nbin_max,ngrid):: dos
 
-  !$omp parallel do private(ik,ib,ig,ig_found,jbin,kk,nu,eps,gamma,w,nB,ff,xb,xf,g2,de,ecenter)
+  ! --- electronic DOS per spin per unit cell on the EPA bins -----------------
+  ! rho(bin) = (1/Nk) sum_{k,band} delta(e_bin - e_kn), delta -> linear
+  ! (cloud-in-cell) weighting between the two adjacent bin centers, so the
+  ! energy integral of rho over the grid is preserved.
+  dos(:,:)=0.0d0
+  do ig=1,int(ngrid)
+     do ik=1,int(Nk)
+        do ib=1,int(Norb)
+           xc=(eig(ib,ik)-edge(ig))/step(ig)-0.5d0   ! fractional bin-center coordinate
+           kk=int(floor(xc))+1                       ! lower bin
+           wlo=1.0d0-(xc-dble(kk-1))                 ! weight of lower bin
+           if(kk>=1 .and. kk<=int(nbin(ig)))   dos(kk,ig)=dos(kk,ig)+wlo
+           if(kk+1>=1 .and. kk+1<=int(nbin(ig))) dos(kk+1,ig)=dos(kk+1,ig)+(1.0d0-wlo)
+        end do
+     end do
+  end do
+  dos(:,:)=dos(:,:)/dble(Nk)
+  do ig=1,int(ngrid)
+     dos(:,ig)=dos(:,ig)/step(ig)                    ! states / (eV spin cell)
+  end do
+
+  !$omp parallel do private(ik,ib,ig,ig_found,jbin,kk,nu,isgn,eps,gamma,w,nB,ff,xb,xf,g2,ef,dosv)
   do ik=1,Nk
      do ib=1,Norb
         eps=eig(ib,ik)
@@ -405,33 +446,39 @@ subroutine calc_tau_epa(tau,gavg,wavg,eig,edge,step,mu,temp,&
         end if
 
         gamma=0.0d0
-        ! sum over final-state bins within same grid
-        do kk=1,int(nbin(ig_found))
-           ! center energy of final bin
-           ecenter=edge(ig_found)+step(ig_found)*(dble(kk)-0.5d0)
-           de=abs(step(ig_found))
+        do nu=1,nmodes
+           w=wavg(nu)
+           if(w<1.0d-8) cycle
 
-           do nu=1,nmodes
-              w=wavg(nu)
-              if(w<1.0d-8) cycle
+           ! Bose distribution nB(w)
+           xb=w/temp
+           if(xb>xcut)then; nB=0.0d0
+           else;            nB=1.0d0/(exp(xb)-1.0d0)
+           end if
+
+           ! isgn=+1: phonon absorption (final e+w, factor nB+f)
+           ! isgn=-1: phonon emission   (final e-w, factor nB+1-f)
+           do isgn=1,-1,-2
+              ef=eps+dble(isgn)*w
+              kk=int((ef-edge(ig_found))/step(ig_found))+1
+              if(kk<1 .or. kk>int(nbin(ig_found))) cycle  ! final state outside grid
               g2=gavg(nu,kk,jbin,ig_found)
               if(abs(g2)<1.0d-30) cycle
+              dosv=dos(kk,ig_found)
+              if(dosv<1.0d-30) cycle
 
-              ! Bose distribution
-              xb=w/temp
-              if(xb>xcut)then; nB=0.0d0
-              else;            nB=1.0d0/(exp(xb)-1.0d0)
-              end if
-
-              ! Fermi distribution f(ecenter)
-              xf=(ecenter-mu)/temp
+              ! Fermi distribution f(ef)
+              xf=(ef-mu)/temp
               if(xf>xcut)then;      ff=0.0d0
               else if(xf<-xcut)then; ff=1.0d0
               else;                  ff=1.0d0/(exp(xf)+1.0d0)
               end if
 
-              ! emission + absorption
-              gamma=gamma+g2*((nB+1.0d0-ff)+(nB+ff))*de
+              if(isgn>0)then
+                 gamma=gamma+g2*(nB+ff)*dosv        ! absorption
+              else
+                 gamma=gamma+g2*(nB+1.0d0-ff)*dosv  ! emission
+              end if
            end do
         end do
 
