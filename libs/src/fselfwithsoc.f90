@@ -20,7 +20,7 @@ subroutine mkself_soc(sigmak,mu,Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,mu_
   integer(c_int32_t),dimension(Nchi,Nchi,2)::chi_map
   integer(c_int32_t),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
   integer(c_int64_t),dimension(Nchi):: invschi
-  real(c_double)esterr,mu_OLD,eps_sgm,maxchi0_global
+  real(c_double)esterr,mu_OLD,eps_sgm,maxchi0_global,rescale_t
   real(c_double),dimension(Norb,Norb):: sgnsig
   real(c_double),dimension(Nchi,Nchi):: sgnsig2
   complex(c_double),dimension(Nk,Nw,Norb,Norb):: Gk,sigmak0
@@ -73,8 +73,10 @@ subroutine mkself_soc(sigmak,mu,Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,mu_
           sgnsig2,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
      call ckchi()
      if(sw_rescale .and. maxchi0_global>=1.0d0)then
-        print'(A,F10.6,A)','[FLEX] Stoner factor=',maxchi0_global,'>= 1: rescaling chi0'
-        chi(:,:,:,:)=chi(:,:,:,:)*(1.0d0-1.0d-4)/maxchi0_global
+        ! the clamp target must stay just below 1: see the note in mkself (fself.f90)
+        rescale_t=1.0d0-1.0d-4
+        print'(A,F10.6,A,F7.4)','[FLEX] Stoner factor=',maxchi0_global,'>= 1: rescaling chi0 to',rescale_t
+        chi(:,:,:,:)=chi(:,:,:,:)*rescale_t/maxchi0_global
      end if
      call get_V_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
      print'(A16,E12.4,A5,E12.4)','Re V_sigma: max:',maxval(dble(chi)),' min:',minval(dble(chi))
@@ -126,6 +128,17 @@ subroutine mkself_soc(sigmak,mu,Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,mu_
      !$omp end workshare
      !$omp end parallel
   end do iter_loop
+  if(maxchi0_global>=1.0d0)then
+     print'(A)','[FLEX] WARNING: Stoner factor >= 1 at the final iteration:'
+     print'(A,F10.6,A)','[FLEX]   max eig[chi0*V] =',maxchi0_global,&
+          ' -> the normal state is magnetically unstable at this T/U.'
+     if(sw_rescale)then
+        print'(A)','[FLEX]   chi0 rescaling was still ACTIVE: the returned sigma/chi correspond to'
+        print'(A)','[FLEX]   an artificially weakened interaction, NOT a physical FLEX solution.'
+     else
+        print'(A)','[FLEX]   chi_s is singular/negative there; the returned results are unreliable.'
+     end if
+  end if
   deallocate(xout_hist,res_hist,B_diis,rhs_diis,ipiv_diis)
   if(sw_out)then
      call io_sigma(.true.)

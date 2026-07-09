@@ -305,7 +305,7 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   integer(c_int32_t) scf_i
   integer(c_int32_t),dimension(Nchi,Nchi,2)::chi_map
   integer(c_int32_t),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
-  real(c_double)esterr,mu_OLD,eps_sgm,maxchi0s_global
+  real(c_double)esterr,mu_OLD,eps_sgm,maxchi0s_global,rescale_t
   complex(c_double),dimension(Nk,Nw,Norb,Norb):: Gk,sigmak0
   complex(c_double),dimension(Nk,Nw,Nchi,Nchi):: chi
   ! DIIS
@@ -362,8 +362,14 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
      end if
      call ckchi_impl(chi,Smat,Cmat,kmap,invk,Nk,Nkall,Nchi,Nw,maxchi0s_global)
      if(sw_rescale .and. maxchi0s_global>=1.0d0)then
-        print'(A,F10.6,A)','[FLEX] Stoner factor=',maxchi0s_global,'>= 1: rescaling chi0'
-        chi(:,:,:,:)=chi(:,:,:,:)*(1.0d0-1.0d-4)/maxchi0s_global
+        ! the clamp target must stay just below 1: the resulting overshoot of the
+        ! next Sigma is what kicks the loop off the rescaled manifold.  Any softer
+        ! clamp (fixed 0.98, adaptive 1-(S-1), ...) admits a spurious self-consistent
+        ! rescaled state and converges to it even when a genuine unrescaled fixed
+        ! point with S < 1 exists (verified on a near-critical two-orbital model)
+        rescale_t=1.0d0-1.0d-4
+        print'(A,F10.6,A,F7.4)','[FLEX] Stoner factor=',maxchi0s_global,'>= 1: rescaling chi0 to',rescale_t
+        chi(:,:,:,:)=chi(:,:,:,:)*rescale_t/maxchi0s_global
      end if
      call get_Vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi)
      print'(A16,E12.4,A5,E12.4)','Re V_sigma: max:',maxval(dble(chi)),' min:',minval(dble(chi))
@@ -415,6 +421,17 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
      !$omp end workshare
      !$omp end parallel
   end do iter_loop
+  if(maxchi0s_global>=1.0d0)then
+     print'(A)','[FLEX] WARNING: Stoner factor >= 1 at the final iteration:'
+     print'(A,F10.6,A)','[FLEX]   max eig[chi0*S] =',maxchi0s_global,&
+          ' -> the normal state is magnetically unstable at this T/U.'
+     if(sw_rescale)then
+        print'(A)','[FLEX]   chi0 rescaling was still ACTIVE: the returned sigma/chi correspond to'
+        print'(A)','[FLEX]   an artificially weakened interaction, NOT a physical FLEX solution.'
+     else
+        print'(A)','[FLEX]   chi_s is singular/negative there; the returned results are unreliable.'
+     end if
+  end if
   deallocate(xout_hist,res_hist,B_diis,rhs_diis,ipiv_diis)
   if(sw_out)then
      call io_sigma(.true.)

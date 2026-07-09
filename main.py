@@ -113,11 +113,11 @@ MODES_CHIS_SC       = frozenset({M.CHIS_SPECTRUM_SC,M.CHIS_QPOINT_SC})
 del M
 
 #option=CalcMode.CHIS_QPOINT_SC
-option=CalcMode.FERMI_3D #calculation mode to run (see the CalcMode enum above; 0-23 RPA/FLEX/transport, 24-26 Eilenberger superconductivity)
+option=CalcMode.LIN_ELIASHBERG #calculation mode to run (see the CalcMode enum above; 0-23 RPA/FLEX/transport, 24-26 Eilenberger superconductivity)
 color_option=ColorMode.GAP #band/FS coloring (option 0,2,3): MONO=black, ORBITAL=olist weights->RGB, VELOCITY=|v(k)|, GAP=Re[phi(k)] from gap_sym/delta0/eil_gap_orbital/eil_gap_file (option 3 only) -- check the Eilenberger pairing gap on the real 3D FS
 
 #Nx,Ny,Nz,Nw=256,256,4,200 #k and energy(or matsubara freq.) mesh size
-Nx,Ny,Nz,Nw=32,32,4,512
+Nx,Ny,Nz,Nw=32,32,4,256
 kmesh=200               #number of k-points along the symmetry line for band/spectrum plots (larger=smoother)
 kscale=[1.0,1.0,1.0]    #per-axis display scale for the 3D Fermi-surface plot (option 3); e.g. [1,1,0.5] compresses kz
 kz=0.0                  #reduced kz of the 2D Fermi-surface cut (option 2): 0=Gamma plane, 0.5=zone-boundary plane
@@ -127,7 +127,7 @@ kz=0.0                  #reduced kz of the 2D Fermi-surface cut (option 2): 0=Ga
 abc=[3.68,3.68,5.03]    #lattice constants a,b,c [Angstrom] (group velocities & symmetry-path lengths)
 #alpha_beta_gamma=[90.,90.,90]  #lattice angles alpha,beta,gamma [deg] (default 90,90,90 if undefined)
 #temp=2.0e-2 #2.59e-2   #directly set k_B*T [eV]; if defined it overrides tempK
-tempK=85 #Kelvin        #temperature [K] (converted internally to temp=k_B*tempK [eV])
+tempK=200 #Kelvin        #temperature [K] (converted internally to temp=k_B*tempK [eV])
 fill= 2.9375       #band filling; mu solved from sum f(eps-mu)=Nk*fill (no SOC: per spin, full=Norb; SOC: total, full=2*Norb)
 #site_prof=[5]
 
@@ -144,7 +144,7 @@ olist=[0,0,0]          #orbital indices mapped to R,G,B for orbital-weight color
 U,J=1.2,0.15           #on-site Hubbard U and Hund J [eV] (FLEX/RPA); screened U'=U-2J used automatically
 #U,J=1.8,0.225
 #0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py,-3:p+ip  (also drives ALL eilenberger modes; model FS/cylinder maps the int -> continuum harmonic, 2 spm -> s)
-gap_sym=1
+gap_sym=2
 
 #use calculation of magnetic susceptibility at superconducting state
 #delta0=1.e-2 #maximum gap size for calculating susceptibility in SC state; set to 0 for normal state
@@ -162,8 +162,8 @@ sw_unit=True    #True: use physical constants (SI/eV units), False: set all cons
 sw_tdf=False   #True: compute the transport distribution function first, then energy-integrate (energy-dependent tau)
 sw_omega=False #True: real freq, False: Matsubara freq.
 sw_rescale_flex=True #True: rescale self energy to make max|Sigma|~U, False: no rescaling
-sw_chi0_tail=False #True: tail-corrected chi0 in FLEX/Eliashberg (conv[G]-conv[G0]+analytic reference; O(1/Nw^2) Matsubara truncation error). no-SOC path only
-sw_self=False  #True: use calculated self energy for spectrum band plot
+sw_chi0_tail=True #True: tail-corrected chi0 in FLEX/Eliashberg (conv[G]-conv[G0]+analytic reference; O(1/Nw^2) Matsubara truncation error). no-SOC path only
+sw_self=True  #True: use calculated self energy for spectrum band plot
 sw_out_self=True #True: write the FLEX self-energy to sigma.bin/self_en.npz (also triggers gap output in option 15)
 sw_in_self=False #True: load the previous self-energy from sigma.bin as the initial guess for the SC loop
 sw_from_file=False #True: read the self-energy from sigma.bin and skip FLEX (solve Eliashberg with it directly)
