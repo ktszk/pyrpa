@@ -162,6 +162,7 @@ sw_unit=True    #True: use physical constants (SI/eV units), False: set all cons
 sw_tdf=False   #True: compute the transport distribution function first, then energy-integrate (energy-dependent tau)
 sw_omega=False #True: real freq, False: Matsubara freq.
 sw_rescale_flex=True #True: rescale self energy to make max|Sigma|~U, False: no rescaling
+sw_chi0_tail=False #True: tail-corrected chi0 in FLEX/Eliashberg (conv[G]-conv[G0]+analytic reference; O(1/Nw^2) Matsubara truncation error). no-SOC path only
 sw_self=False  #True: use calculated self energy for spectrum band plot
 sw_out_self=True #True: write the FLEX self-energy to sigma.bin/self_en.npz (also triggers gap output in option 15)
 sw_in_self=False #True: load the previous self-energy from sigma.bin as the initial guess for the SC loop
@@ -1397,11 +1398,12 @@ def main():
                 plibs.calc_flex(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,mu,temp,chiolist,site,
                                 orb_dep,U,J,fill,sw_out_self,sw_in_self,
                                 Umat if orb_dep else None,Jmat if orb_dep else None,
-                                m_diis=m_diis_num,sw_rescale=sw_rescale_flex)
+                                m_diis=m_diis_num,sw_rescale=sw_rescale_flex,sw_tail=sw_chi0_tail)
             elif option==CalcMode.LIN_ELIASHBERG: #calc gap function
                 plibs.calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,site,plist,mu,temp,gap_sym,sw_self,
                                              orb_dep,U,J,fill,sw_from_file,sw_out_self,sw_in_self,
-                                             Umat if orb_dep else None,Jmat if orb_dep else None)
+                                             Umat if orb_dep else None,Jmat if orb_dep else None,
+                                             sw_tail=sw_chi0_tail)
             elif option==CalcMode.GAP_FUNCTION: #post gap calculation, output gap function/anomalous green's function
                 output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,plist,mu,temp,sw_self)
     elif option==CalcMode.EILENBERGER: #solve homogeneous quasiclassical Eilenberger equation
@@ -1550,7 +1552,7 @@ def main():
                                  orb_dep,U,J,fill,sw_from_file,sw_out_self,sw_in_self,
                                  Umat if orb_dep else None,Jmat if orb_dep else None,
                                  m_diis=m_diis_num,sw_rescale=sw_rescale_flex,
-                                 sw_check_only=sw_check_only)
+                                 sw_check_only=sw_check_only,sw_tail=sw_chi0_tail)
 
 if __name__=="__main__":
     main()

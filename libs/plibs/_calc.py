@@ -52,7 +52,8 @@ def _load_sigma_from_file():
 def _prepare_green_state_normal(state, olist, interaction, mu:float, fill:float, temp:float,
                                 Nw:int, Nx:int, Ny:int, Nz:int, sw_self:bool,
                                 sw_from_file:bool=False, sw_out_self:bool=False, sw_in_self:bool=False,
-                                eps:float=1.0e-4, pp:float=0.5, m_diis:int=5, sw_rescale:bool=True):
+                                eps:float=1.0e-4, pp:float=0.5, m_diis:int=5, sw_rescale:bool=True,
+                                sw_tail:bool=False):
     Smat, Cmat = interaction
     if sw_self:
         if sw_from_file:
@@ -64,7 +65,8 @@ def _prepare_green_state_normal(state, olist, interaction, mu:float, fill:float,
             sigmak, mu_self = flibs.mkself(Smat, Cmat, state['kmap'], state['invk'], olist,
                                            state['ham_k'], state['eig'], state['uni'],
                                            mu, fill, temp, Nw, Nx, Ny, Nz, sw_out_self, sw_in_self,
-                                           eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale)
+                                           eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale,
+                                           sw_tail=sw_tail)
         print(f'chem. pot. with self= {mu_self:.4f} eV', flush=True)
         Gk = flibs.gen_green(sigmak, state['ham_k'], mu_self, temp)
     else:
@@ -97,6 +99,16 @@ def _prepare_green_state_soc(state, olist, slist, invs, interaction, mu:float, f
         mu_self = mu
         Gk = flibs.gen_Green0(state['eig'], state['uni'], mu, temp, Nw)
     return {'Gk': Gk, 'mu_self': mu_self, 'sigmak': sigmak}
+
+def _get_chi0_normal(state, Gk, chiolist, Smat, Cmat, mu_self, temp, Nx, Ny, Nz, sw_tail):
+    """Irreducible chi0 on the irreducible q-grid; sw_tail=True uses the
+    tail-corrected convolution (conv[G]-conv[G0]+analytic reference, needs the
+    chemical potential mu_self of Gk)."""
+    if sw_tail:
+        return flibs.get_chi0_tail(Smat, Cmat, Gk, state['eig'], state['uni'], chiolist,
+                                   state['kmap'], state['invk'], mu_self, temp, Nx, Ny, Nz)
+    return flibs.get_chi0(Smat, Cmat, Gk, chiolist, state['kmap'], state['invk'], temp, Nx, Ny, Nz)
+
 
 def calc_path_spectrum(kind:str, mu:float, temp:float, klist, qlist, chiolist, eig, uni,
                        spa_length, Nw:int, Emax:float, delta:float, Smat=None):
@@ -190,14 +202,14 @@ def output_gap_function(invk, kmap, gap, uni, plist, gap_sym, Nx:int,
 
 def calc_flex(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, mu:float, temp:float,
               olist, site, orb_dep:bool, U:float, J:float, fill:float, sw_out_self:bool, sw_in_self:bool, 
-              Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True):
+              Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True, sw_tail:bool=False):
     state = _prepare_kspace_state(Nx, Ny, Nz, ham_r, S_r, rvec, need_ham=True)
     # FLEX uses the irreducible k-mesh Green's function together with the same orbital-pair
     # interaction basis used in the response routines above.
     Smat, Cmat = _prepare_normal_interaction(olist, site, orb_dep, U, J, Umat, Jmat)
     sigmak, mu_self = flibs.mkself(Smat, Cmat, state['kmap'], state['invk'], olist, state['ham_k'], state['eig'], state['uni'],
                                    mu, fill, temp, Nw, Nx, Ny, Nz, sw_out_self, sw_in_self,
-                                   eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale)
+                                   eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale, sw_tail=sw_tail)
     if sw_out_self:
         np.savez('self_en', sigmak, mu_self)
         output_self_wannier(sigmak, mu_self, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
@@ -219,18 +231,20 @@ def calc_flex_soc(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, mu:float, te
 def calc_lin_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, chiolist, site, plist,
                            mu:float, temp:float, gap_sym:int, sw_self:bool, orb_dep:bool, U:float, J:float,
                            fill:float, sw_from_file:bool, sw_out_self:bool, sw_in_self:bool,
-                           Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True):
+                           Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True,
+                           sw_tail:bool=False):
     state = _prepare_kspace_state(Nx, Ny, Nz, ham_r, S_r, rvec, need_ham=sw_self)
     Smat, Cmat = _prepare_normal_interaction(chiolist, site, orb_dep, U, J, Umat, Jmat)
     green_state = _prepare_green_state_normal(state, chiolist, (Smat, Cmat), mu, fill, temp, Nw,
                                               Nx, Ny, Nz, sw_self, sw_from_file, sw_out_self,
-                                              sw_in_self, eps, pp, m_diis, sw_rescale)
+                                              sw_in_self, eps, pp, m_diis, sw_rescale, sw_tail)
     if green_state is None:
         return
     Gk = green_state['Gk']
     init_delta = get_initial_gap(state['klist'], len(state['eig'].T), gap_sym)
     sw_eig = True  # True: leading eigenvalue (most-unstable mode); False: trace
-    chi, stoner = flibs.get_chi0(Smat, Cmat, Gk, chiolist, state['kmap'], state['invk'], temp, Nx, Ny, Nz)
+    chi, stoner = _get_chi0_normal(state, Gk, chiolist, Smat, Cmat, green_state['mu_self'],
+                                   temp, Nx, Ny, Nz, sw_tail)
     chis, chic = flibs.get_chis_chic(chi, Smat, Cmat)
     chisq = flibs.get_eig_or_tr_chi(chis, state['invk'], sw_eig)
     chicq = flibs.get_eig_or_tr_chi(chic, state['invk'], sw_eig)
@@ -288,7 +302,7 @@ def calc_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec,
                        chiolist, site, plist, mu:float, temp:float, gap_sym:int, sw_self:bool,
                        orb_dep:bool, U:float, J:float, fill:float, sw_from_file:bool, sw_out_self:bool,
                        sw_in_self:bool, Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True,
-                       sw_check_only:bool=False):
+                       sw_check_only:bool=False, sw_tail:bool=False):
     """
     @param sw_check_only: If True, stop after the linearized Eliashberg solve (before the
                           nonlinear loop) and report the Stoner factor and lambda_eliash.
@@ -300,7 +314,7 @@ def calc_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec,
     Smat, Cmat = _prepare_normal_interaction(chiolist, site, orb_dep, U, J, Umat, Jmat)
     green_state = _prepare_green_state_normal(state, chiolist, (Smat, Cmat), mu, fill, temp, Nw,
                                               Nx, Ny, Nz, sw_self, sw_from_file, sw_out_self,
-                                              sw_in_self, eps, pp, m_diis, sw_rescale)
+                                              sw_in_self, eps, pp, m_diis, sw_rescale, sw_tail)
     if green_state is None:
         return
     Gk = green_state['Gk']
@@ -311,7 +325,8 @@ def calc_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec,
     if True:
         # Reuse the linearized problem as a cheap physical gate before entering the much more
         # expensive nonlinear loop. This filters out SDW/CDW instabilities and T >= Tc cases.
-        chi, stoner = flibs.get_chi0(Smat, Cmat, Gk, chiolist, state['kmap'], state['invk'], temp, Nx, Ny, Nz)
+        chi, stoner = _get_chi0_normal(state, Gk, chiolist, Smat, Cmat, mu_self,
+                                       temp, Nx, Ny, Nz, sw_tail)
         if stoner >= 1.0:
             print(f"Stoner factor = {stoner:.6f} >= 1: SDW/CDW instability, stopping before "
                   f"nonlinear Eliashberg.", flush=True)

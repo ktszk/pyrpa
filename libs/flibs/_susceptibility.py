@@ -120,6 +120,24 @@ _lib.get_chi0.argtypes = [
     POINTER(c_double)  # maxchi0s_out (Stoner factor)
 ]
 _lib.get_chi0.restype = None
+_lib.get_chi0_tail.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi
+    np.ctypeslib.ndpointer(dtype=np.float64),     # Smat
+    np.ctypeslib.ndpointer(dtype=np.float64),     # Cmat
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # Gk
+    np.ctypeslib.ndpointer(dtype=np.float64),     # eig
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
+    np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
+    np.ctypeslib.ndpointer(dtype=np.int64),       # invk
+    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
+    POINTER(c_double), POINTER(c_double),         # mu, temp
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_int64), POINTER(c_int64),
+    POINTER(c_double)  # maxchi0s_out (Stoner factor)
+]
+_lib.get_chi0_tail.restype = None
 _lib.get_chi0_soc.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.complex128),
     np.ctypeslib.ndpointer(dtype=np.float64),
@@ -437,6 +455,42 @@ def get_chi0(Smat: np.ndarray, Cmat: np.ndarray, Gk: np.ndarray, olist: np.ndarr
                   i64(Nx), i64(Ny), i64(Nz),
                   i64(Nw), i64(Nk), i64(Nkall),
                   i64(Norb), i64(Nchi), byref(stoner))
+    return chi, stoner.value
+
+def get_chi0_tail(Smat: np.ndarray, Cmat: np.ndarray, Gk: np.ndarray, eig: np.ndarray,
+                  uni: np.ndarray, olist: np.ndarray, kmap: np.ndarray, invk: np.ndarray,
+                  mu: float, temp: float, Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, float]:
+    """
+    @fn get_chi0_tail
+    @brief Tail-corrected variant of get_chi0: chi0 = conv[G] - conv[G0] + analytic
+    reference bubble.  By bilinearity the sharp-cutoff FFT convolution only acts on
+    the fast-decaying residual G-G0 (~1/w^2), while the slowly decaying 1/(iw)
+    reference part is evaluated exactly in imaginary time, reducing the Matsubara
+    truncation error from O(1/Nw) to O(1/Nw^2).  G0 is built internally from
+    (eig, uni) at the SAME chemical potential mu as Gk.
+    @param   Smat: Spin interaction matrix [Nchi, Nchi] float64
+    @param   Cmat: Charge interaction matrix [Nchi, Nchi] float64
+    @param     Gk: Green's function on the irreducible k-grid [Norb, Norb, Nw, Nk] complex128
+    @param    eig: Eigenvalues [Nk, Norb] float64
+    @param    uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param  olist: Orbital index pairs for chi [Nchi, 2] int64
+    @param   kmap: Full-to-reduced k-point mapping [Nkall] int64
+    @param   invk: Inverse k-point mapping [Nkall] int64
+    @param     mu: Chemical potential of Gk in eV
+    @param   temp: Temperature in eV
+    @param Nx,Ny,Nz: k-grid dimensions
+    @return   chi: Tail-corrected irreducible susceptibility [Nchi, Nchi, Nw, Nk] complex128
+    @return stoner: Maximum Stoner factor max(eig(chi0(q,0)*S)) over q
+    """
+    Norb, Nchi = len(Gk), len(olist)
+    Nkall, Nk, Nw = len(kmap), len(Gk[0, 0, 0]), len(Gk[0, 0])
+    chi = np.zeros((Nchi, Nchi, Nw, Nk), dtype=np.complex128)
+    stoner = c_double(0.0)
+    _lib.get_chi0_tail(chi, Smat, Cmat, Gk, eig, uni, kmap, invk, olist,
+                       dbl(mu), dbl(temp),
+                       i64(Nx), i64(Ny), i64(Nz),
+                       i64(Nw), i64(Nk), i64(Nkall),
+                       i64(Norb), i64(Nchi), byref(stoner))
     return chi, stoner.value
 
 def get_chi0_soc(Vmat: np.ndarray, Gk: np.ndarray, olist: np.ndarray, slist: np.ndarray,

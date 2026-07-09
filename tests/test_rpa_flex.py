@@ -263,6 +263,116 @@ def test_output_gap_function_writes_expected_one_orbital_file(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+#  tail-corrected chi0 (get_chi0_tail / chi0_tail_impl)
+# --------------------------------------------------------------------------- #
+def _lindhard_setup(Nx=8, Ny=8, temp=0.04, mu=0.3):
+    """One-orbital model + exact Matsubara Lindhard chi0 on all irreducible q."""
+    rvec = np.array([[0,0,0],[1,0,0],[-1,0,0],[0,1,0],[0,-1,0]], dtype=np.float64)
+    ham_r = np.array([[[0.0]],[[-1.0]],[[-1.0]],[[-0.5]],[[-0.5]]], dtype=np.complex128)
+    klist, kmap, invk = F.gen_irr_k_TRS(Nx, Ny, 1)
+    hamk = F.gen_ham(klist, ham_r, rvec)
+    eig, uni = F.get_eig(hamk)
+    olist, site = P.get_chi_orb_list(1, [1])
+    Smat, Cmat = F.gen_SCmatrix(olist, site, U=1.0, J=0.0)
+    ix, iy = np.meshgrid(np.arange(Nx), np.arange(Ny), indexing='ij')
+    kf = np.stack([ix.ravel()/Nx, iy.ravel()/Ny, np.zeros(Nx*Ny)], axis=1)
+    epsg = F.gen_ham(kf, ham_r, rvec)[:, 0, 0].real.reshape(Nx, Ny)
+    beta = 1.0/temp
+    x = beta*(epsg-mu)
+    fg = np.where(x > 0, np.exp(-x)/(1+np.exp(-x)), 1/(1+np.exp(x)))
+
+    def chi_exact(mlist):
+        out = np.zeros((len(klist), len(mlist)), dtype=complex)
+        for iq, q in enumerate(klist):
+            iqx = int(round(q[0]*Nx)) % Nx
+            iqy = int(round(q[1]*Ny)) % Ny
+            eq = np.roll(np.roll(epsg, -iqx, axis=0), -iqy, axis=1)
+            fq = np.roll(np.roll(fg, -iqx, axis=0), -iqy, axis=1)
+            for jm, m in enumerate(mlist):
+                de = 2j*np.pi*m*temp + epsg - eq
+                deg = (m == 0) & (np.abs(epsg-eq) < 1e-9)
+                safe = np.where(np.abs(de) < 1e-30, 1.0, de)
+                out[iq, jm] = np.where(deg, fg*(1-fg)/temp, (fq-fg)/safe).mean()
+        return out
+
+    def G0(Nw):
+        wl = (2*np.arange(Nw)+1)*np.pi*temp
+        G = 1.0/((mu+1j*wl)[None, :] - eig[:, 0][:, None])
+        return np.ascontiguousarray(G.T[None, None, :, :])
+
+    return dict(Nx=Nx, Ny=Ny, temp=temp, mu=mu, klist=klist, kmap=kmap, invk=invk,
+                hamk=hamk, eig=eig, uni=uni, olist=olist, Smat=Smat, Cmat=Cmat,
+                chi_exact=chi_exact, G0=G0)
+
+
+def test_chi0_tail_matches_lindhard_and_converges_second_order():
+    """chi0_tail = conv[G]-conv[G0]+analytic tau reference: against the exact
+    Matsubara Lindhard function the sharp-cutoff conv error falls ~1/Nw while the
+    tail-corrected error falls ~1/Nw^2 (and is much smaller at fixed Nw)."""
+    st = _lindhard_setup()
+    mlist = [0, 1, 2, 3]
+    ex = st['chi_exact'](mlist)
+    errs = {}
+    for Nw in (32, 128):
+        G = st['G0'](Nw)
+        with _silence_stdout():
+            co, _ = F.get_chi0(st['Smat'], st['Cmat'], G, st['olist'], st['kmap'],
+                               st['invk'], st['temp'], st['Nx'], st['Ny'], 1)
+            cn, _ = F.get_chi0_tail(st['Smat'], st['Cmat'], G, st['eig'], st['uni'],
+                                    st['olist'], st['kmap'], st['invk'], st['mu'],
+                                    st['temp'], st['Nx'], st['Ny'], 1)
+        eo = max(np.abs(co[0, 0, m, :]-ex[:, jm]).max() for jm, m in enumerate(mlist))
+        en = max(np.abs(cn[0, 0, m, :]-ex[:, jm]).max() for jm, m in enumerate(mlist))
+        errs[Nw] = (eo, en)
+    # first vs second order: quadrupling Nw gains ~4x (old) vs ~16x (new)
+    gain_old = errs[32][0]/errs[128][0]
+    gain_new = errs[32][1]/errs[128][1]
+    assert 2.5 < gain_old < 7.0
+    assert gain_new > 9.0
+    # at Nw=128 the corrected chi0 is clearly more accurate
+    assert errs[128][1] < 0.35*errs[128][0]
+
+
+def test_chi0_tail_exact_at_q0_and_reduces_to_conv_api():
+    """At q=0, nu=0 the reference bubble tau product is constant in tau, so the
+    tail-corrected chi0(0,0) equals sum f(1-f)/T to machine precision; the plain
+    get_chi0_conv wrapper (refactored over chi0_conv_acc) stays consistent with
+    get_chi0."""
+    st = _lindhard_setup()
+    Nw = 32
+    G = st['G0'](Nw)
+    with _silence_stdout():
+        cn, _ = F.get_chi0_tail(st['Smat'], st['Cmat'], G, st['eig'], st['uni'],
+                                st['olist'], st['kmap'], st['invk'], st['mu'],
+                                st['temp'], st['Nx'], st['Ny'], 1)
+        co, _ = F.get_chi0(st['Smat'], st['Cmat'], G, st['olist'], st['kmap'],
+                           st['invk'], st['temp'], st['Nx'], st['Ny'], 1)
+        chi_conv = F.get_chi0_conv(G, st['kmap'], st['invk'], st['olist'],
+                                   st['temp'], st['Nx'], st['Ny'], 1)
+    ex0 = st['chi_exact']([0])[0, 0]              # q index 0 = Gamma
+    assert abs(cn[0, 0, 0, 0] - ex0) < 1e-10
+    assert np.allclose(co, chi_conv, atol=1e-12)
+
+
+def test_mkself_sw_tail_smoke():
+    """FLEX loop with the tail-corrected chi0 branch converges and returns a
+    finite self-energy close to (but corrected from) the sharp-cutoff one."""
+    m = _tiny_one_orbital_model(Nx=4, Ny=4, Nw=16, temp=0.1)
+    Smat, Cmat = F.gen_SCmatrix(m['olist'], m['site'], U=1.0, J=0.0)
+    with _silence_stdout():
+        sg1, mu1 = F.mkself(Smat, Cmat, m['kmap'], m['invk'], m['olist'], m['hamk'],
+                            m['eig'], m['uni'], 0.0, 0.8, m['temp'], m['Nw'],
+                            m['Nx'], m['Ny'], m['Nz'], False, False, sw_tail=False)
+        sg2, mu2 = F.mkself(Smat, Cmat, m['kmap'], m['invk'], m['olist'], m['hamk'],
+                            m['eig'], m['uni'], 0.0, 0.8, m['temp'], m['Nw'],
+                            m['Nx'], m['Ny'], m['Nz'], False, False, sw_tail=True)
+    assert np.isfinite(sg2).all()
+    smax = np.abs(sg1).max()
+    assert smax > 0
+    assert np.abs(sg1-sg2).max() < 0.6*smax    # a correction, not a different answer
+
+
+# --------------------------------------------------------------------------- #
 #  standalone runner (no pytest required)
 # --------------------------------------------------------------------------- #
 if __name__ == '__main__':

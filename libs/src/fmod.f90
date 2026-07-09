@@ -115,6 +115,50 @@ subroutine FFT(cmat,tmp,Nx,Ny,Nz,Nw,SW)
   end if
 end subroutine FFT
 
+subroutine fft3d_batch(cmat,tmp,Nx,Ny,Nz,M,SW)
+  !> Batched 3D spatial FFT: transforms the first three (k-space) axes of
+  !> cmat(Nx,Ny,Nz,M) independently for each of the M trailing slices, leaving
+  !> the 4th axis untouched.  Used by the chi0 tail-corrected reference bubble,
+  !> where the 4th axis is imaginary time and must NOT be transformed.
+  !!@param cmat,inout: FFT source; overwritten with the result
+  !!@param  tmp,inout: work array of the same shape
+  !!@param Nx,Ny,Nz,in: spatial mesh
+  !!@param       M,in: number of trailing slices (batch size)
+  !!@param      SW,in: .true. forward (sign -1, unnormalized);
+  !!                   .false. backward (sign +1, normalized by 1/(Nx*Ny*Nz))
+  use,intrinsic::iso_c_binding, only:c_int32_t,c_int64_t,c_double
+  implicit none
+  integer(c_int64_t),intent(in):: Nx,Ny,Nz,M
+  logical,intent(in):: SW
+  complex(c_double),intent(inout),dimension(Nx,Ny,Nz,M):: cmat,tmp
+
+  integer(c_int64_t) plan
+  integer(c_int32_t) Inv,dist,howmany
+  integer(c_int32_t),dimension(3):: Nlist
+
+  Nlist=(/int(Nx,c_int32_t),int(Ny,c_int32_t),int(Nz,c_int32_t)/)
+  dist=int(Nx*Ny*Nz,c_int32_t)
+  howmany=int(M,c_int32_t)
+  if(SW)then
+     Inv=-1
+  else
+     Inv=1
+  end if
+  !$omp critical(fftw_plan_ops)
+  call dfftw_plan_many_dft(plan,3,Nlist,howmany,cmat,Nlist,1,dist,&
+       tmp,Nlist,1,dist,Inv,64)
+  !$omp end critical(fftw_plan_ops)
+  call dfftw_execute(plan)
+  !$omp critical(fftw_plan_ops)
+  call dfftw_destroy_plan(plan)
+  !$omp end critical(fftw_plan_ops)
+  if(SW)then
+     cmat(:,:,:,:)=tmp(:,:,:,:)
+  else
+     cmat(:,:,:,:)=tmp(:,:,:,:)/dble(dist)
+  end if
+end subroutine fft3d_batch
+
 subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   !> This function generate model hamiltonian from hoppings
   !!@param ham_k,out: k-space Hamiltonian
