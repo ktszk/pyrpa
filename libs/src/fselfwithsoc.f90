@@ -497,31 +497,44 @@ contains
   end subroutine get_rn
   
   subroutine io_sigma(sw)
+    !> Same single-record layout as the no-SOC io_sigma (fself.f90):
+    !> mu, mu_OLD, sigmak, metadata footer (temp, Nw, Norb, Nk).
+    !> The old element-wise SOC format is no longer read.
     logical,intent(in):: sw !True: out, False: in
-    integer(c_int32_t)i,j,l,m
     open(55,file='sigma.bin',form='unformatted')
     if(sw)then
        write(55)mu
        write(55)mu_OLD
+       write(55)sigmak
+       write(55)temp,dble(Nw),dble(Norb),dble(Nk)
     else
        read(55)mu
        read(55)mu_OLD
+       read(55)sigmak
+       call ck_sigma_meta()
     end if
-    do l=1,Norb
-       do m=1,Norb
-          do j=1,Nw
-             do i=1,Nk
-                if(sw)then
-                   write(55)sigmak(i,j,m,l)
-                else
-                   read(55)sigmak(i,j,m,l)
-                end if
-             end do
-          end do
-       end do
-    end do
     close(55)
   end subroutine io_sigma
+
+  subroutine ck_sigma_meta()
+    !> Verify the metadata footer (if present) against the current mesh;
+    !> see the note in fself.f90
+    real(c_double) meta(4)
+    integer(c_int32_t) ios
+    read(55,iostat=ios)meta
+    if(ios/=0)return  !no footer (old file): nothing to check
+    if(nint(meta(2))/=Nw .or. nint(meta(3))/=Norb .or. nint(meta(4))/=Nk)then
+       print'(A)','io_sigma ERROR: sigma.bin was written on a different mesh:'
+       print'(A,I6,A,I4,A,I8)','   file: Nw=',nint(meta(2)),'  Norb=',nint(meta(3)),'  Nk=',nint(meta(4))
+       print'(A,I6,A,I4,A,I8)','   run:  Nw=',int(Nw,c_int32_t),'  Norb=',int(Norb,c_int32_t),'  Nk=',int(Nk,c_int32_t)
+       print'(A)','   convert the seed with plibs.regrid_sigma_bin first'
+       stop
+    end if
+    if(abs(meta(1)-temp)>1.0d-10)then
+       print'(A,F10.6,A,F10.6,A)','io_sigma: seed was written at T=',meta(1),&
+            ' eV, reused raw at T=',temp,' eV (T-annealing)'
+    end if
+  end subroutine ck_sigma_meta
 end subroutine mkself_soc
 
 subroutine calc_sigma_soc(sigmak,Gk,Vsigma,Vmat,kmap,invk,invs,olist,slist,sgnsig,sgnsig2,temp,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
