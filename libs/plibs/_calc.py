@@ -49,9 +49,9 @@ def _load_sigma_from_file():
         return None
 
 
-def regrid_sigma_bin(temp_old:float, temp_new:float, Norb:int, Nw_old:int,
-                     Nw_new:int=None, w_scale:float=None, path:str='sigma.bin',
-                     out_path:str=None):
+def regrid_sigma_bin(temp_old:float=None, temp_new:float=None, Norb:int=None,
+                     Nw_old:int=None, Nw_new:int=None, w_scale:float=None,
+                     path:str='sigma.bin', out_path:str=None):
     """Re-grid the FLEX self-energy seed sigma.bin from the Matsubara mesh at
     temp_old onto the mesh at temp_new (T-annealing helper for sw_in_self).
 
@@ -77,12 +77,23 @@ def regrid_sigma_bin(temp_old:float, temp_new:float, Norb:int, Nw_old:int,
     mu and mu_OLD stored in the file are passed through unchanged.  The file
     layout matches io_sigma in fself.f90 (sequential unformatted, 4-byte
     record markers; records: mu, mu_OLD, sigmak(Nk,Nw,Norb,Norb) in Fortran
-    order).  Records larger than 2 GiB (compiler subrecords) are not handled.
+    order, plus a trailing metadata record (temp, Nw, Norb, Nk) written by
+    recent io_sigma versions).  When the metadata footer is present temp_old,
+    Norb and Nw_old are read from it and may be omitted; values passed
+    explicitly are checked against the footer and a mismatch raises
+    ValueError.  Files written by older versions (no footer) require all
+    three explicitly.  The re-gridded file always carries a footer with the
+    NEW mesh, so chained annealing steps need no manual bookkeeping.
+    The SOC path (mkself_soc) writes the same layout, so its files work here
+    too; only files from the retired element-wise SOC format are unreadable.
+    Records larger than 2 GiB (compiler subrecords) are not handled.
 
     @param temp_old: temperature [eV] the file was written at
-    @param temp_new: target temperature [eV]
-    @param     Norb: number of orbitals
+                     (default: from the metadata footer)
+    @param temp_new: target temperature [eV] (required)
+    @param     Norb: number of orbitals (default: from the metadata footer)
     @param   Nw_old: Matsubara count of the stored sigma
+                     (default: from the metadata footer)
     @param   Nw_new: Matsubara count of the target mesh (default: Nw_old)
     @param  w_scale: evaluation-frequency factor (default 1.0 = faithful;
                      temp_old/temp_new = index-map-like compression, see above)
@@ -92,18 +103,43 @@ def regrid_sigma_bin(temp_old:float, temp_new:float, Norb:int, Nw_old:int,
     """
     from scipy.io import FortranFile
     from scipy.interpolate import CubicSpline
-    if Nw_new is None:
-        Nw_new = Nw_old
+    if temp_new is None:
+        raise ValueError("temp_new is required")
     if w_scale is None:
         w_scale = 1.0
     with FortranFile(path, 'r') as f:
         mu = f.read_record(np.float64)
         mu_old = f.read_record(np.float64)
         flat = f.read_record(np.complex128)
+        try:
+            meta = f.read_record(np.float64)
+            if meta.size != 4:
+                meta = None
+        except Exception:
+            meta = None
+    if meta is not None:
+        stored = {'temp_old': meta[0], 'Nw_old': int(round(meta[1])),
+                  'Norb': int(round(meta[2]))}
+        for name, given in (('temp_old', temp_old), ('Nw_old', Nw_old),
+                            ('Norb', Norb)):
+            if given is not None and not np.isclose(given, stored[name],
+                                                    rtol=1e-8, atol=0.0):
+                raise ValueError(f"{name}={given} contradicts the sigma.bin "
+                                 f"metadata footer ({stored[name]})")
+        temp_old, Nw_old, Norb = stored['temp_old'], stored['Nw_old'], stored['Norb']
+    elif temp_old is None or Nw_old is None or Norb is None:
+        raise ValueError("sigma.bin carries no metadata footer (written by an "
+                         "older io_sigma): temp_old, Norb and Nw_old must be "
+                         "given explicitly")
+    if Nw_new is None:
+        Nw_new = Nw_old
     Nk, rem = divmod(flat.size, Nw_old * Norb * Norb)
     if rem != 0:
         raise ValueError(f"sigma.bin size {flat.size} is not divisible by "
                          f"Nw_old*Norb^2 = {Nw_old * Norb * Norb}: wrong Norb/Nw_old?")
+    if meta is not None and Nk != int(round(meta[3])):
+        raise ValueError(f"inferred Nk={Nk} contradicts the metadata footer "
+                         f"({int(round(meta[3]))})")
     sig = flat.reshape((Nk, Nw_old, Norb, Norb), order='F')
     # drop the outermost frequency (circular-convolution wrap-around artifact)
     sig = sig[:, :Nw_old - 1]
@@ -140,6 +176,7 @@ def regrid_sigma_bin(temp_old:float, temp_new:float, Norb:int, Nw_old:int,
         f.write_record(mu)
         f.write_record(mu_old)
         f.write_record(np.ascontiguousarray(out.ravel(order='F')))
+        f.write_record(np.array([temp_new, float(Nw_new), float(Norb), float(Nk)]))
     print(f"regrid_sigma_bin: sigma.bin re-gridded T={temp_old:.6f} -> {temp_new:.6f} eV, "
           f"Nw={Nw_old} -> {Nw_new} (Nk={Nk}, Norb={Norb})", flush=True)
     return Nk, Nw_new

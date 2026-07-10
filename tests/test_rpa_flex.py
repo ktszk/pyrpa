@@ -399,17 +399,24 @@ def test_regrid_sigma_bin_roundtrip_and_reseed(tmp_path):
         with _silence_stdout():
             run_mkself(0.1, 32, sw_out=True, sw_in=False)
             orig = read_sigma_bin(32)
-            Nk, Nw2 = P.regrid_sigma_bin(0.1, 0.1, Norb=1, Nw_old=32)
+            # temp_old/Norb/Nw_old are auto-detected from the metadata footer
+            Nk, Nw2 = P.regrid_sigma_bin(temp_new=0.1)
             new = read_sigma_bin(32)
         assert (Nk, Nw2) == (orig.shape[0], 32)
         # spline is exact on the kept nodes; only the dropped last point changes
         assert np.abs(new[:, :31] - orig[:, :31]).max() < 1e-10
         assert (new[:, :, 0, 0].imag <= 1e-12).all()          # causality
+        # explicit values contradicting the footer must be rejected
+        try:
+            with _silence_stdout():
+                P.regrid_sigma_bin(0.1, 0.1, Norb=1, Nw_old=16)
+            raise AssertionError("wrong Nw_old must be rejected by the footer check")
+        except ValueError:
+            pass
         # cool + enlarge Nw (impossible with raw reuse), index-map-like w_scale
         with _silence_stdout():
             run_mkself(0.1, 32, sw_out=True, sw_in=False)
-            P.regrid_sigma_bin(0.1, 0.08, Norb=1, Nw_old=32, Nw_new=48,
-                               w_scale=0.1 / 0.08)
+            P.regrid_sigma_bin(temp_new=0.08, Nw_new=48, w_scale=0.1 / 0.08)
             sg, mu_s = run_mkself(0.08, 48, sw_out=False, sw_in=True)
         assert np.isfinite(sg).all() and np.isfinite(mu_s)
         assert np.abs(sg).max() > 0
