@@ -556,6 +556,7 @@ subroutine calc_sigma_soc(sigmak,Gk,Vsigma,Vmat,kmap,invk,invs,olist,slist,sgnsi
   !!@param      Nx,in: Number of kx mesh
   !!@param      Ny,in: Number of ky mesh
   !!@param      Nz,in: Number of kz mesh
+  use numerics, only:drop_roundoff
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
@@ -572,7 +573,6 @@ subroutine calc_sigma_soc(sigmak,Gk,Vsigma,Vmat,kmap,invk,invs,olist,slist,sgnsi
 
   integer(c_int32_t) i,j,k,n,l,m
   real(c_double) weight
-  real(c_double),parameter:: eps=1.0d-9
   complex(c_double),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpVsigma,tmp,tmpgk
 
   weight=temp/dble(Nkall)
@@ -651,17 +651,8 @@ subroutine calc_sigma_soc(sigmak,Gk,Vsigma,Vmat,kmap,invk,invs,olist,slist,sgnsi
      end do
   end do
 
-  do l=1,Norb
-     do m=1,Norb
-        !$omp parallel do private(i,j)
-        do j=1,Nw
-           do i=1,Nk
-              sigmak(i,j,m,l)=sigmak(i,j,m,l)*weight
-              if(abs(dble(sigmak(i,j,m,l)))<eps) sigmak(i,j,m,l)=cmplx(0.0d0,imag(sigmak(i,j,m,l)),kind=c_double)
-              if(abs(imag(sigmak(i,j,m,l)))<eps) sigmak(i,j,m,l)=cmplx(dble(sigmak(i,j,m,l)),0.0d0,kind=c_double)
-           end do
-        end do
-        !$omp end parallel do
-     end do
-  end do
+  !$omp parallel workshare
+  sigmak(:,:,:,:)=sigmak(:,:,:,:)*weight
+  !$omp end parallel workshare
+  call drop_roundoff(sigmak,Nk*Nw*Norb*Norb)
 end subroutine calc_sigma_soc

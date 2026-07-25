@@ -196,6 +196,11 @@ def calc_tdf(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray,
     """
     @fn calc_tdf
     @brief Compute the transport distribution function (TDF) tensor as a function of energy.
+
+    The energy grid is the Nw bin CENTRES E_i = min(eig) + (i-1/2)*dw,
+    dw = (max(eig)-min(eig))/Nw.  Like calc_Kn this returns the kweight-weighted
+    SUM over k (no 1/Nk), so int dE (-df/dE) tdf(E) equals calc_Kn's K0 and the
+    caller must apply 1/(Nk*Vuc) exactly once.
     @param    eig: Eigenvalues [Nk, Norb] float64
     @param  veloc: Group velocities [Nk, Norb, 3] float64
     @param kweight: k-point weights [Nk] float64

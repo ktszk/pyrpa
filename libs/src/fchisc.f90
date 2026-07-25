@@ -38,6 +38,7 @@ subroutine mkBdGhamk(hamBdGk,hamk,delta,Nk,Norb) bind(C)
 end subroutine mkBdGhamk
 
 module calc_irr_chi_sc
+  use occupation, only:occ_factor
   use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
 contains
@@ -80,7 +81,7 @@ contains
     complex(c_double),intent(in),dimension(2*Norb,2*Norb,Nk):: uni
 
     integer(c_int32_t) i,k,l,m,nchi32
-    real(c_double) temp_safe,w_eps,sgn
+    real(c_double) temp_safe,w_eps,sgn,el,em,fl,fm,pocc
     complex(c_double) weight
     ! A,B : matrix-element vectors for the normal G·G contribution.
     !       chi += weight * B(i)*A(j) accumulates u*(o1_i,l,k+q) u(o1_j,l,k+q)
@@ -99,18 +100,25 @@ contains
     w_eps=1.0d-12                 ! threshold to detect static (w≈0) branch
     nchi32=int(Nchi,c_int32_t)
     chi(:,:,:)=0.0d0
-    !$omp parallel do reduction(+:chi) private(l,m,i,weight,A_vec,B_vec,P_vec,R_vec)
+    !$omp parallel do reduction(+:chi) private(l,m,i,weight,A_vec,B_vec,P_vec,R_vec,el,em,fl,fm,pocc)
     kloop: do k=1,Nk
        band1_loop: do l=1,2*Norb       ! BdG band index at k+q
           band2_loop: do m=1,2*Norb    ! BdG band index at k
              ! ----- weight: Lindhard-like factor ----------------------------------
-             if(abs(w)<w_eps .and. abs(eig(m,k)-eig(l,qshift(k)))<1.0d-9)then
-                ! degenerate intra-band static limit: 0/0 -> -∂f/∂E = f(1-f)/T
-                weight=cmplx(ffermi(m,k)*(1.0d0-ffermi(m,k))/temp_safe,0.0d0,kind=c_double)
-             else if(abs(ffermi(l,qshift(k))-ffermi(m,k))>eps)then
+             el=eig(l,qshift(k)); em=eig(m,k)
+             fl=ffermi(l,qshift(k)); fm=ffermi(m,k)
+             if(abs(w)<w_eps)then
+                ! Static limit: real and idelta-free (see calc_chi in fchi.f90).
+                ! occ_factor -> -∂f/∂E continuously, so a BdG pair split by less
+                ! than idelta keeps its weight.  This matters more here than in
+                ! the normal state: the +-E Bogoliubov branches become degenerate
+                ! wherever the gap has a node.
+                pocc=occ_factor(el,em,fl,fm,temp_safe)
+                if(abs(pocc)<=eps)cycle band2_loop
+                weight=cmplx(pocc,0.0d0,kind=c_double)
+             else if(abs(fl-fm)>eps)then
                 ! generic case; idelta provides the retarded prescription
-                weight=(ffermi(l,qshift(k))-ffermi(m,k))&
-                     /cmplx(w+eig(m,k)-eig(l,qshift(k)),idelta,kind=c_double)
+                weight=(fl-fm)/cmplx(w+em-el,idelta,kind=c_double)
              else
                 cycle band2_loop       ! both Fermi factors equal -> negligible
              end if

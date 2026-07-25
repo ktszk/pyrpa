@@ -425,6 +425,199 @@ def test_regrid_sigma_bin_roundtrip_and_reseed(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+#  real-frequency chi0 kernel: static limit and near-degenerate bands
+#  (occ_factor in fmod.f90, used by calc_chi / irr_chi_sc)
+# --------------------------------------------------------------------------- #
+def _two_band_split_model(tp):
+    """Two identical square-lattice bands hybridized on site by tp, so the pair is
+    split by exactly 2*tp everywhere.  tp -> 0 must be a continuous limit."""
+    rvec = np.array([[i, j, 0] for i in (-1, 0, 1) for j in (-1, 0, 1)], dtype=np.float64)
+    ham_r = np.zeros((len(rvec), 2, 2), dtype=np.complex128)
+    for n, r in enumerate(rvec):
+        if abs(r[0]) + abs(r[1]) == 1:
+            ham_r[n, 0, 0] = -1.0
+            ham_r[n, 1, 1] = -1.0
+        if abs(r[0]) + abs(r[1]) == 0:
+            ham_r[n, 0, 1] = tp
+            ham_r[n, 1, 0] = tp
+    return rvec, ham_r
+
+
+def test_static_chi0_is_real():
+    """chi0(q, w=0) is a thermodynamic (real) response: idelta must not leak into
+    it.  The old kernel divided by (e_m-e_l+i*idelta) even at w=0 and produced a
+    spurious imaginary part."""
+    rvec, ham_r = _two_band_split_model(0.3)
+    Nk, klist = P.gen_klist(12, 12, 1, sw_pp=False)
+    eig, uni = P.get_eigs(klist, ham_r, np.array([]), rvec)
+    ff = F.get_ffermi(eig, -0.2, 0.03)
+    olist = np.array([[1, 1], [1, 2], [2, 1], [2, 2]], dtype=np.int64)
+    for q in ([0., 0., 0.], [0.5, 0.5, 0.], [0.25, 0.5, 0.]):
+        qs = F.get_qshift(klist, np.array(q))
+        chi = F.get_chi_irr(uni, eig, ff, qs, olist, np.array([0.0]), 1.0e-3, 0.03)[0]
+        assert np.abs(chi.imag).max() < 1e-12
+
+
+def test_static_chi0_continuous_across_band_splitting():
+    """A band pair split by less than idelta must keep its full -df/de weight.
+
+    The old kernel treated |de| < 1e-9 as degenerate and everything above it with
+    a 1/(de + i*idelta) denominator, so for 1e-9 < |de| < idelta the intra-band
+    weight vanished and chi0(q=0, w=0) collapsed to exactly half its correct
+    value.  Here the splitting is swept straight through that window."""
+    Nk, klist = P.gen_klist(16, 16, 1, sw_pp=False)
+    olist = np.array([[1, 1], [1, 2], [2, 1], [2, 2]], dtype=np.int64)
+    temp, mu, idelta = 0.02, 0.0, 1.0e-3
+    q, wl = np.zeros(3), np.array([0.0])
+    vals = []
+    for tp in (0.0, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4):
+        rvec, ham_r = _two_band_split_model(tp)
+        eig, uni = P.get_eigs(klist, ham_r, np.array([]), rvec)
+        ff = F.get_ffermi(eig, mu, temp)
+        chi = F.get_chi_irr(uni, eig, ff, F.get_qshift(klist, q), olist, wl, idelta, temp)
+        vals.append(chi[0, 0, 0].real)
+    vals = np.array(vals)
+    assert vals[0] > 0.0
+    # every splitting far below T must reproduce the degenerate value
+    assert np.abs(vals - vals[0]).max() < 1e-4 * vals[0]
+
+
+def test_static_chi0_matches_exact_lindhard_one_orbital():
+    """Single band: chi0(q,0) must equal the delta-free static Lindhard sum."""
+    rvec = np.array([[i, j, 0] for i in (-1, 0, 1) for j in (-1, 0, 1)], dtype=np.float64)
+    ham_r = np.zeros((len(rvec), 1, 1), dtype=np.complex128)
+    for n, r in enumerate(rvec):
+        if abs(r[0]) + abs(r[1]) == 1:
+            ham_r[n, 0, 0] = -1.0
+    Nk, klist = P.gen_klist(24, 24, 1, sw_pp=False)
+    temp, mu = 0.03, -0.4
+    eig, uni = P.get_eigs(klist, ham_r, np.array([]), rvec)
+    ff = F.get_ffermi(eig, mu, temp)
+    olist = np.array([[1, 1]], dtype=np.int64)
+    for q in ([0., 0., 0.], [0.5, 0.5, 0.], [0.5, 0.0, 0.]):     # commensurate only
+        qs = F.get_qshift(klist, np.array(q))
+        got = F.get_chi_irr(uni, eig, ff, qs, olist, np.array([0.0]), 1.0e-3, temp)[0, 0, 0]
+        kq = qs - 1
+        de = eig[:, 0] - eig[kq, 0]
+        big = np.abs(de) > 1e-9
+        p = np.where(big, (ff[kq, 0] - ff[:, 0]) / np.where(big, de, 1.0),
+                     ff[:, 0] * (1 - ff[:, 0]) / temp)
+        assert abs(got.real - p.mean()) < 1e-7
+        assert abs(got.imag) < 1e-12
+
+
+def test_chi0_sc_reduces_to_normal_state_at_zero_gap():
+    """The BdG susceptibility must go over into the normal-state chi0 as the gap
+    is switched off, continuously (the +-E Bogoliubov branches are degenerate at
+    the gap nodes, exactly the window the old kernel dropped)."""
+    rvec = np.array([[i, j, 0] for i in (-1, 0, 1) for j in (-1, 0, 1)], dtype=np.float64)
+    ham_r = np.zeros((len(rvec), 1, 1), dtype=np.complex128)
+    for n, r in enumerate(rvec):
+        if abs(r[0]) + abs(r[1]) == 1:
+            ham_r[n, 0, 0] = -1.0
+    Nk, klist = P.gen_klist(20, 20, 1, sw_pp=False)
+    temp, mu, idelta = 0.02, -0.3, 1.0e-3
+    olist = np.array([[1, 1]], dtype=np.int64)
+    eig, uni = P.get_eigs(klist, ham_r, np.array([]), rvec)
+    hamk = F.gen_ham(klist, ham_r, rvec)
+    q, wl = np.array([0.5, 0.5, 0.]), np.array([0.0])
+    qs = F.get_qshift(klist, q)
+    normal = F.get_chi_irr(uni, eig, F.get_ffermi(eig, mu, temp),
+                           qs, olist, wl, idelta, temp)[0, 0, 0].real
+    ff_row = np.cos(2 * np.pi * klist[:, 0]) - np.cos(2 * np.pi * klist[:, 1])   # d-wave
+    vals = []
+    for d0 in (0.0, 1e-9, 1e-7, 1e-5, 1e-3, 1e-2):
+        dk = (d0 * ff_row).astype(np.complex128).reshape(Nk, 1, 1)
+        eb, ub = F.get_eig(F.mkBdGhamk(hamk - mu * np.eye(1), dk))
+        c = F.get_chi_irr_sc(ub, eb, F.get_ffermi(eb, 0.0, temp), qs, olist,
+                             wl, idelta, temp, False)
+        vals.append((c[:, :, :, 0] + c[:, :, :, 1])[0, 0, 0].real)
+    vals = np.array(vals)
+    # gaps far below T (the first four) must be indistinguishable from Delta=0
+    assert np.abs(vals[:4] - normal).max() < 1e-6 * abs(normal)
+    # and the approach stays smooth once the gap becomes comparable to T
+    assert np.abs(np.diff(vals)).max() < 0.05 * abs(normal)
+
+
+# --------------------------------------------------------------------------- #
+#  particle-particle (Cooper) bubble: pair-degenerate line must be kept
+#  (pair_factor in fmod.f90, used by calc_phi)
+# --------------------------------------------------------------------------- #
+def _half_filled_square(mesh=32):
+    """Square lattice at half filling: xi_k = 0 on a whole nested Fermi-surface
+    line that passes exactly through mesh points, so xi_m + xi_l = 0 exactly for
+    many pairs - the configuration that exposes the pair-degenerate handling."""
+    rvec = np.array([[i, j, 0] for i in (-1, 0, 1) for j in (-1, 0, 1)], dtype=np.float64)
+    ham_r = np.zeros((len(rvec), 1, 1), dtype=np.complex128)
+    for n, r in enumerate(rvec):
+        if abs(r[0]) + abs(r[1]) == 1:
+            ham_r[n, 0, 0] = -1.0
+    Nk, klist = P.gen_klist(mesh, mesh, 1, sw_pp=False)
+    eig, uni = P.get_eigs(klist, ham_r, np.array([]), rvec)
+    return Nk, klist, eig, uni
+
+
+def test_static_phi0_matches_exact_pair_bubble():
+    """phi0(q, w=0) must equal the delta-free particle-particle sum, including
+    the xi_l = -xi_m pairs where numerator and denominator vanish together and
+    the ratio tends to f(1-f)/T.  The old kernel either damped those with
+    i*idelta or (idelta=0, phi_qmap) skipped them outright."""
+    Nk, klist, eig, uni = _half_filled_square()
+    mu, olist = 0.0, np.array([[1, 1]], dtype=np.int64)
+    assert (np.abs(eig[:, 0] - mu) < 1e-12).sum() > 0        # FS hits mesh points
+    for temp in (0.1, 0.02):
+        ff = F.get_ffermi(eig, mu, temp)
+        for q in ([0., 0., 0.], [0.5, 0.5, 0.]):
+            qs = F.get_iqshift(klist, np.array(q))
+            got = F.get_phi_irr(uni, eig, ff, qs, olist, np.array([0.0]),
+                                1.0e-3, mu, temp)[0, 0, 0]
+            kq = qs - 1
+            s = (eig[:, 0] - mu) + (eig[kq, 0] - mu)
+            big = np.abs(s) > 1e-12
+            p = np.where(big, (1.0 - ff[kq, 0] - ff[:, 0]) / np.where(big, s, 1.0),
+                         ff[:, 0] * (1 - ff[:, 0]) / temp)
+            assert abs(got.real - p.mean()) < 1e-7
+            assert abs(got.imag) < 1e-12
+
+
+def test_static_phi0_keeps_growing_as_temperature_drops():
+    """The Cooper channel must not saturate: phi0(0,0) has to keep growing as
+    T falls (BCS log).  Dropping the Fermi-surface pairs made it level off."""
+    Nk, klist, eig, uni = _half_filled_square()
+    mu, olist = 0.0, np.array([[1, 1]], dtype=np.int64)
+    qs = F.get_iqshift(klist, np.zeros(3))
+    temps = np.array([0.1, 0.05, 0.02, 0.01])
+    phi = []
+    for temp in temps:
+        ff = F.get_ffermi(eig, mu, temp)
+        phi.append(F.get_phi_irr(uni, eig, ff, qs, olist, np.array([0.0]),
+                                 1.0e-3, mu, temp)[0, 0, 0].real)
+    phi = np.array(phi)
+    assert (np.diff(phi) > 0).all()                          # monotonically growing
+    # growth per decade of 1/T must not shrink (a saturating phi would)
+    slopes = np.diff(phi) / np.diff(np.log(1.0 / temps))
+    assert (np.diff(slopes) > 0).all()
+
+
+# --------------------------------------------------------------------------- #
+#  round-off threshold must be relative, not absolute
+# --------------------------------------------------------------------------- #
+def test_chi0_survives_when_its_natural_scale_is_tiny():
+    """chi0 scales as 1/bandwidth.  With every energy blown up by 1e10 the whole
+    bubble sits at ~1e-10, below the ABSOLUTE 1e-9 cut the code used to apply -
+    which silently returned zero.  The cut is now relative to max|chi0|."""
+    st = _tiny_one_orbital_model()
+    chi_ref = F.get_chi0_conv(st['Gk'], st['kmap'], st['invk'], st['olist'],
+                              st['temp'], st['Nx'], st['Ny'], st['Nz'])
+    scale = 1.0e10                     # G ~ 1/E, so chi ~ G^2 * T ~ 1/scale
+    chi_small = F.get_chi0_conv(st['Gk'] / scale, st['kmap'], st['invk'], st['olist'],
+                                st['temp'] * scale, st['Nx'], st['Ny'], st['Nz'])
+    assert np.abs(chi_small).max() > 0.0                     # not wiped out
+    assert np.abs(chi_small).max() < 1.0e-9                  # genuinely below the old cut
+    assert np.allclose(chi_small * scale, chi_ref, rtol=1e-10, atol=0.0)
+
+
+# --------------------------------------------------------------------------- #
 #  standalone runner (no pytest required)
 # --------------------------------------------------------------------------- #
 if __name__ == '__main__':

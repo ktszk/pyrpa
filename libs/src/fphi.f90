@@ -96,6 +96,7 @@ subroutine get_iqshift(qpoint,klist,qshift,Nk) bind(C,name="get_iqshift_")
 end subroutine get_iqshift
 
 module calc_irr_phi
+  use occupation, only:pair_factor
   use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
 contains
@@ -123,23 +124,38 @@ contains
     complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
   
     integer(c_int32_t) i,j,k,l,m,nchi32
+    real(c_double) temp_safe,w_eps,xl,xm,fl,fm,ppair
     complex(c_double) weight
     complex(c_double),dimension(Nchi):: A_vec,B_vec
     complex(c_double),dimension(Nchi,Nchi):: phi,calc_phi
 
+    temp_safe=max(temp,1.0d-12)
+    w_eps=1.0d-12
     nchi32=int(Nchi,c_int32_t)
     phi(:,:)=0.0d0
     kloop: do k=1,Nk
        band1_loop: do l=1,Norb
           band2_loop: do m=1,Norb
-             ! skip singular denominator
-             if(abs(w-eig(m,k)-eig(l,qshift(k))+2.0d0*mu)<eps .and. idelta<eps)then
-                cycle band2_loop
-             end if
              ! Cooper pair propagator (particle-particle channel):
-             ! weight = -(1-f_l(-k+q) - f_m(k)) / (ω - E_m(k) - E_l(-k+q) + 2μ)
-             weight=-(1.0d0-ffermi(l,qshift(k))-ffermi(m,k))&
-                  /cmplx(w-eig(m,k)-eig(l,qshift(k))+2.0d0*mu,idelta,kind=c_double)
+             ! weight = -(1 - f_l(-k+q) - f_m(k)) / (w - xi_m(k) - xi_l(-k+q) + i*delta)
+             xl=eig(l,qshift(k))-mu; xm=eig(m,k)-mu
+             fl=ffermi(l,qshift(k)); fm=ffermi(m,k)
+             if(abs(w)<w_eps)then
+                ! Static limit: real, idelta-free, and NOT singular.  Numerator and
+                ! denominator vanish together on the pair-degenerate line
+                ! xi_l = -xi_m, where the ratio tends to f(1-f)/T - the largest
+                ! weight in the sum and the origin of the BCS log.  The old code
+                ! divided by (denominator + i*idelta) and, whenever idelta was 0
+                ! (phiq_map with sw_omega=.false.), simply skipped those terms,
+                ! i.e. threw away exactly the Fermi-surface pairs that matter.
+                ppair=pair_factor(xl,xm,fl,fm,temp_safe)
+                if(abs(ppair)<=eps)cycle band2_loop
+                weight=cmplx(ppair,0.0d0,kind=c_double)
+             else
+                ! Finite w: the numerator no longer vanishes with the denominator,
+                ! so idelta is the intended retarded prescription.
+                weight=-(1.0d0-fl-fm)/cmplx(w-xm-xl,idelta,kind=c_double)
+             end if
              ! A_vec(j) = uni(ol(j,1),l,qshift(k)) * conjg(uni(ol(j,2),m,k))
              do j=1,Nchi
                 A_vec(j)=uni(ol(j,1),l,qshift(k))*conjg(uni(ol(j,2),m,k))
@@ -275,11 +291,13 @@ subroutine phiq_map(trphi,uni,eig,ffermi,klist,ol,mu,temp,ecut,idelta,eps,Nx,Ny,
   complex(c_double),dimension(Nchi,Nchi):: phi
   complex(c_double),dimension(2*Nchi):: work
 
-  ! sw_omega=.true.: real frequency ω+iδ;  .false.: Matsubara iω_n (w=0, δ=0)
-  if(sw_omega)then !set omega=cmplex(w,idelta)
+  ! sw_omega=.true. : retarded real frequency  w = ecut + i*idelta
+  ! sw_omega=.false.: static limit             w = 0, no broadening
+  !                   (calc_phi evaluates this as the exact delta->0 limit)
+  if(sw_omega)then
      wre=ecut
      wim=idelta
-  else             !set omega=cmplex(0,omega_n)
+  else
      wre=0.0d0
      wim=0.0d0
   end if

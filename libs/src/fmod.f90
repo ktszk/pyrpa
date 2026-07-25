@@ -4,6 +4,97 @@ module constant
   real(c_double),parameter:: pi=3.141592653589793238462643383279d0
 end module constant
 
+module numerics
+  use,intrinsic:: iso_c_binding, only:c_double,c_int64_t
+  implicit none
+contains
+  subroutine drop_roundoff(z,n)
+    !> Zero the real/imaginary parts of z that are pure FFT round-off.
+    !>
+    !> The cut is RELATIVE to the largest element: the convolution carries a
+    !> round-off floor of ~1e-16*max|z|, so 1e-13*max|z| removes it with three
+    !> decades of margin and touches nothing else.  Every call site used to use
+    !> a fixed ABSOLUTE 1e-9 instead, which is silently scale dependent: for a
+    !> small U, a low T or a weakly polarizable system - where chi or sigma is
+    !> itself O(1e-8..1e-6) - it deleted physical structure rather than noise.
+    !>
+    !> n is passed explicitly so a contiguous slice (e.g. chi(:,:,m,l)) can be
+    !> handed over by sequence association.
+    integer(c_int64_t),intent(in):: n
+    complex(c_double),intent(inout):: z(n)
+    real(c_double) eps,amax
+    integer(c_int64_t) i
+    amax=maxval(abs(z))
+    if(amax<=0.0d0)return
+    eps=1.0d-13*amax
+    !$omp parallel do private(i)
+    do i=1,n
+       if(abs(dble(z(i)))<eps) z(i)=cmplx(0.0d0,imag(z(i)),kind=c_double)
+       if(abs(imag(z(i)))<eps) z(i)=cmplx(dble(z(i)),0.0d0,kind=c_double)
+    end do
+    !$omp end parallel do
+  end subroutine drop_roundoff
+end module numerics
+
+module occupation
+  !> Smooth Lindhard occupation factor shared by the susceptibility kernels
+  !> (fchi.f90 / fchisc.f90) and the Kubo transport kernel (fcond.f90).
+  use,intrinsic:: iso_c_binding, only:c_double
+  implicit none
+contains
+  pure function occ_factor(el,em,fl,fm,temp) result(p)
+    !> p = (f_l - f_m)/(e_m - e_l), evaluated so that it stays CONTINUOUS through
+    !> the degenerate point e_m = e_l, where it tends to -df/de = f(1-f)/T.
+    !>
+    !> Writing the Lindhard weight as p/(w + e_m - e_l + i*delta) makes the
+    !> intra-band (Pauli / Drude) term and the inter-band term one and the same
+    !> expression.  A hard "degenerate if |de| < 1e-9, else divide by
+    !> de + i*delta" split instead loses the whole -df/de weight for every pair
+    !> whose splitting lies between that threshold and delta - which for a
+    !> weakly split band pair is a factor-of-two error in chi0(q,0).
+    !>
+    !> The finite difference is replaced by the analytic derivative well before
+    !> catastrophic cancellation matters: at |de| = 1e-6 T the neglected term is
+    !> O((de/T)^2) ~ 1e-12 relative, the cancellation error only ~1e-10.
+    !!@param el,em: band energies (em is the one the derivative is taken at)
+    !!@param fl,fm: Fermi factors at el, em
+    !!@param  temp: temperature, ALREADY regularized by the caller (temp > 0)
+    real(c_double),intent(in):: el,em,fl,fm,temp
+    real(c_double):: p,de,de_min
+    de=em-el
+    de_min=max(1.0d-6*temp,1.0d-12)
+    if(abs(de)<de_min)then
+       p=fm*(1.0d0-fm)/temp
+    else
+       p=(fl-fm)/de
+    end if
+  end function occ_factor
+
+  pure function pair_factor(xl,xm,fl,fm,temp) result(p)
+    !> Particle-particle (Cooper) analogue of occ_factor:
+    !>     p = (1 - f_l - f_m)/(xi_m + xi_l)
+    !> with xi measured from mu.  Both numerator and denominator vanish at
+    !> xi_l = -xi_m (the pair-degenerate line that carries the BCS log), and
+    !> since 1 - f(xi_l) - f(xi_m) = [tanh(b xi_l/2) + tanh(b xi_m/2)]/2 the
+    !> ratio tends to -df/dxi = f(1-f)/T there - finite, and in fact the LARGEST
+    !> weight in the whole sum.  Dropping those terms (as the old
+    !> |denominator| < eps guard in calc_phi did) removes exactly the states
+    !> that drive the pairing instability.
+    !!@param xl,xm: band energies measured from mu
+    !!@param fl,fm: Fermi factors at xl, xm
+    !!@param  temp: temperature, ALREADY regularized by the caller (temp > 0)
+    real(c_double),intent(in):: xl,xm,fl,fm,temp
+    real(c_double):: p,s,s_min
+    s=xm+xl
+    s_min=max(1.0d-6*temp,1.0d-12)
+    if(abs(s)<s_min)then
+       p=fm*(1.0d0-fm)/temp
+    else
+       p=(1.0d0-fl-fm)/s
+    end if
+  end function pair_factor
+end module occupation
+
 subroutine openmp_params(omp_num,omp_check) bind(C)
   !$ use omp_lib
   use,intrinsic:: iso_c_binding, only:c_int64_t
@@ -372,17 +463,24 @@ subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
            end do
         end do
      end do rloop
+     ! The r-loop only accumulates the axis lower triangle (n>=k) of the orbital
+     ! lower triangle (m>=l).  Fill the rest from the two independent symmetries:
+     !   orbital: M_{lm} = conjg(M_{ml})   (H(R) Hermitian after the R-sum)
+     !   axis   : M_{kn} = M_{nk}          (d2/dk_n dk_k is symmetric, NOT conjugated)
+     ! Both the (m,l) and the (l,m) orbital blocks need the axis copy; conjugating
+     ! the axis transpose instead would corrupt every m/=l element and leave
+     ! imk(k,n,l,m) (k<n) at zero.
      do l=1,Norb
         do m=l,Norb
-           !$omp simd
            axis12: do k=1,3
               axis22: do n=k,3
-                 imk(k,n,m,l,i)=imk(n,k,m,l,i)
                  imk(n,k,l,m,i)=conjg(imk(n,k,m,l,i))
-                 imk(k,n,m,l,i)=imk(n,k,l,m,i)
+                 if(n/=k)then
+                    imk(k,n,m,l,i)=imk(n,k,m,l,i)
+                    imk(k,n,l,m,i)=imk(n,k,l,m,i)
+                 end if
               end do axis22
            end do axis12
-           !$omp end simd
         end do
      end do
   end do kloop

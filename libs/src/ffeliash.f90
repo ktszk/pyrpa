@@ -498,6 +498,7 @@ subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,prt,temp,Nx,N
   !>     tmpfk23 stores F_{lm}(k,iω) directly (other leg).
   !>   - FFT both to real space, multiply tmpfk14(r,τ)·tmpfk23(-r,-τ), inverse FFT.
   !>   - Result is the χ^FF bubble at chi-orbital pair (l,m) and its mirror (m,l) via Hermitian conjugate.
+  use numerics, only:drop_roundoff
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
@@ -514,7 +515,6 @@ subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,prt,temp,Nx,N
   integer(c_int32_t) i,j,k,l,m,n,iorb
   integer(c_int32_t) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(2*Nw)
   real(c_double) weight,sgn,dprt
-  real(c_double),parameter:: eps=1.0d-9
   complex(c_double),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmp,tmpfk14,tmpfk23
   
   ! sgn: F(-k,ω) = sgn·F^T(k,ω);  dprt: Δ(k,-ω) = dprt·Δ*(k,ω)
@@ -601,12 +601,12 @@ subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,prt,temp,Nx,N
         k_loop_tmp_to_chi:do i=1,Nkall
            if(invk(2,i)==0)then
               chi(invk(1,i),j,m,l)=tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight
-              if(abs(dble(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(0.0d0,imag(chi(invk(1,i),j,m,l)),kind=c_double)
-              if(abs(imag(chi(invk(1,i),j,m,l)))<eps) chi(invk(1,i),j,m,l)=cmplx(dble(chi(invk(1,i),j,m,l)),0.0d0,kind=c_double)
            end if
         end do k_loop_tmp_to_chi
      end do w_loop_tmp_to_chi
      !$omp end parallel do
+     ! relative round-off cut on this (m,l) block (see drop_roundoff)
+     call drop_roundoff(chi(1,1,m,l),Nk*Nw)
      chi(:,:,chi_map(m,l,1),chi_map(m,l,2))=conjg(chi(:,:,m,l))
   end do orb_loop
   call destroy_fft_plans()

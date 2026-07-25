@@ -13,6 +13,7 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
   !!@param  idelta,in: dumping factor
   !!@param     eps,in: threshold of energy
   !!@param    temp,in: Temperature
+  use occupation, only:occ_factor
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double
   implicit none
   integer(c_int64_t),intent(in):: Nk,Norb
@@ -20,44 +21,50 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
   real(c_double),intent(in),dimension(Norb,Nk):: eig,ffermi
   complex(c_double),intent(in),dimension(3,Norb,Norb,Nk):: vk
   complex(c_double),intent(out),dimension(3,3):: L11,L12,L22
-  
+
   integer(c_int64_t) i,j,k,l,m
-  complex(c_double) tmp
-  real(c_double) ebar
+  complex(c_double) tmp,denom
+  real(c_double) ebar,pocc,temp_safe
   complex(c_double),parameter::ii=(0.0d0,1.0d0)
 
+  temp_safe=max(temp,1.0d-12)
   !$omp parallel
   !$omp workshare
   L11(:,:)=0.0d0
   L12(:,:)=0.0d0
   L22(:,:)=0.0d0
   !$omp end workshare
-  !$omp do reduction(+: L11,L12,L22) private(i,l,m,j,k,tmp,ebar)
-  ! Kubo formula: L_ij = (i/Nk) sum_{k,n,m} v_n(k) v_m(k) * [occupation factor] / [energy denominator]
-  ! Intraband (n==m, degenerate): weight = f*(1-f)/T  — Drude-like term (dc limit when w->0)
-  ! Interband (n/=m):             weight = (f_l-f_m)/[(e_m-e_l)*(w+e_m-e_l+i*delta)]
+  !$omp do reduction(+: L11,L12,L22) private(i,l,m,j,k,tmp,ebar,pocc,denom)
+  ! Kubo formula, ONE expression for every band pair (l,m):
+  !   L_ij = (i/Nk) sum_{k,l,m} v_ml v_lm * p(l,m) / (w + e_m - e_l + i*delta)
+  ! with p(l,m) = (f_l-f_m)/(e_m-e_l) -> -df/de at e_m = e_l (occ_factor).
+  ! The l=m term is then exactly the Drude weight f(1-f)/(T(w+i*delta)), so the
+  ! intra- and inter-band branches are the same function and the crossover is
+  ! smooth.  The old split (hard 1e-9 degeneracy test plus a |f_l-f_m| > eps
+  ! skip) silently dropped every pair whose splitting was below ~eps*4T, i.e.
+  ! exactly the weakly split pairs that carry a full intra-band weight.
   ! The thermoelectric/thermal moments use the symmetrized heat-current vertex
   ! ebar = (e_l+e_m)/2 - mu (reduces to (e-mu) intraband; keeps L12 = L21^T / Onsager).
   k_loop: do i=1,Nk
      band_loop1: do l=1,Norb
         band_loop2: do m=1,Norb
+           pocc=occ_factor(eig(l,i),eig(m,i),ffermi(l,i),ffermi(m,i),temp_safe)
+           ebar=0.5d0*(eig(l,i)+eig(m,i))-mu
+           ! Negligibility is judged on the LARGEST moment (L22 carries an extra
+           ! ebar^2, so a pair far from mu can have a tiny pocc and still matter
+           ! there) and NEVER for l==m: that is the Drude weight, which the
+           ! Boltzmann kernel calc_kn sums without any threshold, so skipping it
+           ! would break the exact dc Kubo <-> Boltzmann correspondence.
+           ! (The old |f_l-f_m| > eps test did both wrong: it biased L12 by 13%
+           ! and L22 by 5% on a two-orbital model.)
+           if(l/=m .and. abs(pocc)*max(1.0d0,ebar*ebar)<=eps)cycle band_loop2
+           denom=cmplx(w+eig(m,i)-eig(l,i),idelta,kind=c_double)
            do j=1,3
               do k=1,3
-                 if(abs(eig(m,i)-eig(l,i))<1.0d-9)then
-                    ! Intraband contribution: use f*(1-f)/T identity for -df/de
-                    tmp=vk(k,m,m,i)*vk(j,m,m,i)*ffermi(m,i)*(1.0d0-ffermi(m,i))/(temp*cmplx(w,idelta,kind=c_double))
-                    L11(k,j)=L11(k,j)+tmp
-                    L12(k,j)=L12(k,j)+tmp*(eig(m,i)-mu)
-                    L22(k,j)=L22(k,j)+tmp*(eig(m,i)-mu)*(eig(m,i)-mu)
-                 else if(abs(ffermi(l,i)-ffermi(m,i))>eps)then
-                    ! Interband contribution: skip when both states have the same occupation
-                    ebar=0.5d0*(eig(l,i)+eig(m,i))-mu
-                    tmp=vk(k,m,l,i)*vk(j,l,m,i)*(ffermi(l,i)-ffermi(m,i))/((eig(m,i)-eig(l,i))&
-                       *cmplx(w+eig(m,i)-eig(l,i),idelta,kind=c_double))
-                    L11(k,j)=L11(k,j)+tmp
-                    L12(k,j)=L12(k,j)+tmp*ebar
-                    L22(k,j)=L22(k,j)+tmp*ebar*ebar
-                 end if
+                 tmp=vk(k,m,l,i)*vk(j,l,m,i)*pocc/denom
+                 L11(k,j)=L11(k,j)+tmp
+                 L12(k,j)=L12(k,j)+tmp*ebar
+                 L22(k,j)=L22(k,j)+tmp*ebar*ebar
               end do
            end do
         end do band_loop2
@@ -90,6 +97,7 @@ subroutine calc_lij_wl(L11,L22,L12,vk,eig,ffermi,Norb,Nk,Nw,mu,wl,idelta,eps,tem
   !!@param idelta,in: dumping factor
   !!@param  eps,in: threshold of energy
   !!@param temp,in: Temperature
+  use occupation, only:occ_factor
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double
   implicit none
   integer(c_int64_t),intent(in):: Nk,Norb,Nw
@@ -100,46 +108,39 @@ subroutine calc_lij_wl(L11,L22,L12,vk,eig,ffermi,Norb,Nk,Nw,mu,wl,idelta,eps,tem
   complex(c_double),intent(out),dimension(Nw,3,3):: L11,L12,L22
 
   integer(c_int64_t) i,j,k,l,m,iw
-  real(c_double) de,fl,fm,el,em,ebar
+  real(c_double) de,fl,fm,el,em,ebar,pocc,temp_safe
   complex(c_double) p11,p12,p22,denom
   complex(c_double),parameter::ii=(0.0d0,1.0d0)
 
   L11(:,:,:)=(0.0d0,0.0d0)
   L12(:,:,:)=(0.0d0,0.0d0)
   L22(:,:,:)=(0.0d0,0.0d0)
+  temp_safe=max(temp,1.0d-12)
 
-  !$omp parallel do reduction(+: L11,L12,L22) private(i,l,m,j,k,iw,de,fl,fm,el,em,ebar,p11,p12,p22,denom)
+  ! Same single smooth kernel as calc_lij (see the comment there); the
+  ! frequency-independent prefactor is hoisted out of the w-loop.
+  !$omp parallel do reduction(+: L11,L12,L22) private(i,l,m,j,k,iw,de,fl,fm,el,em,ebar,pocc,p11,p12,p22,denom)
   k_loop: do i=1,Nk
      band_loop1: do l=1,Norb
         fl=ffermi(l,i); el=eig(l,i)
         band_loop2: do m=1,Norb
            fm=ffermi(m,i); em=eig(m,i)
            de=em-el
+           pocc=occ_factor(el,em,fl,fm,temp_safe)
+           ! symmetrized heat-current vertex ebar = (e_l+e_m)/2 - mu
+           ebar=0.5d0*(el+em)-mu
+           if(l/=m .and. abs(pocc)*max(1.0d0,ebar*ebar)<=eps)cycle band_loop2   ! see calc_lij
            do j=1,3
               do k=1,3
-                 if(abs(de)<1.0d-9)then
-                    p11=vk(k,m,m,i)*vk(j,m,m,i)*fm*(1.0d0-fm)/temp
-                    p12=p11*(em-mu)
-                    p22=p12*(em-mu)
-                    do iw=1,Nw
-                       denom=cmplx(wl(iw),idelta,kind=c_double)
-                       L11(iw,j,k)=L11(iw,j,k)+p11/denom
-                       L12(iw,j,k)=L12(iw,j,k)+p12/denom
-                       L22(iw,j,k)=L22(iw,j,k)+p22/denom
-                    end do
-                 else if(abs(fl-fm)>eps)then
-                    ! symmetrized heat-current vertex ebar = (e_l+e_m)/2 - mu
-                    ebar=0.5d0*(el+em)-mu
-                    p11=vk(k,m,l,i)*vk(j,l,m,i)*(fl-fm)/de
-                    p12=p11*ebar
-                    p22=p11*ebar*ebar
-                    do iw=1,Nw
-                       denom=cmplx(wl(iw)+de,idelta,kind=c_double)
-                       L11(iw,j,k)=L11(iw,j,k)+p11/denom
-                       L12(iw,j,k)=L12(iw,j,k)+p12/denom
-                       L22(iw,j,k)=L22(iw,j,k)+p22/denom
-                    end do
-                 end if
+                 p11=vk(k,m,l,i)*vk(j,l,m,i)*pocc
+                 p12=p11*ebar
+                 p22=p12*ebar
+                 do iw=1,Nw
+                    denom=cmplx(wl(iw)+de,idelta,kind=c_double)
+                    L11(iw,j,k)=L11(iw,j,k)+p11/denom
+                    L12(iw,j,k)=L12(iw,j,k)+p12/denom
+                    L22(iw,j,k)=L22(iw,j,k)+p22/denom
+                 end do
               end do
            end do
         end do band_loop2
@@ -294,10 +295,12 @@ subroutine calc_tdf(tdf,eig,veloc,kweight,tau,Nw,Nk,Norb) bind(C)
 
   integer(c_int32_t) i,j,l,m,iw
   real(c_double) tmp,emax,emin,id,dw
-  id=1.0d-3
   emax=maxval(eig)
   emin=minval(eig)
   dw=(emax-emin)/dble(Nw)
+  ! Lorentzian width: must stay wider than the energy grid, otherwise the delta
+  ! function falls between the bins and tdf becomes a grid-dependent comb.
+  id=max(1.0d-3,2.0d0*dw)
   ! Parallelize over the energy grid: each thread owns distinct iw slices,
   ! so no reduction array is needed (a per-iteration reduction copy of tdf
   ! overflows the stack for large Nw).
@@ -308,11 +311,16 @@ subroutine calc_tdf(tdf,eig,veloc,kweight,tau,Nw,Nk,Norb) bind(C)
            tmp=0.0d0
            k_loop: do i=1,Nk
               band_loop: do j=1,Norb
-                 tmp=tmp+veloc(m,j,i)*veloc(l,j,i)*tau(j,i)*kweight(i)/((iw*dw+emin-eig(j,i))**2+id*id)
+                 ! bin CENTRE E_iw = emin + (iw-1/2)*dw (same binning as get_tau)
+                 tmp=tmp+veloc(m,j,i)*veloc(l,j,i)*tau(j,i)*kweight(i) &
+                      /(((dble(iw)-0.5d0)*dw+emin-eig(j,i))**2+id*id)
               end do band_loop
            end do k_loop
-           ! Lorentzian delta: (1/pi)*id/((E-e)^2+id^2)
-           tdf(m,l,iw)=tmp*id/(pi*Nk)
+           ! Lorentzian delta: (1/pi)*id/((E-e)^2+id^2).
+           ! NO 1/Nk here: like calc_kn this returns the kweight-weighted SUM, so
+           ! that int dE (-df/dE) tdf(E) reproduces calc_kn's K0 and the caller
+           ! applies 1/(Nk*Vuc) exactly once.
+           tdf(m,l,iw)=tmp*id/pi
            tdf(l,m,iw)=tdf(m,l,iw)
         end do axis2
      end do axis1

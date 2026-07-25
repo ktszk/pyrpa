@@ -584,9 +584,9 @@ def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
         print(f"max tau = {tau.max()} "+('fs' if sw_unit else ''),flush=True)
     if sw_tdf:
         tdf=flibs.calc_tdf(eig,vk,kweight,tau,Nw)
-        # absolute-energy grid matching the calc_tdf bins: E_i = emin + i*dw (i=1..Nw)
+        # absolute-energy grid matching the calc_tdf bin CENTRES: E_i = emin + (i-1/2)*dw
         dw=(eig.max()-eig.min())/Nw
-        wlist=eig.min()+dw*np.arange(1,Nw+1)
+        wlist=eig.min()+dw*(np.arange(1,Nw+1)-0.5)
         dfermi=0.25*(1.-np.tanh(0.5*(wlist-mu)/temp)**2)/temp
         K0=(dfermi*tdf.T).T.sum(axis=0)*dw
         K1=(dfermi*(wlist-mu)*tdf.T).T.sum(axis=0)*dw

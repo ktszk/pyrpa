@@ -92,6 +92,7 @@ subroutine get_qshift(qpoint,klist,qshift,Nk) bind(C,name="get_qshift_")
 end subroutine get_qshift
 
 module calc_irr_chi
+  use occupation, only:occ_factor
   use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
 contains
@@ -119,7 +120,7 @@ contains
     complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
 
     integer(c_int32_t) i,j,k,l,m,nchi32
-    real(c_double) temp_safe,w_eps
+    real(c_double) temp_safe,w_eps,el,em,fl,fm,pocc
     complex(c_double) weight
     complex(c_double),dimension(Nchi):: A_vec,B_vec
     complex(c_double),dimension(Nchi,Nchi):: chi,calc_chi
@@ -132,11 +133,24 @@ contains
        band1_loop: do l=1,Norb
           band2_loop: do m=1,Norb
              ! compute scalar weight once per (k,l,m)
-             if(abs(w)<w_eps .and. abs(eig(m,k)-eig(l,qshift(k)))<1.0d-9)then
-                weight=cmplx(ffermi(m,k)*(1.0d0-ffermi(m,k))/temp_safe,0.0d0,kind=c_double)
-             else if(abs(ffermi(l,qshift(k))-ffermi(m,k))>eps)then
-                weight=(ffermi(l,qshift(k))-ffermi(m,k))&
-                     /cmplx(w+eig(m,k)-eig(l,qshift(k)),idelta,kind=c_double)
+             el=eig(l,qshift(k)); em=eig(m,k)
+             fl=ffermi(l,qshift(k)); fm=ffermi(m,k)
+             if(abs(w)<w_eps)then
+                ! Static (thermodynamic) limit.  chi0(q,0) is REAL and idelta must
+                ! not enter: with it every band pair split by less than idelta
+                ! returns (f_l-f_m)/(i*idelta) ~ 0 instead of its -df/de weight,
+                ! which costs chi0(q,0) up to a factor Norb (verified: two bands
+                ! split by 2e-8..2e-4 gave exactly half the correct chi0).
+                ! occ_factor is the exact delta->0 expression and is continuous
+                ! through the degenerate point, so no separate branch is needed.
+                pocc=occ_factor(el,em,fl,fm,temp_safe)
+                if(abs(pocc)<=eps)cycle band2_loop
+                weight=cmplx(pocc,0.0d0,kind=c_double)
+             else if(abs(fl-fm)>eps)then
+                ! Finite w: the numerator vanishes with the splitting, so the
+                ! plain form is already continuous and idelta is the intended
+                ! spectral broadening.
+                weight=(fl-fm)/cmplx(w+em-el,idelta,kind=c_double)
              else
                 cycle band2_loop
              end if
@@ -481,28 +495,14 @@ subroutine get_chi_map(chi_map,irr_chi,olist,Nchi)
 end subroutine get_chi_map
 
 subroutine chi0_threshold(chi,Nk,Nw,Nchi)
-  !> Zero out numerically tiny real/imaginary parts of chi (cosmetic cleanup,
-  !> same eps as the original get_chi0_conv).
-  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  !> Drop the FFT round-off of the convolution (relative cut, see drop_roundoff).
+  use numerics, only:drop_roundoff
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double
   implicit none
   integer(c_int64_t),intent(in):: Nk,Nw,Nchi
   complex(c_double),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
 
-  integer(c_int32_t) i,j,l,m
-  real(c_double),parameter:: eps=1.0d-9
-
-  !$omp parallel do collapse(2) private(i,j)
-  do l=1,Nchi
-     do m=1,Nchi
-        do j=1,Nw
-           do i=1,Nk
-              if(abs(dble(chi(i,j,m,l)))<eps) chi(i,j,m,l)=cmplx(0.0d0,imag(chi(i,j,m,l)),kind=c_double)
-              if(abs(imag(chi(i,j,m,l)))<eps) chi(i,j,m,l)=cmplx(dble(chi(i,j,m,l)),0.0d0,kind=c_double)
-           end do
-        end do
-     end do
-  end do
-  !$omp end parallel do
+  call drop_roundoff(chi,Nk*Nw*Nchi*Nchi)
 end subroutine chi0_threshold
 
 subroutine chi0_conv_acc(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,coef,&
