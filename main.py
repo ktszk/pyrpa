@@ -165,7 +165,7 @@ sw_rescale_flex=True #True: rescale self energy to make max|Sigma|~U, False: no 
 sw_chi0_tail=True #True: tail-corrected chi0 in FLEX/Eliashberg (conv[G]-conv[G0]+analytic reference; O(1/Nw^2) Matsubara truncation error). no-SOC path only
 sw_self=True  #True: use calculated self energy for spectrum band plot
 sw_out_self=True #True: write the FLEX self-energy to sigma.bin/self_en.npz (also triggers gap output in option 15)
-sw_in_self=False #True: load the previous self-energy from sigma.bin as the initial guess for the SC loop
+sw_in_self=False #True: load the previous self-energy from sigma.bin as the initial guess for the SC loop (a seed with a different Nw is auto re-gridded in place onto the current Nw)
 sigma_in_scale=1.0 #factor multiplying the sigma seed loaded via sw_in_self; for U-annealing set (U_new/U_old)**2 (Sigma ~ U^2)
 sw_from_file=False #True: read the self-energy from sigma.bin and skip FLEX (solve Eliashberg with it directly)
 sw_check_only=False #True: stop after linear Eliashberg (also stops if Stoner factor>=1 or lambda<1)
@@ -463,7 +463,7 @@ def set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist
         return fspolys,fscenters,fscolors
 
 def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu:float,ham_r,S_r,rvec,Emin:float,Emax:float,
-                  delta:float,Nw:int,sw_self=True):
+                  delta:float,Nw:int,sw_self=True,sw_maxent=False,maxent_noise=1.0e-4):
     klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     wlist=np.linspace(Emin,Emax,Nw)
@@ -483,9 +483,16 @@ def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu:float,ham_r,S_r,rvec,Emin:float,Em
         selfen=np.ascontiguousarray(np.einsum('mnwr,kr->mnwk',sig_r,phase))  # [Norb,Norb,Niw,Nks]
         ham_k=flibs.gen_ham(klist,ham_r,rvec)
         Gk_mats=flibs.gen_green(selfen,ham_k,mu_self,temp)
-        Niw=min(40,len(iw_grid))  # Pade becomes unstable with too many Matsubara points
-        # A(k,w) = -Im Tr G(k,w+i*delta)
-        Gk=-flibs.pade_with_trace(Gk_mats[:,:,:Niw,:],1j*iw_grid[:Niw],wlist+1j*delta).imag
+        if sw_maxent:
+            # MaxEnt (ana_cont): regularized fit rather than exact interpolation, so it
+            # does not chase Matsubara noise into spurious real-axis poles over wide
+            # Emin..Emax / k windows the way the Pade continued fraction below does.
+            # Slower (~0.1-0.5s per k-point) but every point uses all available iw_grid.
+            Gk=plibs.maxent_trace_spectrum(Gk_mats,iw_grid,wlist,temp,noise_level=maxent_noise)
+        else:
+            Niw=min(40,len(iw_grid))  # Pade becomes unstable with too many Matsubara points
+            # A(k,w) = -Im Tr G(k,w+i*delta)
+            Gk=-flibs.pade_with_trace(Gk_mats[:,:,:Niw,:],1j*iw_grid[:Niw],wlist+1j*delta).imag
     else:
         Gk=flibs.gen_tr_Greenw_0(eig,mu,wlist,delta)
     w,x=np.meshgrid(wlist,spa_length)
@@ -718,7 +725,7 @@ def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
 
 
 def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,plist,mu:float,temp:float,sw_self:bool,
-              sw_soc=False,invs=None,slist=None,gap_sym=0):
+              sw_soc=False,invs=None,slist=None,gap_sym=0,sw_maxent=False,maxent_noise=1.0e-4):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     if sw_self:
@@ -764,15 +771,26 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,plist,mu:float,temp:flo
     emax=(eig.max()-(mu_self if sw_self else mu))*1.2
     emin=(eig.min()-(mu_self if sw_self else mu))*1.2
     wlist=np.linspace(emin,emax,500)
+    # only the kx-axis line (ky=kz=0) is written, so continue just those k-points:
+    # MaxEnt costs ~0.1-0.5 s/k-point and would otherwise be wasted on the rest.
+    sel=[i for i,km in enumerate(klist) if km[1]==0.0 and km[2]==0.0]
     try:
         with open(f'Gpade.dat','w') as fp:
-            idelta=1e-2
-            Gkw=flibs.pade_with_trace(Gk[:,:,:40,:],iwlist[:40]*1j,wlist+idelta*1j)
-            for i,km in enumerate(klist):
-                if km[1]==0.0 and km[2]==0.0:
-                    for j,w in enumerate(wlist):
-                        fp.write(f'{km[0]:3} {w.real:12.8f} {-Gkw[i,j].imag:12.8f}\n')
-                    fp.write('\n')
+            if sw_maxent:
+                # MaxEnt (ana_cont): regularized fit, so it does not chase Matsubara
+                # noise into spurious real-axis structure over this wide 500-point
+                # window the way the 40-point Pade continued fraction below does;
+                # uses the full stored Matsubara mesh instead of truncating to 40.
+                Akw=plibs.maxent_trace_spectrum(Gk[:,:,:,sel],iwlist,wlist,temp,noise_level=maxent_noise)
+            else:
+                idelta=1e-2
+                Gkw=flibs.pade_with_trace(Gk[:,:,:40,:],iwlist[:40]*1j,wlist+idelta*1j)
+                Akw=-Gkw[sel].imag
+            for row,i in enumerate(sel):
+                km=klist[i]
+                for j,w in enumerate(wlist):
+                    fp.write(f'{km[0]:3} {w.real:12.8f} {Akw[row,j]:12.8f}\n')
+                fp.write('\n')
     except IOError as e:
         print(f"Error: Failed to write 'Gpade.dat': {e}",flush=True)
     #maxgap=abs(gap).max()

@@ -424,6 +424,67 @@ def test_regrid_sigma_bin_roundtrip_and_reseed(tmp_path):
         os.chdir(olddir)
 
 
+def test_auto_regrid_sigma_seed(tmp_path):
+    """plibs._calc._auto_regrid_sigma_seed (sw_in_self helper): a sigma.bin
+    seed whose footer Nw differs from the run's is re-gridded in place before
+    mkself reads it; a matching Nw and a footer-less (old-format) file are
+    left byte-identical."""
+    from scipy.io import FortranFile
+    from libs.plibs import _calc as PC
+    m = _tiny_one_orbital_model(Nx=4, Ny=4, Nw=32, temp=0.1)
+    Smat, Cmat = F.gen_SCmatrix(m['olist'], m['site'], U=1.0, J=0.0)
+
+    def run_mkself(temp, Nw, sw_out, sw_in):
+        return F.mkself(Smat, Cmat, m['kmap'], m['invk'], m['olist'], m['hamk'],
+                        m['eig'], m['uni'], 0.0, 0.8, temp, Nw,
+                        m['Nx'], m['Ny'], m['Nz'], sw_out, sw_in, eps=1.0e-6)
+
+    olddir = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        with _silence_stdout():
+            run_mkself(0.1, 32, sw_out=True, sw_in=False)
+        meta = PC._read_sigma_bin_meta()
+        assert meta is not None
+        temp0, Nw0, Norb0, Nk0 = meta
+        assert (round(Nw0), round(Norb0)) == (32, 1) and abs(temp0 - 0.1) < 1e-12
+
+        # matching Nw: the seed must not be touched
+        before = Path('sigma.bin').read_bytes()
+        with _silence_stdout():
+            PC._auto_regrid_sigma_seed(0.1, 32)
+        assert Path('sigma.bin').read_bytes() == before
+
+        # Nw mismatch (cool + enlarge): re-gridded in place, footer updated,
+        # and the seed is then accepted by mkself via sw_in
+        with _silence_stdout():
+            PC._auto_regrid_sigma_seed(0.08, 48)
+        meta = PC._read_sigma_bin_meta()
+        assert (round(meta[1]), round(meta[3])) == (48, round(Nk0))
+        assert abs(meta[0] - 0.08) < 1e-12
+        with _silence_stdout():
+            sg, mu_s = run_mkself(0.08, 48, sw_out=False, sw_in=True)
+        assert np.isfinite(sg).all() and np.isfinite(mu_s)
+        assert np.abs(sg).max() > 0
+
+        # footer-less (old io_sigma) file: meta is None and the file is left alone
+        with FortranFile('sigma.bin', 'r') as f:
+            mu = f.read_record(np.float64)
+            mu_old = f.read_record(np.float64)
+            flat = f.read_record(np.complex128)
+        with FortranFile('sigma.bin', 'w') as f:
+            f.write_record(mu)
+            f.write_record(mu_old)
+            f.write_record(flat)
+        assert PC._read_sigma_bin_meta() is None
+        before = Path('sigma.bin').read_bytes()
+        with _silence_stdout():
+            PC._auto_regrid_sigma_seed(0.1, 64)
+        assert Path('sigma.bin').read_bytes() == before
+    finally:
+        os.chdir(olddir)
+
+
 # --------------------------------------------------------------------------- #
 #  real-frequency chi0 kernel: static limit and near-degenerate bands
 #  (occ_factor in fmod.f90, used by calc_chi / irr_chi_sc)
@@ -615,6 +676,61 @@ def test_chi0_survives_when_its_natural_scale_is_tiny():
     assert np.abs(chi_small).max() > 0.0                     # not wiped out
     assert np.abs(chi_small).max() < 1.0e-9                  # genuinely below the old cut
     assert np.allclose(chi_small * scale, chi_ref, rtol=1e-10, atol=0.0)
+
+
+# --------------------------------------------------------------------------- #
+#  gap w_n -> 0 extrapolation (fermionic Matsubara frequencies are never
+#  exactly zero, so reading Delta(iw_0) directly carries an O((pi*T)^2) bias)
+# --------------------------------------------------------------------------- #
+def test_gap_extrapolate_w0_recovers_delta0_and_flags_iw0_bias():
+    """Delta(iw_n) = Delta0 + c*w_n^2 (the leading-order shape implied by
+    Delta(-iw_n)=Delta(iw_n)^*): the w_n^2 fit must recover Delta0 far more
+    accurately than reading off Delta(iw_0), and the reported bias must match
+    the known analytic (pi*T)^2*|c|/Delta0 offset of that iw_0 shortcut."""
+    from libs.plibs._calc import gap_extrapolate_w0
+    temp = 0.02
+    Nw, Norb, Nk = 200, 2, 3
+    wn = (2 * np.arange(Nw) + 1) * np.pi * temp
+    delta0_true = np.array([0.010, 0.006])
+    c_true = -0.5
+    gap = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
+    rng = np.random.default_rng(0)
+    for k in range(Nk):
+        scale = 1.0 + 0.1 * k
+        for i in range(Norb):
+            gap[i, i, :, k] = (delta0_true[i] * scale + c_true * wn**2
+                              + 1.0e-6 * rng.standard_normal(Nw))
+
+    gap0, bias = gap_extrapolate_w0(gap, temp, n_points=4, order=1)
+
+    for i in range(Norb):
+        assert abs(gap0[i, i, 0].real - delta0_true[i]) < 1.0e-3 * delta0_true[i]
+    iw0 = gap[:, :, 0, :]
+    naive_err = np.abs(iw0[0, 0, 0].real - delta0_true[0]) / delta0_true[0]
+    assert naive_err > 0.15                                   # the iw_0 shortcut really is biased
+    # bias is |gap0 - iw0| normalized by the PEAK gap (max over all orbitals/k);
+    # here that peak is delta0_true[0]*(1+0.1*(Nk-1)) at k=Nk-1, orbital 0.
+    gap_scale = delta0_true[0] * (1.0 + 0.1 * (Nk - 1))
+    expected_bias_00 = abs(c_true) * wn[0]**2 / gap_scale
+    assert abs(bias[0, 0, 0] - expected_bias_00) < 1.0e-2 * expected_bias_00
+    # off-diagonal components are identically zero and must not blow up the max
+    assert np.isfinite(bias).all()
+    assert bias.max() < 1.0                                   # correction stays below the peak gap
+
+
+def test_gap_extrapolate_w0_rejects_too_few_points():
+    from libs.plibs._calc import gap_extrapolate_w0
+    gap = np.zeros((1, 1, 3, 1), dtype=np.complex128)
+    try:
+        gap_extrapolate_w0(gap, temp=0.02, n_points=4, order=1)
+        assert False, "expected ValueError for n_points > available Matsubara points"
+    except ValueError:
+        pass
+    try:
+        gap_extrapolate_w0(gap, temp=0.02, n_points=1, order=1)
+        assert False, "expected ValueError for n_points < order+1"
+    except ValueError:
+        pass
 
 
 # --------------------------------------------------------------------------- #

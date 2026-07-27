@@ -49,6 +49,59 @@ def _load_sigma_from_file():
         return None
 
 
+def _read_sigma_bin_meta(path:str='sigma.bin'):
+    """Metadata footer (temp, Nw, Norb, Nk) of a sigma.bin as a tuple, or None
+    if the file is missing, malformed, or carries no footer (older io_sigma).
+    Walks the sequential records by their 4-byte markers without loading the
+    sigma payload; records larger than 2 GiB (compiler subrecords) are not
+    handled and yield None."""
+    import os, struct
+    try:
+        fsize = os.path.getsize(path)
+        with open(path, 'rb') as f:
+            last = None
+            while f.tell() < fsize:
+                head = f.read(4)
+                if len(head) < 4:
+                    return None
+                n, = struct.unpack('=i', head)
+                if n < 0 or f.tell() + n + 4 > fsize:
+                    return None
+                if n == 32:
+                    last = f.read(32)
+                else:
+                    f.seek(n, 1)
+                    last = None
+                tail = f.read(4)
+                if len(tail) < 4 or struct.unpack('=i', tail)[0] != n:
+                    return None
+    except OSError:
+        return None
+    if last is None:
+        return None
+    return struct.unpack('=4d', last)
+
+
+def _auto_regrid_sigma_seed(temp:float, Nw:int, path:str='sigma.bin'):
+    """Bring the sigma.bin seed loaded via sw_in_self onto the current run's
+    Matsubara mesh: if the metadata footer reports a different Nw, the file is
+    re-gridded in place with regrid_sigma_bin before the Fortran side reads it.
+    w_scale=temp_old/temp reproduces the frequency compression of the raw
+    equal-Nw reuse, so T-annealing behaves the same whether or not Nw changed.
+    Footer-less files (older io_sigma) are left untouched, and a Norb/Nk
+    mismatch is left to the Fortran-side mesh check (such a seed is unusable
+    for the run either way)."""
+    meta = _read_sigma_bin_meta(path)
+    if meta is None:
+        return
+    temp_old, Nw_old = meta[0], int(round(meta[1]))
+    if Nw_old == Nw:
+        return
+    print(f"sw_in_self: sigma.bin seed has Nw={Nw_old}, run uses Nw={Nw}: "
+          f"re-gridding in place", flush=True)
+    regrid_sigma_bin(temp_new=temp, Nw_new=Nw, w_scale=temp_old / temp, path=path)
+
+
 def regrid_sigma_bin(temp_old:float=None, temp_new:float=None, Norb:int=None,
                      Nw_old:int=None, Nw_new:int=None, w_scale:float=None,
                      path:str='sigma.bin', out_path:str=None):
@@ -195,6 +248,8 @@ def _prepare_green_state_normal(state, olist, interaction, mu:float, fill:float,
                 return None
             sigmak, mu_self = loaded
         else:
+            if sw_in_self:
+                _auto_regrid_sigma_seed(temp, Nw)
             sigmak, mu_self = flibs.mkself(Smat, Cmat, state['kmap'], state['invk'], olist,
                                            state['ham_k'], state['eig'], state['uni'],
                                            mu, fill, temp, Nw, Nx, Ny, Nz, sw_out_self, sw_in_self,
@@ -222,6 +277,8 @@ def _prepare_green_state_soc(state, olist, slist, invs, interaction, mu:float, f
                 return None
             sigmak, mu_self = loaded
         else:
+            if sw_in_self:
+                _auto_regrid_sigma_seed(temp, Nw)
             sigmak, mu_self = flibs.mkself_soc(Vmat, state['kmap'], state['invk'], invs, olist, slist,
                                                state['ham_k'], state['eig'], state['uni'],
                                                mu, fill, temp, Nw, Nx, Ny, Nz, sw_out_self, sw_in_self,
@@ -308,8 +365,60 @@ def get_mu(ham_r, S_r, rvec, Arot, temp:float, fill:float, kmesh=40) -> float:
     mu = calc_mu(eig, Nk, fill, temp)
     return mu
 
+def gap_extrapolate_w0(gap: np.ndarray, temp: float, n_points: int = 4, order: int = 1):
+    """
+    @fn gap_extrapolate_w0
+    @brief Extrapolate the gap function Delta(k,iw_n) to the w_n->0 limit along the
+    imaginary axis, by a low-order polynomial fit in w_n^2 using the n_points lowest
+    fermionic Matsubara points. w_n=(2n+1)*pi*temp is never exactly zero, so this
+    limit is reached only by extrapolation, never by reading off a stored data point
+    (in particular Delta(iw_0), the lowest point, differs from it by O((pi*temp)^2)).
+    Delta(-iw_n)=Delta(iw_n)^* makes Delta(iw_n) even in w_n, so fitting in w_n^2
+    (not w_n) removes the leading-order bias rather than just averaging noise.
+    If Delta(z) is analytic in a neighborhood of z=0 (the generic case for a fully
+    gapped or smoothly-nodal SC state), this imaginary-axis limit coincides with the
+    real-axis retarded Delta(w=0).
+    @param    gap: gap function [Norb, Norb, Nw, Nk] complex128 (Matsubara axis 3rd,
+                  as produced by linearized_eliashberg/nonlinear_eliashberg)
+    @param   temp: temperature in eV; sets w_n = (2n+1)*pi*temp
+    @param n_points: number of lowest Matsubara points used in the fit (>= order+1)
+    @param  order: polynomial order in w_n^2 (1: Delta0 + c*w_n^2, the leading-order
+                  correction implied by the even-in-w_n symmetry above)
+    @retval  gap0: extrapolated Delta(k,w_n->0) [Norb, Norb, Nk] complex128
+    @retval  bias: |gap0 - Delta(iw_0)| / max|gap0|, the O((pi*temp)^2) correction
+                  that reading Delta(iw_0) directly misses, per component but
+                  normalized by the PEAK gap [Norb, Norb, Nk] float64. Normalizing
+                  by the global peak (not the per-point value) keeps near-nodal /
+                  off-diagonal components where gap0~0 from blowing up the reported
+                  maximum; bias.max() is then "largest correction as a fraction of
+                  the peak gap". It still grows near Tc, where the whole gap shrinks
+                  toward the scale of pi*temp, flagging where iw_0 is unreliable.
+    """
+    if n_points < order + 1:
+        raise ValueError(f"n_points ({n_points}) must be >= order+1 ({order+1})")
+    Norb1, Norb2, Nw, Nk = gap.shape
+    if Nw < n_points:
+        raise ValueError(f"gap has only {Nw} Matsubara points, need >= {n_points}")
+    wn2 = ((2*np.arange(n_points)+1)*np.pi*temp)**2                    # [n_points]
+    data = np.transpose(gap[:, :, :n_points, :], (2,0,1,3)).reshape(n_points, -1)  # [n_points, Norb^2*Nk]
+    A = np.vander(wn2, order+1, increasing=True)                       # [n_points, order+1]
+    coeffs, *_ = np.linalg.lstsq(A, data, rcond=None)                  # [order+1, Norb^2*Nk]
+    gap0 = coeffs[0].reshape(Norb1, Norb2, Nk)
+    iw0 = gap[:, :, 0, :]
+    gap_scale = max(np.abs(gap0).max(), np.abs(iw0).max())
+    if gap_scale == 0.0:
+        bias = np.zeros((Norb1, Norb2, Nk), dtype=np.float64)
+    else:
+        bias = np.abs(gap0 - iw0) / gap_scale
+    return gap0, bias
+
 def output_gap_function(invk, kmap, gap, uni, plist, gap_sym, Nx:int,
-                        soc=False, invs=None, slist=None, sw_orb=False):
+                        soc=False, invs=None, slist=None, sw_orb=False,
+                        sw_extrapolate=False, temp=None, n_points=4, order=1):
+    if sw_extrapolate:
+        gap0, bias = gap_extrapolate_w0(gap, temp, n_points, order)
+        print(f'gap w_n->0 extrapolation: max relative correction over iw_0 = {bias.max():.4e}', flush=True)
+        gap = gap0[:, :, None, :]  # restore a length-1 Matsubara axis; downstream code reads index 0
     if sw_orb:
         if soc:
             gapb = gap[:, :, 0, :]
@@ -343,6 +452,8 @@ def calc_flex(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, mu:float, temp:f
     # FLEX uses the irreducible k-mesh Green's function together with the same orbital-pair
     # interaction basis used in the response routines above.
     Smat, Cmat = _prepare_normal_interaction(olist, site, orb_dep, U, J, Umat, Jmat)
+    if sw_in_self:
+        _auto_regrid_sigma_seed(temp, Nw)
     sigmak, mu_self = flibs.mkself(Smat, Cmat, state['kmap'], state['invk'], olist, state['ham_k'], state['eig'], state['uni'],
                                    mu, fill, temp, Nw, Nx, Ny, Nz, sw_out_self, sw_in_self,
                                    eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale, sw_tail=sw_tail,
@@ -359,6 +470,8 @@ def calc_flex_soc(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, mu:float, te
                   sigma_scale:float=1.0):
     state = _prepare_kspace_state(Nx, Ny, Nz, ham_r, S_r, rvec, need_ham=True)
     Vmat = _prepare_soc_interaction(olist, slist, site, invs, orb_dep, U, J, Umat, Jmat)
+    if sw_in_self:
+        _auto_regrid_sigma_seed(temp, Nw)
     sigmak, mu_self = flibs.mkself_soc(Vmat, state['kmap'], state['invk'], invs, olist, slist, state['ham_k'], state['eig'], state['uni'],
                                        mu, fill, temp, Nw, Nx, Ny, Nz, sw_out_self, sw_in_self,
                                        eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale,
@@ -371,7 +484,8 @@ def calc_lin_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, chi
                            mu:float, temp:float, gap_sym:int, sw_self:bool, orb_dep:bool, U:float, J:float,
                            fill:float, sw_from_file:bool, sw_out_self:bool, sw_in_self:bool,
                            Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True,
-                           sw_tail:bool=False, sigma_scale:float=1.0):
+                           sw_tail:bool=False, sigma_scale:float=1.0, sw_gap_extrapolate:bool=False,
+                           gap_extrap_points=4, gap_extrap_order=1):
     state = _prepare_kspace_state(Nx, Ny, Nz, ham_r, S_r, rvec, need_ham=sw_self)
     Smat, Cmat = _prepare_normal_interaction(chiolist, site, orb_dep, U, J, Umat, Jmat)
     green_state = _prepare_green_state_normal(state, chiolist, (Smat, Cmat), mu, fill, temp, Nw,
@@ -402,13 +516,16 @@ def calc_lin_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, chi
     if sw_out_self:
         np.save('gap', gap)
         output_gap_wannier(gap, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
-    output_gap_function(state['invk'], state['kmap'], gap, state['uni'], plist, gap_sym, Nx)
+    output_gap_function(state['invk'], state['kmap'], gap, state['uni'], plist, gap_sym, Nx,
+                        sw_extrapolate=sw_gap_extrapolate, temp=temp,
+                        n_points=gap_extrap_points, order=gap_extrap_order)
 
 def calc_lin_eliash_soc(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, mu:float, temp:float,
                         chiolist, slist, plist, invs, site, orb_dep:bool, U:float, J:float, fill:float,
                         gap_sym:int, sw_self:bool, sw_from_file:bool, sw_out_self:bool, sw_in_self:bool,
                         Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True,
-                        sigma_scale:float=1.0):
+                        sigma_scale:float=1.0, sw_gap_extrapolate:bool=False,
+                        gap_extrap_points=4, gap_extrap_order=1):
     state = _prepare_kspace_state(Nx, Ny, Nz, ham_r, S_r, rvec, need_ham=sw_self)
     Vmat = _prepare_soc_interaction(chiolist, slist, site, invs, orb_dep, U, J, Umat, Jmat)
     green_state = _prepare_green_state_soc(state, chiolist, slist, invs, Vmat, mu, fill, temp, Nw,
@@ -438,13 +555,16 @@ def calc_lin_eliash_soc(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, mu:flo
     if sw_out_self:
         np.save('gap', gap)
         output_gap_wannier(gap, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
-    output_gap_function(state['invk'], state['kmap'], gap, state['uni'], plist, gap_sym, Nx, True, invs, slist)
+    output_gap_function(state['invk'], state['kmap'], gap, state['uni'], plist, gap_sym, Nx, True, invs, slist,
+                        sw_extrapolate=sw_gap_extrapolate, temp=temp,
+                        n_points=gap_extrap_points, order=gap_extrap_order)
 
 def calc_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec,
                        chiolist, site, plist, mu:float, temp:float, gap_sym:int, sw_self:bool,
                        orb_dep:bool, U:float, J:float, fill:float, sw_from_file:bool, sw_out_self:bool,
                        sw_in_self:bool, Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True,
-                       sw_check_only:bool=False, sw_tail:bool=False, sigma_scale:float=1.0):
+                       sw_check_only:bool=False, sw_tail:bool=False, sigma_scale:float=1.0,
+                       sw_gap_extrapolate:bool=False, gap_extrap_points=4, gap_extrap_order=1):
     """
     @param sw_check_only: If True, stop after the linearized Eliashberg solve (before the
                           nonlinear loop) and report the Stoner factor and lambda_eliash.
@@ -502,4 +622,6 @@ def calc_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec,
     if sw_out_self:
         np.save('gap', delta)
         output_gap_wannier(delta, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
-    output_gap_function(state['invk'], state['kmap'], delta, state['uni'], plist, gap_sym, Nx)
+    output_gap_function(state['invk'], state['kmap'], delta, state['uni'], plist, gap_sym, Nx,
+                        sw_extrapolate=sw_gap_extrapolate, temp=temp,
+                        n_points=gap_extrap_points, order=gap_extrap_order)

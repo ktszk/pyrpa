@@ -27,6 +27,7 @@ It can calculate the following physical properties:
   - scipy
   - scikit-image
   - matplotlib
+  - ana_cont (optional; MaxEnt analytic continuation, `sw_maxent=True` in plot_spectrum/output_Fk)
 
 # Composition
 ```

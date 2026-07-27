@@ -7,12 +7,14 @@ Functions are organized in submodules by physical topic:
   _bands      : Eigenvalues, chemical potential, Fermi surface
   _response   : Spin susceptibility, pairing susceptibility, conductivity, gap symmetries
   _wannier_io : EPA output reading, Wannier-R space file I/O
+  _maxent     : MaxEnt analytic continuation (optional 'ana_cont' dependency)
 """
 from ._symmetry   import *
 from ._lattice    import *
 from ._bands      import *
 from ._response   import *
 from ._wannier_io import *
+from ._maxent     import *
 from ._calc     import *
 from ._eilenberger import *          # homogeneous solver + model Fermi surface (build_model_fs, ...)
 from ._eilenberger_surface import *  # specular surface (gap profile, LDOS)
