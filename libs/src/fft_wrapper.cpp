@@ -1,7 +1,8 @@
 // fft_wrapper.cpp
 // Drop-in FFTW3 API for Fortran via pocketfft (BSD-3-Clause).
-// Provides dfftw_plan_dft_, dfftw_execute_, dfftw_destroy_plan_
-// with Fortran name-mangled symbols (trailing underscore).
+// Provides dfftw_plan_dft_, dfftw_plan_many_dft_, dfftw_execute_,
+// dfftw_execute_dft_ and dfftw_destroy_plan_ with Fortran name-mangled
+// symbols (trailing underscore).
 //
 // SPDX-License-Identifier: BSD-3-Clause
 #include "pocketfft_hdronly.h"
@@ -13,7 +14,9 @@ using namespace pocketfft;
 
 struct Plan {
     shape_t  shape;
-    stride_t stride;
+    stride_t stride;       // input strides, in bytes
+    stride_t stride_out;   // output strides, in bytes (equal to stride unless
+                           // the advanced interface asked for a different layout)
     shape_t  axes;
     bool     forward;
     std::complex<double> *in;
@@ -56,6 +59,68 @@ void dfftw_plan_dft_(int64_t *plan_out,
         p->axes[i]   = static_cast<size_t>(i);
         s *= static_cast<std::ptrdiff_t>(n[i]);
     }
+    p->stride_out = p->stride;
+
+    *plan_out = static_cast<int64_t>(reinterpret_cast<uintptr_t>(p));
+}
+
+// FFTW advanced interface. Fortran signature:
+//   dfftw_plan_many_dft(plan, rank, n, howmany,
+//                       in,  inembed, istride, idist,
+//                       out, onembed, ostride, odist,
+//                       sign, flags)
+// Modelled as a (rank+1)-dimensional array whose last dimension is the howmany
+// batch: pocketfft loops over every axis that is absent from `axes`, which is
+// exactly FFTW's batch semantics, so no explicit loop is needed here.
+void dfftw_plan_many_dft_(int64_t *plan_out,
+                          const int32_t *rank,
+                          const int32_t *n,
+                          const int32_t *howmany,
+                          std::complex<double> *in_arr,
+                          const int32_t *inembed,
+                          const int32_t *istride,
+                          const int32_t *idist,
+                          std::complex<double> *out_arr,
+                          const int32_t *onembed,
+                          const int32_t *ostride,
+                          const int32_t *odist,
+                          const int32_t *sign,
+                          const int32_t * /*flags*/)
+{
+    auto *p = new Plan();
+    const int r = static_cast<int>(*rank);
+    constexpr std::ptrdiff_t elem =
+        static_cast<std::ptrdiff_t>(sizeof(std::complex<double>));
+
+    p->forward = (*sign == -1);   // FFTW_FORWARD=-1, FFTW_BACKWARD=+1
+    p->in  = in_arr;
+    p->out = out_arr;
+
+    // A null *embed means "contiguous, same as n" in FFTW.
+    const int32_t *ne_in  = inembed ? inembed : n;
+    const int32_t *ne_out = onembed ? onembed : n;
+
+    p->shape.resize(r + 1);
+    p->stride.resize(r + 1);
+    p->stride_out.resize(r + 1);
+    p->axes.resize(r);
+
+    // Column-major (Fortran) layout: element (i_0..i_{r-1}) of transform j sits
+    // at j*dist + sum_k i_k * stride * prod_{m<k} embed[m].
+    std::ptrdiff_t si = static_cast<std::ptrdiff_t>(*istride) * elem;
+    std::ptrdiff_t so = static_cast<std::ptrdiff_t>(*ostride) * elem;
+    for (int i = 0; i < r; ++i) {
+        p->shape[i]      = static_cast<size_t>(n[i]);
+        p->stride[i]     = si;
+        p->stride_out[i] = so;
+        p->axes[i]       = static_cast<size_t>(i);
+        si *= static_cast<std::ptrdiff_t>(ne_in[i]);
+        so *= static_cast<std::ptrdiff_t>(ne_out[i]);
+    }
+    // Trailing batch axis, deliberately left out of `axes` so it is not transformed.
+    p->shape[r]      = static_cast<size_t>(*howmany);
+    p->stride[r]     = static_cast<std::ptrdiff_t>(*idist) * elem;
+    p->stride_out[r] = static_cast<std::ptrdiff_t>(*odist) * elem;
 
     *plan_out = static_cast<int64_t>(reinterpret_cast<uintptr_t>(p));
 }
@@ -64,7 +129,7 @@ void dfftw_execute_(const int64_t *plan)
 {
     auto *p = reinterpret_cast<Plan *>(static_cast<uintptr_t>(*plan));
     // fct=1.0: Fortran side handles normalization (/product(Nlist))
-    c2c(p->shape, p->stride, p->stride, p->axes, p->forward,
+    c2c(p->shape, p->stride, p->stride_out, p->axes, p->forward,
         p->in, p->out, 1.0);
 }
 
@@ -82,7 +147,7 @@ void dfftw_execute_dft_(const int64_t *plan,
                         std::complex<double> *out_arr)
 {
     const auto *p = reinterpret_cast<const Plan *>(static_cast<uintptr_t>(*plan));
-    c2c(p->shape, p->stride, p->stride, p->axes, p->forward,
+    c2c(p->shape, p->stride, p->stride_out, p->axes, p->forward,
         in_arr, out_arr, 1.0);
 }
 

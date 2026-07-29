@@ -1,24 +1,78 @@
 #Makefile
 # Compiler to use; override with `make FC=...` or environment variable.
 # valid values: ifort, ifx, flang, amdflang, gfortran
-FC ?= flang
+#
+# Default toolchain is ifx+MKL (the toolchain the shipped libfmod.so is built
+# with). On these AMD CPUs `-march=<ARCH>` makes ifx emit vector code with NO
+# Intel CPUID dispatch (verified), so it runs at full width on AMD.
+#
+# flang/amdflang (ROCm's LLVM flang) + AOCL is a fully supported alternative:
+#   module load AMD/ROCm AMD/AOCL && make FC=flang
+# AOCL supplies BLAS/LAPACK (libblis/libflame); the FFT comes from the bundled
+# pocketfft (see the FFT block below for why AOCL's own FFTW3 is not used).
+#
+# --- Target CPU architecture -------------------------------------------------
+# ARCH selects the -march target. Default znver3 is the lowest common
+# denominator across the machines this runs on, so ONE binary works everywhere:
+#   znver3  Zen 3  (e.g. Ryzen 7 5700G) -- AVX2, portable, DEFAULT
+#   znver4  Zen 4  (e.g. Ryzen 9 7900)  -- AVX-512, faster but SIGILLs on Zen 3
+# Build the portable default with `make`; on a Zen 4 box get full AVX-512 with:
+#   make ARCH=znver4
+ARCH ?= znver3
+#
+# For MKL BLAS/FFT to also use wider kernels on these AMD CPUs, run with e.g.
+#   export MKL_ENABLE_INSTRUCTIONS=AVX512   (Zen 4)   or  AVX2 (Zen 3)
+#
+# Replace make's built-in default (FC=f77) with ifx, while still honouring an
+# explicit `make FC=...` on the command line or an exported FC in the env.
+# (`?=` alone does not override the built-in default, whose origin is 'default'.)
+ifeq ($(origin FC),default)
+  FC := ifx
+endif
+FC ?= ifx
 # other examples:
 # FC = ifort
 # FC = ifx
 # FC = amdflang
 # FC = gfortran
 
-# C++ compiler for fft_wrapper.cpp: auto-selected to match FC family.
+# --- Compiler family ---------------------------------------------------------
+# Every flag/library block below keys off FCFAM, never off FC itself: FC is
+# often an absolute path (FC=/opt/AMD/aocc-compiler-5.2.0/bin/flang) or a
+# wrapper script (FC=.../aoccflang), and matching those against the literal
+# string "flang" used to fail silently -- the build then got no -march, no
+# -fopenmp and, worst of all, an empty LIBS, i.e. a libfmod.so with unresolved
+# BLAS symbols that only blows up at import time. Match on the basename.
+# Covered names: ifort/ifx/gfortran, and anything ending in "flang"
+# (flang, amdflang, aoccflang, flang-new).
+FCNAME := $(notdir $(FC))
+ifneq ($(filter %flang %flang-new,$(FCNAME)),)
+  FCFAM := flang
+else ifeq ($(FCNAME),ifx)
+  FCFAM := ifx
+else ifeq ($(FCNAME),ifort)
+  FCFAM := ifort
+else ifeq ($(FCNAME),gfortran)
+  FCFAM := gfortran
+else
+  $(error Unrecognised Fortran compiler FC='$(FC)' (basename '$(FCNAME)'). \
+    Use ifx, ifort, gfortran, or a driver whose name ends in "flang". \
+    Note FC is also picked up from the environment -- `make FC=ifx` overrides it.)
+endif
+
+# C++ compiler for fft_wrapper.cpp: auto-selected to match the FC family.
+# (Unused on the MKL FFT path, which needs no C++ wrapper -- see below.)
 # Explicit `make CXX=...` on the command line takes priority;
 # environment CXX is ignored so FC always picks the matching compiler.
-ifeq ($(FC),ifort)
+ifeq ($(FCFAM),ifort)
   _CXX_DEFAULT := icpc
-else ifeq ($(FC),ifx)
+else ifeq ($(FCFAM),ifx)
   _CXX_DEFAULT := icpx
-else ifeq ($(FC),flang)
-  _CXX_DEFAULT := clang++
-else ifeq ($(FC),amdflang)
-  _CXX_DEFAULT := clang++
+else ifeq ($(FCFAM),flang)
+  # Prefer the C++ driver sitting next to the Fortran driver, so a path- or
+  # wrapper-style FC keeps both halves of the toolchain in the same install.
+  _CXX_SIBLING := $(wildcard $(dir $(FC))aoccclang++ $(dir $(FC))clang++)
+  _CXX_DEFAULT := $(if $(_CXX_SIBLING),$(firstword $(_CXX_SIBLING)),clang++)
 else
   _CXX_DEFAULT := g++
 endif
@@ -26,14 +80,33 @@ endif
 ifneq ($(origin CXX),command line)
   CXX := $(_CXX_DEFAULT)
 endif
-CXXFLAGS := -O2 -fPIC -std=c++17
+CXXFLAGS := -O3 -march=$(ARCH) -mtune=$(ARCH) -funroll-loops -fPIC -std=c++17
 
-# Scalar libraries (MKL/AOCL/OpenBLAS); override via SL variable
+# Scalar libraries (MKL/AOCL/OpenBLAS); override via SL variable, e.g. SL=OpenBLAS.
+# Default is compiler-aware: flang/amdflang (AMD's compiler) pair with AMD's AOCL
+# (BLIS/libFLAME, provided via `module load AMD/AOCL`); everything else uses MKL.
+ifeq ($(FCFAM),flang)
+  SL ?= AOCL
+endif
 SL ?= MKL
 # SL = AOCL
 # SL = OpenBLAS
+
+# --- AOCL location -----------------------------------------------------------
+# `module load AMD/AOCL` exports AOCL_ROOT. Link against it explicitly rather
+# than relying on LIBRARY_PATH, so the build also works when only AOCL_ROOT is
+# set, and -rpath makes the resulting .so loadable from Python without the
+# module being loaded.
+ifneq ($(AOCL_ROOT),)
+  AOCL_LIBDIR := $(AOCL_ROOT)/lib
+  AOCL_LDFLAGS := -L$(AOCL_LIBDIR) -Wl,-rpath,$(AOCL_LIBDIR)
+endif
+
 SRCDIR := src
-OBJDIR := obj
+# Per-compiler, per-arch object dir: objects/modules from different compilers
+# are not interchangeable, and znver3/znver4 builds (see `make dispatch`) must
+# never mix either.
+OBJDIR := obj/$(FCNAME)-$(ARCH)
 FLIBSO := libfmod.so
 # automatically track all source files in src/
 SOURCES := $(wildcard $(SRCDIR)/*.f90)
@@ -41,16 +114,21 @@ SOURCES := $(wildcard $(SRCDIR)/*.f90)
 OBJS := $(patsubst $(SRCDIR)/%.f90,$(OBJDIR)/%.o,$(SOURCES))
 # ensure the object for fmod.f90 (constant module) is first
 OBJS := $(OBJDIR)/fmod.o $(filter-out $(OBJDIR)/fmod.o,$(OBJS))
-# FFT backend selection:
-#   MKL provides FFTW3 Fortran wrappers (build from $MKLROOT/interfaces/fftw3xf/ first).
-#   All other configurations use the bundled pocketfft (BSD-3-Clause).
+# FFT backend selection (the sources call the legacy dfftw_* Fortran entry points):
+#   MKL provides its own FFTW3-compatible Fortran wrappers, under the ISSL --
+#   build them from $MKLROOT/interfaces/fftw3xf/ first.
+#   Everything else uses the bundled pocketfft (BSD-3-Clause) via fft_wrapper.cpp.
 # ifort/ifx always use MKL; gfortran uses MKL only when SL=MKL.
-# flang/amdflang always use pocketfft (AOCL does not provide FFTW3 wrappers).
-ifeq ($(FC),ifort)
+#
+# NOTE: AOCL does ship a libfftw3.so that already exports dfftw_plan_dft_ &c.,
+# so linking -lfftw3 would drop the C++ wrapper entirely -- but that is upstream
+# FFTW, which is GPL, and linking it would put libfmod.so as a whole under the
+# GPL. Deliberately not used; keep the FFT backend to MKL or pocketfft.
+ifeq ($(FCFAM),ifort)
   USE_MKL_FFT := 1
-else ifeq ($(FC),ifx)
+else ifeq ($(FCFAM),ifx)
   USE_MKL_FFT := 1
-else ifeq ($(FC),gfortran)
+else ifeq ($(FCFAM),gfortran)
   ifeq ($(SL),MKL)
     USE_MKL_FFT := 1
   endif
@@ -63,7 +141,7 @@ ifdef USE_MKL_FFT
 else
   FFT_OBJ  := $(OBJDIR)/fft_wrapper.o
   FFT_DEP  :=
-  ifneq ($(filter $(FC),flang amdflang),)
+  ifeq ($(FCFAM),flang)
     # ROCm clang++ defaults to GCC 14 headers; point it at the installed GCC.
     # Also pass libstdc++.so by full path since ld.lld skips GCC toolchain dirs.
     GCC_TOOLCHAIN  := $(shell g++ -print-file-name=crtbegin.o | xargs dirname)
@@ -77,27 +155,61 @@ endif
 DEPFILES := $(OBJS:.o=.d)
 
 
-FFLAGS_COMMON := -O2 -fPIC
-# For compilers that support it, place module files in the object directory
-ifeq ($(FC),gfortran)
-  FFLAGS_COMMON += -J$(OBJDIR)
+FFLAGS_COMMON := -O3 -fPIC
+# Keep .mod files in the object directory for every compiler. Both flang
+# drivers accept -J (alias of -module-dir) for writing *and* searching, and the
+# Intel drivers spell the same thing -module. Leaving them in the working
+# directory is not merely untidy: a .mod written by one compiler makes the next
+# compiler abort on it ("Reading module ... Unexpected EOF" from gfortran,
+# "#7013: not generated by any release of this compiler" from ifx).
+# Kept out of FFLAGS_COMMON because that is reused for the link step, where
+# flang warns "argument unused during compilation: '-J...'".
+ifneq ($(filter $(FCFAM),gfortran flang),)
+  MODDIRFLAG := -J$(OBJDIR)
+else ifneq ($(filter $(FCFAM),ifort ifx),)
+  MODDIRFLAG := -module $(OBJDIR)
 endif
-# flang currently ignores -J, so leave modules in source or default location
 FFLAGS_DEBUG := -g -O0
 
-ifeq ($(FC),ifort)
+# Helpers for rewriting colon-separated environment path lists (see below).
+_EMPTY :=
+_SPACE := $(_EMPTY) $(_EMPTY)
+_pathjoin = $(subst $(_SPACE),:,$(strip $1))
+_pathsplit = $(subst :,$(_SPACE),$1)
+
+# Having several compiler modules loaded at once makes their environment
+# variables collide, and the loser is whichever toolchain we are actually
+# invoking. Both fixes below are about that, not about the compilers themselves.
+ifneq ($(filter $(FCFAM),ifort ifx),)
+  # `module load AMD/AOCC` puts /opt/AMD/aocc-compiler-*/include on C_INCLUDE_PATH,
+  # which ifx also searches for .mod files. It finds AOCC's omp_lib.mod first and
+  # dies with "#7013: This module file was not generated by any release of this
+  # compiler", which then cascades into bogus errors about iso_c_binding.
+  # The sources contain no INCLUDE statements at all, so dropping foreign
+  # toolchain include dirs costs nothing.
+  CPATH          := $(call _pathjoin,$(filter-out /opt/AMD/% /opt/rocm%,$(call _pathsplit,$(CPATH))))
+  C_INCLUDE_PATH := $(call _pathjoin,$(filter-out /opt/AMD/% /opt/rocm%,$(call _pathsplit,$(C_INCLUDE_PATH))))
+  export CPATH C_INCLUDE_PATH
+endif
+
+ifeq ($(FCFAM),ifort)
   FFLAGS_COMMON += -mavx2  -qopenmp -heap-arrays
   LIBS := -lmkl_intel_lp64 -lmkl_sequential -lmkl_core $(FFT_LIBS)
 endif
-ifeq ($(FC),ifx)
-  FFLAGS_COMMON += -mavx2  -qopenmp -init:snan -finline-functions -heap-arrays
+ifeq ($(FCFAM),ifx)
+  # ifx is LLVM-based: -march=$(ARCH) tunes for the target Zen core and emits
+  # vector code with no Intel CPUID dispatch (znver4 -> AVX-512, znver3 -> AVX2).
+  # ifx does not accept -mtune=znver*, so -march alone carries the tuning.
+  FFLAGS_COMMON += -march=$(ARCH) -funroll-loops \
+                   -qopenmp -init:snan -finline-functions -heap-arrays
   LIBS := -lmkl_intel_lp64 -lmkl_sequential -lmkl_core $(FFT_LIBS)
 endif
-ifeq ($(FC),gfortran)
+ifeq ($(FCFAM),gfortran)
   # gfortran needs preprocessing enabled when using -MMD
   # also use free form and unlimited line length to avoid truncation errors
   FFLAGS_COMMON += -cpp -ffree-form -ffree-line-length-none \
-                   -mavx2  -fopenmp -finline-functions -fimplicit-none \
+                   -march=$(ARCH) -mtune=$(ARCH) -funroll-loops \
+                   -fopenmp -finline-functions -fimplicit-none \
                    -finit-integer=NaN -finit-real=NaN
   LIBS= -lopenblas $(FFT_LIBS)
   ifeq ($(SL),MKL)
@@ -105,29 +217,61 @@ ifeq ($(FC),gfortran)
   endif
   ifeq ($(SL),AOCL)
     LIBS := -lblis -lflame -lm -lpthread $(FFT_LIBS)
+    LDFLAGS_EXTRA := $(AOCL_LDFLAGS)
   endif
 endif
-ifeq ($(FC),flang)
-  FFLAGS_COMMON += -march=znver3 -fopenmp -finline-functions
+# flang / amdflang (ROCm's LLVM flang): inlining is automatic at -O3, and this
+# AMD flang has no -finline-functions flag, so it is omitted. BLAS/LAPACK is
+# SL-driven; default AOCL (see the compiler-aware SL block above), loaded via
+# `module load AMD/AOCL`. The single-threaded libblis (not libblis-mt) is used
+# for the same reason MKL uses mkl_sequential: BLAS is called from inside our
+# own OpenMP regions, so a threaded BLAS would oversubscribe. MKL likewise uses
+# the sequential layer to avoid clashing with flang's own libomp.
+ifeq ($(FCFAM),flang)
+  FFLAGS_COMMON += -march=$(ARCH) -mtune=$(ARCH) -funroll-loops -fopenmp
+  LDFLAGS_EXTRA := $(AOCL_LDFLAGS)
   LIBS := -lblis -lflame -lm -lpthread $(FFT_LIBS)
-endif
-ifeq ($(FC),amdflang)
-  FFLAGS_COMMON += -march=znver3 -fopenmp -finline-functions
-  LIBS := -lblis -lflame -lm -lpthread $(FFT_LIBS)
+  ifeq ($(SL),MKL)
+    LIBS := -lmkl_intel_lp64 -lmkl_sequential -lmkl_core $(FFT_LIBS)
+  endif
+  ifeq ($(SL),OpenBLAS)
+    LIBS := -lopenblas $(FFT_LIBS)
+  endif
+  # The AOCC module puts a 32-bit library directory on LIBRARY_PATH, and clang
+  # injects every LIBRARY_PATH entry as -L *ahead* of our own -L flags. ld.lld
+  # then finds aocc .../lib32/libomp.so first and aborts with
+  #   "is incompatible with elf64-x86-64".
+  # Drop any lib32 entry -- a 32-bit directory has no role in this link.
+  LIBRARY_PATH := $(call _pathjoin,\
+                    $(filter-out %/lib32 %/lib32/,$(call _pathsplit,$(LIBRARY_PATH))))
+  export LIBRARY_PATH
 endif
 
-.PHONY: all clean
+.PHONY: all clean dispatch
 
 all: $(FLIBSO)
+
+# Runtime CPU dispatch across machines: build BOTH a portable AVX2 library
+# (libfmod_znver3.so) and an AVX-512 one (libfmod_znver4.so). _loader.py picks
+# libfmod_znver4.so at import when the running CPU has AVX-512 (Zen 4), else the
+# znver3 one -- so ONE checkout runs everywhere yet uses AVX-512 only on Zen 4.
+# (A single fat binary is not viable here: Intel -ax auto-dispatch gates on a
+#  genuine-Intel CPUID and would never take the AVX-512 path on AMD, and Fortran
+#  has no per-function multiversioning like C's target_clones.)
+dispatch:
+	$(MAKE) ARCH=znver3 FLIBSO=libfmod_znver3.so
+	$(MAKE) ARCH=znver4 FLIBSO=libfmod_znver4.so
+	@echo "Built libfmod_znver3.so (AVX2) and libfmod_znver4.so (AVX-512); _loader.py selects at runtime."
 
 $(OBJDIR):
 	mkdir -p $@
 
-# compile each source into object
-# for compilers other than flang, generate dependency file using target value
+# compile each source into object.
+# Generate a dependency file only for compilers that accept -MMD; ifx and both
+# flang drivers reject it ("unknown argument: '-MMD'"), so they are excluded.
+DEPFLAGS = $(if $(filter $(FCFAM),ifx flang),,-MMD -MF $(@:.o=.d))
 $(OBJDIR)/%.o: $(SRCDIR)/%.f90 | $(OBJDIR)
-	$(FC) $(FFLAGS_COMMON) $(if $(DEBUG),$(FFLAGS_DEBUG)) -c $< -o $@ \
-		$(if $(filter flang,$(FC)),,$(if $(filter ifx,$(FC)),,-MMD -MF $(@:.o=.d)))
+	$(FC) $(FFLAGS_COMMON) $(MODDIRFLAG) $(if $(DEBUG),$(FFLAGS_DEBUG)) -c $< -o $@ $(DEPFLAGS)
 
 # compile C++ pocketfft wrapper
 $(FFT_OBJ): $(SRCDIR)/fft_wrapper.cpp $(SRCDIR)/pocketfft_hdronly.h | $(OBJDIR)
@@ -144,10 +288,11 @@ constant.mod: $(OBJDIR)/constant.mod
 $(filter-out $(OBJDIR)/fmod.o,$(OBJS)): | $(OBJDIR)/fmod.o
 
 $(FLIBSO): $(OBJS) $(FFT_OBJ) $(FFT_DEP)
-	$(FC) $(FFLAGS_COMMON) $(if $(DEBUG),$(FFLAGS_DEBUG)) -shared $(OBJS) $(FFT_OBJ) -o $@ $(LIBS)
+	$(FC) $(FFLAGS_COMMON) $(if $(DEBUG),$(FFLAGS_DEBUG)) -shared $(OBJS) $(FFT_OBJ) -o $@ \
+		$(LDFLAGS_EXTRA) $(LIBS)
 
 # include generated dependency files (ignore missing initially)
 -include $(DEPFILES)
 
 clean:
-	rm -rf $(OBJDIR) $(FLIBSO) *.mod *.d
+	rm -rf obj $(FLIBSO) libfmod_znver3.so libfmod_znver4.so *.mod *.d

@@ -1,4 +1,4 @@
-subroutine get_qshift(qpoint,klist,qshift,Nk) bind(C,name="get_qshift_")
+subroutine get_qshift(qpoint,klist,qshift,Nk)
   !> shift k to k+q (hash-based O(Nk) mapping)
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
@@ -613,7 +613,7 @@ subroutine chi0_conv_acc(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,coef,&
 end subroutine chi0_conv_acc
 
 subroutine get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,&
-     Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi) bind(C,name='get_chi0_conv_')
+     Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
   !> This function obtains chi_0 using convolution (sharp Matsubara cutoff).
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none

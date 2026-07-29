@@ -113,11 +113,11 @@ MODES_CHIS_SC       = frozenset({M.CHIS_SPECTRUM_SC,M.CHIS_QPOINT_SC})
 del M
 
 #option=CalcMode.CHIS_QPOINT_SC
-option=CalcMode.LIN_ELIASHBERG #calculation mode to run (see the CalcMode enum above; 0-23 RPA/FLEX/transport, 24-26 Eilenberger superconductivity)
+option=CalcMode.CONDUCTIVITY_PT #calculation mode to run (see the CalcMode enum above; 0-23 RPA/FLEX/transport, 24-26 Eilenberger superconductivity)
 color_option=ColorMode.GAP #band/FS coloring (option 0,2,3): MONO=black, ORBITAL=olist weights->RGB, VELOCITY=|v(k)|, GAP=Re[phi(k)] from gap_sym/delta0/eil_gap_orbital/eil_gap_file (option 3 only) -- check the Eilenberger pairing gap on the real 3D FS
 
 #Nx,Ny,Nz,Nw=256,256,4,200 #k and energy(or matsubara freq.) mesh size
-Nx,Ny,Nz,Nw=32,32,4,256
+Nx,Ny,Nz,Nw=256,256,64,200
 kmesh=200               #number of k-points along the symmetry line for band/spectrum plots (larger=smoother)
 kscale=[1.0,1.0,1.0]    #per-axis display scale for the 3D Fermi-surface plot (option 3); e.g. [1,1,0.5] compresses kz
 kz=0.0                  #reduced kz of the 2D Fermi-surface cut (option 2): 0=Gamma plane, 0.5=zone-boundary plane
@@ -127,12 +127,12 @@ kz=0.0                  #reduced kz of the 2D Fermi-surface cut (option 2): 0=Ga
 abc=[3.68,3.68,5.03]    #lattice constants a,b,c [Angstrom] (group velocities & symmetry-path lengths)
 #alpha_beta_gamma=[90.,90.,90]  #lattice angles alpha,beta,gamma [deg] (default 90,90,90 if undefined)
 #temp=2.0e-2 #2.59e-2   #directly set k_B*T [eV]; if defined it overrides tempK
-tempK=200 #Kelvin        #temperature [K] (converted internally to temp=k_B*tempK [eV])
+tempK=300 #Kelvin        #temperature [K] (converted internally to temp=k_B*tempK [eV])
 fill= 2.9375       #band filling; mu solved from sum f(eps-mu)=Nk*fill (no SOC: per spin, full=Norb; SOC: total, full=2*Norb)
 #site_prof=[5]
 
 Emin,Emax=-3,1.         #energy window [eV] for DOS / spectral-function plots (option 1,4)
-delta=5.0e-3            #spectral broadening eta [eV]: imaginary part added to G (Lorentzian width); too large smears, too small=noise
+delta=5.0e-4            #spectral broadening eta [eV]: imaginary part added to G (Lorentzian width); too large smears, too small=noise
 Ecut=1.0e-2            #fixed energy omega_0 [eV] for the q-space susceptibility maps (option 9,11); ~0 probes the Fermi surface
 tau_const=100          #constant relaxation time tau [fs] for Boltzmann transport (option 5)
 olist=[0,0,0]          #orbital indices mapped to R,G,B for orbital-weight coloring (color_option=1); nested lists group orbitals
@@ -301,6 +301,47 @@ def print_matrix(label,mat,width=10,prec=3,ndigits=10):
     print(label,flush=True)
     for row in np.asarray(mat).round(ndigits):
         print(f" {row[0]:{width}.{prec}e} {row[1]:{width}.{prec}e} {row[2]:{width}.{prec}e}",flush=True)
+
+def plot_dielectric(w,eps,fname='dielectric',wp_scr=None):
+    """Publication-quality figure of the dielectric function eps(w).
+
+    Journal conventions: single-column width, serif/mathtext labels, inward
+    ticks on all four sides with minor ticks, thin recessive frame, and the two
+    curves separated by BOTH colour and line style (Okabe-Ito CVD-safe pair +
+    solid/dashed) so they stay distinct in colour-blind view and B/W print.
+
+    @param     w: photon-energy grid [eV] (real, 1-D)
+    @param   eps: complex dielectric function on w (eps1=Re, eps2=Im)
+    @param fname: output basename; writes <fname>.pdf (vector) and <fname>.png
+    @param wp_scr: screened plasma frequency [eV]; if given, marked with a guide
+    Leaves the figure open so a later plt.show() displays it interactively.
+    """
+    blue,verm='#0072B2','#D55E00'          # Okabe-Ito colour-blind-safe pair
+    rc={'font.family':'serif','mathtext.fontset':'dejavuserif','font.size':9,
+        'axes.linewidth':0.8,'lines.linewidth':1.3,
+        'xtick.direction':'in','ytick.direction':'in',
+        'xtick.top':True,'ytick.right':True,
+        'xtick.minor.visible':True,'ytick.minor.visible':True,
+        'legend.frameon':False,'savefig.dpi':600,'figure.dpi':600}
+    with plt.rc_context(rc):
+        fig,ax=plt.subplots(figsize=(3.4,2.6))   # PRB single-column width (~86 mm)
+        ax.axhline(0.0,color='0.6',lw=0.6,zorder=0)
+        if wp_scr is not None:
+            # mark the screened plasma frequency (where eps1 crosses zero)
+            ax.axvline(wp_scr,color='0.5',lw=0.8,ls=':',zorder=0)
+            ax.annotate(r'$\hbar\omega_{\mathrm{p}}$',xy=(wp_scr,0),
+                        xytext=(3,3),textcoords='offset points',
+                        ha='left',va='bottom',fontsize=8,color='0.35')
+        ax.plot(w,np.real(eps),color=blue,ls='-', label=r'$\varepsilon_1$ (real)')
+        ax.plot(w,np.imag(eps),color=verm,ls='--',label=r'$\varepsilon_2$ (imag)')
+        ax.set_xlabel(r'$\hbar\omega$ (eV)')
+        ax.set_ylabel(r'Dielectric function $\varepsilon(\omega)$')
+        ax.set_xlim(np.min(w),np.max(w))
+        ax.legend(loc='best',handlelength=1.8)
+        fig.tight_layout(pad=0.3)
+        for ext in ('pdf','png'):
+            fig.savefig(f'{fname}.{ext}',bbox_inches='tight')
+    print(f"dielectric-function figure written to '{fname}.pdf' and '{fname}.png'",flush=True)
 
 def flatten_orbs(seq):
     """Flatten an olist (mix of ints and int-lists) into a flat list of orbital indices."""
@@ -706,21 +747,66 @@ def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
     except np.linalg.LinAlgError:
         print("Warning: Failed to compute Lorenz coefficient (singular matrix)",flush=True)
     print_matrix('Seebeck coefficient matrix (V/K)',Seebeck[0].real)
+    # dielectric function (relative permittivity) from the optical conductivity,
+    # SI convention: eps(w) = 1 + i*sigma(w)/(eps0*w_rad) = 1 + i*hbar*sigma/(eps0*w),
+    # sigma in S/m, w in eV (hbar converts the eV grid to angular frequency).
+    # Frequency-resolved like sigma; the w=0 point is skipped (eps ~ 1/w there).
+    eps0=scconst.epsilon_0
+    epsilon=1.+1j*hbar/eps0*(sigma.T/(wlist+1e-8)).T
+    # console summary at the lowest positive frequency (static-limit estimate)
+    print(f'dielectric function at w = {wlist[1]:9.3e} eV',flush=True)
+    print_matrix('Re[eps] matrix',epsilon[1].real)
+    print_matrix('Im[eps] matrix',epsilon[1].imag)
+    # --- plasma frequency ----------------------------------------------------
+    # (1) effective (unscreened) plasma frequency from the optical f-sum rule
+    #     (hbar*wp_a)^2 = (2*hbar/(pi*eps0)) * int_0^Emax Re sigma_aa(w) dw
+    #     (sigma in S/m, w in eV -> hbar*wp in eV). It is the spectral weight up
+    #     to the cutoff Emax and, unlike a Drude fit, needs no broadening input.
+    hwp=np.sqrt([abs(2*hbar/(np.pi*eps0)*np.trapezoid(sigma[:,i,i].real,wlist)) for i in range(3)])
+    h_eVs=scconst.physical_constants['Planck constant in eV s'][0]  # h = 2*pi*hbar
+    fp=hwp/h_eVs/1e12   # plasma frequency nu_p = wp/(2*pi) in THz
+    print(f'plasma frequency (f-sum rule, integrated to Emax={Emax} eV):',flush=True)
+    print(f'  hbar*wp = ({hwp[0]:.4f}, {hwp[1]:.4f}, {hwp[2]:.4f}) eV  (xx, yy, zz)',flush=True)
+    print(f'  nu_p    = ({fp[0]:.2f}, {fp[1]:.2f}, {fp[2]:.2f}) THz',flush=True)
+    # (2) screened plasma frequency: energy where Re eps_xx crosses zero upward
+    #     (the longitudinal plasmon / reflectivity edge), by linear interpolation.
+    e1,wpos=epsilon[1:,0,0].real,wlist[1:]
+    zc=np.where((e1[:-1]<0.0)&(e1[1:]>=0.0))[0]
+    if zc.size:
+        j=zc[0]
+        wp_scr=wpos[j]-e1[j]*(wpos[j+1]-wpos[j])/(e1[j+1]-e1[j])
+        print(f'  screened plasma freq (Re eps_xx=0): hbar*wp_scr = {wp_scr:.4f} eV'
+              f'  (nu_scr = {wp_scr/h_eVs/1e12:.2f} THz)',flush=True)
+    else:
+        wp_scr=None
+        print('  screened plasma freq (Re eps_xx=0): no upward zero crossing in [0, Emax]',flush=True)
+    # write sigma(w) and eps(w) (diagonal components) to a data file
+    try:
+        header=(f'plasma frequency (f-sum rule) hbar*wp [eV] = '
+                f'{hwp[0]:.6f} {hwp[1]:.6f} {hwp[2]:.6f}  (xx yy zz)\n'
+                +(f'screened plasma frequency (Re eps_xx=0) hbar*wp_scr [eV] = {wp_scr:.6f}\n'
+                  if wp_scr is not None else 'screened plasma frequency (Re eps_xx=0): none in window\n')
+                +'w[eV] '
+                'Re_sigma_xx Im_sigma_xx Re_sigma_yy Im_sigma_yy Re_sigma_zz Im_sigma_zz '
+                'Re_eps_xx Im_eps_xx Re_eps_yy Im_eps_yy Re_eps_zz Im_eps_zz')
+        d=np.arange(3)
+        data=np.column_stack([wlist[1:],
+                              *[f(sigma[1:,i,i]) for i in d for f in (np.real,np.imag)],
+                              *[f(epsilon[1:,i,i]) for i in d for f in (np.real,np.imag)]])
+        np.savetxt('optical.dat',data,header=header)
+        print("optical conductivity and dielectric function written to 'optical.dat'",flush=True)
+    except OSError as e:
+        print(f"Error: Failed to write 'optical.dat': {e}",flush=True)
+    # publication-quality dielectric-function figure (xx component), saved to file
+    plot_dielectric(wlist[1:],epsilon[1:,0,0],fname='dielectric',wp_scr=wp_scr)
+    # quick interactive view of the optical conductivity
     fig=plt.figure()
-    ax=fig.add_subplot(211)
-    ax.plot(wlist,sigma[:,0,0].real)
-    ax.plot(wlist,sigma[:,0,0].imag)
-    ax2=fig.add_subplot(212)
-    pol=1.+4*hbar*np.pi*1j*(sigma.T/(wlist+1e-8)).T
-    ax2.plot(wlist[1:],pol[1:,0,0].real)
-    ax2.plot(wlist[1:],pol[1:,0,0].imag)
-    #ax2=fig.add_subplot(312)
-    #ax2.plot(wlist,sigmaw.imag)
-    #ax2.plot(wlist,(kappa[:,0,0]+kappa[:,1,1]+kappa[:,2,2]).real)
-    #ax2.plot(wlist,(kappa[:,0,0]+kappa[:,1,1]+kappa[:,2,2]).imag)
-    #ax3=fig.add_subplot(313)
-    #ax3.plot(wlist,(sigmaS[:,0,0]+sigmaS[:,1,1]+sigmaS[:,2,2]).real)
-    #ax3.plot(wlist,(sigmaS[:,0,0]+sigmaS[:,1,1]+sigmaS[:,2,2]).imag)
+    ax=fig.add_subplot(111)
+    ax.set_xlabel(r'$\omega$ (eV)')
+    ax.set_ylabel(r'$\sigma_{xx}(\omega)$ (S/m)')
+    ax.plot(wlist,sigma[:,0,0].real,label='Re')
+    ax.plot(wlist,sigma[:,0,0].imag,label='Im')
+    ax.legend()
     plt.show()
 
 

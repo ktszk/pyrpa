@@ -1,4 +1,4 @@
-subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb) bind(C,name="gen_green0_")
+subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb)
   !> This function obtains green function G0
   !!@param  Gk,out: green function
   !!@param  eig,in: energies at k-points
@@ -40,7 +40,7 @@ subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb) bind(C,name="gen_green0_")
   !$omp end parallel
 end subroutine gen_green0
 
-subroutine gen_green_inv(Gk,self,hamk,mu,temp,Nk,Nw,Norb) bind(C,name="gen_green_inv_")
+subroutine gen_green_inv(Gk,self,hamk,mu,temp,Nk,Nw,Norb)
   !> This function obtains inverse of green function G^-1
   !!@param  Gk,out: inverse of green function
   !!@param self,in: self energies
@@ -128,7 +128,7 @@ subroutine gen_green_inv_from_eig(Gk,self,uni,eig,mu,temp,Nk,Nw,Norb) bind(C)
   !$omp end parallel
 end subroutine gen_green_inv_from_eig
 
-subroutine getinv(Gk,Nk,Nw,Norb) bind(C,name="getinv_")
+subroutine getinv(Gk,Nk,Nw,Norb)
   !> This function obtain green function form G^-1
   !!@param Gk,inout: green function
   !!@param    Nk,in: The number of k-points

@@ -1,4 +1,4 @@
-subroutine get_iqshift(qpoint,klist,qshift,Nk) bind(C,name="get_iqshift_")
+subroutine get_iqshift(qpoint,klist,qshift,Nk)
   !>shift k to -k+q
   !!@param  qpoint,in: q-vector
   !!@param   klist,in: list of all k-point

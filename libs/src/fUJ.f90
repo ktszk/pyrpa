@@ -315,7 +315,7 @@ subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
   !$omp end parallel do
 end subroutine get_V_delta_nsoc_flex
 
-subroutine get_vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi) bind(C,name='get_vsigma_flex_nosoc_')
+subroutine get_vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi)
   !> This function obtains interaction V_sigma without soc
   !!@param  chi,inout: irreducible susceptibility and pairing interaction
   !!@param    Smat,in: S-matrix
