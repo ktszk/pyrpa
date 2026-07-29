@@ -6,6 +6,7 @@ Functions are organized in submodules by physical topic:
   _lattice    : Lattice vectors, hopping import, k/r-mesh generation, BZ visualization
   _bands      : Eigenvalues, chemical potential, Fermi surface
   _response   : Spin susceptibility, pairing susceptibility, conductivity, gap symmetries
+  _nmr        : NMR observables in the SC state (Knight shift, 1/T1T) from chi_s
   _wannier_io : EPA output reading, Wannier-R space file I/O
   _maxent     : MaxEnt analytic continuation (optional 'ana_cont' dependency)
 """
@@ -13,6 +14,7 @@ from ._symmetry   import *
 from ._lattice    import *
 from ._bands      import *
 from ._response   import *
+from ._nmr        import *
 from ._wannier_io import *
 from ._maxent     import *
 from ._calc     import *

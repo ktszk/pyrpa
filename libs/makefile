@@ -245,6 +245,38 @@ ifeq ($(FCFAM),flang)
   LIBRARY_PATH := $(call _pathjoin,\
                     $(filter-out %/lib32 %/lib32/,$(call _pathsplit,$(LIBRARY_PATH))))
   export LIBRARY_PATH
+
+  # --- AMD LibM ---------------------------------------------------------------
+  # ROCm's flang, unlike AOCC's, does not route math intrinsics through AMD's
+  # math library on its own. Two independent mechanisms bring it back, and both
+  # are needed because they cover different call sites:
+  #
+  #  * -fveclib=AMDLIBM lets the vectoriser emit amd_vrd4_*/amd_vrd8_* calls for
+  #    exp/log/pow/sin/cos/tan/sinh/cosh/erf/... (~5x on an exp-heavy loop --
+  #    also faster than AOCC, which does not vectorise exp either). Those names
+  #    are unique to AMD LibM, so nothing can interpose them. NOTE there is no
+  #    vector tanh in AMD LibM, and get_ffermi is tanh-bound, hence the second
+  #    mechanism.
+  #  * The scalar names (exp, tanh, ...) are a different matter: libfmod.so is
+  #    dlopen'd by ctypes and glibc's libm is already in the process's global
+  #    scope, so a plain -lalm always loses the lookup (verified with
+  #    LD_DEBUG=bindings). Linking libalm.a *statically* under
+  #    -Bsymbolic-functions binds them inside the library instead (~1.2x on
+  #    get_ffermi); --exclude-libs keeps them from leaking back out.
+  #    libalm.a needs au_cpuid_* from libaoclutils.
+  #
+  # Cost: results move by <=1 ULP (exp) / <=2 ULP (tanh) against the glibc/MKL
+  # build -- physically irrelevant, but no longer bit-identical. `make AMDLIBM=0`
+  # opts out when an exact match with the ifx build matters.
+  AMDLIBM ?= 1
+  _HAS_VECLIB := $(shell $(FC) -fveclib=AMDLIBM --version >/dev/null 2>&1 && echo yes)
+  ifeq ($(AMDLIBM)$(_HAS_VECLIB),1yes)
+    ifneq ($(wildcard $(AOCL_LIBDIR)/libalm.a),)
+      FFLAGS_COMMON += -fveclib=AMDLIBM
+      LIBS := -Wl,-Bsymbolic-functions -Wl,--exclude-libs,ALL \
+              $(AOCL_LIBDIR)/libalm.a -laoclutils $(LIBS)
+    endif
+  endif
 endif
 
 .PHONY: all clean dispatch

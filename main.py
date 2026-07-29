@@ -68,6 +68,7 @@ class CalcMode(IntEnum):
     EILENBERGER        = (24, "solve quasiclassical Eilenberger equation")  # homogeneous multi-orbital Eilenberger (Matsubara)
     EILENBERGER_SURFACE= (25, "solve surface state via Riccati Eilenberger")  # specular surface gap profile + LDOS (model FS)
     EILENBERGER_VORTEX = (26, "solve isolated vortex via Riccati Eilenberger")  # vortex D(rho) + core LDOS (model FS)
+    NMR_SC             = (27, "calculate NMR observables (K, 1/T1T) in the sc state")  # Knight shift & spin-lattice rate from the BdG chi_s
 
 class ColorMode(IntEnum):
     """Color modes for band/FS plots; second element is the printed label (replaces the old `cstr` list)."""
@@ -96,9 +97,9 @@ MODES_CHIS_QPOINT   = frozenset({M.CHIS_QPOINT,M.CHIS_QPOINT_SC})
 MODES_COLOR         = frozenset({M.BAND,M.FERMI_2D,M.FERMI_3D})
 # susceptibility / Eliashberg modes that build the orbital-pair basis (chiolist)
 MODES_NEED_CHI      = frozenset({M.CHIS_SPECTRUM,M.CHIS_QPOINT,M.CHIS_QMAP,M.PHI_SPECTRUM,M.PHI_QMAP,
-                                 M.CHIS_SPECTRUM_SC,M.CHIS_QPOINT_SC,M.FLEX,M.LIN_ELIASHBERG,M.NONLIN_ELIASHBERG})
+                                 M.CHIS_SPECTRUM_SC,M.CHIS_QPOINT_SC,M.NMR_SC,M.FLEX,M.LIN_ELIASHBERG,M.NONLIN_ELIASHBERG})
 # susceptibility modes that need the static Coulomb vertex (S/C matrices)
-MODES_COULOMB_VERTEX= frozenset({M.CHIS_SPECTRUM,M.CHIS_QPOINT,M.CHIS_QMAP,M.CHIS_SPECTRUM_SC,M.CHIS_QPOINT_SC})
+MODES_COULOMB_VERTEX= frozenset({M.CHIS_SPECTRUM,M.CHIS_QPOINT,M.CHIS_QMAP,M.CHIS_SPECTRUM_SC,M.CHIS_QPOINT_SC,M.NMR_SC})
 # modes that print a constant U,J header
 MODES_PRINT_UJ      = frozenset({M.CHIS_SPECTRUM,M.CHIS_QPOINT,M.CHIS_QMAP,M.FLEX,M.LIN_ELIASHBERG})
 # modes that compute/define mu themselves (skip the common mu block)
@@ -109,7 +110,8 @@ MODES_KMESH_SINGLE  = frozenset({M.FERMI_2D,M.FERMI_3D,M.CHIS_QMAP,M.PHI_QMAP,M.
 MODES_MATSUBARA     = frozenset({M.FLEX,M.LIN_ELIASHBERG})
 # dispatch groups
 MODES_CHI_NORMAL    = frozenset({M.CHIS_SPECTRUM,M.CHIS_QPOINT,M.CHIS_QMAP,M.PHI_SPECTRUM,M.PHI_QMAP})
-MODES_CHIS_SC       = frozenset({M.CHIS_SPECTRUM_SC,M.CHIS_QPOINT_SC})
+# SC-state chi family: all share the BdG gap/hamk construction block
+MODES_CHIS_SC       = frozenset({M.CHIS_SPECTRUM_SC,M.CHIS_QPOINT_SC,M.NMR_SC})
 del M
 
 #option=CalcMode.CHIS_QPOINT_SC
@@ -149,7 +151,39 @@ gap_sym=2
 #use calculation of magnetic susceptibility at superconducting state
 #delta0=1.e-2 #maximum gap size for calculating susceptibility in SC state; set to 0 for normal state
 d0=1.e-1               #helper amplitude scale [eV] for building the per-band delta0 list below
-delta0=[0.,d0*2.,d0*3.,-d0,0.]  #initial SC gap amplitude/sign per band [eV] for SC-state chi (option 12,13); float=single shape, list=multi-gap (signs->s+-)
+delta0=[0.,d0*2.,d0*3.,-d0,0.]  #initial SC gap amplitude/sign per band [eV] for SC-state chi (option 12,13,27); float=single shape, list=multi-gap (signs->s+-)
+
+#--- NMR in the SC state (option 27): Knight shift K(T) and 1/(T1 T) from the BdG chi_s ---
+#delta0 above is read as Delta(0); the gap SHAPE stays fixed and only its amplitude is
+#scaled by the BCS interpolation Delta(T)=Delta(0)*tanh(1.74*sqrt(Tc/T-1)).
+nmr_tc=None           #Tc [eV]; None -> weak-coupling estimate max|delta0|/1.764
+nmr_trange=[0.05,1.2] #reduced temperature range [T/Tc min, T/Tc max] of the sweep
+nmr_nt=24             #number of temperature points in the sweep
+#q-mesh for the 1/T1 BZ sum, sub-sampled from Nx,Ny,Nz (each entry rounded down to a divisor).
+#COST IS LINEAR IN Nq: total ~ NT*Nq*Nk, so nmr_qsize=[Nx,Ny,Nz] is O(Nk^2) and only
+#tractable on toy meshes.  The k-sum sets the RESOLUTION (needs delta >~ v_F*dk), the q-sum
+#only INTEGRATES a smooth function (error ~Nq^-2), so 8-16/axis is normally plenty -- except
+#near a magnetic instability, where chi_s(q) sharpens at q_AF.  Verify with nmr_qconv.
+nmr_qsize=[8,8,1]
+nmr_qfold=True        #fold q with -q (exact for centrosymmetric+TRS, which the BdG basis already assumes); halves the cost
+nmr_qconv=True        #before the sweep, compare the q-sum on nmr_qsize and on half that mesh and print the relative change
+nmr_w0=None           #NMR probe frequency [eV] for chi''(q,w0)/w0; None -> 0.5*delta (needs w0 <~ delta << gap)
+nmr_hf_A,nmr_hf_B=1.0,0.0 #hyperfine form factor A(q)=A+2B(cos qx+cos qy) (Mila-Rice); B=0 -> flat weight, A=-4B kills the (pi,pi) response
+#--- use a self-consistent RPA/FLEX/Eliashberg gap instead of the gap_sym form factor ---
+#Set to the base name (no extension) of the gap exported by LIN_ELIASHBERG/NONLIN_ELIASHBERG
+#with sw_out_self=True (output_gap_wannier -> 'gap_wannier').  Delta(R) is mesh independent,
+#so the Eliashberg run may use a coarser k-mesh than this sweep needs.  None -> gap_sym/delta0.
+#NOTE: gap_sym/delta0 must still be VALID (the shared SC-chi block builds a gap from them
+#before this one replaces it); their values are then irrelevant, but set nmr_spsym since
+#gap_sym no longer describes the pairing channel.
+nmr_gap_file=None
+nmr_gap_extrapolate=True #True: fit Delta(iw_n)->Delta(0) (removes the O((pi T)^2) bias of the lowest slice); False: use slice nmr_gap_iw averaged over nmr_gap_navg
+nmr_gap_iw,nmr_gap_navg=0,1 #slice / slice-average used when nmr_gap_extrapolate=False
+#Overall amplitude Delta(0) [eV] to rescale the loaded gap to, measured as the maximum ON THE
+#FERMI SURFACE.  REQUIRED for a linearized-Eliashberg gap (an eigenvector: scale is arbitrary);
+#set None to keep the stored amplitude of a nonlinear/self-consistent gap.
+nmr_gap_max=None
+nmr_spsym=None        #None: take the singlet/triplet channel from the sign of gap_sym; True/False: override (needed with nmr_gap_file, where gap_sym no longer describes the gap)
 #mu0=9.85114560061123
 #k_sets=[[0., 0., 0.],[.5, 0., 0.],[.5, .5, 0.]]
 #xlabel=[r'$\Gamma$','X','M']
@@ -1473,6 +1507,59 @@ def main():
                     for cso in ic:
                         f.write(f"{cso.imag:12.8f}, ")
                     f.write("\n")
+        elif option==CalcMode.NMR_SC: #Knight shift K(T) and 1/(T1 T) from the SC-state chi_s
+            eig_n=flibs.get_eig(hamk)[0]
+            if nmr_gap_file is not None:
+                # Replace the gap_sym/delta0 form factor by the self-consistent RPA/FLEX gap.
+                # Delta(R) is mesh independent, so this klist need not match the Eliashberg one.
+                print(f'using the Eliashberg gap from {nmr_gap_file}.npz',flush=True)
+                deltak=plibs.gap_from_eliashberg(klist,nmr_gap_file,nmr_gap_extrapolate,
+                                                 nmr_gap_iw,nmr_gap_navg,eig=eig_n,mu=mu,
+                                                 gap_max=nmr_gap_max)
+            if nmr_spsym is not None:
+                sw_spsym=bool(nmr_spsym)
+            # deltak is read as the T=0 gap; nmr_sweep rescales its AMPLITUDE
+            # by the BCS interpolation at each temperature and leaves the shape alone.
+            gap0=float(abs(deltak).max())
+            # Tc must come from the gap ON THE FERMI SURFACE: max|Delta| over the whole zone
+            # can be many times larger when the form factor has little weight on the sheets
+            # that carry states (e.g. dx2-y2 on a pocket centred at (pi,pi)), and a Tc taken
+            # from it puts the whole sweep at the wrong reduced temperature.
+            _,gap_fs_max,_=plibs.fermi_surface_gap(eig_n,mu,deltak)
+            temp_c=plibs.bcs_temp_c(gap_fs_max) if nmr_tc is None else float(nmr_tc)
+            if temp_c<=0.:
+                print("Error: Tc is zero -- the gap vanishes on the Fermi surface."
+                      " Set nmr_tc, raise delta0, or pick another gap_sym",flush=True)
+                return
+            # sw_spsym comes from the sign of gap_sym (or nmr_spsym): it selects the sign of
+            # the anomalous term, i.e. the channel preserved at T=0 (field perpendicular to
+            # d) vs the Yosida-suppressed one (singlet, or field parallel to d).  With
+            # nmr_gap_file the gap no longer comes from gap_sym, so set nmr_spsym explicitly.
+            print(f'spin channel: {"preserved at T=0 (triplet, field _|_ d)" if sw_spsym else "Yosida-suppressed (singlet, or field || d)"}',flush=True)
+            print(f'Delta(0) = {gap0*1e3:7.4f} meV (max on Fermi surface {gap_fs_max*1e3:7.4f} meV),'
+                  f' Tc = {temp_c:10.3e} eV ({temp_c/kb:.2f} K)'
+                  f'{" (BCS estimate from the Fermi-surface gap)" if nmr_tc is None else ""}',flush=True)
+            qlist,qmult=plibs.nmr_qmesh(Nx,Ny,Nz,*nmr_qsize,sw_fold=nmr_qfold)
+            hf_weight=qmult*plibs.hyperfine_form_factor(qlist,nmr_hf_A,nmr_hf_B)
+            print(f'q-mesh {nmr_qsize} -> {len(qlist)} points'
+                  f'{" after q/-q folding" if nmr_qfold else ""}, '
+                  f'hyperfine A={nmr_hf_A:.3f} B={nmr_hf_B:.3f}',flush=True)
+            temps=np.linspace(nmr_trange[0],nmr_trange[1],nmr_nt)*temp_c
+            # Report the k-mesh/broadening hierarchy BEFORE the q-convergence probe, so a
+            # warning about an under-resolved k-mesh is not buried under the probe output.
+            plibs.nmr_scale_check(eig_n,mu,delta,gap0,deltak)
+            plibs.nmr_cost_estimate(len(klist),len(qlist),nmr_nt,Norb,len(chiolist))
+            if nmr_qconv:
+                # Probe deep in the SC state, where chi''(q) has the most q-structure.
+                plibs.nmr_qconvergence(hamk,deltak,klist,Nx,Ny,Nz,nmr_qsize,mu,
+                                       max(temps[0],0.1*temp_c),temp_c,Smat,chiolist,
+                                       delta,nmr_w0,sw_spsym,nmr_hf_A,nmr_hf_B)
+            print('start NMR temperature sweep',flush=True)
+            res=plibs.nmr_sweep(hamk,deltak,klist,qlist,mu,temps,temp_c,Smat,chiolist,
+                                delta,nmr_w0,sw_spsym,hf_weight,sw_scale_check=False)
+            plibs.write_nmr_dat(res)
+            plibs.plot_nmr(res)
+            print('wrote nmr_sc.dat and nmr_sc.png',flush=True)
     elif option in MODES_FLEX_ELIASH: #flex/eliashberg calculations
         if sw_soc: #with soc
             try:
