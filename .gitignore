@@ -38,6 +38,8 @@ Hopping.dat
 irvec.txt
 ndegen.txt
 ham_r.txt
+HamRsMLO
+HamiltonianPMTInfo
 
 .vscode/
 
