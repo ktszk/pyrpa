@@ -104,7 +104,7 @@ def read_HamRsMLO(directory: str = '.') -> tuple[np.ndarray, np.ndarray, np.ndar
     @brief Read ecalj job_mlo binary output (HamRsMLO + HamiltonianPMTInfo).
            Returns the same format as import_MLO_hoppings.
     @param directory: path containing HamRsMLO and HamiltonianPMTInfo
-    @retval  rvec: R-vectors (nr, 3) int64, in lattice-vector units
+    @retval  rvec: R-vectors (nr, 3) float64, in lattice-vector units
     @retval ham_r: H(R) (nr, no, no) complex128, eV
     @retval   S_r: S(R) (nr, no, no) complex128, dimensionless
     @retval    no: number of MLO orbitals (ndimMTO)
@@ -205,7 +205,8 @@ def read_HamRsMLO(directory: str = '.') -> tuple[np.ndarray, np.ndarray, np.ndar
                 S_r[ir, i, j]   = ovlmr[it, i, j, 0]
 
     ham_r *= RY_TO_EV
-    rvec = np.array(rvec_list, dtype=np.int64)
+    # float64 like the other importers: the Fortran kernels declare rvec as double
+    rvec = np.array(rvec_list, dtype=np.float64)
     return rvec, ham_r, S_r, no, nr
 
 def get_bvec(avec: np.ndarray) -> np.ndarray:
@@ -448,12 +449,15 @@ def get_symm_line(brav:int)->tuple[list,list]:
         xlabel=[r'$\Gamma$','X','M',r'$\Gamma$']
     return k_list,xlabel
 
-def BZedge(bvec: np.ndarray, ax=None) -> None:
+def BZedge(bvec: np.ndarray, ax=None) -> np.ndarray:
     """
     @fn BZedge
     @brief Draw first Brillouin zone boundary edges using Wigner-Seitz construction in reciprocal space.
+           The edges are drawn in Cartesian k [Angstrom^-1], so whatever is overlaid on the same
+           axes (Fermi sheets, k-points) must be Cartesian too.
     @param bvec: reciprocal lattice vectors as rows, shape (3,3), in Angstrom^-1
     @param   ax: matplotlib Axes3D; uses plt.gca() if None
+    @retval  the BZ corner points [Nv,3] in Cartesian k, for setting the axis ranges
     """
     import itertools
     import matplotlib.pyplot as plt
@@ -470,9 +474,6 @@ def BZedge(bvec: np.ndarray, ax=None) -> None:
     vor = Voronoi(pts)
     origin_idx = np.argmin(np.linalg.norm(pts, axis=1))
 
-    # avec transforms Cartesian k to fractional*2pi plot coordinates: k_plot = avec @ k_cart
-    avec = 2*np.pi * np.linalg.inv(bvec).T
-
     def _order_polygon(verts):
         c = verts.mean(axis=0)
         u = verts[0] - c
@@ -488,11 +489,13 @@ def BZedge(bvec: np.ndarray, ax=None) -> None:
         angles = np.arctan2([(p-c).dot(v) for p in verts], [(p-c).dot(u) for p in verts])
         return verts[np.argsort(angles)]
 
+    corners = []
     for ridge_pts, ridge_verts in zip(vor.ridge_points, vor.ridge_vertices):
         if origin_idx not in ridge_pts or -1 in ridge_verts:
             continue
         verts_cart = vor.vertices[ridge_verts]
-        verts_plot = (avec @ verts_cart.T).T
-        ordered = _order_polygon(verts_plot)
+        ordered = _order_polygon(verts_cart)
         poly = np.vstack([ordered, ordered[0]])
         ax.plot(poly[:, 0], poly[:, 1], poly[:, 2], color='black', lw=0.5)
+        corners.append(ordered)
+    return np.vstack(corners) if corners else np.zeros((0, 3))

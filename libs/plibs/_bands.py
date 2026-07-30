@@ -246,7 +246,8 @@ def find_extremal_kz(kz_arr: np.ndarray, S_arr: np.ndarray, band_idx: int,
     return cand_kz
 
 def gen_3d_surf_points(mesh: int, rvec: np.ndarray, ham_r: np.ndarray,
-                       S_r: np.ndarray, mu: float, kscale: float = 1.0) -> tuple[list, list, list]:
+                       S_r: np.ndarray, mu: float, kscale: float = 1.0,
+                       bvec: np.ndarray | None = None) -> tuple[list, list, list]:
     """
     @fn gen_3d_surf_points()
     @brief This function obtains 3d fermi wave-numbers
@@ -256,15 +257,20 @@ def gen_3d_surf_points(mesh: int, rvec: np.ndarray, ham_r: np.ndarray,
     @param    S_r: overlap integrals
     @param     mu: chemical potential
     @param kscale: change considering k-space area 1.0 is only 1st BZ
+    @param   bvec: reciprocal lattice vectors as rows [Angstrom^-1]. If given, the
+                   surface vertices are returned in Cartesian k (same frame as BZedge);
+                   otherwise they stay in 2pi*fractional units of the reciprocal cell.
+    @retval fspolys: triangles of each Fermi sheet (Cartesian if bvec is given)
+    @retval fscenters: triangle centers in FRACTIONAL coordinates (always), because
+                   they are fed back to get_eigs/get_colors, which take fractional k
+    @retval fsband: band index of each sheet
     """
     import skimage.measure as ski
     Nk,klist=gen_klist(mesh+1,mesh+1,mesh+1)
     klist=klist*kscale
     eig,uni=get_eigs(klist,ham_r,S_r,rvec)
-    if isinstance(kscale,int):
-        ks=kscale*np.array([1.,1.,1.])
-    else:
-        ks=np.array(kscale)
+    # accept a scalar (int or float) as well as a per-axis [kx,ky,kz] list
+    ks=np.asarray(kscale,dtype=float)*np.ones(3)
     fspolys=[]
     fscenters=[]
     fsband=[]
@@ -274,8 +280,11 @@ def gen_3d_surf_points(mesh: int, rvec: np.ndarray, ham_r: np.ndarray,
                                                  spacing=(ks[0]*2*np.pi/mesh,ks[1]*2*np.pi/mesh,
                                                           ks[2]*2*np.pi/mesh))
             verts=verts-ks*np.pi
-            fspolys.append(verts[faces])
-            fscenters.append(verts[faces].mean(axis=1)*.5/np.pi)
+            # k_frac in [-ks/2, ks/2]; klist fed to get_eigs uses the same fractional units
+            kfrac=verts*.5/np.pi
+            # Cartesian k = sum_i k_frac_i * b_i, so that the sheet and BZedge(bvec) share a frame
+            fspolys.append((kfrac.dot(bvec) if bvec is not None else verts)[faces])
+            fscenters.append(kfrac[faces].mean(axis=1))
             fsband.append(i)
     return fspolys,fscenters,fsband
 

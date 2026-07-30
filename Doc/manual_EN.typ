@@ -58,6 +58,7 @@ The format of the input Hamiltonian file is specified by the `ftype` variable. A
   [1], [A single `{fname}.input` file (custom format)],
   [2], [`{fname}_hr.dat` file (Wannier90 default hopping file). *This is the standard choice when interfacing with first-principles codes.*],
   [3], [Non-orthogonal basis hopping in MLO (Maximally Localized Orbital) format],
+  [4], [Directory `{fname}/` containing `HamRsMLO` and `HamiltonianPMTInfo` (binary output of ecalj `job_mlo`). Same non-orthogonal MLO basis as ftype=3; the overlap $S(R)$ is read alongside $H(R)$],
   [Other], [`Hopping.dat` file (ecalj hopping file)],
 )
 

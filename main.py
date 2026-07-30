@@ -7,6 +7,7 @@ ftype: set input hamiltonian's format
 1: .input file named {fname}
 2: {fname}_hr.dat file (wannier90 default hopping file
 3: for non-orthogonal basehoppings as MLO basis
+4: HamRsMLO, HamiltonianPMTInfo binaries in {fname} dir (ecalj job_mlo output)
 else: Hopping.dat file (ecalj hopping file)
 brav: choose primitive translation vector S,FC,BC etc
 0: simple 
@@ -23,7 +24,8 @@ else: monoclinic
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4nso',0,7,False
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
-fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
+fname,ftype,brav,sw_soc='inputs/Cu',4,6,False        # ecalj job_mlo binaries (abc=[3.597]*3, fill=5.5)
+#fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/000AsP.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/FeS',2,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
@@ -126,11 +128,11 @@ kz=0.0                  #reduced kz of the 2D Fermi-surface cut (option 2): 0=Ga
 #RotMat=[[0,0,1],[0,1,0],[1,0,0]]
 
 #abc=[3.96*0.70711,3.96*0.70711,13.02*.5]
-abc=[3.68,3.68,5.03]    #lattice constants a,b,c [Angstrom] (group velocities & symmetry-path lengths)
+abc=3.597,3.597,3.597]    #lattice constants a,b,c [Angstrom] (group velocities & symmetry-path lengths)
 #alpha_beta_gamma=[90.,90.,90]  #lattice angles alpha,beta,gamma [deg] (default 90,90,90 if undefined)
 #temp=2.0e-2 #2.59e-2   #directly set k_B*T [eV]; if defined it overrides tempK
 tempK=300 #Kelvin        #temperature [K] (converted internally to temp=k_B*tempK [eV])
-fill= 2.9375       #band filling; mu solved from sum f(eps-mu)=Nk*fill (no SOC: per spin, full=Norb; SOC: total, full=2*Norb)
+fill= 5.5 #2.9375       #band filling; mu solved from sum f(eps-mu)=Nk*fill (no SOC: per spin, full=Norb; SOC: total, full=2*Norb)
 #site_prof=[5]
 
 Emin,Emax=-3,1.         #energy window [eV] for DOS / spectral-function plots (option 1,4)
@@ -471,10 +473,6 @@ def plot_3d_surf(fspolys,fscenters,fscolors,surface_opt,kscale,bvec):
     fig=plt.figure()
     ax = fig.add_subplot(111, projection='3d')
     clist=['r','g','b','c','m','y','k','w']
-    if isinstance(kscale,int):
-        ks=kscale*np.array([1.,1.,1.])
-    else:
-        ks=np.array(kscale)
     if surface_opt==0:
         for j,polys in enumerate(fspolys):
             ax.add_collection3d(Poly3DCollection(polys,facecolor=clist[j%6]))
@@ -501,14 +499,21 @@ def plot_3d_surf(fspolys,fscenters,fscolors,surface_opt,kscale,bvec):
             plt.colorbar(fs,format='%.2e')
         ax.add_collection3d(tri)
     ax.grid(False)
-    ax.set_xlim(-np.pi*ks[0], np.pi*ks[0])
-    ax.set_ylim(-np.pi*ks[1], np.pi*ks[1])
-    ax.set_zlim(-np.pi*ks[2], np.pi*ks[2])
+    bzv=plibs.BZedge(bvec, ax)
+    # Sheets and BZ edges are both Cartesian k [A^-1] now, so one range fits both.
+    # (kscale>1 samples beyond the 1st BZ, hence taking the max of the two extents.)
+    kmax=np.maximum(np.abs(bzv).max(axis=0),
+                    np.abs(np.concatenate([np.asarray(p).reshape(-1,3)
+                                           for p in fspolys])).max(axis=0)) if len(fspolys) \
+         else np.abs(bzv).max(axis=0)
+    ax.set_xlim(-kmax[0], kmax[0])
+    ax.set_ylim(-kmax[1], kmax[1])
+    ax.set_zlim(-kmax[2], kmax[2])
+    ax.set_box_aspect(tuple(kmax))
     ax.set_xticks([])
     ax.set_yticks([])
     ax.set_zticks([])
     plt.tight_layout()
-    plibs.BZedge(bvec, ax)
     plt.show()
     #plt.savefig(fname='3DFS.png',dpi=300)
     
@@ -533,7 +538,9 @@ def set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist
             fscenters.extend(i)
         for i in colors:
             fscolors.extend(i)
-        fscenters=np.array(fscenters)*2.*np.pi
+        # centers come back fractional; the sheets are Cartesian, so map the scatter
+        # overlay with bvec to keep both in the same frame
+        fscenters=np.array(fscenters).dot(plibs.get_bvec(avec))
         fscolors=np.array(fscolors)
         return fspolys,fscenters,fscolors
 
@@ -1128,14 +1135,23 @@ def main():
     omp_num,omp_check=flibs.omp_params()
 
     # ===== Input file and parameter validation =====
-    # Check if Hamiltonian file exists
-    if not os.path.exists(fname):
-        print(f"Error: Hamiltonian file '{fname}' not found",flush=True)
-        return
-    # Validate ftype (any integer outside {0,1,2,3} uses the Hopping.dat branch)
+    # Validate ftype (any integer outside {0,1,2,3,4} uses the Hopping.dat branch)
     if not isinstance(ftype, int):
         print(f"Error: ftype={ftype!r} must be an integer",flush=True)
         return
+    # Check the files each format actually reads: fname is a bare prefix for ftype 2
+    # (_hr.dat is appended) and a directory for ftype 0, 4 and the Hopping.dat branch,
+    # so testing fname itself would wrongly reject those.
+    required={0:['irvec.txt','ndegen.txt','ham_r.txt'],
+              1:[''],
+              2:['_hr.dat'],
+              3:[''],
+              4:['HamRsMLO','HamiltonianPMTInfo']}.get(ftype,['Hopping.dat'])
+    sep='' if ftype in (1,2,3) else os.sep       # ftype 2 appends a suffix, dirs join with /
+    for f in required:
+        if not os.path.exists(fname+sep+f):
+            print(f"Error: Hamiltonian file '{fname+sep+f}' not found",flush=True)
+            return
     # Validate brav (any integer outside {0..7} uses the monoclinic branch)
     if not isinstance(brav, int):
         print(f"Error: brav={brav!r} must be an integer",flush=True)
@@ -1176,6 +1192,9 @@ def main():
     #import hamiltonian
     if ftype==3:
         rvec,ham_r,S_r,Norb,Nr=plibs.import_MLO_hoppings(fname)
+    elif ftype==4:
+        # fname is the directory holding the ecalj job_mlo binaries
+        rvec,ham_r,S_r,Norb,Nr=plibs.read_HamRsMLO(fname)
     else:
         rvec,ham_r,Norb,Nr=plibs.import_hoppings(fname,ftype)
         S_r=[]
@@ -1350,7 +1369,7 @@ def main():
         clist=plibs.get_colors(klist,blist,ihbar*avec.T,rvec,ham_r,S_r,olist,color_option,True)
         plot_FS(clist,klist,color_option)
     elif option==CalcMode.FERMI_3D: #3D Fermi surface plot (color_option=GAP: the Eilenberger pairing gap Re[phi(k)])
-        polys,centers,blist=plibs.gen_3d_surf_points(Nx,rvec,ham_r,S_r,mu,kscale)
+        polys,centers,blist=plibs.gen_3d_surf_points(Nx,rvec,ham_r,S_r,mu,kscale,bvec)
         gorb=(plibs.gap_orbital_from_wannier(eil_gap_file,eil_gap_iw,eil_gap_navg) #RPA/FLEX gap as form factor
               if eil_gap_file else eil_gap_orbital)
         fspolys,fscenters,fscolors=set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist,

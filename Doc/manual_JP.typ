@@ -59,6 +59,7 @@ Fortran で書かれた内部ライブラリ（`libs/flibs`, `libs/plibs`）が�
   [1], [`{fname}.input` ファイル（独自形式）],
   [2], [`{fname}_hr.dat` ファイル（Wannier90のデフォルトホッピングファイル）。*第一原理計算との連携では通常これを使用*],
   [3], [MLO（最局在ワニエ）基底の非直交基底ホッピング形式],
+  [4], [`{fname}/` ディレクトリ内の `HamRsMLO`, `HamiltonianPMTInfo`（ecalj `job_mlo` のバイナリ出力）。ftype=3 と同じく非直交 MLO 基底で, 重なり積分 $S(R)$ も同時に読み込みます],
   [その他], [`Hopping.dat` ファイル（ecaljのホッピングファイル）],
 )
 
