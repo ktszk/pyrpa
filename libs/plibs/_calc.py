@@ -414,7 +414,7 @@ def gap_extrapolate_w0(gap: np.ndarray, temp: float, n_points: int = 4, order: i
 
 def output_gap_function(invk, kmap, gap, uni, plist, gap_sym, Nx:int,
                         soc=False, invs=None, slist=None, sw_orb=False,
-                        sw_extrapolate=False, temp=None, n_points=4, order=1):
+                        sw_extrapolate=False, temp=None, n_points=4, order=1, iperm=None):
     if sw_extrapolate:
         gap0, bias = gap_extrapolate_w0(gap, temp, n_points, order)
         print(f'gap w_n->0 extrapolation: max relative correction over iw_0 = {bias.max():.4e}', flush=True)
@@ -423,12 +423,12 @@ def output_gap_function(invk, kmap, gap, uni, plist, gap_sym, Nx:int,
         if soc:
             gapb = gap[:, :, 0, :]
         else:
-            gapb = flibs.remap_gap(gap[:, :, 0, :], plist, invk, gap_sym)
+            gapb = flibs.remap_gap(gap[:, :, 0, :], plist, invk, gap_sym, iperm=iperm)
     else:
         if soc:
             gapb = flibs.conv_delta_orb_to_band_soc(gap, uni, invk, invs, slist)
         else:
-            gapb = flibs.conv_delta_orb_to_band(gap, uni, invk, plist, gap_sym)
+            gapb = flibs.conv_delta_orb_to_band(gap, uni, invk, plist, gap_sym, iperm=iperm)
     print('output gap function')
     for iorb in range(len(gapb)):
         for jorb in range(len(gapb)):
@@ -484,7 +484,7 @@ def calc_lin_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, chi
                            mu:float, temp:float, gap_sym:int, sw_self:bool, orb_dep:bool, U:float, J:float,
                            fill:float, sw_from_file:bool, sw_out_self:bool, sw_in_self:bool,
                            Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True,
-                           sw_tail:bool=False, sigma_scale:float=1.0, sw_gap_extrapolate:bool=False,
+                           sw_tail:bool=False, sigma_scale:float=1.0, sw_gap_extrapolate:bool=False, iperm=None,
                            gap_extrap_points=4, gap_extrap_order=1):
     state = _prepare_kspace_state(Nx, Ny, Nz, ham_r, S_r, rvec, need_ham=sw_self)
     Smat, Cmat = _prepare_normal_interaction(chiolist, site, orb_dep, U, J, Umat, Jmat)
@@ -511,12 +511,12 @@ def calc_lin_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, chi
     except IOError as e:
         print(f"Error: Failed to write 'chis.dat' or 'chic.dat': {e}", flush=True)
     gap, lambda_eliash = flibs.linearized_eliashberg(chi, Gk, state['uni'], init_delta, Smat, Cmat, chiolist, plist,
-                                      state['kmap'], state['invk'], Nx, Ny, Nz, temp, gap_sym)
+                                      state['kmap'], state['invk'], Nx, Ny, Nz, temp, gap_sym, iperm=iperm)
     print(f'Stoner factor = {stoner:.6f}, lambda_eliash = {lambda_eliash:.6f}', flush=True)
     if sw_out_self:
         np.save('gap', gap)
         output_gap_wannier(gap, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
-    output_gap_function(state['invk'], state['kmap'], gap, state['uni'], plist, gap_sym, Nx,
+    output_gap_function(state['invk'], state['kmap'], gap, state['uni'], plist, gap_sym, Nx, iperm=iperm,
                         sw_extrapolate=sw_gap_extrapolate, temp=temp,
                         n_points=gap_extrap_points, order=gap_extrap_order)
 
@@ -564,7 +564,7 @@ def calc_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec,
                        orb_dep:bool, U:float, J:float, fill:float, sw_from_file:bool, sw_out_self:bool,
                        sw_in_self:bool, Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True,
                        sw_check_only:bool=False, sw_tail:bool=False, sigma_scale:float=1.0,
-                       sw_gap_extrapolate:bool=False, gap_extrap_points=4, gap_extrap_order=1):
+                       sw_gap_extrapolate:bool=False, gap_extrap_points=4, gap_extrap_order=1, iperm=None):
     """
     @param sw_check_only: If True, stop after the linearized Eliashberg solve (before the
                           nonlinear loop) and report the Stoner factor and lambda_eliash.
@@ -595,7 +595,8 @@ def calc_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec,
                   f"nonlinear Eliashberg.", flush=True)
             return
         delta_init, lambda_eliash = flibs.linearized_eliashberg(chi, Gk, state['uni'], delta_init_band, Smat, Cmat,
-                                                 chiolist, plist, state['kmap'], state['invk'], Nx, Ny, Nz, temp, gap_sym)
+                                                 chiolist, plist, state['kmap'], state['invk'], Nx, Ny, Nz, temp, gap_sym,
+                                                 iperm=iperm)
         print(f'Stoner factor = {stoner:.6f}, lambda_eliash = {lambda_eliash:.6f}', flush=True)
         if lambda_eliash < 1.0:
             print(f"lambda_eliash = {lambda_eliash:.6f} < 1: no superconducting instability "
@@ -618,10 +619,10 @@ def calc_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec,
         print("Warning: initial gap is zero; skip Tc-based scaling", flush=True)
     delta, sigmak = flibs.nonlinear_eliashberg(delta_init, Gk, state['ham_k'], Smat, Cmat, chiolist, plist,
                                                state['kmap'], state['invk'], mu_self, temp, gap_sym, Nx, Ny, Nz,
-                                               sw_sigma=sw_self, sw_Vconst=True, eps=eps, m_diis=m_diis)
+                                               sw_sigma=sw_self, sw_Vconst=True, eps=eps, m_diis=m_diis, iperm=iperm)
     if sw_out_self:
         np.save('gap', delta)
         output_gap_wannier(delta, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
-    output_gap_function(state['invk'], state['kmap'], delta, state['uni'], plist, gap_sym, Nx,
+    output_gap_function(state['invk'], state['kmap'], delta, state['uni'], plist, gap_sym, Nx, iperm=iperm,
                         sw_extrapolate=sw_gap_extrapolate, temp=temp,
                         n_points=gap_extrap_points, order=gap_extrap_order)

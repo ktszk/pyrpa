@@ -114,6 +114,9 @@ MODES_MATSUBARA     = frozenset({M.FLEX,M.LIN_ELIASHBERG})
 MODES_CHI_NORMAL    = frozenset({M.CHIS_SPECTRUM,M.CHIS_QPOINT,M.CHIS_QMAP,M.PHI_SPECTRUM,M.PHI_QMAP})
 # SC-state chi family: all share the BdG gap/hamk construction block
 MODES_CHIS_SC       = frozenset({M.CHIS_SPECTRUM_SC,M.CHIS_QPOINT_SC,M.NMR_SC})
+# modes that reconstruct Delta(-k) from Delta(k) with the inversion operator (plist/iperm).
+# For these the operator must really be a symmetry of H(R) -- see plibs.inversion_op.
+MODES_NEED_PARITY   = frozenset({M.FLEX,M.LIN_ELIASHBERG,M.NONLIN_ELIASHBERG,M.GAP_FUNCTION})
 del M
 
 #option=CalcMode.CHIS_QPOINT_SC
@@ -128,13 +131,16 @@ kz=0.0                  #reduced kz of the 2D Fermi-surface cut (option 2): 0=Ga
 #RotMat=[[0,0,1],[0,1,0],[1,0,0]]
 
 #abc=[3.96*0.70711,3.96*0.70711,13.02*.5]
-abc=3.597,3.597,3.597]    #lattice constants a,b,c [Angstrom] (group velocities & symmetry-path lengths)
+abc=[3.597,3.597,3.597]    #lattice constants a,b,c [Angstrom] (group velocities & symmetry-path lengths)
 #alpha_beta_gamma=[90.,90.,90]  #lattice angles alpha,beta,gamma [deg] (default 90,90,90 if undefined)
 #temp=2.0e-2 #2.59e-2   #directly set k_B*T [eV]; if defined it overrides tempK
 tempK=300 #Kelvin        #temperature [K] (converted internally to temp=k_B*tempK [eV])
 fill= 5.5 #2.9375       #band filling; mu solved from sum f(eps-mu)=Nk*fill (no SOC: per spin, full=Norb; SOC: total, full=2*Norb)
 #site_prof=[5]
 
+inv_tol=3.0e-2          #relative residual below which the inversion operator is accepted as a
+                        #symmetry of H(R) (option 14,15,16,23). Fitted first-principles models
+                        #carry a few % of error, so this is deliberately loose; see plibs.inversion_op
 Emin,Emax=-3,1.         #energy window [eV] for DOS / spectral-function plots (option 1,4)
 delta=5.0e-4            #spectral broadening eta [eV]: imaginary part added to G (Lorentzian width); too large smears, too small=noise
 Ecut=1.0e-2            #fixed energy omega_0 [eV] for the q-space susceptibility maps (option 9,11); ~0 probes the Fermi surface
@@ -852,7 +858,7 @@ def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
 
 
 def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,plist,mu:float,temp:float,sw_self:bool,
-              sw_soc=False,invs=None,slist=None,gap_sym=0,sw_maxent=False,maxent_noise=1.0e-4):
+              sw_soc=False,invs=None,slist=None,gap_sym=0,sw_maxent=False,maxent_noise=1.0e-4,iperm=None):
     klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
     eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
     if sw_self:
@@ -879,7 +885,7 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,plist,mu:float,temp:flo
             Fktr=np.array([f.diagonal().sum() for f in Fkt.T])
     else:
         Fk0=flibs.gen_Fk(Gk,gap,invk)
-        Fk=flibs.remap_gap(Fk0[:,:,0,:],plist,invk,gap_sym)
+        Fk=flibs.remap_gap(Fk0[:,:,0,:],plist,invk,gap_sym,iperm=iperm)
         Fktr=np.array([f.diagonal().sum() for f in Fk.T])
     print('output anomalous green function')
     try:
@@ -935,7 +941,7 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,plist,mu:float,temp:flo
         plt.plot(iwlist,sigmak[0,4,:,318].imag,color='b')
         #plt.plot(-iwlist,-Gk[4,0,:,318].imag,color='b')
         plt.show()
-    info=plibs.output_gap_function(invk,kmap,gap,uni,plist,gap_sym,Nx,sw_soc,invs,slist)
+    info=plibs.output_gap_function(invk,kmap,gap,uni,plist,gap_sym,Nx,sw_soc,invs,slist,iperm=iperm)
 
 
 def get_mass(mesh,rvec,ham_r,S_r,mu:float,de=3.e-6,meshkz=20):
@@ -1200,6 +1206,25 @@ def main():
         S_r=[]
     plist=flibs.get_plist(rvec,ham_r)
     print("Effective parity of wannier functions:", plist, flush=True)
+    # The Eliashberg solvers rebuild Delta(-k) from Delta(k) with this operator, so it has to
+    # BE a symmetry of H(R). The diagonal parity above is exact for single-site cells but not
+    # when inversion exchanges sites (2-Fe cells etc.), where the true operator is a signed
+    # permutation. Validate, and switch to the permutation form when needed.
+    iperm=None
+    if option in MODES_NEED_PARITY:
+        psgn,pperm,pstat,pres=plibs.inversion_op(rvec,ham_r,plist,tol=inv_tol)
+        res_str='n/a' if pres is None else f'{pres:.2e}'
+        print(f"Inversion operator: {pstat} (diag(plist) residual {res_str})",flush=True)
+        if pstat=='monomial':
+            plist,iperm=psgn,pperm
+            print(f"  -> using signed permutation: perm={pperm.tolist()} sgn={psgn.astype(int).tolist()}",
+                  flush=True)
+        elif pstat!='diagonal':
+            print(f"Error: inversion cannot be represented by a signed permutation ({pstat}).",flush=True)
+            print("       Delta(-k) would be reconstructed with a non-symmetry, giving the leading",flush=True)
+            print("       solution of a wrong eigenproblem. Raise inv_tol if the model is a fit, or",flush=True)
+            print("       rebuild the Wannier functions in a symmetry-respecting gauge.",flush=True)
+            return
 
     # ===== Parameter checks dependent on number of orbitals =====
     print(f"Number of orbital = {Norb}",flush=True)
@@ -1433,7 +1458,7 @@ def main():
             klist,kmap,invk=flibs.gen_irr_k_TRS(Nx,Ny,Nz)
             eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
             deltaini=flibs.remap_gap(flibs.get_initial_delta(plibs.get_initial_gap(klist,len(eig.T),gap_sym),
-                                                              uni, kmap, invk, 1, gap_sym),plist,invk,gap_sym)
+                                                              uni, kmap, invk, 1, gap_sym),plist,invk,gap_sym,iperm=iperm)
             deltaini_static=np.ascontiguousarray(deltaini[:,:,0,:].transpose(2,0,1))  # [Nkall,Norb,Norb]
             print("maximum gap = %7.4f meV"%(delta0*1e3),flush=True)
             gap_max=abs(deltaini_static).max()
@@ -1617,9 +1642,9 @@ def main():
                 plibs.calc_lin_eliashberg_eq(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,chiolist,site,plist,mu,temp,gap_sym,sw_self,
                                              orb_dep,U,J,fill,sw_from_file,sw_out_self,sw_in_self,
                                              Umat if orb_dep else None,Jmat if orb_dep else None,
-                                             sw_tail=sw_chi0_tail,sigma_scale=sigma_in_scale)
+                                             sw_tail=sw_chi0_tail,sigma_scale=sigma_in_scale,iperm=iperm)
             elif option==CalcMode.GAP_FUNCTION: #post gap calculation, output gap function/anomalous green's function
-                output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,plist,mu,temp,sw_self)
+                output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,plist,mu,temp,sw_self,iperm=iperm)
     elif option==CalcMode.EILENBERGER: #solve homogeneous quasiclassical Eilenberger equation
         if eil_fs: #model FS + Fermi velocity: anisotropic penetration depth lambda_xx/lambda_yy
             plibs.calc_fs_penetration(eil_coupling,temp,eil_wc,kind=(eil_fs_kind or 'ellipse'),
@@ -1767,7 +1792,7 @@ def main():
                                  Umat if orb_dep else None,Jmat if orb_dep else None,
                                  m_diis=m_diis_num,sw_rescale=sw_rescale_flex,
                                  sw_check_only=sw_check_only,sw_tail=sw_chi0_tail,
-                                 sigma_scale=sigma_in_scale)
+                                 sigma_scale=sigma_in_scale,iperm=iperm)
 
 if __name__=="__main__":
     main()

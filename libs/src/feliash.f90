@@ -1,4 +1,4 @@
-subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,kmap,invk,temp,eps,&
+subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,iprm,kmap,invk,temp,eps,&
      Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,arnoldi_m,lambda_out) bind(C)
   !> calculate linearized eliashberg equations with TRS without soc
   !!@param     delta,out: gap function
@@ -32,6 +32,10 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,kmap,invk,
   integer(c_int64_t),intent(in):: arnoldi_m  !! Krylov subspace dimension (0=power method, >0=Arnoldi)
   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
   integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
+  !! Inversion in the orbital basis is the signed permutation P_{m,iprm(m)}=prt(m):
+  !! Delta_ml(-k) = dprt*prt(m)*prt(l)*Delta_{iprm(m),iprm(l)}(k).
+  !! iprm=identity recovers the old diagonal-parity behaviour bit for bit.
+  integer(c_int64_t),intent(in),dimension(Norb):: iprm
   real(c_double),intent(in):: temp,eps
   real(c_double),intent(in),dimension(Norb):: prt
   real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
@@ -79,7 +83,7 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,kmap,invk,
         lambda_prev=0.0d0
         iter_loop:do i_iter=1,itemax !iteration
            call mkfk_trs_nsoc(fk,Gk,delta,Nk,Nw,Norb)
-           call mkdelta_nsoc(newdelta,fk,chi,Smat,Cmat,kmap,invk,prt,olist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
+           call mkdelta_nsoc(newdelta,fk,chi,Smat,Cmat,kmap,invk,prt,iprm,olist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
            !$omp parallel workshare
            newdelta(:,:,:,:)=newdelta(:,:,:,:)*weight
            !$omp end parallel workshare
@@ -410,7 +414,7 @@ contains
     complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: v_in
     complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: w_out
     call mkfk_trs_nsoc(fk,Gk,v_in,Nk,Nw,Norb)
-    call mkdelta_nsoc(w_out,fk,chi,Smat,Cmat,kmap,invk,prt,olist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
+    call mkdelta_nsoc(w_out,fk,chi,Smat,Cmat,kmap,invk,prt,iprm,olist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
     !$omp parallel workshare
     w_out(:,:,:,:)=w_out(:,:,:,:)*weight
     !$omp end parallel workshare
@@ -483,7 +487,7 @@ subroutine mkfk_trs_nsoc(fk,Gk,delta,Nk,Nw,Norb)
   !$omp end parallel do
 end subroutine mkfk_trs_nsoc
 
-subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,olist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
+subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,iprm,olist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
   !> This function obtain new gap function Delta=sum VF
   !!@param newdelta,out: new gap function
   !!@param     delta,in: anomalous green function
@@ -507,6 +511,8 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,olist,Nkal
   integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
   integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  !! orbital permutation of the inversion operator (identity = old behaviour)
+  integer(c_int64_t),intent(in),dimension(Norb):: iprm
   logical(1),intent(in):: sw_pair
   real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
   real(c_double),intent(in),dimension(Norb):: prt
@@ -565,12 +571,15 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,olist,Nkal
            !$omp do private(i,j)
            do j=1,Nw
               do i=1,Nkall
+                 ! The single-inversion terms below carry P = signed permutation, i.e.
+                 ! p_m p_l on the amplitude AND iprm on the orbital indices. The
+                 ! F(-k,-w) term applies P twice (P^2=1), so it needs neither.
                  if(invk(2,i)==0)then !k
                     tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),j)=delta(invk(1,i),j,olist(l,2),olist(m,1))
                     tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgn*dprt*prt(olist(l,2))*prt(olist(m,1))*&
-                         conjg(delta(invk(1,i),j,olist(l,2),olist(m,1))) !F(k,-w)=sgn*dprt*p*p*F^*(k,w) (no soc only)
+                         conjg(delta(invk(1,i),j,iprm(olist(l,2)),iprm(olist(m,1)))) !F(k,-w)=sgn*dprt*p*p*F^*(k,w) (no soc only)
                  else if(invk(2,i)==1)then !-k
-                    tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),j)=prt(olist(l,2))*prt(olist(m,1))*dprt*delta(invk(1,i),j,olist(l,2),olist(m,1)) !F(-k,w)=p*p*dprt*F(k,w)
+                    tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),j)=prt(olist(l,2))*prt(olist(m,1))*dprt*delta(invk(1,i),j,iprm(olist(l,2)),iprm(olist(m,1))) !F(-k,w)=p*p*dprt*F(k,w)
                     tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgn*delta(invk(1,i),j,olist(m,1),olist(l,2)) !F(-k,-w)=sgn*F(k,w)
                  end if
               end do
@@ -730,7 +739,7 @@ subroutine get_initial_delta(delta,init_delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,gap
   !$omp end parallel
 end subroutine get_initial_delta
 
-subroutine conv_delta_orb_to_band(deltab,delta,uni,prt,invk,Norb,Nkall,Nk,Nw,gap_sym) bind(C)
+subroutine conv_delta_orb_to_band(deltab,delta,uni,prt,iprm,invk,Norb,Nkall,Nk,Nw,gap_sym) bind(C)
   !> This function transform orbital basis gap function into band basis gap function
   !!@param deltab,out: band basis gap function
   !!@param   delta,in: orbital basis gap function
@@ -744,6 +753,8 @@ subroutine conv_delta_orb_to_band(deltab,delta,uni,prt,invk,Norb,Nkall,Nk,Nw,gap
   implicit none
   integer(c_int64_t),intent(in):: Nw,Norb,Nk,Nkall,gap_sym
   integer(c_int64_t),intent(in),dimension(3,Nkall):: invk
+  !! orbital permutation of the inversion operator (identity = old behaviour)
+  integer(c_int64_t),intent(in),dimension(Norb):: iprm
   real(c_double),intent(in),dimension(Norb):: prt
   complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: delta
@@ -751,7 +762,7 @@ subroutine conv_delta_orb_to_band(deltab,delta,uni,prt,invk,Norb,Nkall,Nk,Nw,gap
 
   integer(c_int32_t) i,k,l,n
   real(c_double) dprt
-  complex(c_double),dimension(Norb,Norb):: matL,matR,tmpm
+  complex(c_double),dimension(Norb,Norb):: matL,matR,tmpm,dtmp
 
   if(gap_sym<0)then
      dprt=-1.0d0 !odd
@@ -759,7 +770,7 @@ subroutine conv_delta_orb_to_band(deltab,delta,uni,prt,invk,Norb,Nkall,Nk,Nw,gap
      dprt=1.0d0 !even
   end if
 
-  !$omp parallel do private(i,k,l,n,matL,matR,tmpm)
+  !$omp parallel do private(i,k,l,n,matL,matR,tmpm,dtmp)
   do i=1,Nkall
      k=invk(1,i)
      if(invk(2,i)==0)then
@@ -767,14 +778,16 @@ subroutine conv_delta_orb_to_band(deltab,delta,uni,prt,invk,Norb,Nkall,Nk,Nw,gap
         call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),matL,Norb,delta(k,1,:,:),Norb,(0.0d0,0.0d0),tmpm,Norb)
         call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),tmpm,Norb,uni(:,:,k),Norb,(0.0d0,0.0d0),deltab(i,:,:),Norb)
      else if(invk(2,i)==1)then
-        matL=transpose(uni(:,:,k))
-        do n=1,Norb
-           matL(:,n)=matL(:,n)*prt(n)
-        end do
-        call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),matL,Norb,delta(k,1,:,:),Norb,(0.0d0,0.0d0),tmpm,Norb)
+        ! Delta_orb(-k) = dprt * P Delta_orb(k) P^T with P the signed permutation
+        ! (iprm,prt). Forming it explicitly is identical to the old column scaling
+        ! when iprm is the identity, and stays correct when it is not.
         do l=1,Norb
-           tmpm(:,l)=tmpm(:,l)*(dprt*prt(l))
+           do n=1,Norb
+              dtmp(n,l)=dprt*prt(n)*prt(l)*delta(k,1,iprm(n),iprm(l))
+           end do
         end do
+        matL=transpose(uni(:,:,k))
+        call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),matL,Norb,dtmp,Norb,(0.0d0,0.0d0),tmpm,Norb)
         matR=conjg(uni(:,:,k))
         call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),tmpm,Norb,matR,Norb,(0.0d0,0.0d0),deltab(i,:,:),Norb)
      else
@@ -784,11 +797,13 @@ subroutine conv_delta_orb_to_band(deltab,delta,uni,prt,invk,Norb,Nkall,Nk,Nw,gap
   !$omp end parallel do
 end subroutine conv_delta_orb_to_band
 
-subroutine remap_delta(delta,delta0,prt,invk,Nkall,Nk,Nw,Norb,gap_sym)
+subroutine remap_delta(delta,delta0,prt,iprm,invk,Nkall,Nk,Nw,Norb,gap_sym)
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Norb,gap_sym
   integer(c_int64_t),intent(in),dimension(3,Nkall):: invk
+  !! orbital permutation of the inversion operator (identity = old behaviour)
+  integer(c_int64_t),intent(in),dimension(Norb):: iprm
   real(c_double),intent(in),dimension(Norb):: prt
   complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: delta0
   complex(c_double),intent(out),dimension(Nkall,Nw,Norb,Norb):: delta
@@ -810,7 +825,7 @@ subroutine remap_delta(delta,delta0,prt,invk,Nkall,Nk,Nw,Norb,gap_sym)
               if(invk(2,i)==0)then
                  delta(i,j,m,l)=delta0(invk(1,i),j,m,l)
               else if(invk(2,i)==1)then
-                 delta(i,j,m,l)=dprt*prt(m)*prt(l)*delta0(invk(1,i),j,m,l)
+                 delta(i,j,m,l)=dprt*prt(m)*prt(l)*delta0(invk(1,i),j,iprm(m),iprm(l))
               end if
            end do
         end do

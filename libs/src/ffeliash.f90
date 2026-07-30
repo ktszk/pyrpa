@@ -1,5 +1,5 @@
 !non-linear FLEX-Eliashberg equations solver (without SOC)
-subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,kmap,invk,mu,temp,eps,&
+subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,iprm,kmap,invk,mu,temp,eps,&
      Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,sw_sigma,sw_Vconst,m_diis,gap_min,&
      sw_amp_newton) bind(C)
   !> Non-linear self-consistent FLEX-Eliashberg loop (no SOC).
@@ -57,6 +57,8 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,kmap,invk,mu,temp
   integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
   logical(c_bool),intent(in):: sw_sigma,sw_Vconst,sw_amp_newton
   real(c_double),intent(in):: temp,eps,mu,gap_min
+  !! orbital permutation of the inversion operator (identity = old behaviour)
+  integer(c_int64_t),intent(in),dimension(Norb):: iprm
   real(c_double),intent(in),dimension(Norb):: prt
   real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
   complex(c_double),intent(in),dimension(Norb,Norb,Nk):: hamk
@@ -128,14 +130,14 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,kmap,invk,mu,temp
   if(sw_Vconst)then
      ! With constant pairing interaction, we only need to compute χ_0_S, χ_0_C once at the very beginning.
      fk(:,:,:,:)=0.0d0
-     call get_chi0sc(Vsigma,Vdelta,Gk,fk,kmap,invk,irr_chi,chi_map,olist,prt,temp,&
+     call get_chi0sc(Vsigma,Vdelta,Gk,fk,kmap,invk,irr_chi,chi_map,olist,prt,iprm,temp,&
                      Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,sw_pair)
      call mkfk_trs_nsoc(fk,Gk,delta,Nk,Nw,Norb) ! linearized seed F = -G·Δ·G^†
   else
      ! With FLEX pairing interaction, we need χ_0_S, χ_0_C from the start to build V_σ, V_Δ for the first Σ and Δ update.
      ! This is because the FLEX vertices depend on χ_0, and the self-energy depends on the vertices.
      call mkfk_trs_nsoc(fk,Gk,delta,Nk,Nw,Norb) ! linearized seed F = -G·Δ·G^†
-     call get_chi0sc(Vsigma,Vdelta,Gk,fk,kmap,invk,irr_chi,chi_map,olist,prt,temp,&
+     call get_chi0sc(Vsigma,Vdelta,Gk,fk,kmap,invk,irr_chi,chi_map,olist,prt,iprm,temp,&
                      Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,sw_pair)                            ! Vsigma=χ_0_S, Vdelta=χ_0_C
   end if
   call ckchi_impl(Vsigma,Smat,Cmat,kmap,invk,Nk,Nkall,Nchi,Nw,maxchi0s_global)   ! SDW Stoner check on χ_0_S
@@ -149,7 +151,7 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,kmap,invk,mu,temp
   iter_loop: do i_iter=1,itemax
      print'(A5,I5)','iter=',i_iter
      ! 1. Δ_new = K[F] (gap equation)
-     call mkdelta_nsoc(newdelta,fk,Vdelta,Smat,Cmat,kmap,invk,prt,olist,&
+     call mkdelta_nsoc(newdelta,fk,Vdelta,Smat,Cmat,kmap,invk,prt,iprm,olist,&
           Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
      !$omp parallel workshare
      newdelta(:,:,:,:)=newdelta(:,:,:,:)*weight                          ! T/Nkall normalization
@@ -301,7 +303,7 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,kmap,invk,mu,temp
      call mkfkeliash_trs_nsoc(fk,Gk0,Gk,delta,Nk,Nw,Norb)
      if(.not. sw_Vconst)then
         ! 6. χ_0_S, χ_0_C from new G, F
-        call get_chi0sc(Vsigma,Vdelta,Gk,fk,kmap,invk,irr_chi,chi_map,olist,prt,temp,&
+        call get_chi0sc(Vsigma,Vdelta,Gk,fk,kmap,invk,irr_chi,chi_map,olist,prt,iprm,temp,&
                         Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,sw_pair)
         call ckchi_impl(Vsigma,Smat,Cmat,kmap,invk,Nk,Nkall,Nchi,Nw,maxchi0s_global)
         ! 7. update FLEX vertices V_σ (Vsigma), V_Δ (Vdelta)
@@ -451,7 +453,7 @@ subroutine mkV_flex_nosoc(Vdelta,Vsigma,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
   !$omp end parallel do
 end subroutine mkV_flex_nosoc
 
-subroutine get_chi0sc(Vsigma,Vdelta,Gk,fk,kmap,invk,irr_chi,chi_map,olist,prt,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,sw_pair)
+subroutine get_chi0sc(Vsigma,Vdelta,Gk,fk,kmap,invk,irr_chi,chi_map,olist,prt,iprm,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,sw_pair)
   !> Build SC irreducible susceptibility in the FLEX spin/charge channels.
   !>   χ^GG  = G(k+q)·G(k)              (normal bubble)
   !>   χ^FF  = -F(k+q)·F^*(k)           (anomalous bubble; sign/structure handled by sw_pair)
@@ -467,6 +469,8 @@ subroutine get_chi0sc(Vsigma,Vdelta,Gk,fk,kmap,invk,irr_chi,chi_map,olist,prt,te
   integer(c_int32_t),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
   logical(1),intent(in):: sw_pair
   real(c_double),intent(in):: temp
+  !! orbital permutation of the inversion operator (identity = old behaviour)
+  integer(c_int64_t),intent(in),dimension(Norb):: iprm
   real(c_double),intent(in),dimension(Norb):: prt
   complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk,fk
   complex(c_double),intent(out),dimension(Nk,Nw,Nchi,Nchi):: Vsigma,Vdelta
@@ -475,7 +479,7 @@ subroutine get_chi0sc(Vsigma,Vdelta,Gk,fk,kmap,invk,irr_chi,chi_map,olist,prt,te
   complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2
 
   call get_chi0_conv(Vsigma,Gk,kmap,invk,irr_chi,chi_map,olist,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)            ! Vsigma <- χ^GG
-  call get_chi0_conv_ff(Vdelta,fk,kmap,invk,irr_chi,chi_map,olist,prt,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,sw_pair) ! Vdelta <- χ^FF
+  call get_chi0_conv_ff(Vdelta,fk,kmap,invk,irr_chi,chi_map,olist,prt,iprm,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,sw_pair) ! Vdelta <- χ^FF
   !$omp parallel do collapse(2) private(i,j,cmat1,cmat2)
   do j=1,Nw
      do i=1,Nk
@@ -488,7 +492,7 @@ subroutine get_chi0sc(Vsigma,Vdelta,Gk,fk,kmap,invk,irr_chi,chi_map,olist,prt,te
   !$omp end parallel do
 end subroutine get_chi0sc
 
-subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,prt,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,sw_pair)
+subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,prt,iprm,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi,sw_pair)
   !> Anomalous bubble χ^FF(q,iω) = -Σ_k F(k+q, iω+iω') · F^*(k, iω') via real-space FFT.
   !>
   !> Algorithm:
@@ -508,6 +512,8 @@ subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,prt,temp,Nx,N
   integer(c_int32_t),intent(in),dimension(Nchi*(Nchi+1)/2,2):: irr_chi
   logical(1),intent(in):: sw_pair
   real(c_double),intent(in):: temp
+  !! orbital permutation of the inversion operator (identity = old behaviour)
+  integer(c_int64_t),intent(in),dimension(Norb):: iprm
   real(c_double),intent(in),dimension(Norb):: prt
   complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Fk
   complex(c_double),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
@@ -566,15 +572,15 @@ subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,prt,temp,Nx,N
               tmpfk14(kmap(1,i),kmap(2,i),kmap(3,i),j)=conjg(Fk(invk(1,i),j,olist(m,2),olist(l,1))) !F^+14(k,iw)
               tmpfk23(kmap(1,i),kmap(2,i),kmap(3,i),j)=Fk(invk(1,i),j,olist(l,2),olist(m,1)) !F23(k,iw)
               !-iw
-              tmpfk14(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=prt(olist(l,1))*prt(olist(m,2))*sgn*dprt*conjg(Fk(invk(1,i),j,olist(l,1),olist(m,2))) !F^+14(k,-iw)=sgnF^*14(k,iw)
-              tmpfk23(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=prt(olist(m,1))*prt(olist(l,2))*sgn*dprt*Fk(invk(1,i),j,olist(m,1),olist(l,2)) !F23(k,-iw)=sgnF32(k,iw)
+              tmpfk14(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=prt(olist(l,1))*prt(olist(m,2))*sgn*dprt*conjg(Fk(invk(1,i),j,iprm(olist(l,1)),iprm(olist(m,2)))) !F^+14(k,-iw)=sgnF^*14(k,iw)
+              tmpfk23(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=prt(olist(m,1))*prt(olist(l,2))*sgn*dprt*Fk(invk(1,i),j,iprm(olist(m,1)),iprm(olist(l,2))) !F23(k,-iw)=sgnF32(k,iw)
            else if(invk(2,i)==1)then
               !iw
               tmpfk14(kmap(1,i),kmap(2,i),kmap(3,i),j)=conjg(Fk(invk(1,i),j,olist(m,1),olist(l,1))) !F^+14(-k,iw)=F41(k,iw)
               tmpfk23(kmap(1,i),kmap(2,i),kmap(3,i),j)=Fk(invk(1,i),j,olist(l,2),olist(m,2)) !F23(-k,iw)=F^23(k,iw)
               !-iw
-              tmpfk14(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=prt(olist(l,1))*prt(olist(m,2))*sgn*dprt*conjg(Fk(invk(1,i),j,olist(l,1),olist(m,2))) !F^+14(-k,-iw)
-              tmpfk23(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=prt(olist(m,1))*prt(olist(l,2))*sgn*dprt*Fk(invk(1,i),j,olist(l,2),olist(m,1)) !F23(-k,-iw)
+              tmpfk14(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=prt(olist(l,1))*prt(olist(m,2))*sgn*dprt*conjg(Fk(invk(1,i),j,iprm(olist(l,1)),iprm(olist(m,2)))) !F^+14(-k,-iw)
+              tmpfk23(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=prt(olist(m,1))*prt(olist(l,2))*sgn*dprt*Fk(invk(1,i),j,iprm(olist(l,2)),iprm(olist(m,1))) !F23(-k,-iw)
            end if
         end do k_loop_Gk_to_tmp
      end do w_loop_Gk_to_tmp

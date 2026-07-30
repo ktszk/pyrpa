@@ -14,6 +14,7 @@ _lib.lin_eliash.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.float64),
     np.ctypeslib.ndpointer(dtype=np.int64),
     np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.int64),       # iprm (inversion orbital permutation)
     np.ctypeslib.ndpointer(dtype=np.int64),
     np.ctypeslib.ndpointer(dtype=np.int64),
     POINTER(c_double), POINTER(c_double),
@@ -59,6 +60,7 @@ _lib.eliashberg.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.float64),     # Cmat
     np.ctypeslib.ndpointer(dtype=np.int64),       # olist
     np.ctypeslib.ndpointer(dtype=np.float64),     # plist (= prt in Fortran)
+    np.ctypeslib.ndpointer(dtype=np.int64),       # iprm (inversion orbital permutation)
     np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
     np.ctypeslib.ndpointer(dtype=np.int64),       # invk
     POINTER(c_double), POINTER(c_double), POINTER(c_double),  # mu, temp, eps
@@ -77,6 +79,7 @@ _lib.conv_delta_orb_to_band.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.complex128),
     np.ctypeslib.ndpointer(dtype=np.complex128),
     np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.int64),       # iprm (inversion orbital permutation)
     np.ctypeslib.ndpointer(dtype=np.int64),
     POINTER(c_int64), POINTER(c_int64),
     POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
@@ -135,6 +138,7 @@ _lib.remap_delta_.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.complex128),
     np.ctypeslib.ndpointer(dtype=np.complex128),
     np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.int64),       # iprm (inversion orbital permutation)
     np.ctypeslib.ndpointer(dtype=np.int64),
     POINTER(c_int64), POINTER(c_int64),
     POINTER(c_int64), POINTER(c_int64),
@@ -146,7 +150,7 @@ def linearized_eliashberg(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init
                           Smat: np.ndarray, Cmat: np.ndarray, olist: np.ndarray, plist: np.ndarray,
                           kmap: np.ndarray, invk: np.ndarray, Nx: int, Ny: int, Nz: int,
                           temp: float, gap_sym: int, eps: float = 1.0e-5, itemax: int = 300,
-                          arnoldi_m: int = 10) -> tuple[np.ndarray, float]:
+                          arnoldi_m: int = 10, iperm: np.ndarray | None = None) -> tuple[np.ndarray, float]:
     """
     @fn linearized_eliashberg
     @brief Solve the linearized Eliashberg gap equation (without SOC) to obtain the superconducting gap function.
@@ -165,6 +169,9 @@ def linearized_eliashberg(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init
     @param   gap_sym: Gap symmetry index (0=s, 1=dx2-y2, etc.)
     @param       eps: Convergence tolerance
     @param    itemax: Maximum number of iterations
+    @param     iperm: Orbital permutation of the inversion operator [Norb] int64.
+                      None = identity, i.e. the diagonal-parity convention. Use
+                      plibs.inversion_op() to obtain (plist, iperm) for multi-site cells.
     @return    delta: Linearized gap function [Norb, Norb, Nw, Nkall] complex128
     @return   lambda_eliash: Physical (largest) Eliashberg eigenvalue (>1 means T<Tc)
     """
@@ -172,7 +179,9 @@ def linearized_eliashberg(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init
     Nkall, Nk, Nw = len(kmap), len(Gk[0, 0, 0]), len(Gk[0, 0])
     delta = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
     lambda_out = c_double(0.0)
-    _lib.lin_eliash(delta, chi, Gk, uni, init_delta, Smat, Cmat, olist, plist, kmap, invk,
+    iprm = np.arange(Norb, dtype=np.int64) if iperm is None else np.asarray(iperm, dtype=np.int64)
+    iprm = iprm + 1   # Fortran is 1-based
+    _lib.lin_eliash(delta, chi, Gk, uni, init_delta, Smat, Cmat, olist, plist, iprm, kmap, invk,
                     dbl(temp), dbl(eps), i64(Nkall),
                     i64(Nk), i64(Nw), i64(Nchi),
                     i64(Norb), i64(Nx), i64(Ny),
@@ -230,7 +239,7 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
                          sw_sigma: bool = False, sw_Vconst: bool = False, eps: float = 1.0e-4,
                          itemax: int = 100, m_diis: int = 5,
                          gap_min: float = 1.0e-2,
-                         sw_amp_newton: bool = True) -> tuple[np.ndarray, np.ndarray]:
+                         sw_amp_newton: bool = True, iperm: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
     """
     @fn nonlinear_eliashberg
     @brief Solve the non-linear FLEX-Eliashberg self-consistency loop (no SOC).
@@ -292,7 +301,9 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
     Norb, _, Nw, Nk = delta.shape
     Nkall, Nchi = len(kmap), len(Smat)
     sigmak = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
-    _lib.eliashberg(delta, sigmak, Gk, hamk, Smat, Cmat, olist, plist,
+    iprm = np.arange(Norb, dtype=np.int64) if iperm is None else np.asarray(iperm, dtype=np.int64)
+    iprm = iprm + 1   # Fortran is 1-based
+    _lib.eliashberg(delta, sigmak, Gk, hamk, Smat, Cmat, olist, plist, iprm,
                     kmap, invk,
                     dbl(mu), dbl(temp), dbl(eps),
                     i64(Nkall), i64(Nk), i64(Nw),
@@ -304,7 +315,7 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
     return delta, sigmak
 
 def conv_delta_orb_to_band(delta: np.ndarray, uni: np.ndarray, invk: np.ndarray,
-                           plist: np.ndarray, gap_sym) -> np.ndarray:
+                           plist: np.ndarray, gap_sym, iperm: np.ndarray | None = None) -> np.ndarray:
     """
     @fn conv_delta_orb_to_band
     @brief Convert the superconducting gap function from orbital basis to band basis (without SOC).
@@ -317,7 +328,9 @@ def conv_delta_orb_to_band(delta: np.ndarray, uni: np.ndarray, invk: np.ndarray,
     """
     Nkall, Nk, Nw, Norb = len(invk), len(uni), len(delta[0, 0]), len(delta)
     deltab = np.zeros((Norb, Norb, Nkall), dtype=np.complex128)
-    _lib.conv_delta_orb_to_band(deltab, delta, uni, plist, invk, i64(Norb),
+    iprm = np.arange(Norb, dtype=np.int64) if iperm is None else np.asarray(iperm, dtype=np.int64)
+    iprm = iprm + 1   # Fortran is 1-based
+    _lib.conv_delta_orb_to_band(deltab, delta, uni, plist, iprm, invk, i64(Norb),
                                 i64(Nkall), i64(Nk),
                                 i64(Nw), i64(gap_sym))
     return deltab
@@ -423,7 +436,7 @@ def get_band_to_orb_delta(init_delta: np.ndarray, uni: np.ndarray) -> np.ndarray
     _lib.get_band_to_orb_delta(delta_f, init_delta_f, uni_f, i64(Nk), i64(Norb))
     return np.ascontiguousarray(np.transpose(delta_f, (2, 0, 1)))
 
-def remap_gap(delta0, plist, invk, gap_sym):
+def remap_gap(delta0, plist, invk, gap_sym, iperm=None):
     """
     @fn remap_gap
     @brief Remap the anomalous self-energy from the reduced k-grid to the full k-grid applying gap symmetry.
@@ -436,6 +449,8 @@ def remap_gap(delta0, plist, invk, gap_sym):
     Nkall, Nk, Norb = len(invk), len(delta0.T), len(plist)
     Nw = delta0.shape[2]
     delta = np.zeros((Norb, Norb, Nw, Nkall), dtype=np.complex128)
-    _lib.remap_delta_(delta, delta0, plist, invk, i64(Nkall), i64(Nk),
+    iprm = np.arange(Norb, dtype=np.int64) if iperm is None else np.asarray(iperm, dtype=np.int64)
+    iprm = iprm + 1   # Fortran is 1-based
+    _lib.remap_delta_(delta, delta0, plist, iprm, invk, i64(Nkall), i64(Nk),
                       i64(Nw), i64(Norb), i64(gap_sym))
     return delta

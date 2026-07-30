@@ -351,3 +351,80 @@ def expand_irr_to_full_symm(data_irr: np.ndarray, invk: np.ndarray,
         full[..., ix_arr[flat_idx], iy_arr[flat_idx], iz_arr[flat_idx]] = d
 
     return full
+
+
+def inversion_op(rvec: np.ndarray, ham_r: np.ndarray, plist: np.ndarray | None = None,
+                 tol: float = 1e-2, min_fraction: float = 0.9,
+                 min_pair_fraction: float = 0.5
+                 ) -> tuple[np.ndarray | None, np.ndarray | None, str, float | None]:
+    """
+    @fn inversion_op
+    @brief Determine the inversion operator in the orbital basis as a signed permutation,
+    so that the k -> -k reconstruction used by the Eliashberg solvers,
+
+        Delta_ml(-k) = dprt * sgn[m] * sgn[l] * Delta_{perm[m],perm[l]}(k),
+
+    uses an operator that is an actual symmetry of H(R).  The solvers historically assume
+    a DIAGONAL operator (perm = identity, sgn = flibs.get_plist).  That is exact for
+    single-site cells but wrong whenever inversion exchanges sites (e.g. the 2-Fe cell of
+    iron-based systems), where the true operator is off-diagonal: imposing the diagonal
+    form then constrains the gap with something that is not a symmetry, so the solver
+    returns the leading solution of a wrong eigenproblem.
+    @param   rvec: R-vectors [Nr, 3] float64
+    @param  ham_r: Hopping matrix [Nr, Norb, Norb] complex128
+    @param  plist: Candidate diagonal parities (flibs.get_plist); tested first when given
+    @param    tol: Relative residual accepted as "is a symmetry"
+    @param min_fraction: Fraction of R-vectors whose S-image must exist (passed to
+            detect_symm_ops_auto_U)
+    @param min_pair_fraction: Fraction of R-vectors that must have a -R partner for the
+            diag(plist) residual to be considered meaningful.  Kept looser than
+            min_fraction: truncated first-principles R-sets routinely lose ~10% of the
+            partners at the edge of the R-shell, which says nothing about the symmetry.
+    @retval   sgn: Signs [Norb] float64, pass as plist (None if undetermined)
+    @retval  perm: 0-based orbital permutation [Norb] int64, pass as iperm (None if undetermined)
+    @retval status: 'diagonal' (plist is valid, perm = identity), 'monomial' (signed
+            permutation found), 'general' (inversion exists but mixes orbitals -> a
+            constant signed permutation cannot represent it), 'none' (not found)
+    @retval    res: Relative residual of diag(plist) -- the quantity the decision is based on
+            (None when plist is not supplied). The residual of the returned monomial itself is
+            bounded by tol through detect_symm_ops_auto_U's own verification.
+    """
+    rv = np.round(rvec).astype(int)
+    key = {(int(r[0]), int(r[1]), int(r[2])): i for i, r in enumerate(rv)}
+    Norb = ham_r.shape[1]
+
+    def residual(M: np.ndarray) -> tuple[float, int]:
+        num = den = 0.0
+        npair = 0
+        for i, r in enumerate(rv):
+            j = key.get((-int(r[0]), -int(r[1]), -int(r[2])))
+            if j is None:
+                continue
+            npair += 1
+            num = max(num, np.abs(ham_r[j] - M.dot(ham_r[i]).dot(M.conj().T)).max())
+            den = max(den, np.abs(ham_r[i]).max())
+        return (num / den if den > 0.0 else 0.0), npair
+
+    res_diag = None
+    if plist is not None:
+        p = np.asarray(plist, dtype=float)
+        res_diag, npair = residual(np.diag(p.astype(complex)))
+        if npair >= min_pair_fraction * len(rv) and res_diag <= tol:
+            return p, np.arange(Norb, dtype=np.int64), 'diagonal', res_diag
+
+    ops = detect_symm_ops_auto_U(rvec, ham_r, candidate_S=[-np.eye(3)],
+                                 tol=tol, min_fraction=min_fraction)
+    if not ops:
+        return None, None, 'none', res_diag
+    U = ops[0][1]
+    nz = np.abs(U) > 1e-8
+    if not ((nz.sum(axis=0) == 1).all() and (nz.sum(axis=1) == 1).all()
+            and np.allclose(np.abs(U[nz]), 1.0, atol=1e-6)):
+        return None, None, 'general', res_diag
+    perm = np.argmax(nz, axis=1).astype(np.int64)
+    sgn = np.array([U[m, perm[m]].real for m in range(Norb)], dtype=float)
+    # U and -U give the same U H U^+ and the same two-factor gap relation, so fix the
+    # overall sign the way get_plist does (relative to orbital 0)
+    if sgn[0] < 0.0:
+        sgn = -sgn
+    return sgn, perm, 'monomial', res_diag
