@@ -611,6 +611,44 @@ def test_gap_orbital_from_wannier(tmp_path):
     assert abs(np.corrcoef(fw['phi'].real, fd['phi'].real)[0, 1]) > 0.99 # matches analytic d
 
 
+def test_gap_orbital_from_wannier_round_trips_the_exporter(tmp_path):
+    """Pin the Fourier sign against output_gap_wannier itself.
+
+    The d-wave fixture above cannot do this: its Delta(R) is real and inversion
+    symmetric, so exp(+2 pi i k.R) and exp(-2 pi i k.R) give the same answer and a flipped
+    sign (which would return Delta(-k)) passes unnoticed.  Export a RANDOM gap through
+    output_gap_wannier, read it back, and require the exact Delta(k) that went in."""
+    import libs.plibs as p
+    import libs.flibs as F
+    from libs.plibs._wannier_io import _irr_to_full_kgrid
+    Nx = Ny = 8
+    Nz, Norb, Nw, temp = 1, 2, 3, 0.02
+    klist, kmap, invk = F.gen_irr_k_TRS(Nx, Ny, Nz)
+    rng = np.random.default_rng(3)
+    gap = (rng.standard_normal((Norb, Norb, Nw, len(klist)))
+           + 1j * rng.standard_normal((Norb, Norb, Nw, len(klist))))
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        p.output_gap_wannier(gap, kmap, invk, Nx, Ny, Nz, Nw, temp, N_cut=Nw, zero_tol=0.0)
+    finally:
+        os.chdir(cwd)
+
+    g0 = p.gap_orbital_from_wannier(str(tmp_path / 'gap_wannier'))
+    full = _irr_to_full_kgrid(gap, invk, kmap, Nx, Ny, Nz)      # what the exporter saw
+    kfull = kmap / np.array([Nx, Ny, Nz], dtype=np.float64)
+    err = wrong = 0.0
+    for i, kf in enumerate(kfull):
+        want = full[:, :, 0, kmap[i, 0], kmap[i, 1], kmap[i, 2]]
+        got = g0(kf)
+        err = max(err, np.abs(got - want).max())
+        # what the flipped sign would have produced at this k: Delta(-k)
+        j = np.argmin(np.abs(kfull - (-kf) % 1.0).sum(axis=1))
+        wrong = max(wrong, np.abs(full[:, :, 0, kmap[j, 0], kmap[j, 1], kmap[j, 2]] - want).max())
+    assert err < 1.0e-12, f'inverse FT does not round-trip the exporter (max err {err:.3e})'
+    assert wrong > 1.0e-3, 'fixture too symmetric to distinguish Delta(k) from Delta(-k)'
+
+
 def test_gap_color_3d():
     """gap_color_3d (used by main.py's FERMI_3D, color_option=GAP) must reproduce the
     EXACT same phi(k) as the Eilenberger FS pipeline at arbitrary k-points, for both the

@@ -388,7 +388,8 @@ def get_ptv(alatt: np.ndarray, deg: np.ndarray, brav: int) -> tuple[np.ndarray, 
     elif brav==5: #base center
         Arot=np.array([[ .5, .5, 0.],[-.5, .5, 0.],[ 0., 0., 1.]])
     elif brav==6: #face center 2
-        Arot=np.array([[.5, 0., .5],[0., .5, .5],[.5,.5, 0.]])
+        # a1,a2 in this order so that det(Arot)>0 (right-handed set)
+        Arot=np.array([[0., .5, .5],[.5, 0., .5],[.5,.5, 0.]])
     elif brav==7: #body center 2
         Arot=np.array([[-.5, .5, .5],[.5, -.5, .5],[.5, .5, -.5]])
     else:
@@ -410,6 +411,13 @@ def get_ptv(alatt: np.ndarray, deg: np.ndarray, brav: int) -> tuple[np.ndarray, 
         avec=alatt*Arot
     else:
         avec=alatt[0]*Arot
+    # Cell volume must be positive: several routines use det(avec) directly as the
+    # unit-cell volume (carrier density, conductivity), so a left-handed set would
+    # silently flip their sign.
+    vol=sclin.det(avec)
+    if vol<=0.:
+        raise ValueError(f"primitive translation vectors for brav={brav} are not right-handed "
+                         f"(cell volume = {vol})")
     return avec,Arot
 
 def get_symm_line(brav:int)->tuple[list,list]:
@@ -438,8 +446,8 @@ def get_symm_line(brav:int)->tuple[list,list]:
     elif brav==5: #base center
         k_list=[[0.,0.,0.],[.5,0.,0.],[.5,.5,0.],[0.,0.,0.],[0.,0.,.5]]
         xlabel=[r'$\Gamma$','X','S',r'$\Gamma$','Z']
-    elif brav==6:
-        k_list=[[0.,0.,0.],[0., .5, .5],[.5, .5, .5],[.25,.75,.5],[0.,0.,0.]]
+    elif brav==6: #face center 2
+        k_list=[[0.,0.,0.],[.5, 0., .5],[.5, .5, .5],[.75,.25,.5],[0.,0.,0.]]
         xlabel=[r'$\Gamma$','X','L','W',r'$\Gamma$']
     elif brav==7: #body center (common)
         k_list=[[.5,.5,.5],[0., 0., 0.],[.5, 0., 0.],[.5, .5,-.5],[0.,0.,0.]]

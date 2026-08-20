@@ -52,9 +52,21 @@ contains
     !>   weight = [f_l(k+q) - f_m(k)] / [w + E_m(k) - E_l(k+q) + iδ]   (= -Π_0 convention)
     !>   degenerate static limit: lim → f(1-f)/T = -∂f/∂E   (intra-band)
     !>
-    !> Sign convention from spin-space symmetry:
-    !>   sw_spsym = .false. → singlet     → sgn = +1  (Yosida: χ_zz → 0 at T=0)
-    !>   sw_spsym = .true.  → triplet d∥ẑ → sgn = -1  (χ_zz preserved at T=0)
+    !> Sign convention from spin-space symmetry.  What sgn selects is unambiguous:
+    !>   sw_spsym = .false. → sgn = +1  FF cancels GG at T=0 → Yosida suppression
+    !>   sw_spsym = .true.  → sgn = -1  FF adds to GG        → response survives at T=0
+    !> Mapping onto the field direction, via χ_ij = χ_N[δ_ij - d̂_i d̂_j (1-Y(T))]:
+    !>   singlet   : χ is isotropic and Yosida-suppressed for every field direction,
+    !>               so .false. is the only meaningful setting.
+    !>   triplet   : the component PARALLEL to d is Yosida-suppressed (.false.), the
+    !>               components PERPENDICULAR to d are unaffected (.true.).
+    !>               For d∥ẑ that means H∥z → .false., H⊥z → .true.  (This is the
+    !>               Sr2RuO4 reading: d∥ẑ leaves the IN-PLANE Knight shift flat
+    !>               through Tc while χ_zz still drops.)
+    !> NOTE: an earlier version of this comment labelled sgn=-1 as "χ_zz preserved
+    !> for d∥ẑ".  That is the wrong component -- for d∥ẑ it is χ_xx=χ_yy that is
+    !> preserved and χ_zz that is suppressed, exactly like the singlet.  Only the
+    !> label was wrong; the arithmetic below is unchanged.
     !> At Δ→0, BdG eigenvectors become block-diagonal in Nambu space, so P/R
     !> cannot both be non-zero for the same (l,m); FF vanishes and GG reduces to
     !> the normal-state expression.
@@ -70,7 +82,8 @@ contains
     !!@param         w: frequency
     !!@param    idelta: dumping factor (Lorentzian broadening)
     !!@param       eps: skip threshold for tiny |Δf| contributions (performance)
-    !!@param   sw_spsym: symmetry of spin space (true: triplet_dz, false: singlet)
+    !!@param   sw_spsym: spin channel: .false. = Yosida-suppressed (singlet, or H ∥ d),
+    !!                     .true.  = preserved at T=0 (triplet, H ⊥ d)
     !!@return irr_chi_sc: irreducible susceptibility matrix [Nchi,Nchi]
     integer(c_int64_t),intent(in):: Nk,Norb,Nchi
     integer(c_int64_t),intent(in),dimension(Nk):: qshift
@@ -92,9 +105,9 @@ contains
     complex(c_double),dimension(2,Nchi,Nchi):: chi,irr_chi_sc
 
     if(sw_spsym)then
-       sgn=-1.0d0 !triplet_dz: FF doubles GG -> χ_zz unsuppressed for d∥ẑ
+       sgn=-1.0d0 !FF adds to GG    -> χ survives at T=0 (triplet, H ⊥ d)
     else
-       sgn=+1.0d0 !singlet:    FF cancels GG at T=0 -> Yosida function
+       sgn=+1.0d0 !FF cancels GG    -> Yosida function   (singlet, or H ∥ d)
     end if
     temp_safe=max(temp,1.0d-12)   ! guard against T=0 in degenerate static limit
     w_eps=1.0d-12                 ! threshold to detect static (w≈0) branch
@@ -162,7 +175,8 @@ subroutine get_chi_irr_sc(chi,uni,eig,ffermi,qshift,ol,wl,Nchi,Norb,Nk,Nw,idelta
   !!@param idelta,in: dumping factor
   !!@param    eps,in: threshold of calculation value
   !!@param   temp,in: temperature
-  !!@param sw_spsym,in: symmetry of spin space (true: triplet_dz, false: singlet)
+  !!@param sw_spsym,in: spin channel: .false. = Yosida-suppressed (singlet, or H ∥ d),
+  !!                   .true.  = preserved at T=0 (triplet, H ⊥ d)
   use calc_irr_chi_sc
   use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none

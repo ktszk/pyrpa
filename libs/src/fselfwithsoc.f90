@@ -34,6 +34,15 @@ subroutine mkself_soc(sigmak,mu,Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,mu_
   ! bracket cache for renew_mu
   real(c_double):: muS_cache,muL_cache
   logical:: bracket_valid
+  ! multiplicity of each irreducible k in the full BZ (1 on the time-reversal invariant
+  ! momenta, 2 elsewhere) -- see the note in fself.f90's mkself
+  real(c_double),dimension(Nk):: kmult
+  integer(c_int32_t) ik_mult
+
+  kmult(:)=0.0d0
+  do ik_mult=1,int(Nkall,c_int32_t)
+     kmult(invk(1,ik_mult))=kmult(invk(1,ik_mult))+1.0d0
+  end do
 
   eps_sgm=1.0d-10
   mu=mu_init
@@ -475,7 +484,11 @@ contains
     real(c_double) tmp,deltagk
     complex(c_double):: Gk0,iw
 
-    tmp=sum(0.5d0*(1.0d0-tanh(0.5d0*(eig(:,:)-rmu)/temp)))
+    ! weight each irreducible k by its full-BZ multiplicity; sum(kmult) = Nkall
+    tmp=0.0d0
+    do i=1,Nk
+       tmp=tmp+kmult(i)*sum(0.5d0*(1.0d0-tanh(0.5d0*(eig(:,i)-rmu)/temp)))
+    end do
     call gen_green_inv(Gk,sigmak,hamk,rmu,temp,Nk,Nw,Norb)
     call getinv(Gk,Nk,Nw,Norb)
     deltagk=0.0d0
@@ -488,12 +501,12 @@ contains
              do n=1,Norb
                 Gk0=Gk0+uni(l,n,i)*conjg(uni(l,n,i))/(iw-eig(n,i))
              end do
-             deltagk=deltagk+dble(Gk(i,j,l,l)-Gk0)
+             deltagk=deltagk+kmult(i)*dble(Gk(i,j,l,l)-Gk0)
           end do
        end do
     end do
     !$omp end parallel do
-    rn=(tmp+2*temp*deltagk)/Nk
+    rn=(tmp+2*temp*deltagk)/Nkall
   end subroutine get_rn
   
   subroutine io_sigma(sw)

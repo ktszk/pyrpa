@@ -664,7 +664,7 @@ subroutine get_initial_delta(delta,init_delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,gap
   complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: delta
 
   integer(c_int32_t) i,j,l,m,n
-  real(c_double) norm,sgn
+  real(c_double) norm
   complex(c_double),dimension(Nk,Norb,Norb):: delta0
   complex(c_double),dimension(Norb,Norb):: tmpu
 
@@ -680,11 +680,6 @@ subroutine get_initial_delta(delta,init_delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,gap
      end do
      !$omp end parallel
   else
-     if(gap_sym>0)then
-        sgn=1.0d0
-     else
-        sgn=-1.0d0
-     end if
      !$omp parallel
      !$omp workshare
      delta0(:,:,:)=0.0d0

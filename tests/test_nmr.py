@@ -146,9 +146,9 @@ def _write_gap_wannier(tmpdir, Nx=8, Ny=8, Nz=1, Norb=2, Nw=6, temp=0.02, decay=
 
 
 def test_gap_from_eliashberg_round_trips_the_exported_gap(tmp_path):
-    """Reading back what output_gap_wannier wrote must reproduce Delta(k) exactly --
-    this pins the Fourier sign, which is the opposite of the one in
-    gap_orbital_from_wannier (that one returns Delta(-k))."""
+    """Reading back what output_gap_wannier wrote must reproduce Delta(k) exactly.
+    This pins the Fourier sign; the same convention is checked from the Eilenberger side
+    by test_gap_orbital_from_wannier_round_trips_the_exporter."""
     d, exact_iw0, exact_w0, kfull = _write_gap_wannier(tmp_path)
     # single lowest slice: must match Delta(k, iw_0) to machine precision
     got = P.gap_from_eliashberg(kfull, f'{d}/gap_wannier', sw_extrapolate=False,

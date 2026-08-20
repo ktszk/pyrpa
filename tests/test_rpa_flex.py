@@ -739,3 +739,100 @@ def test_gap_extrapolate_w0_rejects_too_few_points():
 if __name__ == '__main__':
     import _tools
     sys.exit(_tools.run_standalone(globals()))
+
+
+def _multiorbital_trs_model(Norb=3, Nx=4, Ny=4, Nz=1, Nw=4, temp=0.05, mu=0.13, seed=3):
+    """Multi-orbital model with H(R) real (TRS) and H(-R)=H(R)^T (hermitian H(k)), but
+    H(R) deliberately NOT symmetric.  A one-orbital model, or one with symmetric H(k),
+    cannot distinguish a transposed orbital index in the G(-k)=G(k)^T expansion."""
+    rng = np.random.default_rng(seed)
+    hop = {}
+    for R in [(a, b, 0) for a in (-1, 0, 1) for b in (-1, 0, 1)]:
+        if R == (0, 0, 0):
+            A = rng.standard_normal((Norb, Norb))
+            hop[R] = A + A.T
+        elif R not in hop:
+            A = rng.standard_normal((Norb, Norb))
+            hop[R] = A
+            hop[(-R[0], -R[1], -R[2])] = A.T
+    rvec = np.array([[float(a) for a in R] for R in hop], dtype=np.float64)
+    ham_r = np.array([hop[tuple(int(x) for x in R)] for R in rvec], dtype=np.complex128)
+    assert np.abs(ham_r - np.transpose(ham_r, (0, 2, 1))).max() > 1e-3, "H(R) must be asymmetric"
+    klist, kmap, invk = F.gen_irr_k_TRS(Nx, Ny, Nz)
+    Nk = len(klist)
+    Gk = F.gen_green(np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128),
+                     F.gen_ham(klist, ham_r, rvec), mu, temp)
+    olist, site = P.get_chi_orb_list(Norb, [1])
+    Smat, Cmat = F.gen_SCmatrix(olist, site, U=0.0, J=0.0)
+    return dict(Norb=Norb, Nx=Nx, Ny=Ny, Nz=Nz, Nw=Nw, Nk=Nk, Nkall=Nx*Ny*Nz, temp=temp,
+                mu=mu, rvec=rvec, ham_r=ham_r, klist=klist, kmap=kmap, invk=invk,
+                Gk=Gk, olist=olist, site=site, Smat=Smat, Cmat=Cmat)
+
+
+def test_green_symmetry_relations_used_by_chi0_and_sigma():
+    """The relations the k->-k / w->-w expansions rely on, for hermitian H with TRS:
+    G(k,-iw) = G(k,iw)^dagger  and  G(-k,iw) = G(k,iw)^T."""
+    st = _multiorbital_trs_model()
+    rvec, ham_r, temp, mu, Norb = st['rvec'], st['ham_r'], st['temp'], st['mu'], st['Norb']
+
+    def G(kf, n):
+        w = (2 * n + 1) * np.pi * temp
+        H = np.einsum('r,rab->ab', np.exp(-2j * np.pi * (np.asarray(kf) @ rvec.T)), ham_r)
+        return np.linalg.inv((1j * w + mu) * np.eye(Norb) - H)
+
+    rng = np.random.default_rng(11)
+    ks = rng.random((8, 3))
+    ks[:, 2] = 0.0
+    for k in ks:
+        for n in range(3):
+            g = G(k, n)
+            assert np.allclose(G(k, -n - 1), g.conj().T, atol=1e-12)   # hermiticity
+            assert np.allclose(G(-k, n), g.T, atol=1e-12)              # TRS
+            assert np.allclose(G(-k, -n - 1), g.conj(), atol=1e-12)    # both
+    # the relations without the transpose must NOT hold, else the test is blind
+    g = G(ks[0], 0)
+    assert not np.allclose(G(ks[0], -1), g.conj(), atol=1e-6)
+    assert not np.allclose(G(-ks[0], 0), g, atol=1e-6)
+
+
+def test_chi0_symmetry_expansion_matches_unreduced_k_grid():
+    """get_chi0 rebuilds half the BZ through G(-k,iw)=G(k,iw)^T.  Feeding it G on the full
+    grid with every k its own representative bypasses that branch entirely; both must agree."""
+    st = _multiorbital_trs_model()
+    Nx, Ny, Nz, Nw, Norb = st['Nx'], st['Ny'], st['Nz'], st['Nw'], st['Norb']
+    Nkall, kmap, invk = st['Nkall'], st['kmap'], st['invk']
+    with _silence_stdout():
+        chi_a, _ = F.get_chi0(st['Smat'], st['Cmat'], st['Gk'], st['olist'],
+                              kmap, invk, st['temp'], Nx, Ny, Nz)
+        kfull = np.ascontiguousarray(kmap / np.array([Nx, Ny, Nz]))
+        invk_full = np.zeros_like(invk)
+        invk_full[:, 0] = np.arange(1, Nkall + 1)
+        invk_full[:, 2] = invk[:, 2]
+        Gk_full = F.gen_green(np.zeros((Norb, Norb, Nw, Nkall), dtype=np.complex128),
+                              F.gen_ham(kfull, st['ham_r'], st['rvec']), st['mu'], st['temp'])
+        chi_b, _ = F.get_chi0(st['Smat'], st['Cmat'], Gk_full, st['olist'],
+                              kmap, invk_full, st['temp'], Nx, Ny, Nz)
+    sel = np.zeros(st['Nk'], dtype=int)
+    for i in range(Nkall):
+        if invk[i, 1] == 0:
+            sel[invk[i, 0] - 1] = i
+    assert np.allclose(chi_a, chi_b[:, :, :, sel], atol=1e-12)
+
+
+def test_flex_filling_weights_irreducible_k_by_multiplicity():
+    """The TRS wedge is not uniformly weighted: the time-reversal invariant momenta are
+    their own partner (multiplicity 1) while every other k has 2.  An unweighted average
+    over the wedge biases n(mu) -- and hence mu -- by O(1/Nk)."""
+    for (Nx, Ny, Nz) in [(4, 4, 1), (8, 8, 1), (4, 4, 2)]:
+        klist, kmap, invk = F.gen_irr_k_TRS(Nx, Ny, Nz)
+        Nk, Nkall = len(klist), Nx * Ny * Nz
+        mult = np.zeros(Nk)
+        for i in range(Nkall):
+            mult[invk[i, 0] - 1] += 1
+        assert mult.sum() == Nkall
+        assert set(np.unique(mult)) <= {1.0, 2.0}
+        assert (mult == 1).sum() > 0, "there must be TRIM points, else the bias is invisible"
+        temp = 0.1
+        eig = -2 * (np.cos(2 * np.pi * klist[:, 0]) + np.cos(2 * np.pi * klist[:, 1]))
+        occ = 0.5 * (1 - np.tanh(0.5 * (eig - 0.35) / temp))
+        assert not np.isclose(occ.sum() / Nk, (mult * occ).sum() / Nkall, atol=1e-6)

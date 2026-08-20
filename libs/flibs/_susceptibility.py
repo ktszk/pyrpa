@@ -596,7 +596,9 @@ def get_chi_irr_sc(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray,
     @param    wlist: Real-frequency mesh [Nw] float64
     @param   idelta: Lorentzian broadening parameter in eV
     @param     temp: Temperature in eV
-    @param sw_spsym: True for triplet (dz) symmetry, False for singlet
+    @param sw_spsym: spin channel. False = the Yosida-suppressed one (singlet, or a
+                     field parallel to the triplet d-vector); True = the one preserved
+                     at T=0 (field perpendicular to d, e.g. in-plane for d||z)
     @return     chi: Irreducible susceptibility in SC state [Nw, Nchi, Nchi] complex128
     """
     Nk, Nw = len(eig), len(wlist)

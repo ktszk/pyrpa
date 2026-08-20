@@ -209,10 +209,9 @@ def gap_from_eliashberg(klist: np.ndarray, fname: str = 'gap_wannier',
 
     # Delta(k) = sum_R Delta(R) exp(-2 pi i k.R).  output_gap_wannier builds Delta(R) with
     # np.fft.ifftn over the k-axes (kernel exp(+2 pi i k.R)), so this MINUS sign is its
-    # exact inverse -- verified to round-trip a random gap to 3e-15.  (Note that
-    # gap_orbital_from_wannier in _eilenberger.py uses the opposite sign and therefore
-    # returns Delta(-k); harmless there, since it only ever supplies a form factor that
-    # project_gap_to_band renormalises and every even-parity gap has Delta(-k)=Delta(k).)
+    # exact inverse -- verified to round-trip a random gap to 3e-15.  Same convention as
+    # gap_orbital_from_wannier (_eilenberger.py) and the self-energy interpolation in
+    # main.py's plot_spectrum.
     kl = np.ascontiguousarray(klist, dtype=np.float64)
     rv = np.ascontiguousarray(rvec, dtype=np.float64)
     Nk = len(kl)

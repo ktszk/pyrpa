@@ -24,9 +24,9 @@ else: monoclinic
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4nso',0,7,False
 #fname,ftype,brav,sw_soc='inputs/Sr2RuO4',2,2,True
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
-fname,ftype,brav,sw_soc='inputs/Cu',4,6,False        # ecalj job_mlo binaries (abc=[3.597]*3, fill=5.5)
+#fname,ftype,brav,sw_soc='inputs/Cu',4,6,False        # ecalj job_mlo binaries (abc=[3.597]*3, fill=5.5)
 #fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
-#fname,ftype,brav,sw_soc='inputs/000AsP.input',1,0,False
+fname,ftype,brav,sw_soc='inputs/000AsP.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/FeS',2,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2_soc.input',1,0,True
@@ -120,11 +120,11 @@ MODES_NEED_PARITY   = frozenset({M.FLEX,M.LIN_ELIASHBERG,M.NONLIN_ELIASHBERG,M.G
 del M
 
 #option=CalcMode.CHIS_QPOINT_SC
-option=CalcMode.CONDUCTIVITY_PT #calculation mode to run (see the CalcMode enum above; 0-23 RPA/FLEX/transport, 24-26 Eilenberger superconductivity)
-color_option=ColorMode.GAP #band/FS coloring (option 0,2,3): MONO=black, ORBITAL=olist weights->RGB, VELOCITY=|v(k)|, GAP=Re[phi(k)] from gap_sym/delta0/eil_gap_orbital/eil_gap_file (option 3 only) -- check the Eilenberger pairing gap on the real 3D FS
+option=CalcMode.BAND #calculation mode to run (see the CalcMode enum above; 0-23 RPA/FLEX/transport, 24-26 Eilenberger superconductivity)
+color_option=ColorMode.ORBITAL #band/FS coloring (option 0,2,3): MONO=black, ORBITAL=olist weights->RGB, VELOCITY=|v(k)|, GAP=Re[phi(k)] from gap_sym/delta0/eil_gap_orbital/eil_gap_file (option 3 only) -- check the Eilenberger pairing gap on the real 3D FS
 
 #Nx,Ny,Nz,Nw=256,256,4,200 #k and energy(or matsubara freq.) mesh size
-Nx,Ny,Nz,Nw=256,256,64,200
+Nx,Ny,Nz,Nw=32,32,4,512
 kmesh=200               #number of k-points along the symmetry line for band/spectrum plots (larger=smoother)
 kscale=[1.0,1.0,1.0]    #per-axis display scale for the 3D Fermi-surface plot (option 3); e.g. [1,1,0.5] compresses kz
 kz=0.0                  #reduced kz of the 2D Fermi-surface cut (option 2): 0=Gamma plane, 0.5=zone-boundary plane
@@ -135,18 +135,18 @@ abc=[3.597,3.597,3.597]    #lattice constants a,b,c [Angstrom] (group velocities
 #alpha_beta_gamma=[90.,90.,90]  #lattice angles alpha,beta,gamma [deg] (default 90,90,90 if undefined)
 #temp=2.0e-2 #2.59e-2   #directly set k_B*T [eV]; if defined it overrides tempK
 tempK=300 #Kelvin        #temperature [K] (converted internally to temp=k_B*tempK [eV])
-fill= 5.5 #2.9375       #band filling; mu solved from sum f(eps-mu)=Nk*fill (no SOC: per spin, full=Norb; SOC: total, full=2*Norb)
+fill= 2.9375       #band filling; mu solved from sum f(eps-mu)=Nk*fill (no SOC: per spin, full=Norb; SOC: total, full=2*Norb)
 #site_prof=[5]
 
 inv_tol=3.0e-2          #relative residual below which the inversion operator is accepted as a
                         #symmetry of H(R) (option 14,15,16,23). Fitted first-principles models
                         #carry a few % of error, so this is deliberately loose; see plibs.inversion_op
-Emin,Emax=-3,1.         #energy window [eV] for DOS / spectral-function plots (option 1,4)
-delta=5.0e-4            #spectral broadening eta [eV]: imaginary part added to G (Lorentzian width); too large smears, too small=noise
+Emin,Emax=-3,10.         #energy window [eV] for DOS / spectral-function plots (option 1,4)
+delta=1.0e-2            #spectral broadening eta [eV]: imaginary part added to G (Lorentzian width); too large smears, too small=noise
 Ecut=1.0e-2            #fixed energy omega_0 [eV] for the q-space susceptibility maps (option 9,11); ~0 probes the Fermi surface
 tau_const=100          #constant relaxation time tau [fs] for Boltzmann transport (option 5)
-olist=[0,0,0]          #orbital indices mapped to R,G,B for orbital-weight coloring (color_option=1); nested lists group orbitals
-#olist=[0,[1,2],3]
+#olist=[0,0,0]          #orbital indices mapped to R,G,B for orbital-weight coloring (color_option=1); nested lists group orbitals
+olist=[0,[1,2],3]
 #U,J=0.,0.
 #U,J= 0.2, 0.025
 #U,J= 0.4, 0.05

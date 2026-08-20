@@ -215,7 +215,9 @@ def chis_q_point_sc(q: np.ndarray, hamk: np.ndarray, delta_k: np.ndarray, mu: fl
     @param    klist: k-point list [Nk, 3] float64
     @param    olist: Orbital index pairs for susceptibility [Nchi, 2] int64 (chiolist)
     @param   idelta: Lorentzian broadening in eV
-    @param sw_spsym: True for triplet (dz) symmetry, False for singlet
+    @param sw_spsym: spin channel. False = the Yosida-suppressed one (singlet, or a
+                     field parallel to the triplet d-vector); True = the one preserved
+                     at T=0 (field perpendicular to d, e.g. in-plane for d||z)
     @retval  trchis: Trace of spin susceptibility chi_s [Nw] complex128
     @retval chis_orb: Orbital-resolved spin susceptibility
     @retval   wlist: Frequency mesh [Nw] float64
@@ -246,7 +248,9 @@ def chis_spectrum_sc(mu: float, temp: float, Smat: np.ndarray, hamk: np.ndarray,
     @param      Nw: Number of frequency points
     @param    Emax: Maximum frequency in eV
     @param  idelta: Lorentzian broadening in eV
-    @param sw_spsym: True for triplet (dz) symmetry, False for singlet
+    @param sw_spsym: spin channel. False = the Yosida-suppressed one (singlet, or a
+                     field parallel to the triplet d-vector); True = the one preserved
+                     at T=0 (field perpendicular to d, e.g. in-plane for d||z)
     @retval   chisq: Spin susceptibility trace at each q-point [Nq, Nw] complex128
     @retval chis_orbq: Orbital-resolved spin susceptibility [Nq, ...]
     @retval   wlist: Frequency mesh [Nw] float64

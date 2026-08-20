@@ -945,19 +945,22 @@ subroutine get_chi0_sum(chi,Gk,klist,invk,irr_chi,chi_map,olist,temp,Nw,Nk,Nkall
   orb_loop:do iorb=1,Nchi*(Nchi+1)/2
      l=irr_chi(iorb,1)
      m=irr_chi(iorb,2)
+     ! Gk is stored on the irreducible wedge only, so it must be indexed with invk(1,i),
+     ! never with the full-BZ index i.  The expansion below is the same one chi0_conv_acc
+     ! uses: G(k,-iw)=G(k,iw)^dagger (Hermitian H) and G(-k,iw)=G(k,iw)^T (TRS).
      !$omp parallel do private(i)
      do j=1,Nw
         do i=1,Nkall
            if(invk(2,i)==0)then
-              tmpgk13(i,j)=Gk(i,j,olist(m,1),olist(l,1))
-              tmpgk42(i,j)=Gk(i,j,olist(l,2),olist(m,2))
-              tmpgk13(i,2*Nw-j+1)=conjg(Gk(i,j,olist(l,1),olist(m,1)))
-              tmpgk42(i,2*Nw-j+1)=conjg(Gk(i,j,olist(m,2),olist(l,2)))
+              tmpgk13(i,j)=Gk(invk(1,i),j,olist(l,1),olist(m,1)) !G13(k,iw)
+              tmpgk42(i,j)=Gk(invk(1,i),j,olist(m,2),olist(l,2)) !G42(k,iw)
+              tmpgk13(i,2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(m,1),olist(l,1))) !G13(k,-iw)=G^*31(k,iw)
+              tmpgk42(i,2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(l,2),olist(m,2))) !G42(k,-iw)=G^*24(k,iw)
            else if(invk(2,i)==1)then
-              tmpgk13(i,j)=Gk(i,j,olist(l,1),olist(m,1))
-              tmpgk42(i,j)=Gk(i,j,olist(m,2),olist(l,2))
-              tmpgk13(i,2*Nw-j+1)=conjg(Gk(i,j,olist(m,1),olist(l,1)))
-              tmpgk42(i,2*Nw-j+1)=conjg(Gk(i,j,olist(l,2),olist(m,2)))
+              tmpgk13(i,j)=Gk(invk(1,i),j,olist(m,1),olist(l,1)) !G13(-k,iw)=G^31(k,iw)
+              tmpgk42(i,j)=Gk(invk(1,i),j,olist(l,2),olist(m,2)) !G42(-k,iw)=G^24(k,iw)
+              tmpgk13(i,2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(l,1),olist(m,1))) !G13(-k,-iw)=G^*13(k,iw)
+              tmpgk42(i,2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(m,2),olist(l,2))) !G42(-k,-iw)=G^*42(k,iw)
            end if
         end do
      end do
@@ -971,12 +974,14 @@ subroutine get_chi0_sum(chi,Gk,klist,invk,irr_chi,chi_map,olist,temp,Nw,Nk,Nkall
         end do wl_loop
         qloop: do iq=1,Nkall
            if(invk(2,iq)==0)then
-              call get_qshift(klist(:,iq),klist,qshift,Nk)
+              call get_qshift(klist(:,iq),klist,qshift,Nkall)
               !$omp parallel do private(i) reduction(+: chi)
               wloop2: do j=1,2*Nw
                  !$omp simd
                  kloop: do i=1,Nkall
-                    chi(invk(1,iq),iw,m,l)=chi(invk(1,iq),iw,m,l)-tmpgk13(i,j)*tmpgk42(qshift(i),wshift(j))
+                    ! chi0(q,i nu) = -sum_{k,iw} G13(k+q,iw+i nu) G42(k,iw): the q/nu shift
+                    ! goes on G13, matching chi0_conv_acc
+                    chi(invk(1,iq),iw,m,l)=chi(invk(1,iq),iw,m,l)-tmpgk13(qshift(i),wshift(j))*tmpgk42(i,j)
                  end do kloop
                  !$omp end simd
               end do wloop2

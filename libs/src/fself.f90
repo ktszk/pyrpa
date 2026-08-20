@@ -310,6 +310,18 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   logical:: bracket_valid
   ! eigenvalues of H(k)+Sigma(k,iw) precomputed before mu search
   complex(c_double),allocatable:: eig_gkinv(:,:,:)
+  ! multiplicity of each irreducible k in the full BZ. The TRS reduction pairs k with -k,
+  ! but the time-reversal invariant momenta (Gamma, X, M, Z, ...) are their own partner and
+  ! therefore have multiplicity 1 while every other k has 2. An unweighted average over the
+  ! wedge would over-weight the TRIMs; chi0 and Sigma already expand to the full BZ, so the
+  ! filling has to be weighted the same way to stay consistent.
+  real(c_double),dimension(Nk):: kmult
+  integer(c_int32_t) ik_mult
+
+  kmult(:)=0.0d0
+  do ik_mult=1,int(Nkall,c_int32_t)
+     kmult(invk(1,ik_mult))=kmult(invk(1,ik_mult))+1.0d0
+  end do
 
   eps_sgm=1.0d-10
   mu=mu_init
@@ -698,23 +710,28 @@ contains
     real(c_double) tmp,deltagk
     complex(c_double) iw_im
 
-    ! n(μ) = (1/Nk){Σ_{k,n} f(ε_{kn}) + 2T·Σ_{k,j}[G(k,iω_j) - G_0(k,iω_j)]}
-    ! non-interacting Fermi sum (unchanged)
-    tmp=sum(0.5d0*(1.0d0-tanh(0.5d0*(eig(:,:)-rmu)/temp)))
+    ! n(μ) = (1/Nkall){Σ_{k,n} w_k f(ε_{kn}) + 2T·Σ_{k,j} w_k [G(k,iω_j) - G_0(k,iω_j)]}
+    ! w_k = kmult(k) is the multiplicity of the irreducible k in the full BZ (1 on the TRIMs,
+    ! 2 elsewhere); sum(w_k) = Nkall, so this is the exact full-BZ average.
+    ! non-interacting Fermi sum
+    tmp=0.0d0
+    do i=1,Nk
+       tmp=tmp+kmult(i)*sum(0.5d0*(1.0d0-tanh(0.5d0*(eig(:,i)-rmu)/temp)))
+    end do
     ! correction from self-energy: use precomputed eigenvalues of H(k)+Sigma(k,iw): no getinv needed
     deltagk=0.0d0
-    !$omp parallel do reduction(+:deltagk) private(n,iw_im)
+    !$omp parallel do reduction(+:deltagk) private(n,i,iw_im)
     do j=1,Nw
        iw_im=cmplx(0.0d0,dble(2*j-1)*pi*temp,kind=c_double)
        do i=1,Nk
           do n=1,Norb
-             deltagk=deltagk+dble(1.0d0/(rmu+iw_im-eig_gkinv(n,i,j)) &
-                                  -1.0d0/(rmu+iw_im-eig(n,i)))
+             deltagk=deltagk+kmult(i)*dble(1.0d0/(rmu+iw_im-eig_gkinv(n,i,j)) &
+                                           -1.0d0/(rmu+iw_im-eig(n,i)))
           end do
        end do
     end do
     !$omp end parallel do
-    rn=(tmp+2*temp*deltagk)/Nk
+    rn=(tmp+2*temp*deltagk)/Nkall
   end subroutine get_rn
 
   subroutine precompute_eig_gkinv()

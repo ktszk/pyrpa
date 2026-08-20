@@ -982,6 +982,15 @@ def gap_orbital_from_wannier(fname='gap_wannier', iw_index=0, n_avg=1):
     slightly diluting the anisotropy, since Delta(k,iw_n) gets more isotropic with n).
     The absolute scale is irrelevant: project_gap_to_band renormalizes to <|phi|^2>=1.
 
+    Fourier convention: output_gap_wannier builds Delta(R) with np.fft.ifftn over the
+    k-axes, whose kernel is exp(+2 pi i k.R), so the inverse taken here carries the MINUS
+    sign, matching the self-energy interpolation in main.py's plot_spectrum.  (This used
+    to be written with a plus and therefore returned Delta(-k).  It changed nothing in
+    practice -- the result is only ever used as a form factor that project_gap_to_band
+    renormalizes, and Delta(-k)=Delta(k) for the even-parity gaps this path is used with,
+    while an odd-parity one only picks up a global sign -- but the transform is now the
+    true inverse, verified to round-trip an output_gap_wannier export to 3e-15.)
+
     @param fname: base name of the .npz written by output_gap_wannier (without extension)
     @param iw_index: starting Matsubara index (0 = lowest iw_0)
     @param n_avg: number of consecutive Matsubara slices to average (1 = single slice)
@@ -995,8 +1004,8 @@ def gap_orbital_from_wannier(fname='gap_wannier', iw_index=0, n_avg=1):
     gR = gap[:, :, n0:n1, :].mean(axis=2)            # (Norb,Norb,Nr) over chosen slices
     rg = np.ascontiguousarray(rvec, dtype=np.float64)
 
-    def gap_orbital(kfrac):                          # Delta_orb(k) = sum_R e^{i 2pi k.R} Delta(R)
-        ph = np.exp(2j * np.pi * (rg @ np.asarray(kfrac, dtype=np.float64)))
+    def gap_orbital(kfrac):                          # Delta_orb(k) = sum_R e^{-i 2pi k.R} Delta(R)
+        ph = np.exp(-2j * np.pi * (rg @ np.asarray(kfrac, dtype=np.float64)))
         return (gR * ph).sum(axis=-1)               # (Norb, Norb)
     return gap_orbital
 
