@@ -71,12 +71,13 @@ _lib.get_veloc_mlo.argtypes = [
 ]
 _lib.get_veloc_mlo.restype = None
 _lib.get_vnm_mlo.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),   # vk (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),   # vk0 = dH/dk
+    np.ctypeslib.ndpointer(dtype=np.complex128),   # sk0 = dS/dk
+    np.ctypeslib.ndpointer(dtype=np.complex128),   # Ovlk = S(k)
+    np.ctypeslib.ndpointer(dtype=np.float64),      # eig
+    np.ctypeslib.ndpointer(dtype=np.float64),      # mrot
+    np.ctypeslib.ndpointer(dtype=np.complex128),   # uni
     POINTER(c_int64), POINTER(c_int64)
 ]
 _lib.get_vnm_mlo.restype = None
@@ -274,7 +275,8 @@ def get_vk(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray,
     return vk
 
 def get_vnm(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray,
-            sk0: np.ndarray | None = None, eig: np.ndarray | None = None) -> np.ndarray:
+            sk0: np.ndarray | None = None, eig: np.ndarray | None = None,
+            Ovlk: np.ndarray | None = None) -> np.ndarray:
     """
     @fn get_vnm
     @brief Compute inter-band velocity matrix elements v_{nm}(k) for all band pairs and Cartesian directions.
@@ -284,6 +286,8 @@ def get_vnm(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray,
     @param   sk0: Overlap derivative dS/dk [Nk, Norb, Norb, 3] complex128 for a non-orthogonal
                   (MLO) basis; None for an orthogonal basis
     @param   eig: Eigenvalues [Nk, Norb] float64, required together with sk0
+    @param  Ovlk: k-space overlap S(k) [Nk, Norb, Norb] complex128, required together with sk0
+                  (the exact Loewdin velocity needs S itself, not only its derivative)
     @return   vnm: Inter-band velocity matrix elements [Nk, Norb, Norb, 3] complex128
     """
     Nk = len(uni)
@@ -294,7 +298,9 @@ def get_vnm(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray,
     else:
         if eig is None:
             raise ValueError("get_vnm: eig is required when sk0 (non-orthogonal basis) is given")
-        _lib.get_vnm_mlo(vk, vk0, sk0, eig, mrot, uni, i64(Nk), i64(Norb))
+        if Ovlk is None:
+            raise ValueError("get_vnm: Ovlk (S(k)) is required when sk0 (non-orthogonal basis) is given")
+        _lib.get_vnm_mlo(vk, vk0, sk0, Ovlk, eig, mrot, uni, i64(Nk), i64(Norb))
     return vk
 
 def _get_sk0(klist: np.ndarray, S_r, rvec: np.ndarray) -> np.ndarray | None:
@@ -321,7 +327,9 @@ def get_vnmk(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
     @return   vnm: Inter-band velocity matrix elements [Nk, Norb, Norb, 3] complex128
     """
     vk0 = get_vlm0(klist, ham_r, rvec)
-    return get_vnm(vk0, mrot, uni, _get_sk0(klist, S_r, rvec), eig)
+    sk0 = _get_sk0(klist, S_r, rvec)
+    Ovlk = None if sk0 is None else gen_ham(klist, S_r, rvec)
+    return get_vnm(vk0, mrot, uni, sk0, eig, Ovlk)
 
 def get_veloc(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
               mrot: np.ndarray, uni: np.ndarray, S_r=None,

@@ -111,7 +111,10 @@ def test_overlap_term_is_not_negligible():
 
 def test_vnm_mlo_diagonal_equals_band_velocity():
     """The interband routine must reduce to get_veloc_mlo on the band diagonal:
-    v_nn = H~_nn - (eps_n+eps_n)/2 S~_nn."""
+    v_nn = H~_nn - eps_n S~_nn = d eps_n/dk.  get_vnm_mlo reaches it through the
+    Loewdin route (G = C^H dX/dk X C with X = S^1/2), i.e. a different sequence of
+    zgemm/zheev than get_veloc_mlo, so the two agree to roundoff rather than bitwise
+    -- hence a relative tolerance."""
     rvec, ham_r, S_r, Norb, _ = _mlo_model(seed=3)
     klist = _klist()
     mrot = np.eye(3)
@@ -120,12 +123,13 @@ def test_vnm_mlo_diagonal_equals_band_velocity():
     v = F.get_veloc(klist, ham_r, rvec, mrot, uni, S_r, eig)
     vnm = F.get_vnmk(klist, ham_r, rvec, mrot, uni, S_r, eig)
     diag = np.einsum('knni->kni', vnm).real
-    assert np.abs(diag - v).max() < 1e-12
+    assert np.abs(diag - v).max() < 1e-12 * max(1.0, np.abs(v).max())
 
 
 def test_vnm_mlo_is_hermitian():
-    """H~ and S~ are Hermitian and the (eps_n+eps_m)/2 prefactor is symmetric, so
-    the interband velocity matrix stays Hermitian in the band indices."""
+    """H~ is Hermitian and the Loewdin correction enters as -(G E + E G^H), which is
+    Hermitian by construction, so the interband velocity matrix stays Hermitian in the
+    band indices."""
     rvec, ham_r, S_r, _, _ = _mlo_model(seed=4)
     klist = _klist()
     eig, uni = _eig_uni(klist, ham_r, S_r, rvec)

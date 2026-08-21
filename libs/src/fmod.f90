@@ -863,56 +863,102 @@ subroutine get_veloc_mlo(vk,vk0,sk0,eig,mrot,uni,Nk,Norb) bind(C)
   !$omp end parallel do
 end subroutine get_veloc_mlo
 
-subroutine get_vnm_mlo(vk,vk0,sk0,eig,mrot,uni,Nk,Norb) bind(C)
+subroutine get_vnm_mlo(vk,vk0,sk0,Ovlk,eig,mrot,uni,Nk,Norb) bind(C)
   !> This function obtain band-basis group velocity with inter-band elements for a
-  !! NON-ORTHOGONAL (MLO) basis.  Writing S~ = C^H dS/dk C, H~ = C^H dH/dk C, the
-  !! velocity operator between the generalized eigenstates is
-  !!   v_nm = H~_nm - (eps_n + eps_m)/2 * S~_nm
-  !! (from v_nm = (eps_m - eps_n)<u_n|d_k u_m> with <chi|d_k chi> = dS/dk / 2, the
-  !!  no-Berry-connection gauge already implied by the orthogonal get_vnm).  It stays
-  !! Hermitian and reduces to the get_veloc_mlo expression on the diagonal.
-  !!@param  vk,out: band-basis group velocities
-  !!@param  vk0,in: orbital-basis dH/dk (get_vlm0 on ham_r)
-  !!@param  sk0,in: orbital-basis dS/dk (get_vlm0 on S_r)
-  !!@param  eig,in: generalized eigenvalues (get_eig_mlo)
-  !!@param mrot,in: rotation matrix for real space
-  !!@param  uni,in: generalized eigenvectors, S-orthonormal (get_eig_mlo)
-  !!@param   Nk,in: The number of k-points
-  !!@param Norb,in: The number of orbitals
+  !! NON-ORTHOGONAL (MLO) basis.  The model is read as an orthogonal tight-binding
+  !! model in the Loewdin basis, Htilde = S^-1/2 H S^-1/2, whose velocity operator is
+  !! dHtilde/dk.  With X = S^1/2 and E = diag(eig) that is exactly
+  !!   M = C^H (dH/dk) C - G E - E G^H ,      G = C^H (dX/dk) X C
+  !! and dX/dk follows from X dX + dX X = dS/dk, i.e. in the eigenbasis of S
+  !!   (dX)_nm = (U^H (dS/dk) U)_nm / (sqrt(s_n) + sqrt(s_m)) .
+  !! On the diagonal dX X + X dX = dS collapses the two G terms to eps_n (dS/dk)_nn,
+  !! reproducing the get_veloc_mlo group velocity, so the two routines stay consistent.
+  !!
+  !! The cheaper ansatz M = H~ - (eps_n+eps_m)/2 S~ is exact only when [S, dS/dk] = 0.
+  !! For the ecalj Cu sdp model it overshoots sum|v_nm|^2 by 1.5x at 10-15 eV transition
+  !! energy and 2.7x at 20-30 eV (against 0.5x undershoot when dS/dk is dropped), which
+  !! shows up directly as excess eps_2 above 10 eV.  Setting S=1 reduces this to get_vnm.
+  !!@param   vk,out: band-basis group velocities
+  !!@param   vk0,in: orbital-basis dH/dk (get_vlm0 on ham_r)
+  !!@param   sk0,in: orbital-basis dS/dk (get_vlm0 on S_r)
+  !!@param  Ovlk,in: k-space overlap S(k) (gen_ham on S_r)
+  !!@param   eig,in: generalized eigenvalues (get_eig_mlo)
+  !!@param  mrot,in: rotation matrix for real space
+  !!@param   uni,in: generalized eigenvectors, S-orthonormal (get_eig_mlo)
+  !!@param    Nk,in: The number of k-points
+  !!@param  Norb,in: The number of orbitals
   use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
   integer(c_int64_t),intent(in):: Nk,Norb
   real(c_double),intent(in),dimension(3,3):: mrot
   real(c_double),intent(in),dimension(Norb,Nk):: eig
   complex(c_double),intent(in),dimension(3,Norb,Norb,Nk):: vk0,sk0
-  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: Ovlk,uni
   complex(c_double),intent(out),dimension(3,Norb,Norb,Nk):: vk
 
-  integer(c_int32_t) i,j_dir,l,m,n,k
+  integer(c_int32_t) i,j_dir,l,m,n,k,info
+  integer(c_int64_t) lwork
+  real(c_double) rwork(3*Norb-2),eq(Norb),sq(Norb)
+  complex(c_double) work_query(1)
+  complex(c_double),allocatable :: work(:)
   complex(c_double) tmp(3,Norb,Norb)
-  complex(c_double),dimension(Norb,Norb):: vtmp,Wtmp,tmp_j,tmp_s
+  complex(c_double),dimension(Norb,Norb):: Umat,Xmat,Gmat,vtmp,Wtmp,tmp_j,tmp_s
+  real(c_double),parameter:: ovl_thresh=1.0d-8
 
-  !$omp parallel
-  !$omp workshare
-  vk(:,:,:,:)=0.0d0
-  !$omp end workshare
-  !$omp do private(tmp,vtmp,Wtmp,tmp_j,tmp_s,j_dir,l,m,n,k)
+  call zheev('V','U',Norb,Umat,Norb,eq,work_query,-1_c_int64_t,rwork,info)
+  lwork = int(dble(work_query(1)), c_int64_t)
+
+  !$omp parallel private(tmp,Umat,Xmat,Gmat,vtmp,Wtmp,tmp_j,tmp_s, &
+  !$omp                  eq,sq,rwork,work,info,j_dir,l,m,n,k)
+  allocate(work(lwork))
+  !$omp do
   kloop: do i=1,Nk
-     ! tmp(j,:,:) = U^H vk0(j,:,:,i) U - sym(eig) * U^H sk0(j,:,:,i) U  for j=1..3
+     ! --- S(k) = U diag(eq) U^H, then X = S^1/2 = U diag(sqrt(eq)) U^H ---
+     Umat(:,:)=Ovlk(:,:,i)
+     call zheev('V','U',Norb,Umat,Norb,eq,work,lwork,rwork,info)
+     if(info/=0)then
+        print*,'zheev failed in get_vnm_mlo (overlap): info=',info
+        stop
+     end if
+     do n=1,Norb
+        sq(n)=sqrt(max(eq(n),ovl_thresh))
+     end do
+     do n=1,Norb
+        Wtmp(:,n)=Umat(:,n)*sq(n)
+     end do
+     call zgemm('N','C',Norb,Norb,Norb,(1.0d0,0.0d0),Wtmp,Norb,Umat,Norb,(0.0d0,0.0d0),Xmat,Norb)
+
      do j_dir=1,3
+        ! --- dX/dk : (U^H dS U)_nm / (sq_n + sq_m), rotated back ---
+        vtmp(:,:)=sk0(j_dir,:,:,i)
+        call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),vtmp,Norb,Umat,Norb,(0.0d0,0.0d0),Wtmp,Norb)
+        call zgemm('C','N',Norb,Norb,Norb,(1.0d0,0.0d0),Umat,Norb,Wtmp,Norb,(0.0d0,0.0d0),tmp_s,Norb)
+        do m=1,Norb
+           do n=1,Norb
+              tmp_s(n,m)=tmp_s(n,m)/(sq(n)+sq(m))
+           end do
+        end do
+        call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),Umat,Norb,tmp_s,Norb,(0.0d0,0.0d0),Wtmp,Norb)
+        call zgemm('N','C',Norb,Norb,Norb,(1.0d0,0.0d0),Wtmp,Norb,Umat,Norb,(0.0d0,0.0d0),vtmp,Norb)
+
+        ! --- G = C^H (dX) X C ---
+        call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),vtmp,Norb,Xmat,Norb,(0.0d0,0.0d0),tmp_s,Norb)
+        call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),tmp_s,Norb,uni(:,:,i),Norb,(0.0d0,0.0d0),Wtmp,Norb)
+        call zgemm('C','N',Norb,Norb,Norb,(1.0d0,0.0d0),uni(:,:,i),Norb,Wtmp,Norb,(0.0d0,0.0d0),Gmat,Norb)
+
+        ! --- M = C^H (dH/dk) C - G E - E G^H ---
         vtmp(:,:)=vk0(j_dir,:,:,i)
         call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),vtmp,Norb,uni(:,:,i),Norb,(0.0d0,0.0d0),Wtmp,Norb)
         call zgemm('C','N',Norb,Norb,Norb,(1.0d0,0.0d0),uni(:,:,i),Norb,Wtmp,Norb,(0.0d0,0.0d0),tmp_j,Norb)
-        vtmp(:,:)=sk0(j_dir,:,:,i)
-        call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),vtmp,Norb,uni(:,:,i),Norb,(0.0d0,0.0d0),Wtmp,Norb)
-        call zgemm('C','N',Norb,Norb,Norb,(1.0d0,0.0d0),uni(:,:,i),Norb,Wtmp,Norb,(0.0d0,0.0d0),tmp_s,Norb)
         do n=1,Norb
            do k=1,Norb
-              tmp(j_dir,k,n)=tmp_j(k,n)-0.5d0*(eig(k,i)+eig(n,i))*tmp_s(k,n)
+              tmp(j_dir,k,n)=tmp_j(k,n)-Gmat(k,n)*eig(n,i)-eig(k,i)*conjg(Gmat(n,k))
            end do
         end do
      end do
+
      !rotate axis
+     vk(:,:,:,i)=(0.0d0,0.0d0)
      band_loop5: do n=1,Norb
         do k=1,Norb
            do l=1,3
@@ -924,6 +970,7 @@ subroutine get_vnm_mlo(vk,vk0,sk0,eig,mrot,uni,Nk,Norb) bind(C)
      end do band_loop5
   end do kloop
   !$omp end do
+  deallocate(work)
   !$omp end parallel
 end subroutine get_vnm_mlo
 
