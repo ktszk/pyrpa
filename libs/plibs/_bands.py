@@ -320,14 +320,18 @@ def get_colors(klist: np.ndarray, blist, mrot, rvec: np.ndarray, ham_r: np.ndarr
             clist=[np.array([get_col(clst,ol[0]),get_col(clst,ol[1]),get_col(clst,ol[2])]).T for clst in uni]
         return clist
     elif color_option==2: #velocity size color
+        # eig is needed alongside uni: for a non-orthogonal (MLO) basis the velocity
+        # carries the -eps*dS/dk term (get_veloc dispatches on S_r).
         if sw_2d:
-            uni=[[get_eigs(k,ham_r,S_r,rvec,True,False) for k in kk] for kk in klist]
-            vk=[[flibs.get_veloc(k,ham_r,rvec,mrot,unkk)[:,b,:] for k,unkk in zip(kk,unk)]
-                for kk,unk,b in zip(klist,uni,blist)]
+            eu=[[get_eigs(k,ham_r,S_r,rvec) for k in kk] for kk in klist]
+            vk=[[flibs.get_veloc(k,ham_r,rvec,mrot,unkk,S_r,eigk)[:,b,:]
+                 for k,(eigk,unkk) in zip(kk,euk)]
+                for kk,euk,b in zip(klist,eu,blist)]
             clist=[[np.sqrt((abs(vkkk)*abs(vkkk)).sum(axis=1)) for vkkk in vkk] for vkk in vk]
         else:
-            uni=[get_eigs(k,ham_r,S_r,rvec,True,False) for k in klist]
-            vk=[flibs.get_veloc(kk,ham_r,rvec,mrot,unk)[:,b,:] for kk,unk,b in zip(klist,uni,blist)]
+            eu=[get_eigs(k,ham_r,S_r,rvec) for k in klist]
+            vk=[flibs.get_veloc(kk,ham_r,rvec,mrot,unk,S_r,eigk)[:,b,:]
+                for kk,(eigk,unk),b in zip(klist,eu,blist)]
             clist=[np.sqrt((abs(vkk)*abs(vkk)).sum(axis=1)) for vkk in vk]
         return clist
 
@@ -353,12 +357,12 @@ def get_emesh(Nx: int, Ny: int, Nz: int, ham_r: np.ndarray, S_r: np.ndarray, rve
     kweight = np.ones(len(eig), dtype=np.float64)
     if sw_veloc:
         if sw_uni:
-            vk=flibs.get_vnmk(klist,ham_r,rvec,avec,uni)
+            vk=flibs.get_vnmk(klist,ham_r,rvec,avec,uni,S_r,eig)
             return Nk,eig,vk,kweight
         else:
-            vk=flibs.get_veloc(klist,ham_r,rvec,avec,uni)
+            vk=flibs.get_veloc(klist,ham_r,rvec,avec,uni,S_r,eig)
             if sw_mass:
-                imass=flibs.get_mass(klist,ham_r,rvec,avec,uni,True)
+                imass=flibs.get_mass(klist,ham_r,rvec,avec,uni,True,S_r,eig)
                 return Nk,eig,vk,imass,kweight
             else:
                 return Nk,eig,vk,kweight

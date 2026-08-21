@@ -1048,8 +1048,9 @@ def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, band=None, Ro
             pts = np.ascontiguousarray(cont, dtype=np.float64)   # [Np,3] fractional
             if len(pts) < 2:
                 continue
-            _, uni = get_eigs(pts, ham_r, S_r, rvec)
-            vk = flibs.get_veloc(pts, ham_r, rvec, avec.T, uni).real    # [Np,Norb,3]
+            eg, uni = get_eigs(pts, ham_r, S_r, rvec)
+            # S_r/eg carry the -eps*dS/dk overlap term for a non-orthogonal (MLO) basis
+            vk = flibs.get_veloc(pts, ham_r, rvec, avec.T, uni, S_r, eg).real   # [Np,Norb,3]
             v = vk[:, b, :]
             # band eigenvectors u(k_F) and u(-k_F) (orbital content) for the gap projection
             ub = uni[:, b, :].copy()                   # [Np, Norb] (Eilenberger band a=b)

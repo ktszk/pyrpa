@@ -13,7 +13,7 @@ file is executed directly).  Contents:
   * output control ........ silence()
   * distributions ......... fermi, bose, fermionic_matsubara, bosonic_matsubara
   * model builders ........ one_orbital_square, two_orbital_square,
-                            band_diagonal_model, cylindrical_fs,
+                            band_diagonal_model, mlo_model, cylindrical_fs,
                             full_grid_dispersion
   * exact references ...... two_pole_poles_weights, two_pole_green,
                             exact_chi0_1orb  (Lindhard bubble, optionally with
@@ -189,6 +189,58 @@ def band_diagonal_model(Nk, Norb, seed=0, Ewidth=0.6):
         vk[:, n, n, :] = vdiag[:, n, :]
     veloc = np.ascontiguousarray(vdiag, dtype=np.float64)
     return eig, vk, veloc
+
+
+def mlo_model(Norb=4, seed=0, ovl=0.30):
+    """Random NON-ORTHOGONAL (MLO-like) tight-binding model, as read by ftype 3/4:
+    returns (rvec, ham_r, S_r, Norb, Nr) for the generalized problem H C = eps S C.
+
+    H(R) is a random Hermitian model on {0,+-x,+-y,+-z} obeying the reality condition
+    A(-R) = A(R)^H of a Wannier/MLO model, so H(k) comes out Hermitian.
+
+    S(R) cannot be random: get_eig_mlo canonically orthogonalizes S(k) and DISCARDS
+    directions with a non-positive overlap eigenvalue, so a random S would silently
+    produce zero eigenvector columns.  S is therefore built as a Gram matrix,
+    S(k) = B(k)^H B(k) + eta, i.e. S(R) = sum_{R1-R2=R} B(R2)^H B(R1) + eta delta_{R,0},
+    which is positive definite for every k by construction (and Hermitian-symmetric
+    in R, S(-R) = S(R)^H, as gen_ham requires).
+    """
+    rng = np.random.default_rng(seed)
+
+    def _rand(scale):
+        return scale * (rng.normal(size=(Norb, Norb)) + 1j * rng.normal(size=(Norb, Norb)))
+
+    dirs = [(0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1)]
+    neg = lambda R: tuple(-c for c in R)
+
+    hdict = {}
+    h0 = _rand(0.30)
+    hdict[(0, 0, 0)] = h0 + h0.conj().T
+    for R in dirs[1:]:
+        t = _rand(0.30)
+        hdict[R] = t
+        hdict[neg(R)] = t.conj().T
+
+    B = {R: _rand(ovl) for R in dirs}
+    B[(0, 0, 0)] = B[(0, 0, 0)] + np.eye(Norb)
+    sdict = {}
+    for R1 in dirs:
+        for R2 in dirs:
+            dR = tuple(a - b for a, b in zip(R1, R2))
+            sdict[dR] = sdict.get(dR, 0.0) + B[R2].conj().T @ B[R1]
+    sdict[(0, 0, 0)] = sdict[(0, 0, 0)] + 1.0e-2 * np.eye(Norb)
+
+    rlist = sorted(set(hdict) | set(sdict))
+    Nr = len(rlist)
+    rvec = np.ascontiguousarray(np.array(rlist, dtype=np.float64))
+    ham_r = np.zeros((Nr, Norb, Norb), dtype=np.complex128)
+    S_r = np.zeros((Nr, Norb, Norb), dtype=np.complex128)
+    for j, R in enumerate(rlist):
+        if R in hdict:
+            ham_r[j] = hdict[R]
+        if R in sdict:
+            S_r[j] = sdict[R]
+    return rvec, np.ascontiguousarray(ham_r), np.ascontiguousarray(S_r), Norb, Nr
 
 
 def cylindrical_fs(Nb=120, gap_sym='d'):

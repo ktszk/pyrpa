@@ -26,7 +26,7 @@ else: monoclinic
 #fname,ftype,brav,sw_soc='inputs/SiMLO.input',3,6,False
 #fname,ftype,brav,sw_soc='inputs/Cu',4,6,False        # ecalj job_mlo binaries (abc=[3.597]*3, fill=5.5)
 #fname,ftype,brav,sw_soc='inputs/NdFeAsO.input',1,0,False
-fname,ftype,brav,sw_soc='inputs/000AsP.input',1,0,False
+fname,ftype,brav,sw_soc='inputs/000AsP_c4.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/FeS',2,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2.input',1,0,False
 #fname,ftype,brav,sw_soc='inputs/hop2_soc.input',1,0,True
@@ -120,7 +120,7 @@ MODES_NEED_PARITY   = frozenset({M.FLEX,M.LIN_ELIASHBERG,M.NONLIN_ELIASHBERG,M.G
 del M
 
 #option=CalcMode.CHIS_QPOINT_SC
-option=CalcMode.BAND #calculation mode to run (see the CalcMode enum above; 0-23 RPA/FLEX/transport, 24-26 Eilenberger superconductivity)
+option=CalcMode.LIN_ELIASHBERG #calculation mode to run (see the CalcMode enum above; 0-23 RPA/FLEX/transport, 24-26 Eilenberger superconductivity)
 color_option=ColorMode.ORBITAL #band/FS coloring (option 0,2,3): MONO=black, ORBITAL=olist weights->RGB, VELOCITY=|v(k)|, GAP=Re[phi(k)] from gap_sym/delta0/eil_gap_orbital/eil_gap_file (option 3 only) -- check the Eilenberger pairing gap on the real 3D FS
 
 #Nx,Ny,Nz,Nw=256,256,4,200 #k and energy(or matsubara freq.) mesh size
@@ -134,7 +134,7 @@ kz=0.0                  #reduced kz of the 2D Fermi-surface cut (option 2): 0=Ga
 abc=[3.597,3.597,3.597]    #lattice constants a,b,c [Angstrom] (group velocities & symmetry-path lengths)
 #alpha_beta_gamma=[90.,90.,90]  #lattice angles alpha,beta,gamma [deg] (default 90,90,90 if undefined)
 #temp=2.0e-2 #2.59e-2   #directly set k_B*T [eV]; if defined it overrides tempK
-tempK=300 #Kelvin        #temperature [K] (converted internally to temp=k_B*tempK [eV])
+tempK=200 #Kelvin        #temperature [K] (converted internally to temp=k_B*tempK [eV])
 fill= 2.9375       #band filling; mu solved from sum f(eps-mu)=Nk*fill (no SOC: per spin, full=Norb; SOC: total, full=2*Norb)
 #site_prof=[5]
 
@@ -150,8 +150,8 @@ olist=[0,[1,2],3]
 #U,J=0.,0.
 #U,J= 0.2, 0.025
 #U,J= 0.4, 0.05
-#U,J= 0.6, 0.075
-U,J=1.2,0.15           #on-site Hubbard U and Hund J [eV] (FLEX/RPA); screened U'=U-2J used automatically
+U,J= 0.6, 0.075
+#U,J=1.2,0.15           #on-site Hubbard U and Hund J [eV] (FLEX/RPA); screened U'=U-2J used automatically
 #U,J=1.8,0.225
 #0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py,-3:p+ip  (also drives ALL eilenberger modes; model FS/cylinder maps the int -> continuum harmonic, 2 spm -> s)
 gap_sym=2
@@ -205,8 +205,8 @@ sw_tdf=False   #True: compute the transport distribution function first, then en
 sw_omega=False #True: real freq, False: Matsubara freq.
 sw_rescale_flex=True #True: rescale self energy to make max|Sigma|~U, False: no rescaling
 sw_chi0_tail=True #True: tail-corrected chi0 in FLEX/Eliashberg (conv[G]-conv[G0]+analytic reference; O(1/Nw^2) Matsubara truncation error). no-SOC path only
-sw_self=True  #True: use calculated self energy for spectrum band plot
-sw_out_self=True #True: write the FLEX self-energy to sigma.bin/self_en.npz (also triggers gap output in option 15)
+sw_self=False  #True: use calculated self energy for spectrum band plot
+sw_out_self=False #True: write the FLEX self-energy to sigma.bin/self_en.npz (also triggers gap output in option 15)
 sw_in_self=False #True: load the previous self-energy from sigma.bin as the initial guess for the SC loop (a seed with a different Nw is auto re-gridded in place onto the current Nw)
 sigma_in_scale=1.0 #factor multiplying the sigma seed loaded via sw_in_self; for U-annealing set (U_new/U_old)**2 (Sigma ~ U^2)
 sw_from_file=False #True: read the self-energy from sigma.bin and skip FLEX (solve Eliashberg with it directly)
@@ -1718,7 +1718,7 @@ def main():
     elif option==CalcMode.ELECTRON_MASS: #mass calc
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
-        mass=flibs.get_mass(klist,ham_r,rvec,avec.T*ihbar,uni)*eC/emass
+        mass=flibs.get_mass(klist,ham_r,rvec,avec.T*ihbar,uni,S_r=S_r,eig=eig)*eC/emass
     elif option==CalcMode.SPECTRUM_IMPURITY: #calc spectrum with impurity
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         rlist=plibs.gen_rlist(Nx,Ny,Nz)

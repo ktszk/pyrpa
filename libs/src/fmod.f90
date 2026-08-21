@@ -487,21 +487,48 @@ subroutine get_imass0(imk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   !$omp end parallel do
 end subroutine get_imass0
 
-subroutine get_imassk(imk,imk0,mrot,uni,Nk,Norb) bind(C)
+subroutine get_imassk(imk,imk0,vk0,eig,mrot,uni,Nk,Norb) bind(C)
+  !> This function obtains the band-basis inverse effective mass tensor
+  !!   d2 eps_n/dk_a dk_b = (U^H d2H/dk_a dk_b U)_nn
+  !!                      + 2 sum_{m/=n} Re[H~^a_nm H~^b_mn]/(eps_n - eps_m),  H~^a = U^H dH/dk_a U
+  !! The second (interband / level-repulsion) term is 2nd-order perturbation theory and is
+  !! the SAME order as the first one in a multiband model -- it used to be missing here.
+  !! It diverges at a band crossing, where a band-resolved mass simply does not exist, so
+  !! pairs closer than deg_thresh are dropped rather than blown up.
+  !!@param  imk,out: band-basis inverse effective mass tensor
+  !!@param imk0,in: orbital-basis d2H/dk_a dk_b (get_imass0)
+  !!@param  vk0,in: orbital-basis dH/dk_a (get_vlm0)
+  !!@param  eig,in: band energies at k-points
+  !!@param mrot,in: rotation matrix for real space
+  !!@param  uni,in: unitary matrix orbital to band
+  !!@param   Nk,in: The number of k-points
+  !!@param Norb,in: The number of orbitals
   use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
   integer(c_int64_t),intent(in):: Nk,Norb
   real(c_double),intent(in),dimension(3,3):: mrot
+  real(c_double),intent(in),dimension(Norb,Nk):: eig
   complex(c_double),intent(in),dimension(3,3,Norb,Norb,Nk):: imk0
+  complex(c_double),intent(in),dimension(3,Norb,Norb,Nk):: vk0
   complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
   real(c_double),intent(out),dimension(3,3,Norb,Nk):: imk
 
   integer(c_int32_t) i,j_ax,k_ax,l,m,n
+  real(c_double) de,acc
   complex(c_double) tmp(3,3,Norb)
   complex(c_double) Mtmp(Norb,Norb),Wtmp(Norb,Norb),res_mat(Norb,Norb)
+  complex(c_double) vb(Norb,Norb,3)
+  real(c_double),parameter:: deg_thresh=1.0d-6
 
-  !$omp parallel do private(tmp,Mtmp,Wtmp,res_mat,j_ax,k_ax,l,m,n)
+  !$omp parallel do private(tmp,Mtmp,Wtmp,res_mat,vb,de,acc,j_ax,k_ax,l,m,n)
   kloop: do i=1,Nk
+     !band-basis velocity matrices vb(:,:,a) = U^H (dH/dk_a) U  (needed by the interband term)
+     do k_ax=1,3
+        Mtmp(:,:)=vk0(k_ax,:,:,i)
+        call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),Mtmp,Norb,uni(:,:,i),Norb,(0.0d0,0.0d0),Wtmp,Norb)
+        call zgemm('C','N',Norb,Norb,Norb,(1.0d0,0.0d0),uni(:,:,i),Norb,Wtmp,Norb,(0.0d0,0.0d0),res_mat,Norb)
+        vb(:,:,k_ax)=res_mat(:,:)
+     end do
      !rotate orb to band via zgemm: tmp(k_ax,j_ax,n)=diag(U^H * imk0(k_ax,j_ax,:,:,i) * U)_n
      do k_ax=1,3
         do j_ax=1,3
@@ -509,7 +536,15 @@ subroutine get_imassk(imk,imk0,mrot,uni,Nk,Norb) bind(C)
            call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),Mtmp,Norb,uni(:,:,i),Norb,(0.0d0,0.0d0),Wtmp,Norb)
            call zgemm('C','N',Norb,Norb,Norb,(1.0d0,0.0d0),uni(:,:,i),Norb,Wtmp,Norb,(0.0d0,0.0d0),res_mat,Norb)
            do n=1,norb
-              tmp(k_ax,j_ax,n)=res_mat(n,n)
+              ! 2 sum_{m/=n} Re[H~^a_nm H~^b_mn]/(eps_n-eps_m).  Re of the PRODUCT: taking the
+              ! real part of each factor first would drop the interference between the axes.
+              acc=0.0d0
+              do m=1,norb
+                 de=eig(n,i)-eig(m,i)
+                 if(abs(de)<deg_thresh) cycle       ! also skips m==n
+                 acc=acc+2.0d0*dble(vb(n,m,k_ax)*vb(m,n,j_ax))/de
+              end do
+              tmp(k_ax,j_ax,n)=res_mat(n,n)+cmplx(acc,0.0d0,kind=c_double)
            end do
         end do
      end do
@@ -529,6 +564,105 @@ subroutine get_imassk(imk,imk0,mrot,uni,Nk,Norb) bind(C)
   end do kloop
   !$omp end parallel do
 end subroutine get_imassk
+
+subroutine get_imassk_mlo(imk,imk0,smk0,vk0,sk0,eig,mrot,uni,Nk,Norb) bind(C)
+  !> This function obtains the band-basis inverse effective mass tensor for a
+  !! NON-ORTHOGONAL (MLO) basis, H(k)C = eps S(k)C with C^H S C = 1.  Writing
+  !!   H~^a = C^H dH/dk_a C,  S~^a = C^H dS/dk_a C,  G^a_ln = H~^a_ln - eps_n S~^a_ln
+  !! (so G^a_nn = d eps_n/dk_a is the get_veloc_mlo velocity),
+  !!   d2 eps_n/dk_a dk_b = [C^H (d2H/dk_a dk_b - eps_n d2S/dk_a dk_b) C]_nn
+  !!                      - (d eps_n/dk_a) S~^b_nn - (d eps_n/dk_b) S~^a_nn
+  !!                      + 2 sum_{l/=n} Re[conjg(G^b_ln) G^a_ln]/(eps_n - eps_l)
+  !! The two extra terms beyond the orthogonal case come from the k-dependence of the
+  !! normalization C^H S C = 1 (which fixes Re D^b_nn = -S~^b_nn/2 for dC = C D) and from
+  !! the eigenvector response D^b_ln = G^b_ln/(eps_n - eps_l).  Note eps_n (the band whose
+  !! mass is wanted), NOT eps_l, sits inside G -- that asymmetry is real.
+  !! Setting S=1 reduces every line to get_imassk.
+  !!@param  imk,out: band-basis inverse effective mass tensor
+  !!@param imk0,in: orbital-basis d2H/dk_a dk_b (get_imass0 on ham_r)
+  !!@param smk0,in: orbital-basis d2S/dk_a dk_b (get_imass0 on S_r)
+  !!@param  vk0,in: orbital-basis dH/dk_a (get_vlm0 on ham_r)
+  !!@param  sk0,in: orbital-basis dS/dk_a (get_vlm0 on S_r)
+  !!@param  eig,in: generalized eigenvalues (get_eig_mlo)
+  !!@param mrot,in: rotation matrix for real space
+  !!@param  uni,in: generalized eigenvectors, S-orthonormal (get_eig_mlo)
+  !!@param   Nk,in: The number of k-points
+  !!@param Norb,in: The number of orbitals
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
+  implicit none
+  integer(c_int64_t),intent(in):: Nk,Norb
+  real(c_double),intent(in),dimension(3,3):: mrot
+  real(c_double),intent(in),dimension(Norb,Nk):: eig
+  complex(c_double),intent(in),dimension(3,3,Norb,Norb,Nk):: imk0,smk0
+  complex(c_double),intent(in),dimension(3,Norb,Norb,Nk):: vk0,sk0
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
+  real(c_double),intent(out),dimension(3,3,Norb,Nk):: imk
+
+  integer(c_int32_t) i,j_ax,k_ax,l,m,n
+  real(c_double) de,acc,en
+  complex(c_double) gk,gj
+  complex(c_double) tmp(3,3,Norb)
+  complex(c_double) Mtmp(Norb,Norb),Wtmp(Norb,Norb),res_h(Norb,Norb),res_s(Norb,Norb)
+  complex(c_double) vb(Norb,Norb,3),sb(Norb,Norb,3)
+  real(c_double) vd(3,Norb)
+  real(c_double),parameter:: deg_thresh=1.0d-6
+
+  !$omp parallel do private(tmp,Mtmp,Wtmp,res_h,res_s,vb,sb,vd,gk,gj,de,acc,en,j_ax,k_ax,l,m,n)
+  kloop: do i=1,Nk
+     !band-basis first derivatives: vb(:,:,a)=C^H (dH/dk_a) C, sb(:,:,a)=C^H (dS/dk_a) C
+     do k_ax=1,3
+        Mtmp(:,:)=vk0(k_ax,:,:,i)
+        call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),Mtmp,Norb,uni(:,:,i),Norb,(0.0d0,0.0d0),Wtmp,Norb)
+        call zgemm('C','N',Norb,Norb,Norb,(1.0d0,0.0d0),uni(:,:,i),Norb,Wtmp,Norb,(0.0d0,0.0d0),res_h,Norb)
+        vb(:,:,k_ax)=res_h(:,:)
+        Mtmp(:,:)=sk0(k_ax,:,:,i)
+        call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),Mtmp,Norb,uni(:,:,i),Norb,(0.0d0,0.0d0),Wtmp,Norb)
+        call zgemm('C','N',Norb,Norb,Norb,(1.0d0,0.0d0),uni(:,:,i),Norb,Wtmp,Norb,(0.0d0,0.0d0),res_s,Norb)
+        sb(:,:,k_ax)=res_s(:,:)
+        ! band velocity d eps_n/dk_a = G^a_nn (S~^a_nn is real, H~ and S~ are Hermitian)
+        do n=1,norb
+           vd(k_ax,n)=dble(vb(n,n,k_ax))-eig(n,i)*dble(sb(n,n,k_ax))
+        end do
+     end do
+     do k_ax=1,3
+        do j_ax=1,3
+           Mtmp(:,:)=imk0(k_ax,j_ax,:,:,i)
+           call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),Mtmp,Norb,uni(:,:,i),Norb,(0.0d0,0.0d0),Wtmp,Norb)
+           call zgemm('C','N',Norb,Norb,Norb,(1.0d0,0.0d0),uni(:,:,i),Norb,Wtmp,Norb,(0.0d0,0.0d0),res_h,Norb)
+           Mtmp(:,:)=smk0(k_ax,j_ax,:,:,i)
+           call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),Mtmp,Norb,uni(:,:,i),Norb,(0.0d0,0.0d0),Wtmp,Norb)
+           call zgemm('C','N',Norb,Norb,Norb,(1.0d0,0.0d0),uni(:,:,i),Norb,Wtmp,Norb,(0.0d0,0.0d0),res_s,Norb)
+           do n=1,norb
+              en=eig(n,i)
+              acc=0.0d0
+              do l=1,norb
+                 de=en-eig(l,i)
+                 if(abs(de)<deg_thresh) cycle       ! also skips l==n
+                 gk=vb(l,n,k_ax)-en*sb(l,n,k_ax)
+                 gj=vb(l,n,j_ax)-en*sb(l,n,j_ax)
+                 acc=acc+2.0d0*dble(conjg(gj)*gk)/de
+              end do
+              acc=acc-vd(k_ax,n)*dble(sb(n,n,j_ax))-vd(j_ax,n)*dble(sb(n,n,k_ax))
+              tmp(k_ax,j_ax,n)=res_h(n,n)-en*res_s(n,n)+cmplx(acc,0.0d0,kind=c_double)
+           end do
+        end do
+     end do
+     !rotate axis
+     imk(:,:,:,i)=0.0d0
+     band_loop6: do n=1,norb
+        do l=1,3
+           do m=1,3
+              do j_ax=1,3
+                 do k_ax=1,3
+                    imk(m,l,n,i)=imk(m,l,n,i)+mrot(m,k_ax)*mrot(l,j_ax)*dble(tmp(k_ax,j_ax,n))
+                 end do
+              end do
+           end do
+        end do
+     end do band_loop6
+  end do kloop
+  !$omp end parallel do
+end subroutine get_imassk_mlo
 
 subroutine get_vlm0(vk,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   !> This function obtain orbital basis velocity
@@ -673,6 +807,125 @@ subroutine get_vnm(vk,vk0,mrot,uni,Nk,Norb) bind(C)
   !$omp end do
   !$omp end parallel
 end subroutine get_vnm
+
+subroutine get_veloc_mlo(vk,vk0,sk0,eig,mrot,uni,Nk,Norb) bind(C)
+  !> This function obtain group velocity at bands for a NON-ORTHOGONAL (MLO) basis
+  !! The generalized problem H(k)C = eps S(k)C with C^H S C = 1 has the extra
+  !! overlap-derivative term in the Hellmann-Feynman velocity:
+  !!   v_n = (C^H dH/dk C)_nn - eps_n (C^H dS/dk C)_nn
+  !! Dropping the second term (i.e. calling get_veloc) makes v_n wrong wherever
+  !! dS/dk /= 0, which is everywhere for MLO/ecalj (ftype 3,4) hoppings.
+  !!@param  vk,out: band-basis group velocities
+  !!@param  vk0,in: orbital-basis dH/dk (get_vlm0 on ham_r)
+  !!@param  sk0,in: orbital-basis dS/dk (get_vlm0 on S_r)
+  !!@param  eig,in: generalized eigenvalues (get_eig_mlo)
+  !!@param mrot,in: rotation matrix for real space
+  !!@param  uni,in: generalized eigenvectors, S-orthonormal (get_eig_mlo)
+  !!@param   Nk,in: The number of k-points
+  !!@param Norb,in: The number of orbitals
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
+  implicit none
+  integer(c_int64_t),intent(in):: Nk,Norb
+  real(c_double),intent(in),dimension(3,3):: mrot
+  real(c_double),intent(in),dimension(Norb,Nk):: eig
+  complex(c_double),intent(in),dimension(3,Norb,Norb,Nk):: vk0,sk0
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
+  real(c_double),intent(out),dimension(3,Norb,Nk):: vk
+
+  integer(c_int32_t) i,j_dir,l,m,n
+  complex(c_double) tmp(3,Norb)
+  complex(c_double),dimension(Norb,Norb):: vtmp,Wtmp,tmp_j,tmp_s
+
+  !$omp parallel do private(tmp,vtmp,Wtmp,tmp_j,tmp_s,j_dir,l,m,n)
+  kloop: do i=1,Nk
+     !rotate orb to band via zgemm: tmp_j = U^H * vk0(j,:,:,i) * U, likewise tmp_s for sk0
+     do j_dir=1,3
+        vtmp(:,:)=vk0(j_dir,:,:,i)
+        call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),vtmp,Norb,uni(:,:,i),Norb,(0.0d0,0.0d0),Wtmp,Norb)
+        call zgemm('C','N',Norb,Norb,Norb,(1.0d0,0.0d0),uni(:,:,i),Norb,Wtmp,Norb,(0.0d0,0.0d0),tmp_j,Norb)
+        vtmp(:,:)=sk0(j_dir,:,:,i)
+        call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),vtmp,Norb,uni(:,:,i),Norb,(0.0d0,0.0d0),Wtmp,Norb)
+        call zgemm('C','N',Norb,Norb,Norb,(1.0d0,0.0d0),uni(:,:,i),Norb,Wtmp,Norb,(0.0d0,0.0d0),tmp_s,Norb)
+        do n=1,Norb
+           tmp(j_dir,n)=tmp_j(n,n)-eig(n,i)*tmp_s(n,n)
+        end do
+     end do
+     !rotate axis
+     vk(:,:,i)=0.0d0
+     band_loop4: do n=1,Norb
+        do l=1,3
+           do m=1,3
+              vk(m,n,i)=vk(m,n,i)+mrot(m,l)*dble(tmp(l,n))
+           end do
+        end do
+     end do band_loop4
+  end do kloop
+  !$omp end parallel do
+end subroutine get_veloc_mlo
+
+subroutine get_vnm_mlo(vk,vk0,sk0,eig,mrot,uni,Nk,Norb) bind(C)
+  !> This function obtain band-basis group velocity with inter-band elements for a
+  !! NON-ORTHOGONAL (MLO) basis.  Writing S~ = C^H dS/dk C, H~ = C^H dH/dk C, the
+  !! velocity operator between the generalized eigenstates is
+  !!   v_nm = H~_nm - (eps_n + eps_m)/2 * S~_nm
+  !! (from v_nm = (eps_m - eps_n)<u_n|d_k u_m> with <chi|d_k chi> = dS/dk / 2, the
+  !!  no-Berry-connection gauge already implied by the orthogonal get_vnm).  It stays
+  !! Hermitian and reduces to the get_veloc_mlo expression on the diagonal.
+  !!@param  vk,out: band-basis group velocities
+  !!@param  vk0,in: orbital-basis dH/dk (get_vlm0 on ham_r)
+  !!@param  sk0,in: orbital-basis dS/dk (get_vlm0 on S_r)
+  !!@param  eig,in: generalized eigenvalues (get_eig_mlo)
+  !!@param mrot,in: rotation matrix for real space
+  !!@param  uni,in: generalized eigenvectors, S-orthonormal (get_eig_mlo)
+  !!@param   Nk,in: The number of k-points
+  !!@param Norb,in: The number of orbitals
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
+  implicit none
+  integer(c_int64_t),intent(in):: Nk,Norb
+  real(c_double),intent(in),dimension(3,3):: mrot
+  real(c_double),intent(in),dimension(Norb,Nk):: eig
+  complex(c_double),intent(in),dimension(3,Norb,Norb,Nk):: vk0,sk0
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
+  complex(c_double),intent(out),dimension(3,Norb,Norb,Nk):: vk
+
+  integer(c_int32_t) i,j_dir,l,m,n,k
+  complex(c_double) tmp(3,Norb,Norb)
+  complex(c_double),dimension(Norb,Norb):: vtmp,Wtmp,tmp_j,tmp_s
+
+  !$omp parallel
+  !$omp workshare
+  vk(:,:,:,:)=0.0d0
+  !$omp end workshare
+  !$omp do private(tmp,vtmp,Wtmp,tmp_j,tmp_s,j_dir,l,m,n,k)
+  kloop: do i=1,Nk
+     ! tmp(j,:,:) = U^H vk0(j,:,:,i) U - sym(eig) * U^H sk0(j,:,:,i) U  for j=1..3
+     do j_dir=1,3
+        vtmp(:,:)=vk0(j_dir,:,:,i)
+        call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),vtmp,Norb,uni(:,:,i),Norb,(0.0d0,0.0d0),Wtmp,Norb)
+        call zgemm('C','N',Norb,Norb,Norb,(1.0d0,0.0d0),uni(:,:,i),Norb,Wtmp,Norb,(0.0d0,0.0d0),tmp_j,Norb)
+        vtmp(:,:)=sk0(j_dir,:,:,i)
+        call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),vtmp,Norb,uni(:,:,i),Norb,(0.0d0,0.0d0),Wtmp,Norb)
+        call zgemm('C','N',Norb,Norb,Norb,(1.0d0,0.0d0),uni(:,:,i),Norb,Wtmp,Norb,(0.0d0,0.0d0),tmp_s,Norb)
+        do n=1,Norb
+           do k=1,Norb
+              tmp(j_dir,k,n)=tmp_j(k,n)-0.5d0*(eig(k,i)+eig(n,i))*tmp_s(k,n)
+           end do
+        end do
+     end do
+     !rotate axis
+     band_loop5: do n=1,Norb
+        do k=1,Norb
+           do l=1,3
+              do m=1,3
+                 vk(m,k,n,i)=vk(m,k,n,i)+mrot(m,l)*dble(tmp(l,k,n))
+              end do
+           end do
+        end do
+     end do band_loop5
+  end do kloop
+  !$omp end do
+  !$omp end parallel
+end subroutine get_vnm_mlo
 
 subroutine gen_tr_greenw_0(trGk,wl,eig,mu,delta,Nk,Nw,Norb) bind(C)
   !> This function obtain orbital(band) trace of green function

@@ -336,8 +336,9 @@ def test_imass_band_tensor_is_symmetric():
     ham_r[1, 1, 0] = np.conj(ham_r[0, 0, 1])
     klist = np.array([[0.13, 0.27, 0.0], [0.41, -0.19, 0.0]])
     mrot = np.array([[1.0, 0.2, 0.0], [0.0, 1.1, 0.0], [0.0, 0.0, 0.9]])
-    _, uni = F.get_eig(F.gen_ham(klist, ham_r, rvec))
-    imass = F.get_imassk(F.get_imass0(klist, ham_r, rvec), mrot, uni)
+    eig, uni = F.get_eig(F.gen_ham(klist, ham_r, rvec))
+    imass = F.get_imassk(F.get_imass0(klist, ham_r, rvec), mrot, uni,
+                         F.get_vlm0(klist, ham_r, rvec), eig)
     assert np.abs(imass - imass.transpose(0, 1, 3, 2)).max() < 1e-12
     assert np.abs(imass).max() > 0.0
 

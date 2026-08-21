@@ -60,6 +60,26 @@ _lib.get_vnm.argtypes = [
     POINTER(c_int64), POINTER(c_int64)
 ]
 _lib.get_vnm.restype = None
+_lib.get_veloc_mlo.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    POINTER(c_int64), POINTER(c_int64)
+]
+_lib.get_veloc_mlo.restype = None
+_lib.get_vnm_mlo.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    POINTER(c_int64), POINTER(c_int64)
+]
+_lib.get_vnm_mlo.restype = None
 _lib.get_imass0.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.complex128),
     np.ctypeslib.ndpointer(dtype=np.float64),
@@ -71,11 +91,25 @@ _lib.get_imass0.restype = None
 _lib.get_imassk.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.float64),
     np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
     np.ctypeslib.ndpointer(dtype=np.float64),
     np.ctypeslib.ndpointer(dtype=np.complex128),
     POINTER(c_int64), POINTER(c_int64)
 ]
 _lib.get_imassk.restype = None
+_lib.get_imassk_mlo.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.complex128),
+    POINTER(c_int64), POINTER(c_int64)
+]
+_lib.get_imassk_mlo.restype = None
 _lib.get_qshift_.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.float64),
     np.ctypeslib.ndpointer(dtype=np.float64),
@@ -215,38 +249,64 @@ def get_vlm0(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray) -> np.ndarr
                   i64(Nk), i64(Nr), i64(Norb))
     return vk
 
-def get_vk(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray) -> np.ndarray:
+def get_vk(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray,
+           sk0: np.ndarray | None = None, eig: np.ndarray | None = None) -> np.ndarray:
     """
     @fn get_vk
     @brief Transform orbital-basis velocity matrices to band-basis velocity expectation values.
-    @param   vk0: Unrotated velocity matrices [Nk, Norb, Norb, 3] complex128
+    @param   vk0: Unrotated velocity matrices dH/dk [Nk, Norb, Norb, 3] complex128
     @param  mrot: Rotation matrix (lattice-to-Cartesian) [3, 3] float64
     @param   uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param   sk0: Overlap derivative dS/dk [Nk, Norb, Norb, 3] complex128 for a non-orthogonal
+                  (MLO) basis; None for an orthogonal basis
+    @param   eig: Eigenvalues [Nk, Norb] float64, required together with sk0
     @return   vk: Band velocities [Nk, Norb, 3] float64
     """
     Nk = len(uni)
     Norb = uni.shape[1]
     vk = np.zeros((Nk, Norb, 3), dtype=np.float64)
-    _lib.get_veloc(vk, vk0, mrot, uni, i64(Nk), i64(Norb))
+    if sk0 is None:
+        _lib.get_veloc(vk, vk0, mrot, uni, i64(Nk), i64(Norb))
+    else:
+        if eig is None:
+            raise ValueError("get_vk: eig is required when sk0 (non-orthogonal basis) is given")
+        _lib.get_veloc_mlo(vk, vk0, sk0, eig, mrot, uni, i64(Nk), i64(Norb))
     return vk
 
-def get_vnm(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray) -> np.ndarray:
+def get_vnm(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray,
+            sk0: np.ndarray | None = None, eig: np.ndarray | None = None) -> np.ndarray:
     """
     @fn get_vnm
     @brief Compute inter-band velocity matrix elements v_{nm}(k) for all band pairs and Cartesian directions.
-    @param   vk0: Unrotated velocity matrices [Nk, Norb, Norb, 3] complex128
+    @param   vk0: Unrotated velocity matrices dH/dk [Nk, Norb, Norb, 3] complex128
     @param  mrot: Rotation matrix (lattice-to-Cartesian) [3, 3] float64
     @param   uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param   sk0: Overlap derivative dS/dk [Nk, Norb, Norb, 3] complex128 for a non-orthogonal
+                  (MLO) basis; None for an orthogonal basis
+    @param   eig: Eigenvalues [Nk, Norb] float64, required together with sk0
     @return   vnm: Inter-band velocity matrix elements [Nk, Norb, Norb, 3] complex128
     """
     Nk = len(uni)
     Norb = uni.shape[1]
     vk = np.zeros((Nk, Norb, Norb, 3), dtype=np.complex128)
-    _lib.get_vnm(vk, vk0, mrot, uni, i64(Nk), i64(Norb))
+    if sk0 is None:
+        _lib.get_vnm(vk, vk0, mrot, uni, i64(Nk), i64(Norb))
+    else:
+        if eig is None:
+            raise ValueError("get_vnm: eig is required when sk0 (non-orthogonal basis) is given")
+        _lib.get_vnm_mlo(vk, vk0, sk0, eig, mrot, uni, i64(Nk), i64(Norb))
     return vk
 
+def _get_sk0(klist: np.ndarray, S_r, rvec: np.ndarray) -> np.ndarray | None:
+    """dS/dk in the orbital basis, or None for an orthogonal basis (S_r empty/None).
+    S(k) is built by the same Fourier sum as H(k), so get_vlm0 differentiates it too."""
+    if S_r is None or len(S_r) == 0:
+        return None
+    return get_vlm0(klist, S_r, rvec)
+
 def get_vnmk(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
-             mrot: np.ndarray, uni: np.ndarray) -> np.ndarray:
+             mrot: np.ndarray, uni: np.ndarray, S_r=None,
+             eig: np.ndarray | None = None) -> np.ndarray:
     """
     @fn get_vnmk
     @brief Convenience wrapper: compute inter-band velocity matrix elements by composing get_vlm0 and get_vnm.
@@ -255,13 +315,17 @@ def get_vnmk(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
     @param   rvec: Real-space displacement vectors [Nr, 3] float64
     @param   mrot: Rotation matrix (lattice-to-Cartesian) [3, 3] float64
     @param    uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param    S_r: Real-space overlap blocks [Nr, Norb, Norb] for a non-orthogonal (MLO) basis;
+                   None or [] for an orthogonal basis
+    @param    eig: Eigenvalues [Nk, Norb] float64, required together with S_r
     @return   vnm: Inter-band velocity matrix elements [Nk, Norb, Norb, 3] complex128
     """
     vk0 = get_vlm0(klist, ham_r, rvec)
-    return get_vnm(vk0, mrot, uni)
+    return get_vnm(vk0, mrot, uni, _get_sk0(klist, S_r, rvec), eig)
 
 def get_veloc(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
-              mrot: np.ndarray, uni: np.ndarray) -> np.ndarray:
+              mrot: np.ndarray, uni: np.ndarray, S_r=None,
+              eig: np.ndarray | None = None) -> np.ndarray:
     """
     @fn get_veloc
     @brief Convenience wrapper: compute band-diagonal velocity expectation values by composing get_vlm0 and get_vk.
@@ -270,10 +334,13 @@ def get_veloc(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
     @param   rvec: Real-space displacement vectors [Nr, 3] float64
     @param   mrot: Rotation matrix (lattice-to-Cartesian) [3, 3] float64
     @param    uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param    S_r: Real-space overlap blocks [Nr, Norb, Norb] for a non-orthogonal (MLO) basis;
+                   None or [] for an orthogonal basis
+    @param    eig: Eigenvalues [Nk, Norb] float64, required together with S_r
     @return    vk: Band velocities [Nk, Norb, 3] float64
     """
     vk0 = get_vlm0(klist, ham_r, rvec)
-    return get_vk(vk0, mrot, uni)
+    return get_vk(vk0, mrot, uni, _get_sk0(klist, S_r, rvec), eig)
 
 def get_imass0(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray) -> np.ndarray:
     """
@@ -291,23 +358,38 @@ def get_imass0(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray) -> np.nda
                     i64(Nk), i64(Nr), i64(Norb))
     return imass0
 
-def get_imassk(imass0: np.ndarray, mrot: np.ndarray, uni: np.ndarray) -> np.ndarray:
+def get_imassk(imass0: np.ndarray, mrot: np.ndarray, uni: np.ndarray,
+               vk0: np.ndarray, eig: np.ndarray,
+               smass0: np.ndarray | None = None, sk0: np.ndarray | None = None) -> np.ndarray:
     """
     @fn get_imassk
-    @brief Rotate the inverse effective mass tensor from orbital basis into band basis.
-    @param  imass0: Unrotated inverse mass tensor [Nk, Norb, Norb, 3, 3] complex128 (output of get_imass0)
+    @brief Rotate the inverse effective mass tensor from orbital basis into band basis,
+           including the interband (2nd-order perturbation) term
+           2 sum_{m!=n} Re[H~^a_nm H~^b_mn]/(eps_n-eps_m), which needs dH/dk and eig.
+           Band pairs degenerate to within 1e-6 eV are skipped (the mass diverges there).
+    @param  imass0: Unrotated d2H/dk2 [Nk, Norb, Norb, 3, 3] complex128 (output of get_imass0)
     @param    mrot: Rotation matrix (lattice-to-Cartesian) [3, 3] float64
     @param     uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param     vk0: Orbital-basis dH/dk [Nk, Norb, Norb, 3] complex128 (output of get_vlm0)
+    @param     eig: Eigenvalues [Nk, Norb] float64
+    @param  smass0: d2S/dk2 [Nk, Norb, Norb, 3, 3] for a non-orthogonal (MLO) basis; None otherwise
+    @param     sk0: dS/dk [Nk, Norb, Norb, 3] for a non-orthogonal (MLO) basis; None otherwise
     @return  imass: Band-basis inverse effective mass tensor [Nk, Norb, 3, 3] float64
     """
     Nk = len(uni)
     Norb = uni.shape[1]
     imass = np.zeros((Nk, Norb, 3, 3), dtype=np.float64)
-    _lib.get_imassk(imass, imass0, mrot, uni, i64(Nk), i64(Norb))
+    if smass0 is None and sk0 is None:
+        _lib.get_imassk(imass, imass0, vk0, eig, mrot, uni, i64(Nk), i64(Norb))
+    else:
+        if smass0 is None or sk0 is None:
+            raise ValueError("get_imassk: smass0 and sk0 must be given together (non-orthogonal basis)")
+        _lib.get_imassk_mlo(imass, imass0, smass0, vk0, sk0, eig, mrot, uni, i64(Nk), i64(Norb))
     return imass
 
 def get_mass(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray, mrot: np.ndarray,
-             uni: np.ndarray, sw_imass: bool = False) -> np.ndarray:
+             uni: np.ndarray, sw_imass: bool = False, S_r=None,
+             eig: np.ndarray | None = None) -> np.ndarray:
     """
     @fn get_mass
     @brief Compute the effective mass tensor or its inverse for all bands at each k-point.
@@ -316,12 +398,22 @@ def get_mass(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray, mrot: np.nd
     @param     rvec: Real-space displacement vectors [Nr, 3] float64
     @param     mrot: Rotation matrix (lattice-to-Cartesian) [3, 3] float64
     @param      uni: Eigenvector matrices [Nk, Norb, Norb] complex128
-    @param sw_imass: If True, return inverse mass (imass) [Nk, Norb, 3, 3]; if False, return mass [Nk, Norb, 3, 3]
+    @param sw_imass: If True, return inverse mass (imass) [Nk, Norb, 3, 3]; if False, return mass
+    @param      S_r: Real-space overlap blocks [Nr, Norb, Norb] for a non-orthogonal (MLO) basis;
+                     None or [] for an orthogonal basis
+    @param      eig: Eigenvalues [Nk, Norb] float64 -- REQUIRED (the interband term needs them)
     @return   mass: Effective mass or inverse mass tensor [Nk, Norb, 3, 3]
     """
     import scipy.linalg as sclin
+    if eig is None:
+        raise ValueError("get_mass: eig is required (the interband term of the mass needs it)")
     imass0 = get_imass0(klist, ham_r, rvec)
-    imass = get_imassk(imass0, mrot, uni)
+    vk0 = get_vlm0(klist, ham_r, rvec)
+    if S_r is None or len(S_r) == 0:
+        imass = get_imassk(imass0, mrot, uni, vk0, eig)
+    else:
+        imass = get_imassk(imass0, mrot, uni, vk0, eig,
+                           get_imass0(klist, S_r, rvec), get_vlm0(klist, S_r, rvec))
     if sw_imass:
         return imass
     else:
