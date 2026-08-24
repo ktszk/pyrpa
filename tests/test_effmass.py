@@ -35,6 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import libs.flibs as F
+import libs.plibs as P
 import _tools as T
 
 FD_STEP = 2.0e-4          # h for the finite-difference Hessian
@@ -227,6 +228,354 @@ def test_eig_required():
     klist = _klist(3)
     _, uni = _eig_uni(klist, ham_r, S_r, rvec)
     T.assert_raises(ValueError, F.get_mass, klist, ham_r, rvec, np.eye(3), uni, True)
+
+
+def test_tilted_cylinder_orbit_area_follows_inverse_cosine():
+    """A quasi-2D cylinder has A_ext(theta) = A_ext(0) / cos(theta)."""
+    rvec = np.array(
+        [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0],
+         [0.0, 1.0, 0.0], [0.0, -1.0, 0.0]],
+        dtype=np.float64,
+    )
+    ham_r = np.full((4, 1, 1), -1.0, dtype=np.complex128)
+    mesh, mu, abz = 160, -3.0, 4.0 * np.pi**2
+    areas = []
+    for theta in (0.0, 35.0, 45.0):
+        rotmat = P.make_rotmat(theta, 0.0)
+        scan, _ = P.scan_fs_area(mesh, rvec, ham_r, [], rotmat, mu, abz, meshkz=9)
+        kz_arr, area_arr = np.asarray(scan[0]).T
+        candidates = P.find_extremal_kz(
+            kz_arr, area_arr, 0, mesh, rvec, ham_r, [], rotmat, mu, abz,
+        )
+        assert candidates == ([0.0, 0.5] if theta == 0.0 else [0.0])
+        eig = P.get_eigs_2d(mesh, rvec, ham_r, [], rotmat, candidates[0])
+        contours, bands = P.get_kf_points(eig, mesh, mu, candidates[0])
+        areas.append(P.get_band_area(contours, bands, 0, abz))
+    for theta, area in zip((35.0, 45.0), areas[1:]):
+        assert np.isclose(area / areas[0], 1.0 / np.cos(np.deg2rad(theta)), rtol=3e-3)
+
+
+def _square_cylinder():
+    """One-orbital square lattice with in-plane hoppings only: a cylinder along c."""
+    rvec = np.array(
+        [[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0],
+         [0.0, 1.0, 0.0], [0.0, -1.0, 0.0]],
+        dtype=np.float64,
+    )
+    return rvec, np.full((4, 1, 1), -1.0, dtype=np.complex128)
+
+
+_HEX = np.array([[3.0, 0.0, 0.0], [-1.5, 1.5 * np.sqrt(3.0), 0.0], [0.0, 0.0, 5.0]])
+
+
+def test_slice_area_factor_is_the_reciprocal_cell_area():
+    """At rotmat=I the Jacobian must be |b1 x b2|, not 4*pi^2/(|a1||a2|)."""
+    for avec in (np.diag([3.0, 4.0, 5.0]), _HEX):
+        bvec = P.get_bvec(avec)
+        exact = np.linalg.norm(np.cross(bvec[0], bvec[1]))
+        assert np.isclose(P.slice_area_factor(np.eye(3), bvec), exact, rtol=1e-12)
+    # orthorhombic is the case the old hard-coded formula got right
+    bvec = P.get_bvec(np.diag([3.0, 4.0, 5.0]))
+    assert np.isclose(P.slice_area_factor(np.eye(3), bvec), 4.0 * np.pi**2 / 12.0)
+    # a hexagonal cell is NOT: 4*pi^2/(a*a) misses the 1/sin(gamma)
+    bvec = P.get_bvec(_HEX)
+    assert not np.isclose(P.slice_area_factor(np.eye(3), bvec), 4.0 * np.pi**2 / 9.0)
+    # a cubic cell has an isotropic Jacobian, so tilting cannot change it
+    bvec = P.get_bvec(np.eye(3))
+    facs = [P.slice_area_factor(P.make_rotmat_bfield(t, 20.0, bvec), bvec)
+            for t in (0.0, 30.0, 60.0)]
+    assert np.allclose(facs, 4.0 * np.pi**2)
+
+
+def test_slice_is_perpendicular_to_the_requested_field():
+    """make_rotmat_bfield must realise the requested (theta,phi) for any cell shape."""
+    for avec in (np.diag([1.0, 1.0, 3.0]), _HEX, np.eye(3)):
+        bvec = P.get_bvec(avec)
+        for theta, phi in ((0.0, 0.0), (25.0, 0.0), (45.0, 30.0), (70.0, 115.0)):
+            th, ph = np.deg2rad(theta), np.deg2rad(phi)
+            want = np.array([np.sin(th) * np.cos(ph), np.sin(th) * np.sin(ph), np.cos(th)])
+            got = P.field_direction(P.make_rotmat_bfield(theta, phi, bvec), avec)
+            assert np.allclose(got, want, atol=1e-12)
+    # the plain fractional rotation only gets it right for a cubic cell
+    bvec, avec = P.get_bvec(np.diag([1.0, 1.0, 3.0])), np.diag([1.0, 1.0, 3.0])
+    got = P.field_direction(P.make_rotmat(45.0, 0.0), avec)
+    assert np.isclose(np.degrees(np.arccos(got[2])), np.degrees(np.arctan(1.0 / 3.0)))
+
+
+def test_tetragonal_cylinder_orbit_area_follows_inverse_cosine():
+    """Same 1/cos(theta) law as the cubic test, but for c/a=3 where the old
+    fixed ABZ and fractional rotation both failed."""
+    rvec, ham_r = _square_cylinder()
+    avec = np.diag([1.0, 1.0, 3.0])
+    bvec = P.get_bvec(avec)
+    mesh, mu = 240, -3.0
+    P.open_contour_report()
+    areas = {}
+    for theta in (0.0, 15.0, 30.0, 45.0):
+        rotmat = P.make_rotmat_bfield(theta, 0.0, bvec)
+        abz = P.slice_area_factor(rotmat, bvec)
+        eig = P.get_eigs_2d(mesh, rvec, ham_r, [], rotmat, 0.0)
+        areas[theta] = P.get_band_area(*P.get_kf_points(eig, mesh, mu, 0.0), 0, abz)
+    for theta in (15.0, 30.0):
+        assert np.isclose(areas[theta] / areas[0.0],
+                          1.0 / np.cos(np.deg2rad(theta)), rtol=1e-3)
+    # at 45 deg the elongated orbit no longer fits in the slice box: it must be
+    # reported as unavailable rather than silently truncated
+    assert areas[45.0] is None
+    assert P.open_contour_report() == 1
+
+
+def test_open_contour_is_rejected():
+    """A pocket straddling the zone boundary comes back as open pieces whose
+    shoelace sum is not the orbit area."""
+    rvec, ham_r = _square_cylinder()
+    mesh, mu, abz = 200, 1.0, 4.0 * np.pi**2   # hole pocket around the zone corner
+    eig = P.get_eigs_2d(mesh, rvec, ham_r, [], np.eye(3), 0.0)
+    contours, bands = P.get_kf_points(eig, mesh, mu, 0.0)
+    assert not all(np.allclose(c[0], c[-1]) for c in contours[0])
+    P.open_contour_report()
+    assert P.get_band_area(contours, bands, 0, abz) is None
+    assert P.open_contour_report() == 1
+    truncated = P.get_band_area(contours, bands, 0, abz, sw_strict=False)
+    exact = 0.30831 * abz          # fraction of the BZ with eps > mu
+    assert truncated < 0.5 * exact  # ... and it is wrong by a factor of ~3.6
+
+
+def test_zone_boundary_extremal_gate():
+    """kz=0.5 is extremal iff rotmat[2] is a reciprocal lattice vector, and kz=0 is
+    only a candidate when the scan actually reaches it."""
+    rvec, ham_r = _square_cylinder()
+    kz = np.linspace(0.0, 0.5, 6)
+    S = 1.0 + 0.1 * kz                     # monotone: no interior extremum to refine
+    for theta, want in ((0.0, [0.0, 0.5]), (90.0, [0.0, 0.5]), (45.0, [0.0])):
+        got = P.find_extremal_kz(kz, S, 0, 4, rvec, ham_r, [],
+                                 P.make_rotmat(theta, 0.0), 0.0, 1.0)
+        assert [round(k, 6) for k in got] == want
+    # a band whose FS only appears at finite kz: kz_arr[0] is an ordinary point
+    kz2 = np.linspace(0.2, 0.5, 6)
+    got = P.find_extremal_kz(kz2, 1.0 + 0.1 * kz2, 0, 4, rvec, ham_r, [],
+                             np.eye(3), 0.0, 1.0)
+    assert [round(k, 6) for k in got] == [0.5]
+
+
+def _cubic_tb(tx=1.0, ty=1.0, tz=1.0):
+    """One-orbital tight binding on a cubic cell: eps = -2 sum_i t_i cos(k_i a)."""
+    rvec = np.array([[1, 0, 0], [-1, 0, 0], [0, 1, 0],
+                     [0, -1, 0], [0, 0, 1], [0, 0, -1]], dtype=np.float64)
+    ham_r = np.array([-tx, -tx, -ty, -ty, -tz, -tz],
+                     dtype=np.complex128).reshape(6, 1, 1)
+    return rvec, ham_r
+
+
+def _extremal_orbits(rvec, ham_r, avec, mu, theta, phi, meshkz=25, dk=2 * np.pi / 240,
+                     egrid=None):
+    """The full plane-slicing pipeline, exactly as main.get_dhva_band drives it."""
+    bvec = P.get_bvec(avec)
+    bhat = P.bfield_hat(theta, phi)
+    kf = P.fs_cartesian_points(rvec, ham_r, [], avec, mu, mesh=40, egrid=egrid)
+    radius, dmax = P.fs_extent_along(kf, bhat, avec)
+    period = P.slice_period(bvec, bhat)
+    d_end = min(dmax, 0.5 * period) if period is not None else dmax
+    sym = d_end if (period is not None and 0.5 * period <= dmax * (1 + 1e-9)) else None
+    d_arr = np.linspace(0.0, d_end, meshkz, True)
+    _, cache, _, _ = P.scan_plane_area(rvec, ham_r, [], avec, mu, bhat, d_arr,
+                                       2.6 * radius, dk, egrid=egrid)
+    ext = [e for br in P.track_orbit_branches(cache, d_arr)
+           for e in P.branch_extrema(br, d_end=sym)]
+    return P.dedup_extremal_orbits(ext, bvec)
+
+
+def test_slice_period_commensurate_and_incommensurate():
+    """The scan range must come from a real commensuration, never from a near-miss."""
+    cub = P.get_bvec(np.eye(3))
+    assert np.isclose(P.slice_period(cub, P.bfield_hat(0.0, 0.0)), 2 * np.pi)
+    assert np.isclose(P.slice_period(cub, P.bfield_hat(90.0, 0.0)), 2 * np.pi)
+    assert P.slice_period(cub, P.bfield_hat(35.0, 17.0)) is None
+    # fcc: B along [111] repeats with b1.B_hat
+    fcc = P.get_bvec(4.0 * np.array([[0, .5, .5], [.5, 0, .5], [.5, .5, 0]]))
+    n = np.ones(3) / np.sqrt(3.0)
+    assert np.isclose(P.slice_period(fcc, n), abs(fcc[0].dot(n)))
+    # a field a whisker off [111] is incommensurate, and must not report a tiny period
+    off = np.array([1.0, 1.0, 1.0 + 1e-3]); off /= np.linalg.norm(off)
+    assert P.slice_period(fcc, off) is None
+
+
+def test_plane_slice_reproduces_the_tilted_cylinder_law():
+    """A(theta) = A(0)/cos(theta) at a tilt where the orbit no longer fits in one cell."""
+    rvec = np.array([[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0],
+                     [0.0, 1.0, 0.0], [0.0, -1.0, 0.0]], dtype=np.float64)
+    ham_r = np.full((4, 1, 1), -1.0, dtype=np.complex128)
+    avec, mu, dk = np.diag([1.0, 1.0, 3.0]), -3.0, 2 * np.pi / 240
+    a0 = None
+    for theta in (0.0, 60.0, 75.0):
+        bhat = P.bfield_hat(theta, 0.0)
+        orbits, n_open, _, _ = P.find_plane_orbits(rvec, ham_r, [], avec, mu, bhat,
+                                                   0.0, 4.0, dk, ngrow=4)
+        o = min(orbits, key=lambda o: np.linalg.norm(o['cen2d']))
+        if a0 is None:
+            a0 = o['area']
+        assert np.isclose(o['area'] / a0, 1.0 / np.cos(np.deg2rad(theta)), rtol=1e-3)
+
+
+def test_plane_slice_is_isotropic_for_a_spherical_pocket():
+    """A nearly free-electron pocket has an angle-independent extremal orbit, at
+    field directions with no commensurate relation to the lattice."""
+    rvec, ham_r = _cubic_tb()
+    avec, mu = np.eye(3), -5.9
+    areas = [max(e['area'] for e in _extremal_orbits(rvec, ham_r, avec, mu, th, ph))
+             for th, ph in ((0.0, 0.0), (40.0, 17.0), (54.7356, 45.0), (71.3, 133.0))]
+    assert max(areas) / min(areas) - 1.0 < 5e-3
+
+
+def test_corrugated_cylinder_gives_belly_and_neck():
+    """Both extremal orbits of a warped cylinder, against a 1D quadrature reference."""
+    from scipy.integrate import quad
+
+    def exact(mu_eff):
+        xm = np.arccos(np.clip(mu_eff - 1.0, -1.0, 1.0)) / (2 * np.pi)
+        y0 = lambda x: np.arccos(np.clip(mu_eff - np.cos(2 * np.pi * x), -1.0, 1.0)) / (2 * np.pi)
+        return 4 * quad(y0, 0.0, xm, limit=400)[0] * 4 * np.pi**2
+
+    tz, mu = 0.1, -3.0
+    rvec, ham_r = _cubic_tb(tz=tz)
+    got = sorted(e['area'] for e in
+                 _extremal_orbits(rvec, ham_r, np.eye(3), mu, 0.0, 0.0,
+                                  dk=2 * np.pi / 480))
+    want = sorted([exact(-(mu + 2 * tz) / 2.0), exact(-(mu - 2 * tz) / 2.0)])
+    assert len(got) == 2, f'expected belly and neck, got {got}'
+    for g, w in zip(got, want):
+        assert np.isclose(g, w, rtol=2e-4)
+
+
+def test_energy_grid_interpolation_matches_direct_diagonalisation():
+    """The interpolated sweep must reproduce the exact one it replaces."""
+    tz, mu = 0.1, -3.0
+    rvec, ham_r = _cubic_tb(tz=tz)
+    direct = sorted(e['area'] for e in
+                    _extremal_orbits(rvec, ham_r, np.eye(3), mu, 0.0, 0.0))
+    egrid = P.build_fs_energy_grid(rvec, ham_r, [], mu, mesh=80)
+    assert egrid is not None and egrid['bands'] == [0]
+    interp = sorted(e['area'] for e in
+                    _extremal_orbits(rvec, ham_r, np.eye(3), mu, 0.0, 0.0, egrid=egrid))
+    assert len(interp) == len(direct)
+    for a, b in zip(interp, direct):
+        assert np.isclose(a, b, rtol=1e-4)
+
+
+def test_dedup_separates_zone_copies_from_neighbouring_extrema():
+    """The two questions the reduction must not confuse: 'same orbit, other zone?'
+    is settled by the centre, 'same frequency, other place?' by the area."""
+    bvec = P.get_bvec(np.diag([2.8, 2.8, 6.5]))
+    rec = lambda band, area, cen: {'band': band, 'area': area, 'd': 0.0,
+                                   'cen3d': np.asarray(cen, dtype=float)}
+    base = rec(0, 1.0000, [0.3, 0.0, 0.0])
+    # (a) exact lattice copy: same orbit, however far away it sits
+    copy = rec(0, 1.0004, base['cen3d'] + bvec[0] - 2 * bvec[2])
+    assert len(P.dedup_extremal_orbits([base, copy], bvec, tol_k=0.05)) == 1
+    # (b) neighbouring extremum of the same tube, area within 0.1%: must survive.
+    #     The old area-only rule (rtol 2e-3) collapsed exactly this case.
+    neigh = rec(0, 1.0010, [0.3, 0.0, 0.4])
+    assert len(P.dedup_extremal_orbits([base, neigh], bvec, tol_k=0.05)) == 2
+    # (c) point-group image: no lattice vector relates them, but one frequency
+    image = rec(0, 1.0000, [0.0, 0.3, 0.0])
+    assert len(P.dedup_extremal_orbits([base, image], bvec, tol_k=0.05)) == 1
+    # (d) a different band is never merged
+    other = rec(1, 1.0000, [0.3, 0.0, 0.0])
+    assert len(P.dedup_extremal_orbits([base, other], bvec, tol_k=0.05)) == 2
+    # the reduced centre is what stage 1 compares, and it must fold copies together
+    inv = np.linalg.inv(bvec)
+    assert np.allclose(P.orbit_key(base, inv), P.orbit_key(copy, inv), atol=1e-9)
+
+
+def test_corrugated_cylinder_extrema_survive_the_reduction():
+    """Belly and neck of one tube differ by 35% here, but the reduction must keep
+    both while folding away the copies the scan sees in neighbouring zones."""
+    tz, mu = 0.1, -3.0
+    rvec, ham_r = _cubic_tb(tz=tz)
+    ext = _extremal_orbits(rvec, ham_r, np.eye(3), mu, 0.0, 0.0)
+    assert len(ext) == 2
+    assert all('_key' not in e for e in ext)
+
+
+def test_encloses_origin():
+    """The test that decides whether a section through the centre is a closed orbit."""
+    ring = lambda r, c=(0.0, 0.0): np.stack(
+        [c[0] + r * np.cos(np.linspace(0, 2 * np.pi, 97)),
+         c[1] + r * np.sin(np.linspace(0, 2 * np.pi, 97))], axis=1)
+    assert P.encloses_origin(ring(1.0))
+    assert not P.encloses_origin(ring(0.4, c=(2.0, 0.0)))     # off to one side
+    assert not P.encloses_origin(ring(0.4, c=(-2.0, 0.0)))    # and to the other
+    assert P.encloses_origin(ring(3.0, c=(1.0, 1.0)))         # big and off-centre
+    assert not P.encloses_origin(ring(1.0, c=(1.5, 0.0)))     # just misses
+    # a contour whose bounding box contains the origin but which does not
+    horseshoe = np.array([[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [0.5, 1.0],
+                          [0.5, -0.5], [-1.0, -0.5], [-1.0, -1.0]])
+    assert not P.encloses_origin(horseshoe)
+
+
+def test_open_orbit_is_recognised_not_merely_discarded():
+    """A section that does not close is a physical statement, not a failure: it says
+    the orbit is open and carries no dHvA oscillation. Cutting a cylinder lengthwise
+    is the simplest case."""
+    rvec = np.array([[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0],
+                     [0.0, 1.0, 0.0], [0.0, -1.0, 0.0]], dtype=np.float64)
+    ham_r = np.full((4, 1, 1), -1.0, dtype=np.complex128)
+    avec, mu, dk = np.diag([1.0, 1.0, 3.0]), -3.0, 2 * np.pi / 240
+
+    def probe(theta):
+        orbits, _, _, open_bands = P.find_plane_orbits(
+            rvec, ham_r, [], avec, mu, P.bfield_hat(theta, 0.0), 0.0, 4.0, dk, ngrow=4)
+        return len(orbits), open_bands
+
+    n, open_bands = probe(0.0)          # B along the tube: a closed cross-section
+    assert n == 1 and open_bands == set()
+    n, open_bands = probe(60.0)         # still closed, only wider
+    assert n == 1 and open_bands == set()
+    n, open_bands = probe(90.0)         # B across the tube: the section runs away
+    assert n == 0 and open_bands == {0}
+
+
+def test_follow_orbit_carries_an_orbit_to_the_next_angle():
+    """An orbit already known must not have to be rediscovered: following it from its
+    own centre must land on the same orbit at the next angle, belly and neck alike."""
+    tz, mu = 0.1, -3.0
+    rvec, ham_r = _cubic_tb(tz=tz)
+    avec, bvec, dk = np.eye(3), P.get_bvec(np.eye(3)), 2 * np.pi / 240
+    egrid = P.build_fs_energy_grid(rvec, ham_r, [], mu, mesh=120)
+    seeds = _extremal_orbits(rvec, ham_r, avec, mu, 0.0, 0.0, egrid=egrid)
+    assert len(seeds) == 2                       # belly and neck of the warped tube
+    bhat = P.bfield_hat(10.0, 0.0)
+    kf = P.fs_cartesian_points(rvec, ham_r, [], avec, mu, mesh=40, egrid=egrid)
+    radius, dmax = P.fs_extent_along(kf, bhat, avec)
+    step = min(dmax, 0.5 * P.slice_period(bvec, P.bfield_hat(0.0, 0.0))) / 24
+    got = []
+    for sd in seeds:
+        f = P.follow_orbit(sd, rvec, ham_r, [], avec, mu, bhat, 2.6 * radius, dk,
+                           step, egrid=egrid)
+        assert f is not None, f"lost the orbit at {sd['area']:.4f}"
+        assert f['band'] == sd['band']
+        got.append(f['area'])
+    # a tube tilted by theta has A -> A/cos(theta) to leading order
+    for a, s in zip(sorted(got), sorted(e['area'] for e in seeds)):
+        assert np.isclose(a, s / np.cos(np.deg2rad(10.0)), rtol=5e-3)
+
+
+def test_follow_orbit_returns_none_when_the_orbit_is_gone():
+    """Following must fail cleanly rather than latch onto whatever else is nearby.
+    Turning B across the tube leaves the section open, so the belly has no successor."""
+    tz, mu = 0.1, -3.0
+    rvec, ham_r = _cubic_tb(tz=tz)
+    avec, dk = np.eye(3), 2 * np.pi / 240
+    seeds = _extremal_orbits(rvec, ham_r, avec, mu, 0.0, 0.0)
+    belly = max(seeds, key=lambda e: e['area'])
+    assert P.follow_orbit(belly, rvec, ham_r, [], avec, mu, P.bfield_hat(90.0, 0.0),
+                          8.0, dk, 0.1) is None
+    # a periodic image of the same orbit is the same orbit, and must still be found
+    image = dict(belly)
+    image['cen3d'] = belly['cen3d'] + np.array([0.0, 0.0, 2 * np.pi])
+    f = P.follow_orbit(image, rvec, ham_r, [], avec, mu, P.bfield_hat(0.0, 0.0),
+                       4.0, dk, 0.1)
+    assert f is not None and np.isclose(f['area'], belly['area'], rtol=1e-3)
 
 
 if __name__ == '__main__':

@@ -934,9 +934,11 @@ def output_Fk(Nx:int,Ny:int,Nz:int,Nw:int,ham_r,S_r,rvec,plist,mu:float,temp:flo
     info=plibs.output_gap_function(invk,kmap,gap,uni,plist,gap_sym,Nx,sw_soc,invs,slist,iperm=iperm)
 
 
-def get_mass(mesh,rvec,ham_r,S_r,mu:float,de=3.e-6,meshkz=20):
+def get_mass(mesh,rvec,ham_r,S_r,avec,bvec,mu:float,de=3.e-6,meshkz=20):
     """
     calculate cyclotron mass m*_c=hbar^2/2pi (dS/dE) where S is the area of Fermi surface cross section
+    avec/bvec: primitive/reciprocal lattice vectors as rows, used for the slice area
+               Jacobian and to report the field direction RotMat actually describes
     de: energy step for numerical derivative (eV)
     meshkz: number of kz points for coarse scan of S(kz) in [0, pi/2]
     """
@@ -948,11 +950,18 @@ def get_mass(mesh,rvec,ham_r,S_r,mu:float,de=3.e-6,meshkz=20):
         print("Error: kz mesh size (meshkz) is non-positive",flush=True)
         return
 
-    al=alatt[:2]
-    if al[0] <= 0 or al[1] <= 0:
-        print("Error: Lattice constant (al) is non-positive",flush=True)
-        return
-    ABZ=4.*np.pi**2/(al[0]*al[1])
+    # Area Jacobian of the kz-slice spanned by RotMat: |v1 x v2| with v_i = sum_k RotMat[i,k] b_k.
+    # Equals 4*pi^2/(a1*a2) for an orthorhombic cell at RotMat=I, but follows the rotation
+    # and the cell shape otherwise.
+    ABZ=plibs.slice_area_factor(RotMat,bvec)
+    bhat=plibs.field_direction(RotMat,avec)
+    th_B=np.degrees(np.arccos(min(abs(bhat[2]),1.)))
+    ph_B=np.degrees(np.arctan2(bhat[1],bhat[0]))
+    print(f"field direction implied by RotMat: B_hat = "
+          f"({bhat[0]:.4f}, {bhat[1]:.4f}, {bhat[2]:.4f})  "
+          f"theta={th_B:.2f} deg, phi={ph_B:.2f} deg",flush=True)
+    print(f"slice area Jacobian = {ABZ:.6f} AA^-2",flush=True)
+    plibs.open_contour_report()   # clear the counter for this run
 
     # --- Phase 1: coarse scan S(kz) ---
     print("Phase 1: scanning S(kz)...",flush=True)
@@ -997,62 +1006,157 @@ def get_mass(mesh,rvec,ham_r,S_r,mu:float,de=3.e-6,meshkz=20):
             i_max,i_min=np.argmax(mc_vals),np.argmin(mc_vals)
             print(f"  >> Max m* = {mc_vals[i_max]:.4f} m_e  at kz = {kz_vals[i_max]:.4f}",flush=True)
             print(f"  >> Min m* = {mc_vals[i_min]:.4f} m_e  at kz = {kz_vals[i_min]:.4f}",flush=True)
+    n_open=plibs.open_contour_report()
+    if n_open:
+        print(f"Warning: {n_open} orbit(s) discarded: the contour left the 2D slice box, so its "
+              "area is not the orbit area. Increase the cell along the slice normal or use a "
+              "field direction commensurate with the lattice.",flush=True)
 
-def get_dhva_band(mesh,rvec,ham_r,S_r,mu:float,theta_list,phi=0.,meshkz=20):
+def get_dhva_band(mesh,rvec,ham_r,S_r,avec,bvec,mu:float,theta_list,phi=0.,meshkz=20,
+                  grid_mesh=120):
     """
     Calculate dHvA frequency F vs magnetic field polar angle theta.
     F = hbar/(2*pi*e) * A_ext  (Onsager relation)
+    The Fermi surface is sliced by Cartesian planes perpendicular to B, over a window
+    wide enough to close the orbit, so theta/phi may be any real angle: H(k) is exactly
+    periodic in the fractional k it is fed, and the window may span several zones.
+    avec/bvec : primitive/reciprocal lattice vectors as rows
     theta_list: array of polar angles from z-axis [deg]
     phi       : azimuthal angle [deg] (fixes the rotation plane, default 0 = xz-plane)
-    meshkz    : number of kz scan points per angle for the coarse S(kz) scan
+    meshkz    : number of slice offsets scanned per angle
+    grid_mesh : diagonalise once on a grid_mesh^3 fractional grid and interpolate the
+                slices from it (cubic). None diagonalises every slice point instead --
+                exact but far slower; the grid reproduces it to ~1e-5 in the area.
     Returns   : dict  band_idx -> np.ndarray of shape (N, 2) columns=[theta, F[T]]
     """
     import matplotlib.pyplot as plt
-    al=alatt[:2]
-    ABZ=4.*np.pi**2/(al[0]*al[1])
     F_factor=hbar/(2.*np.pi)*1.e20   # AA^-2 -> T (Onsager): hbar[eV*s]/(2pi) * 1e20[AA^-2->m^-2]
+    # keep the in-plane resolution the caller asked for: mesh points across a zone
+    dk=float(np.linalg.norm(bvec,axis=1).min())/mesh
+    egrid=None
+    if grid_mesh:
+        print(f"building the {grid_mesh}^3 band-energy grid...",flush=True)
+        egrid=plibs.build_fs_energy_grid(rvec,ham_r,S_r,mu,mesh=grid_mesh)
+        if egrid is None:
+            print("Error: no band crosses the chemical potential",flush=True)
+            return {}
+        print(f"  bands kept: {[b+1 for b in egrid['bands']]}",flush=True)
+    kf=plibs.fs_cartesian_points(rvec,ham_r,S_r,avec,mu,mesh=40,egrid=egrid)
+    if len(kf)==0:
+        print("Error: no band crosses the chemical potential",flush=True)
+        return {}
 
     all_results={}  # band_idx -> [(theta, F), ...]
+    open_dirs={}    # band_idx -> angles whose central section is an open orbit
+    seeds=[]        # orbits found at earlier angles, followed into the next
+    seed_life=3     # angles a seed survives without being found again
+    n_open_tot=n_rej=0
 
     for theta in theta_list:
-        rotmat=plibs.make_rotmat(theta,phi)
-        S_scan,eig_cache=plibs.scan_fs_area(mesh,rvec,ham_r,S_r,rotmat,mu,ABZ,meshkz)
-
-        for band_idx in S_scan:
-            data=np.array(S_scan[band_idx])
-            kz_arr,S_arr=data[:,0],data[:,1]
-            if len(kz_arr)<3:
+        bhat=plibs.bfield_hat(theta,phi)
+        radius,dmax=plibs.fs_extent_along(kf,bhat,avec)
+        # commensurate B: A(d) repeats with period p and is symmetric about 0 and p/2,
+        # so [0,p/2] is the fundamental domain and both ends are extremal planes.
+        # Incommensurate B: no repeat, only interior dA/dd=0 orbits.
+        period=plibs.slice_period(bvec,bhat)
+        d_end=min(dmax,0.5*period) if period is not None else dmax
+        sym_end=d_end if (period is not None and 0.5*period<=dmax*(1.+1e-9)) else None
+        L0,d_arr=2.6*radius,np.linspace(0.,d_end,meshkz,True)
+        S_scan,orbit_cache,n_open,open_bands=plibs.scan_plane_area(
+            rvec,ham_r,S_r,avec,mu,bhat,d_arr,L0,dk,egrid=egrid)
+        n_open_tot+=n_open
+        for b in open_bands:
+            open_dirs.setdefault(b,[]).append(theta)
+        # follow every orbit through the scan, take dA/dd=0 per branch, then collapse
+        # the copies that differ by a whole reciprocal lattice vector
+        branches=plibs.track_orbit_branches(orbit_cache,d_arr)
+        ext=[e for br in branches for e in plibs.branch_extrema(br,d_end=sym_end)]
+        # one step of the offset scan is the natural scale for telling a zone copy
+        # (same orbit) from a neighbouring extremum of the same tube
+        # Carry orbits found at earlier angles forward: an orbit already known is
+        # followed straight to its extremum from its own centre, without having to be
+        # rediscovered among hundreds of branches. This only ever adds. A seed that
+        # fails to follow is kept for a few more angles rather than dropped at once --
+        # one bad angle would otherwise break the chain for the whole rest of the sweep.
+        step=d_end/max(meshkz-1,1)
+        alive=[]
+        for sd in seeds:
+            f=plibs.follow_orbit(sd,rvec,ham_r,S_r,avec,mu,bhat,L0,dk,step,egrid=egrid)
+            if f is None:
+                if sd.get('_age',0)+1<seed_life:
+                    sd=dict(sd); sd['_age']=sd.get('_age',0)+1
+                    alive.append(sd)
                 continue
-            cand_kz=plibs.find_extremal_kz(kz_arr,S_arr,band_idx,mesh,rvec,ham_r,S_r,rotmat,mu,ABZ)
+            f['_age']=0
+            ext.append(f)
+            alive.append(f)
+        ext=plibs.dedup_extremal_orbits(ext,bvec,tol_k=step)
+        # an area that moves with the sampling window is not an orbit (see the docstring)
+        ext,rejected=plibs.verify_orbits_window(ext,rvec,ham_r,S_r,avec,mu,bhat,
+                                                2.6*radius,dk,egrid=egrid)
+        n_rej+=len(rejected)
+        # seeds come from before the window check: continuity across angles is stronger
+        # evidence than that check, and a rejected orbit must still be able to seed
+        seeds=plibs.dedup_extremal_orbits(ext+alive,bvec,tol_k=step)
+        for e in ext:
+            all_results.setdefault(e['band'],[]).append((theta,e['area']*F_factor))
 
-            for kz_ext in cand_kz:
-                eig=eig_cache.get(kz_ext)
-                if eig is None:
-                    eig=plibs.get_eigs_2d(mesh,rvec,ham_r,S_r,rotmat,kz_ext)
-                v2,blist_ext=plibs.get_kf_points(eig,mesh,mu,kz_ext)
-                S0=plibs.get_band_area(v2,blist_ext,band_idx,ABZ)
-                if not S0:
-                    continue
-                all_results.setdefault(band_idx,[]).append((theta,S0*F_factor))
+        print(f"theta={theta:.1f} deg: FS bands={[b+1 for b in sorted(S_scan)]}, "
+              f"window={L0:.2f} AA^-1, d in [0,{d_end:.3f}]"
+              +("" if period is None else f" (period {period:.3f})")+", "
+              f"{len(branches)} branches -> {len(ext)} extremal orbits"
+              +(f" ({len(rejected)} rejected: window dependent)" if rejected else "")
+              +(f"  [central section OPEN: band(s) {[b+1 for b in sorted(open_bands)]}]"
+                if open_bands else ""),flush=True)
 
-        print(f"theta={theta:.1f} deg: FS bands={[b+1 for b in S_scan.keys()]}",flush=True)
+    for b in sorted(open_dirs):
+        th=open_dirs[b]
+        print(f"Band {b+1}: the CENTRAL section is an OPEN orbit for theta = "
+              f"{', '.join(f'{t:g}' for t in th)} deg -- no dHvA oscillation from the central "
+              "orbit there (it shows up in magnetoresistance instead).",flush=True)
+    if n_open_tot:
+        print(f"Note: {n_open_tot} contour piece(s) never closed in the sampling window; "
+              "open orbits and window-cut copies together.",flush=True)
 
     # convert to arrays
     all_results={k:np.array(v) for k,v in all_results.items()}
+    if not all_results:
+        print("Error: no usable extremal orbit was found at any angle",flush=True)
+        return all_results
 
-    # Group extremal F values by rank (ascending) at each theta and connect same-rank points
-    # across angles to form continuous orbit branches (e.g., belly vs neck orbits)
+    # Connect extremal frequencies into orbit branches across angle by continuity of F
+    # (a rank sort would swap branches wherever two of them cross)
+    def _link_branches(theta_F,tol=0.35):
+        out=[]
+        active=[]                      # (branch index, last F)
+        for th in sorted(theta_F):
+            fs=theta_F[th]
+            pairs=sorted(((abs(f-fp)/max(f,fp,1e-30),ia,ifq)
+                          for ia,(_,fp) in enumerate(active)
+                          for ifq,f in enumerate(fs)),key=lambda t:t[0])
+            used_a,used_f,new_active=set(),set(),[]
+            for cost,ia,ifq in pairs:
+                if cost>tol or ia in used_a or ifq in used_f:
+                    continue
+                used_a.add(ia); used_f.add(ifq)
+                bi=active[ia][0]
+                out[bi].append((th,fs[ifq]))
+                new_active.append((bi,fs[ifq]))
+            for ifq,f in enumerate(fs):
+                if ifq not in used_f:
+                    out.append([(th,f)])
+                    new_active.append((len(out)-1,f))
+            active=new_active
+        return out
+
     fig,ax=plt.subplots()
     prop_cycle=plt.rcParams['axes.prop_cycle'].by_key()['color']
     for ci,band_idx in enumerate(sorted(all_results.keys())):
         d=all_results[band_idx]
         color=prop_cycle[ci % len(prop_cycle)]
-        thetas=np.unique(d[:,0])
-        theta_F={th:sorted(d[d[:,0]==th,1]) for th in thetas}
-        n_branches=max(len(v) for v in theta_F.values())
-        for i in range(n_branches):
-            pts=np.array([(th,flist[i])
-                          for th,flist in sorted(theta_F.items()) if i<len(flist)])
+        theta_F={th:sorted(d[d[:,0]==th,1]) for th in np.unique(d[:,0])}
+        for i,br in enumerate(_link_branches(theta_F)):
+            pts=np.array(br)
             label=f'Band {band_idx+1}' if i==0 else '_nolegend_'
             ax.plot(pts[:,0],pts[:,1],'-o',color=color,markersize=3,label=label)
     ax.set_xlabel('theta (deg)')
@@ -1701,10 +1805,10 @@ def main():
         print(n_carr.sum())
         plibs.get_carrier_num(Nx,rvec,ham_r,S_r,mu,Arot)
     elif option==CalcMode.CYCLOTRON_MASS: #calc cyclotron mass
-        get_mass(Nx,rvec,ham_r,S_r,mu)
+        get_mass(Nx,rvec,ham_r,S_r,avec,bvec,mu)
     elif option==CalcMode.DHVA: #plot dHvA frequency vs angle
         theta_list=np.linspace(0.,90.,40)
-        get_dhva_band(Nx,rvec,ham_r,S_r,mu,theta_list)
+        get_dhva_band(Nx,rvec,ham_r,S_r,avec,bvec,mu,theta_list)
     elif option==CalcMode.ELECTRON_MASS: #mass calc
         klist,spa_length,xticks=plibs.mk_klist(k_sets,kmesh,bvec)
         eig,uni=plibs.get_eigs(klist,ham_r,S_r,rvec)
