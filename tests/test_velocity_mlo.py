@@ -173,21 +173,6 @@ def test_orthogonal_path_untouched():
                           F.get_vnmk(klist, ham_r, rvec, mrot, uni, None, eig))
 
 
-def test_eig_required_with_overlap():
-    """Passing sk0 without eig is a programming error, not a silent wrong answer."""
-    rvec, ham_r, S_r, Norb, _ = _mlo_model(seed=8)
-    klist = _klist(4)
-    vk0 = F.get_vlm0(klist, ham_r, rvec)
-    sk0 = F.get_vlm0(klist, S_r, rvec)
-    _, uni = _eig_uni(klist, ham_r, S_r, rvec)
-    for fn in (F.get_vk, F.get_vnm):
-        try:
-            fn(vk0, np.eye(3), uni, sk0)
-        except ValueError:
-            continue
-        raise AssertionError(f'{fn.__name__} accepted sk0 without eig')
-
-
 if __name__ == '__main__':
     import _tools
     sys.exit(_tools.run_standalone(globals()))

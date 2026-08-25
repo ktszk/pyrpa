@@ -20,53 +20,78 @@ subroutine generate_irr_kpoint_inv(klist,kmap,invk_ft_list,Nk,Nx,Ny,Nz) bind(C)
   call gen_irr_k(klist) !get irreducible k-points' info
 
   gen_inv_ft:block
-    integer(c_int32_t) Nkall,i,j,k
-    real(c_double) tmp(3),iktmp(3),eps
-    eps=1.0d0/max(Nx,Ny,Nz)
+    integer(c_int64_t) Nkall,i,ix,iy,iz,jx,jy,jz,jd,jt,nbad,ifl
+    integer(c_int64_t),allocatable:: irr_of(:),irr_neg_of(:)
+
     Nkall=Nx*Ny*Nz
+    allocate(irr_of(Nkall),irr_neg_of(Nkall))
+    irr_of(:)=0
+    irr_neg_of(:)=0
 
-    !$omp parallel do private(i,j,k,tmp,iktmp)
+    ! Reverse lookup, built once in O(Nk).  gen_allk lays the full BZ out as the
+    ! regular [0,1)^3 mesh flat = ix+1 + iy*Nx + iz*Nx*Ny, so "which full-grid
+    ! point is this irreducible point" and "... is its TRS partner -k" are both
+    ! plain integer arithmetic.  This replaces two linear searches -- one over
+    ! the Nk irreducible points, one over all Nkall points -- that ran once per
+    ! full-grid point and made the routine O(Nkall^2): measured 0.17 s at 32^3
+    ! but ~10 s at 64^3 and minutes at 100^3.
+    !
+    ! Working in integers also retires the old coordinate comparison
+    ! sum|k_i - k_j| < eps with eps = 1/max(Nx,Ny,Nz): that tolerance is exactly
+    ! the smallest mesh spacing, so it was correct only by virtue of the strict
+    ! < and of dble(i)/dble(N) round-tripping exactly through the multiply.
+    !
+    ! Serial on purpose: the loop is O(Nk) with a ten-flop body, and keeping it
+    ! ordered makes "first index wins" exact if gen_irr_k ever emits the same
+    ! point twice (it does for a few meshes, e.g. 1x2x1 lists Gamma twice).
+    do i=1,Nk
+       ix=modulo(nint(klist(1,i)*Nx,c_int64_t),Nx)
+       iy=modulo(nint(klist(2,i)*Ny,c_int64_t),Ny)
+       iz=modulo(nint(klist(3,i)*Nz,c_int64_t),Nz)
+       ifl=ix+1+iy*Nx+iz*Nx*Ny
+       if(irr_of(ifl)==0) irr_of(ifl)=i
+       jx=modulo(-ix,Nx); jy=modulo(-iy,Ny); jz=modulo(-iz,Nz)
+       ifl=jx+1+jy*Nx+jz*Nx*Ny
+       if(irr_neg_of(ifl)==0) irr_neg_of(ifl)=i
+    end do
+
+    nbad=0
+    !$omp parallel do private(i,ix,iy,iz,jx,jy,jz,jd,jt) reduction(+:nbad)
     do i=1,Nkall
-       ! For each full-BZ k-point, find its irreducible representative via TRS: k or -k mod 1
-       do j=1,Nk !set invk(1,:) and invk(2,:)
-          tmp(:)=all_k(:,i)-klist(:,j)
-          if(sum(abs(tmp))<eps)then
-             invk_ft_list(1,i)=j !irreducible k index
-             invk_ft_list(2,i)=0 !0 = direct mapping (k == irr_k)
-             exit
-          end if
-          ! Compute -k mod 1: 0 stays 0, otherwise 1-k
-          do k=1,3
-             if(klist(k,j)==0.0d0)then
-                iktmp(k)=0.0d0
-             else
-                iktmp(k)=1.0d0-klist(k,j)
-             end if
-          end do
-          tmp(:)=all_k(:,i)-iktmp(:)
-          if(sum(abs(tmp))<eps)then
-             invk_ft_list(1,i)=j !irreducible k index
-             invk_ft_list(2,i)=1 !1 = TRS-related mapping (k == -irr_k mod 1)
-             exit
-          end if
-       end do
-
-       do j=1,Nkall !set invk(3,:)
-          do k=1,3
-             if(all_k(k,j)==0.0d0)then
-                iktmp(k)=0.0d0
-             else
-                iktmp(k)=1.0d0-all_k(k,j)
-             end if
-          end do
-          tmp(:)=all_k(:,i)-iktmp(:)
-          if(sum(abs(tmp))<eps)then
-             invk_ft_list(3,i)=j !save index of -k in all k-point
-             exit
-          end if
-       end do
+       ix=kmap(1,i); iy=kmap(2,i); iz=kmap(3,i)
+       jx=modulo(-ix,Nx); jy=modulo(-iy,Ny); jz=modulo(-iz,Nz)
+       invk_ft_list(3,i)=jx+1+jy*Nx+jz*Nx*Ny      ! index of -k in the full list
+       jd=irr_of(i)
+       jt=irr_neg_of(i)
+       ! The old loop scanned j upward testing k == k_j first and k == -k_j
+       ! second, so the smaller index wins and a self-paired point (k == -k,
+       ! i.e. Gamma and the zone-boundary points) is reported as direct.
+       if(jd>0 .and. (jt==0 .or. jd<=jt))then
+          invk_ft_list(1,i)=jd
+          invk_ft_list(2,i)=0 !0 = direct mapping (k == irr_k)
+       else if(jt>0)then
+          invk_ft_list(1,i)=jt
+          invk_ft_list(2,i)=1 !1 = TRS-related mapping (k == -irr_k mod 1)
+       else
+          invk_ft_list(1,i)=0
+          invk_ft_list(2,i)=0
+          nbad=nbad+1
+       end if
     end do
     !$omp end parallel do
+
+    deallocate(irr_of,irr_neg_of)
+    ! Never silently hand back a zero index: it would be used as a 1-based
+    ! subscript downstream and read out of bounds.  Reaching here means
+    ! gen_irr_k built an incomplete wedge for this mesh (known to happen when
+    ! Nx is odd and Ny is even).
+    if(nbad>0)then
+       write(*,'(a,i0,a)') 'generate_irr_kpoint_inv: ',nbad, &
+            ' full-grid k-points have no irreducible representative'
+       write(*,'(a,i0,a,i0,a,i0)') '  mesh Nx=',Nx,' Ny=',Ny,' Nz=',Nz
+       write(*,'(a)') '  gen_irr_k did not cover this mesh; use a different k-mesh'
+       error stop 1
+    end if
   end block gen_inv_ft
 contains
   subroutine gen_allk(klist,kmap)
@@ -151,8 +176,30 @@ contains
                 end do
              end do
              iter_k_ini=iter_k
-          else
-             continue
+          else !Nx is odd, Ny is even
+             ! Same convention as the branch above -- fold kx into [0,Nx/2] and
+             ! fold ky as well on the self-paired kx lines -- but with Nx odd
+             ! there is no kx=pi, so kx=0 is the ONLY self-paired line and only
+             ! that one loses its upper half of ky.  The count is the same
+             ! Nx*Ny/2+1 as the Nx-even/Ny-odd case (TRS_irr.typ derives only
+             ! that one), yet the construction is not its mirror image: the
+             ! removal is one line's worth, not two.
+             do j=0,int(Ny/2) !ky<=Ny/2: every kx of the half zone
+                do i=0,int((Nx-1)/2)
+                   klist(1,iter_k)=dble(i)/dble(Nx)
+                   klist(2,iter_k)=dble(j)/dble(Ny)
+                   iter_k=iter_k+1
+                end do
+             end do
+
+             do j=int(Ny/2)+1,Ny-1 !ky>Ny/2: drop kx=0, the self-paired line
+                do i=1,int((Nx-1)/2)
+                   klist(1,iter_k)=dble(i)/dble(Nx)
+                   klist(2,iter_k)=dble(j)/dble(Ny)
+                   iter_k=iter_k+1
+                end do
+             end do
+             iter_k_ini=iter_k
           end if
        else !Nx,Ny are odd
           !$omp parallel
@@ -246,8 +293,24 @@ contains
                          iter_k=iter_k+1
                       end do
                    end do
-                else
-                   continue
+                else !Nx is odd, Ny is even (see the kz=0 plane above)
+                   do j=0,int(Ny/2)
+                      do i=0,int((Nx-1)/2)
+                         klist(1,iter_k)=dble(i)/dble(Nx)
+                         klist(2,iter_k)=dble(j)/dble(Ny)
+                         klist(3,iter_k)=0.5d0
+                         iter_k=iter_k+1
+                      end do
+                   end do
+
+                   do j=int(Ny/2)+1,Ny-1
+                      do i=1,int((Nx-1)/2)
+                         klist(1,iter_k)=dble(i)/dble(Nx)
+                         klist(2,iter_k)=dble(j)/dble(Ny)
+                         klist(3,iter_k)=0.5d0
+                         iter_k=iter_k+1
+                      end do
+                   end do
                 end if
              else !Nx,Ny are odd
                 do j=0,int((Ny-1)/2) !kz=0 plane

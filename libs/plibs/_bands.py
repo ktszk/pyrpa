@@ -458,7 +458,7 @@ def get_plane_orbits(eig: np.ndarray, mesh: int, L: float, mu: float,
 def find_plane_orbits(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray,
                       mu: float, bhat: np.ndarray, d: float, L0: float, dk: float,
                       ngrow: int = 3, mesh_max: int = 1200, egrid: dict | None = None,
-                      ngrow_open: int = 2) -> tuple[list, int, float, set]:
+                      ngrow_open: int = 2) -> tuple[list, int, float, set, set]:
     """
     @fn find_plane_orbits()
     @brief Orbits of one plane, widening the window until the section through the centre
@@ -485,7 +485,14 @@ def find_plane_orbits(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec
     @retval orbits: closed orbits (see get_plane_orbits)
     @retval n_open: pieces still open at the largest window tried
     @retval      L: window edge length actually used
-    @retval open_bands: bands whose section through the centre is an open orbit
+    @retval unresolved: bands with nothing closed around the axis and an open piece as
+                    the nearest thing to it -- an open section, as far as the window can
+                    tell. Used to decide whether to widen.
+    @retval axial: bands that DO have a closed orbit encircling the axis. Reporting is
+                    better based on this: "no orbit encircles the axis here" is a plain
+                    measurement, whereas calling a section open also has to rule out a
+                    small pocket sitting nearer the axis than any open piece, which near
+                    a degenerate field direction it cannot.
     """
     L=float(L0)
     orbits,n_open,central=[],0,set()
@@ -501,7 +508,7 @@ def find_plane_orbits(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec
         if it>=ngrow_open:
             break            # a few zone diameters and still no closed central orbit
         L*=2.
-    return orbits,n_open,L,central
+    return orbits,n_open,L,central,axial
 
 def fs_cartesian_points(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray,
                         avec: np.ndarray, mu: float, mesh: int = 40,
@@ -554,7 +561,8 @@ def scan_plane_area(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: 
     @retval S_scan: dict band_idx -> [(d, area[AA^-2]), ...]
     @retval  orbit_cache: dict d -> full orbit list (all bands, all copies)
     @retval n_open: number of contour pieces that never closed
-    @retval open_bands: bands whose CENTRAL section (d=0) is an open orbit
+    @retval axial_bands: bands having a closed orbit that encircles the field axis on
+                    the central plane (d=0)
     """
     S_scan={}
     orbit_cache={}
@@ -564,25 +572,25 @@ def scan_plane_area(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: 
     # slice grow on its own changes how many orbit copies the window holds from slice
     # to slice, which breaks the continuity the branch tracking relies on.
     L=float(L0)
-    open_bands=set()
-    for j,dp in enumerate({d_arr[0],d_arr[len(d_arr)//2],d_arr[-1]} if len(d_arr) else {0.}):
-        _,_,Lp,ob=find_plane_orbits(rvec,ham_r,S_r,avec,mu,bhat,float(dp),L0,dk,
-                                    ngrow,egrid=egrid)
+    axial_bands=set()
+    for dp in ({d_arr[0],d_arr[len(d_arr)//2],d_arr[-1]} if len(d_arr) else {0.}):
+        _,_,Lp,_,ax=find_plane_orbits(rvec,ham_r,S_r,avec,mu,bhat,float(dp),L0,dk,
+                                      ngrow,egrid=egrid)
         L=max(L,Lp)
-        # the reported verdict is about the CENTRAL section (d=0); at other offsets a
-        # tube has simply shrunk away, which says nothing about the orbit topology
+        # reported for the CENTRAL section (d=0); at other offsets a tube has simply
+        # shrunk away, which says nothing about the orbit topology
         if len(d_arr) and np.isclose(dp,d_arr[0]) and np.isclose(d_arr[0],0.):
-            open_bands=ob
+            axial_bands=ax
     for d in d_arr:
-        orbits,nop,_,_=find_plane_orbits(rvec,ham_r,S_r,avec,mu,bhat,float(d),L,dk,
-                                         0,egrid=egrid)
+        orbits,nop=find_plane_orbits(rvec,ham_r,S_r,avec,mu,bhat,float(d),L,dk,
+                                     0,egrid=egrid)[:2]
         n_open+=nop
         orbit_cache[float(d)]=orbits
         for b in {o['band'] for o in orbits}:
             o=min((o for o in orbits if o['band']==b),
                   key=lambda o: np.linalg.norm(o['cen2d']))
             S_scan.setdefault(b,[]).append((float(d),o['area']))
-    return S_scan,orbit_cache,n_open,open_bands
+    return S_scan,orbit_cache,n_open,axial_bands
 
 def plane_area_at(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray,
                   mu: float, bhat: np.ndarray, d: float, band_idx: int,
@@ -864,30 +872,77 @@ def follow_orbit(seed: dict, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarra
 
 def verify_orbits_window(records: list, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray,
                          avec: np.ndarray, mu: float, bhat: np.ndarray, L: float, dk: float,
-                         egrid: dict | None = None, grow: float = 1.6,
+                         egrid: dict | None = None,
+                         grow: tuple = (1.3, 1.7, 2.1),
                          rtol: float = 5.0e-3) -> tuple[list, list]:
     """
     @fn verify_orbits_window()
-    @brief Keep only orbits whose area does not move when the sampling window is widened.
-           A window that cuts through a connected Fermi-surface region returns the
-           boundary of whatever part of it fits, which is a closed curve but not an
-           orbit: its area tracks the window. A real orbit does not.
-    @param records: extremal orbit dicts (band, area, d, cen3d)
+    @brief Keep only orbits whose area does not move when the sampling window changes.
+           A window cutting through a connected Fermi-surface region returns the
+           boundary of whatever part of it fits: a closed curve, but not an orbit, and
+           its area tracks the window. A real orbit's does not.
+
+           The orbit is re-identified at each window by its CENTRE, not by its area.
+           Matching on area cannot tell "this orbit is not reproducible" from "this
+           particular window happens to cut the copy that carried that area", and a
+           single growth factor makes the verdict a coin flip: measured on Cu, the
+           belly at theta=25 disagrees by 4e-1 at 1.6*L and by 1e-6 at 2.0*L. Several
+           windows are tried and the spread of the areas decides.
+    @param records: extremal orbit dicts (band, area, d, cen2d/cen3d)
     @param       L: window edge length the records were found with [AA^-1]
-    @param    grow: factor by which the window is widened for the check
-    @param    rtol: relative area agreement required
-    @retval  good: records confirmed window-independent
+    @param    grow: window factors to re-measure at
+    @param    rtol: relative spread allowed across those windows
+    @retval  good: records whose area is window-independent
     @retval  bad : records rejected
     """
+    n=np.asarray(bhat,dtype=float)
+    e1,e2=plane_frame(n)
     good,bad=[],[]
     for r in records:
-        orbits=find_plane_orbits(rvec,ham_r,S_r,avec,mu,bhat,r['d'],grow*L,dk,
-                                 0,egrid=egrid)[0]
-        same=[o for o in orbits
-              if o['band']==r['band']
-              and abs(o['area']-r['area'])<=rtol*max(r['area'],1e-30)]
-        (good if same else bad).append(r)
+        c=np.asarray(r['cen3d'],dtype=float)
+        p=np.array([(c-r['d']*n).dot(e1),(c-r['d']*n).dot(e2)])
+        tol=max(0.5*np.sqrt(max(r['area'],0.)/np.pi),3.*dk)
+        areas=[r['area']]
+        for gf in grow:
+            orbits=find_plane_orbits(rvec,ham_r,S_r,avec,mu,n,r['d'],gf*L,dk,
+                                     0,egrid=egrid)[0]
+            cand=[o for o in orbits if o['band']==r['band']
+                  and np.linalg.norm(o['cen2d']-p)<tol]
+            if cand:
+                areas.append(min(cand,key=lambda o:np.linalg.norm(o['cen2d']-p))['area'])
+        if len(areas)<2:
+            bad.append(r)          # never found again: not an orbit we can stand behind
+            continue
+        a=np.array(areas)
+        (good if (a.max()-a.min())<=rtol*a.max() else bad).append(r)
     return good,bad
+
+def nearest_lattice_offset(g: np.ndarray, bvec: np.ndarray, shell: int = 1) -> np.ndarray:
+    """
+    @fn nearest_lattice_offset()
+    @brief Reduce a fractional difference to the shortest Cartesian vector modulo the
+           reciprocal lattice.
+           Rounding each fractional component is the obvious thing and is exact ONLY for
+           an orthogonal cell. On a skewed lattice it misses the nearest lattice point
+           routinely -- measured over random differences: 0/1000 for cubic and
+           tetragonal, but 156/1000 for hexagonal, 256/1000 for bcc and 296/1000 for
+           fcc, overshooting by up to 1.36 AA^-1 out of |b|=3.03. So the rounded guess
+           is only a starting point and its neighbours are checked in Cartesian length.
+    @param      g: difference of two fractional coordinates
+    @param   bvec: reciprocal lattice vectors as rows [AA^-1]
+    @param  shell: how far around the rounded guess to look
+    @return       : shortest Cartesian representative of g modulo the lattice [AA^-1]
+    """
+    import itertools
+    bv=np.asarray(bvec,dtype=float)
+    h0=np.rint(np.asarray(g,dtype=float))
+    best=None
+    for dh in itertools.product(range(-shell,shell+1),repeat=3):
+        v=(g-(h0+np.array(dh))).dot(bv)
+        n=float(v.dot(v))
+        if best is None or n<best[0]:
+            best=(n,v)
+    return best[1]
 
 def orbit_key(record: dict, bvec_inv: np.ndarray) -> np.ndarray:
     """
@@ -905,7 +960,8 @@ def orbit_key(record: dict, bvec_inv: np.ndarray) -> np.ndarray:
     return f-np.rint(f)
 
 def dedup_extremal_orbits(records: list, bvec: np.ndarray, tol_k: float = 0.02,
-                          rtol_area: float = 2.0e-4) -> list:
+                          rtol_area: float = 2.0e-4, rtol_copy: float = 1.0e-3,
+                          bhat: np.ndarray | None = None) -> list:
     """
     @fn dedup_extremal_orbits()
     @brief Reduce the raw extremal orbits to one record per distinct dHvA frequency,
@@ -914,10 +970,10 @@ def dedup_extremal_orbits(records: list, bvec: np.ndarray, tol_k: float = 0.02,
            Stage 1 -- is this the same orbit in another zone? The scan deliberately
            covers several repeats of the Fermi surface along B (that redundancy is what
            makes the orbit search robust), so one orbit turns up many times. At its own
-           extremum a copy sits at centre + G exactly, so comparing reduced centres
-           settles it with no reference to the area. Comparing areas here is what used
-           to destroy genuinely distinct extrema of one tube whose areas happen to lie
-           within a fraction of a percent of each other.
+           extremum a copy sits at centre + G exactly, so the reduced centres decide it,
+           with the area only as a tight consistency check. What must NOT be done is to
+           merge on a loose area alone: that destroys genuinely distinct extrema of one
+           tube whose areas lie within a fraction of a percent of each other.
 
            Stage 2 -- are these different places on the Fermi surface with the same
            frequency? Point-group images (the X and Y electron pockets, the four
@@ -929,24 +985,45 @@ def dedup_extremal_orbits(records: list, bvec: np.ndarray, tol_k: float = 0.02,
     @param     tol_k: how close two reduced centres must be to be one orbit [AA^-1];
                       about one step of the offset scan is right -- above the scatter
                       between copies, below the spacing of distinct extrema
+    @param rtol_copy: relative area agreement for stage 1, loose enough to cover the
+                      scatter between copies refined at different offsets (~2.5e-4 here)
+                      but far below the spacing of neighbouring extrema (~2.4e-3)
     @param rtol_area: relative area agreement for stage 2
+    @param      bhat: field direction; when given, the copy kept from each group is the
+                      one nearest the field axis
     @return          : one record per distinct orbit, largest area first
     """
     inv=np.linalg.inv(np.asarray(bvec,dtype=float))
-    keep=[]
+    groups=[]
     for r in sorted(records,key=lambda r:-r['area']):
         f=orbit_key(r,inv)
-        dup=False
-        for k in keep:
-            if k['band']!=r['band']:
+        for gr in groups:
+            if gr['band']!=r['band']:
                 continue
-            g=f-k['_key']
-            if np.linalg.norm((g-np.rint(g)).dot(bvec))<tol_k:
-                dup=True
+            # a zone copy has BOTH the same centre modulo the lattice and the same area;
+            # requiring the area too keeps two genuinely different orbits that happen to
+            # be concentric (a small pocket inside a belly, say) apart
+            if (np.linalg.norm(nearest_lattice_offset(f-gr['key'],bvec))<tol_k
+                    and abs(gr['area']-r['area'])<=rtol_copy*max(gr['area'],1e-30)):
+                gr['members'].append(r)
                 break
-        if not dup:
-            r=dict(r); r['_key']=f
-            keep.append(r)
+        else:
+            groups.append({'band':r['band'],'key':f,'area':r['area'],'members':[r]})
+    # Keep the copy sitting closest to the field axis. Any member has the right area,
+    # but everything downstream that uses the centre -- re-measuring the orbit in a
+    # wider window, following it to the next angle -- needs the one in the middle of
+    # the window, not a copy several zones out near the rim.
+    if bhat is None:
+        pick=lambda r: float(np.linalg.norm(r['cen3d']))
+    else:
+        nb=np.asarray(bhat,dtype=float)
+        pick=lambda r: float(np.linalg.norm(r['cen3d']-r['cen3d'].dot(nb)*nb))
+    keep=[]
+    for gr in groups:
+        r=dict(min(gr['members'],key=pick))
+        r['_key']=gr['key']
+        keep.append(r)
+    keep.sort(key=lambda r:-r['area'])
     merged=[]
     for r in keep:
         if not any(k['band']==r['band']
@@ -1168,28 +1245,3 @@ def get_emesh(Nx: int, Ny: int, Nz: int, ham_r: np.ndarray, S_r: np.ndarray, rve
             return Nk,klist,eig,uni,kweight
         else:
             return Nk,eig,kweight
-
-def calc_carrier(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray,
-                 Nx: int, Ny: int, Nz: int, fill: float, temp: float,
-                 with_spin: bool = False) -> np.ndarray:
-    """
-    @fn calc_carrier
-    @brief Calculate the carrier density (electrons/cm³) from the Fermi-Dirac distribution derivative.
-    @param      rvec: Real-space lattice vectors (Wannier R-vectors)
-    @param     ham_r: Hamiltonian in real space (Wannier representation)
-    @param       S_r: Overlap matrix in real space
-    @param      avec: Lattice vectors (rows are primitive vectors) in Angstrom
-    @param        Nx: Number of k-points along kx
-    @param        Ny: Number of k-points along ky
-    @param        Nz: Number of k-points along kz
-    @param      fill: Target electron filling (electrons per unit cell)
-    @param      temp: Temperature in eV
-    @param with_spin: If True, include spin degeneracy factor (not yet used)
-    @return   n_carr: Carrier density array [Nband] in cm⁻³
-    """
-    Nk,eig,kweight=get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec.T)
-    Vuc=sclin.det(avec)*1e-24
-    mu=calc_mu(eig,Nk,fill,temp)
-    dfermi=0.25*(1.-np.tanh(0.5*(eig-mu)/temp)**2)/temp
-    n_carr=2*dfermi.sum(axis=0)/(Vuc*Nk)
-    return n_carr

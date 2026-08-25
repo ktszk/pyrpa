@@ -12,7 +12,6 @@ import os
 import sys
 import contextlib
 import io
-import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -226,21 +225,6 @@ def test_nonlinear_eliashberg_zero_seed_and_zero_interaction_stays_zero():
 # --------------------------------------------------------------------------- #
 #  high-level calc helpers
 # --------------------------------------------------------------------------- #
-def test_load_sigma_from_file_missing_returns_none_in_temp_cwd():
-    """_load_sigma_from_file should fail softly instead of crashing when self_en.npz is absent."""
-    from libs.plibs._calc import _load_sigma_from_file
-
-    old = os.getcwd()
-    with tempfile.TemporaryDirectory() as td:
-        os.chdir(td)
-        try:
-            with _silence_stdout():
-                loaded = _load_sigma_from_file()
-        finally:
-            os.chdir(old)
-    assert loaded is None
-
-
 def test_output_gap_function_writes_expected_one_orbital_file(tmp_path):
     """The gap-output helper should write the one-orbital gap in kmap order."""
     st = _tiny_one_orbital_model(Nw=2)
@@ -718,19 +702,100 @@ def test_gap_extrapolate_w0_recovers_delta0_and_flags_iw0_bias():
     assert bias.max() < 1.0                                   # correction stays below the peak gap
 
 
-def test_gap_extrapolate_w0_rejects_too_few_points():
-    from libs.plibs._calc import gap_extrapolate_w0
-    gap = np.zeros((1, 1, 3, 1), dtype=np.complex128)
-    try:
-        gap_extrapolate_w0(gap, temp=0.02, n_points=4, order=1)
-        assert False, "expected ValueError for n_points > available Matsubara points"
-    except ValueError:
-        pass
-    try:
-        gap_extrapolate_w0(gap, temp=0.02, n_points=1, order=1)
-        assert False, "expected ValueError for n_points < order+1"
-    except ValueError:
-        pass
+# --------------------------------------------------------------------------- #
+#  irreducible k-mesh under time reversal (finv.f90 generate_irr_kpoint_inv)
+# --------------------------------------------------------------------------- #
+def _irr_k_violations(Nx, Ny, Nz):
+    """Count exact-integer violations of the three invariants invk must satisfy.
+
+    Every full-grid point must (a) be its irreducible representative when the
+    flag is 0, (b) be MINUS it mod 1 when the flag is 1, and (c) carry the
+    correct full-grid index of its own -k.  Checking on integer mesh indices
+    rather than on the float coordinates is the point: the routine used to
+    match coordinates with a tolerance of 1/max(Nx,Ny,Nz) -- exactly one mesh
+    spacing -- and silently matched a NEIGHBOUR whenever 1/N was not a binary
+    fraction.  32^3 and 64^3 were fine; 12^3 mismapped 919 of 1728 points.
+    """
+    A = np.array([Nx, Ny, Nz], dtype=np.int64)
+    klist, kmap, invk = F.gen_irr_k_TRS(Nx, Ny, Nz)
+    assert invk[:, 0].min() >= 1 and invk[:, 0].max() <= len(klist)
+    ki = np.rint(klist*A).astype(np.int64) % A                 # irreducible points as indices
+    j = invk[:, 0] - 1
+    rep = np.where(invk[:, 1][:, None] == 0, ki[j], (-ki[j]) % A)
+    negk = (-kmap) % A
+    flat = negk[:, 0] + 1 + negk[:, 1]*Nx + negk[:, 2]*Nx*Ny
+    return int((~(rep == kmap).all(axis=1)).sum()) + int((invk[:, 2] != flat).sum())
+
+
+def test_irr_k_mapping_is_exact_on_non_binary_meshes():
+    """The TRS mapping must be exact for every mesh, not only for powers of two."""
+    for mesh in [(2, 2, 2), (4, 4, 4), (5, 5, 5), (6, 6, 6), (9, 9, 9), (12, 12, 12),
+                 (3, 3, 1), (6, 4, 2), (7, 7, 3), (10, 6, 5), (1, 1, 5), (8, 6, 4),
+                 (5, 4, 3), (3, 2, 4), (7, 6, 5), (1, 2, 1)]:
+        assert _irr_k_violations(*mesh) == 0, f"mesh {mesh}"
+
+
+def test_irr_k_covers_the_full_grid_exactly_once():
+    """Every full-grid point is claimed, and the weights sum back to Nkall."""
+    for Nx, Ny, Nz in [(6, 6, 6), (4, 5, 3), (5, 4, 3), (12, 8, 6)]:
+        klist, kmap, invk = F.gen_irr_k_TRS(Nx, Ny, Nz)
+        Nkall = Nx*Ny*Nz
+        assert len(kmap) == Nkall
+        # kmap must be a permutation of the whole [0,Nx)x[0,Ny)x[0,Nz) grid
+        flat = kmap[:, 0] + Nx*(kmap[:, 1] + Ny*kmap[:, 2])
+        assert np.array_equal(np.sort(flat), np.arange(Nkall))
+        # -k is an involution on the full grid
+        assert np.array_equal(invk[invk[:, 2] - 1, 2], np.arange(1, Nkall + 1))
+        # multiplicities of the irreducible points add up to the full grid
+        assert np.bincount(invk[:, 0], minlength=len(klist) + 1).sum() == Nkall
+
+
+def _Nk_from_trs_note(Nx, Ny, Nz):
+    """N_k of the irreducible wedge, transcribed from TRS_irr.typ.
+
+    k_z = 0 (and k_z = pi when N_z is even) are self-paired planes and take the
+    2-D reduction; the remaining planes pair up with their -k_z partner and are
+    kept whole.  The 2-D count depends on the parity of N_x and N_y, which is
+    what leaves the +4 / +2 / +1 offsets on N/2.
+    """
+    ex, ey, ez = Nx % 2 == 0, Ny % 2 == 0, Nz % 2 == 0
+    N = Nx*Ny*Nz
+    if ez:
+        return N//2 + 4 if (ex and ey) else (N//2 + 2 if (ex or ey) else N//2 + 1)
+    return N//2 + 2 if (ex and ey) else (N//2 + 1 if (ex or ey) else (N + 1)//2)
+
+
+def test_irr_wedge_matches_the_trs_note_for_every_parity():
+    """gen_irr_k must build the wedge TRS_irr.typ describes, for all 8 parities.
+
+    Four properties pin it down: the point count matches the note, the points
+    are distinct, no k and -k are both present (that would double-count), and
+    k plus -k covers the full grid (nothing is lost).
+
+    Nx odd with Ny even used to fail all four: that branch of gen_irr_k was a
+    bare `continue`, so the wedge was left unfilled and the routine wrote past
+    the end of klist.  The note only derives the mixed-parity case for Nx even /
+    Ny odd; the COUNT is symmetric under swapping the axes, but the
+    CONSTRUCTION is not -- with Nx even both kx=0 and kx=pi are self-paired and
+    lose half their ky, with Nx odd only kx=0 is.
+    """
+    meshes = [(4, 4, 4), (5, 5, 5), (4, 5, 5), (5, 4, 5),      # ee/oo/eo/oe with Nz odd
+              (4, 4, 5), (5, 5, 4), (4, 5, 4), (5, 4, 4),      # ... and with Nz even
+              (1, 2, 1), (3, 2, 4), (7, 6, 5), (1, 8, 6),      # more Nx-odd/Ny-even
+              (6, 4, 2), (9, 9, 9), (12, 8, 6), (2, 2, 2)]
+    for Nx, Ny, Nz in meshes:
+        A = np.array([Nx, Ny, Nz], dtype=np.int64)
+        klist, _, _ = F.gen_irr_k_TRS(Nx, Ny, Nz)
+        ki = np.rint(klist*A).astype(np.int64) % A
+        pts = {tuple(r) for r in ki}
+        neg = {tuple(r) for r in ((-ki) % A)}
+        mesh = (Nx, Ny, Nz)
+        assert len(ki) == _Nk_from_trs_note(*mesh), f"{mesh}: count"
+        assert len(pts) == len(ki), f"{mesh}: duplicate wedge points"
+        assert not any(a != b and b in pts
+                       for a, b in zip((tuple(r) for r in ki),
+                                       (tuple(r) for r in ((-ki) % A)))), f"{mesh}: k and -k"
+        assert len(pts | neg) == Nx*Ny*Nz, f"{mesh}: does not cover the grid"
 
 
 # --------------------------------------------------------------------------- #

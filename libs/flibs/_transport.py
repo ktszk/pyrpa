@@ -49,11 +49,22 @@ _lib.calc_sigma_hall.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.float64),
     np.ctypeslib.ndpointer(dtype=np.float64),
     np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
     POINTER(c_double), POINTER(c_double),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_double)
+    POINTER(c_int64), POINTER(c_int64)
 ]
 _lib.calc_sigma_hall.restype = None
+_lib.calc_k0_band.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    np.ctypeslib.ndpointer(dtype=np.float64),
+    POINTER(c_double), POINTER(c_double),
+    POINTER(c_int64), POINTER(c_int64)
+]
+_lib.calc_k0_band.restype = None
 _lib.calc_tdf.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.float64),
     np.ctypeslib.ndpointer(dtype=np.float64),
@@ -170,26 +181,70 @@ def calc_Kn(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray, temp: float
                  dbl(mu), i64(Nk), i64(Norb))
     return K0, K1, K2
 
-def calc_sigmahall(eig: np.ndarray, veloc: np.ndarray, imass: np.ndarray,
-                   kweight: np.ndarray, tau: np.ndarray, temp: float, mu: float) -> float:
+def calc_sigma_hall(eig: np.ndarray, veloc: np.ndarray, imass: np.ndarray,
+                     kweight: np.ndarray, tau: np.ndarray, temp: float,
+                     mu: float) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn calc_sigmahall
-    @brief Compute the Hall conductivity sigma_Hall via band integrals using velocity and inverse mass.
-    @param     eig: Eigenvalues [Nk, Norb] float64
-    @param   veloc: Group velocities [Nk, Norb, 3] float64
-    @param   imass: Inverse effective mass tensor [Nk, Norb, 3, 3] float64
+    @fn calc_sigma_hall
+    @brief Weak-field Boltzmann Hall kernel for all three field directions, band
+    resolved and antisymmetrized in the two current indices:
+
+        S[n,a,b,g] = 0.5*(A[n,a,b,g] - A[n,b,a,g]),
+        A[n,a,b,g] = sum_k w_k tau^2 (-df/de) eps_{g,u,v} v_a M^-1_{b,u} v_v
+
+    sigma^(1)_{ab}(B||g)/B is S[...,a,b,g] times the same prefactor that turns
+    calc_Kn's K0 into sigma, so the caller applies 1/(sum(kweight)*Vuc) once.
+    Contracted at (a,b,g)=(x,y,z) this is minus the textbook one-sided scalar
+    -0.5 w (vx^2/m_yy + vy^2/m_xx - 2 vx vy/m_xy) term by term.  The tensor form
+    is what lets the caller build rho^(1) = -sigma^-1 sigma^(1) sigma^-1 for a
+    cell whose axes are not orthogonal (sigma_xy != 0 already at B=0) and for an
+    arbitrary field direction; the band resolution feeds the two-fluid
+    decomposition needed in a compensated metal.
+
+    Sabs is sum |contribution| with the same indexing; |S|/Sabs is the
+    cancellation ratio of the sign-changing Hall integrand, which is what
+    predicts an R_H whose sign still moves with the k-mesh.
+    @param     eig: Eigenvalues [Nk, Norb] float64 (eV)
+    @param   veloc: Group velocities [Nk, Norb, 3] float64 (m/s)
+    @param   imass: Inverse effective mass tensor [Nk, Norb, 3, 3] float64 (1/kg)
     @param kweight: k-point weights [Nk] float64
     @param     tau: Relaxation time [Nk, Norb] float64
     @param    temp: Temperature in eV
     @param      mu: Chemical potential in eV
-    @return sigma_hall: Hall conductivity (scalar) float64
+    @retval Shall: Hall kernel [Norb, 3, 3, 3] float64, indexed [n, a, b, g]
+    @retval  Sabs: sum of |contribution|, same shape
     """
     Nk = len(eig)
     Norb = eig.shape[1]
-    sigma_hall = c_double(0.0)
-    _lib.calc_sigma_hall(eig, veloc, imass, kweight, tau, dbl(temp), dbl(mu),
-                         i64(Nk), i64(Norb), byref(sigma_hall))
-    return sigma_hall.value
+    Shall = np.zeros((Norb, 3, 3, 3), dtype=np.float64)
+    Sabs = np.zeros((Norb, 3, 3, 3), dtype=np.float64)
+    _lib.calc_sigma_hall(Shall, Sabs, eig, veloc, imass, kweight, tau,
+                         dbl(temp), dbl(mu), i64(Nk), i64(Norb))
+    return Shall, Sabs
+
+def calc_k0_band(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray,
+                 temp: float, mu: float, tau: np.ndarray) -> np.ndarray:
+    """
+    @fn calc_k0_band
+    @brief Per-band charge transport kernel K0n[n,i,j] = sum_k v_i v_j tau (-df/de) w_k.
+
+    calc_Kn returns only the band sum; the per-band split is what allows the
+    two-fluid decomposition sigma = sum_n sigma_n used to read a Hall
+    coefficient in a compensated metal.  Sums over n to calc_Kn's K0.
+    @param     eig: Eigenvalues [Nk, Norb] float64 (eV)
+    @param   veloc: Group velocities [Nk, Norb, 3] float64 (m/s)
+    @param kweight: k-point weights [Nk] float64
+    @param    temp: Temperature in eV
+    @param      mu: Chemical potential in eV
+    @param     tau: Relaxation time [Nk, Norb] float64
+    @return    K0n: [Norb, 3, 3] float64
+    """
+    Nk = len(eig)
+    Norb = eig.shape[1]
+    K0n = np.zeros((Norb, 3, 3), dtype=np.float64)
+    _lib.calc_k0_band(K0n, eig, veloc, kweight, tau, dbl(temp), dbl(mu),
+                      i64(Nk), i64(Norb))
+    return K0n
 
 def calc_tdf(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray,
              tau: np.ndarray, Nw: int) -> np.ndarray:

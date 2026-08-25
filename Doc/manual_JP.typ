@@ -25,15 +25,28 @@ pyrpaは, モデルハミルトニアン（タイトバインディング模型�
 - 状態密度（DOS）の計算
 - スペクトル関数 $A(bold(k), omega)$ の計算
 - ボルツマン理論・線形応答理論による各種伝導係数（電気伝導率, 熱伝導率, ゼーベック係数など）の計算
+- 弱磁場ホール係数 $R_H$, ホールキャリア密度, ホール移動度の計算（バンド分解による二流体分析付き）
 - RPA（乱雑位相近似）に基づくスピン感受率 $chi_s$ およびペアリング感受率 $phi$ の計算
 - 超伝導状態における動的スピン感受率 $chi_s^"SC"$ の計算
 - FLEX（揺らぎ交換近似）による自己エネルギーの計算
 - 線形 Eliashberg 方程式による超伝導固有値・ギャップ関数の計算
 - 非線形 Eliashberg 方程式による自己無撞着 SC ギャップ関数の計算
-- キャリア数・サイクロトロン質量・dHvA 振動数の計算
+- バンドフィリング・サイクロトロン質量・dHvA 振動数の計算
 - 不純物・CPA を含むスペクトル関数の計算
 
 pyrpaはすべての設定を`main.py`の上部にある変数を書き換えることで行います。ライブラリのimport行より上にある変数のみを変更することを想定しています。
+
+= 本改訂での変更点
+
+以下の変更は過去のバージョンで得られた結果を変えます。特に最初の 2 点は過去の計算結果そのものを無効にします。本改訂より前の出力がある場合は, 下記に照らして確認してください。
+
+- *時間反転対称性下の既約 $bold(k)$ メッシュ.* `generate_irr_kpoint_inv` は $bold(k)$ 点の座標を許容誤差 $1\/max(N_x,N_y,N_z)$ — ちょうどメッシュ間隔 1 つ分 — で照合しており, $1\/N$ が2進小数で表せない場合に *隣の点* に誤マッチしていました。$N$ が 2 のべき乗（$4,8,16,32,64$）のメッシュは影響を受けませんが, それ以外は影響を受けます（例: $12^3$ では 1728 点中 919 点が誤対応）。現在は整数メッシュ添字から構成しており, 全てのメッシュで厳密です。2 のべき乗以外のメッシュで得た FLEX / Eliashberg / SC-$chi$ の結果は信頼できないものとして再計算してください。同ルーチンは $O(N_"kall"^2)$ でしたが $O(N_"kall")$ になりました（$64^3$ で 9.2 s $arrow$ 0.009 s）。
+
+- *$N_x$ が奇数かつ $N_y$ が偶数の既約ウェッジ.* このパリティの組み合わせは `gen_irr_k` の未実装分岐であり, ウェッジが埋められないまま `klist` の範囲外に書き込むため $N_z >= 3$ でクラッシュしていました。現在は実装済みで, $8 times 8 times 6$ までの 384 通りのメッシュ／パリティ全てについて `TRS_irr.typ` の記述と一致することを確認しています。
+
+- *伝導計算のスピン縮退.* option=5, 6 はスピン因子を `sw_soc` から取るようになりました。従来は無条件に $g_s=2$ としていたため, 両スピンを含むハミルトニアンでは結果が 2 倍ずれていました。
+
+- *ホール係数.* $R_H$ は $sigma_(x y)\/(sigma_(x x) sigma_(y y))$ ではなく完全な伝導率テンソルから構成するようになり, ホールキャリア密度はキャリアの型を添えた正の値として出力されます。option=5 を参照してください。
 
 = 動作環境
 
@@ -135,14 +148,49 @@ $ A(bold(k), omega) = -1/pi "Im" "Tr" G(bold(k), omega + i delta) $
 
 === option=5: ボルツマン伝導係数 (`CONDUCTIVITY_BT`)
 
-ボルツマン輸送方程式を用いて以下の各種輸送係数を計算します。緩和時間近似（$tau = $ `tau_const` fs）を使用します。
+緩和時間近似のもとでボルツマン輸送方程式から輸送係数を計算します。緩和時間のモデルは `tau_mode` で選択します（既定は定数 $tau$）。
 
-出力される物理量：
+熱電関連の出力：
 - 電気伝導率テンソル $sigma_{i j}$ （単位: S/m）
 - 熱伝導率テンソル $kappa_{i j}$ （単位: W/m/K）
 - ゼーベック係数テンソル $S_{i j}$ （単位: V/K）
 - パワーファクター $sigma S^2$ （単位: $upright(W \/ m \/K^2)$）
 - ペルチェ係数, ローレンツ数
+
+==== 弱磁場ホール応答
+
+同じモードで $B$ に線形なホール応答も出力します。ホールカーネルは *磁場3方向すべて* についてバンド分解して評価します。
+
+$ S_(a b)^((g)) = 1/2 sum_(bold(k),n) w_bold(k) tau^2 (-partial f \/ partial epsilon) epsilon_(g u v) [v_a (M^(-1))_(b u) v_v - (a <-> b)] $
+
+ホール係数はテンソルのまま構成します。
+
+$ rho^((1)) = -sigma^(-1) sigma^((1)) sigma^(-1), quad R_H^((g)) = rho^((1))_(b a) \/ B quad (a\,b\,g " は巡回") $
+
+$sigma_(x y)\/(sigma_(x x) sigma_(y y))$ で代用すると $sigma$ が $x y z$ で対角であることを仮定することになり, 軸が直交しない格子では成立しません（単斜晶では $B=0$ でも $sigma_(x y) eq.not 0$）。$sigma$ が特異になる場合（厳密な2次元バンドでは $sigma_(z z)=0$）は, その軸に垂直な面内 $2 times 2$ ブロックで評価し, 残り2方向は未定義として出力します。
+
+出力される物理量：
+- $bold(B) parallel x, y, z$ それぞれのホール係数 $R_H$ （単位: $upright(m^3 \/ C)$）
+- ホールキャリア密度 $n_H = 1\/(e |R_H|)$ （単位: $upright(c m^(-3))$）と, $"sign"(R_H)$ から判定した `electron` / `hole` の別
+- ホール移動度 $mu_H = R_H sigma_(a a)$ （単位: $upright(c m^2 \/ V s)$）と 1 テスラあたりの $omega_c tau$
+- $sigma^((1))_(x y)\/B$ （単位: $upright(S \/ m T)$）
+- 本モードが前提とする弱磁場展開 $omega_c tau < 0.1$ が成立する磁場範囲
+
+#block(fill: luma(240), inset: 8pt, radius: 4pt, width: 100%)[
+  $n_H = 1\/(e|R_H|)$ が真のキャリア密度と一致するのは *単一の閉じたフェルミ面シートの場合のみ* です。多バンド金属では二流体平均 $R_H = (p mu_h^2 - n mu_e^2)\/(e(p mu_h + n mu_e)^2)$ となり, 補償近傍では発散・符号反転します。密度として読む前に, 併記される Luttinger 体積（後述）と必ず突き合わせてください。
+]
+
+==== $bold(k)$ メッシュ収束
+
+$sigma^((1))$ は $M^(-1)$ を通じて $sigma$ より $bold(k)$ 微分が1階多く, さらに被積分関数がフェルミ面の周りで符号を変えるため, 収束が著しく遅くなります。収束していないメッシュでは $R_H$ が *符号ごと誤る* ことがあります。`hall_mesh_list` を設定すると一連のメッシュで計算して収束表を出力し, 最も細かい2点間で符号反転または5%超の変化があれば警告します。
+
+各メッシュについて2つの診断値を出力します。
+- $N_"eff"$ — $-partial f\/partial epsilon$ 重みの参加率, すなわちフェルミ窓を担う実効的な状態数。全ての量が $N_"eff"$ 個の平均なので, これがノイズフロアを決めます（$10^3$ 未満で警告）。
+- ホール被積分関数の相殺率 $|sum| \/ sum |dot|$。これが小さいときは大きな正負の寄与のわずかな残差になっており（補償近傍）, 符号がまだメッシュ依存の可能性があります（$10^(-2)$ 未満で警告）。
+
+==== バンド分解
+
+$sigma$ も $sigma^((1))$ も単純なバンド和なので, フェルミ面シートごとの内訳も出力します（各閉ポケットの Luttinger 体積から求めたキャリア密度, $sigma_(x x)$, そのシート単独の $R_H$ と $n_H$, 移動度）。各シート自身の $n_H$ を Luttinger 体積と比べれば, そのシートが単純な閉じたポケットとして振る舞っているかが分かり, 全体の $n_H$ と $n_e\/n_h$ の食い違いが実験で見えている補償そのものになります。
 
 === option=6: 線形応答理論による伝導係数 (`CONDUCTIVITY_PT`)
 
@@ -229,9 +277,9 @@ option=15 で計算したギャップ関数 (`gap.npy`) を読み込み, 以下�
 - ギャップ関数の異常グリーン関数 $F(bold(k), i omega_n)$
 - Padé 近似による実周波数への解析接続スペクトル
 
-=== option=17: キャリア数 (`CARRIER_NUM`)
+=== option=17: バンドフィリング (`BAND_FILLING`)
 
-各バンドのフェルミ面の体積から電子数（粒子数）・ホール数を計算します。`fill` との整合性確認に使います。
+バンドの占有状況を手早く確認するための診断用モードです。各バンドについて, $bold(k)$ メッシュのうち $mu$ より上・下にある割合を出力します。非占有側がそのバンドのホール的な側, 占有側が電子的な側なので, この2つでシートがバンドの底寄りか天井寄りかが一目で分かります。占有割合の総和は単位胞あたりの電子数になり, `fill` との整合性チェックになります。 この2つの割合はどちらも Luttinger 体積であり, $upright(c m^3)$ あたりではなく単位胞・スピンあたりで規格化したものです。フェルミ面を持たないバンドは 1（単位胞に電子1個）または 0 になり, ポケットを持つバンドは対応する側にそのポケットの $V_"occ"\/V_"BZ"$ が出ます。option=5 で使う `fs_carrier_density` は同じ体積に $g_s\/V_"uc"$ を掛けたものです。`fill` と突き合わせるにはこちらの規格化が, 実験のキャリア濃度と比べるには $upright(c m^(-3))$ の方が対応します。
 
 === option=18: サイクロトロン質量 (`CYCLOTRON_MASS`)
 
@@ -385,9 +433,21 @@ olist = [[0, 3], [1, 4], [2, 5]]
 
 === 伝導計算パラメータ
 
-- `tau_const` （実数, 単位: fs）: ボルツマン理論（option=5）での定数緩和時間$tau$。実際の系では散乱機構に依存しますが, 定数近似では実験値との比較から決めます（例: 金属では1〜100 fs程度）。
+- `tau_const` （実数, 単位: fs）: `tau_mode='const'` のときに使う定数緩和時間 $tau$。定数近似では自由パラメータであり, 実験値との比較から決めます（例: 金属では 1〜100 fs 程度）。なお $R_H$ は $tau^2\/tau^2$ を持つため定数 $tau$ には *依存しません*。`tau_mode='const'` では, ホール係数はフェルミ窓の広がり以外に温度依存性を持たない純粋なバンド構造由来の量になります。
 
-- `sw_tdf` （bool）: `True`にすると輸送分布関数（TDF）を先に計算し, そのエネルギー積分から輸送係数を求めます（エネルギー依存緩和時間に対応する場合に有効）。
+- `tau_mode` （文字列, 既定 `'const'`）: option=5 の緩和時間モデル。
+  - `'const'`: 定数 `tau_const`（$bold(k)$・バンドに依らない）。
+  - `'epa'`: 電子フォノン平均結合（Samsonidze--Kozinsky の EPA）による $tau(bold(k))$。`epa_file` が必要です。$R_H (T)$ やシートごとの移動度差が意味を持つのはこのモードです。
+  - `'dos1'` / `'dos2'`: DOS ベースの $tau$（`tau_const` でスケール）。
+  実行時にフェルミ面平均 $angle.l tau angle.r$, フェルミ窓での範囲, および $angle.l tau^2 angle.r \/ angle.l tau angle.r^2$ が出力されます。最後の量は定数 $tau$ でちょうど 1 になり, $tau(bold(k))$ が $R_H$ を定数 $tau$ の値からどれだけずらすかを表します。
+
+- `epa_file` （文字列 または `None`）: `tau_mode='epa'` のときに読み込む `epa.x`（`job='egrid'`）の出力ファイルパス。
+
+- `hall_mesh_list` （リスト または `None`, 既定 `None`）: option=5 のホール係数に対する $bold(k)$ メッシュ収束スイープ。例: `[20,30,40]` や `[(20,20,10),(30,30,15)]`。各要素は整数（立方メッシュ）か `(Nx,Ny,Nz)` タプルです。`None` の場合は `(Nx,Ny,Nz)` 単一メッシュのみで, 収束情報は得られません。粗いメッシュでは $sigma^((1))$ が符号ごと誤り得るため, 新しい物質では最低一度はスイープすることを強く推奨します。
+
+- `sw_tdf` （bool）: `True` にすると輸送分布関数（TDF）を先に計算し, そのエネルギー積分から輸送係数を求めます（エネルギー依存緩和時間に対応する場合に有効）。
+
+伝導モード（option=5,6）のスピン縮退因子は `sw_soc` に従います。`sw_soc=False` ではバンドがスピン縮退しているとして $g_s=2$ を, `sw_soc=True` ではハミルトニアンに両スピンが既に含まれているとして $g_s=1$ を使います。
 
 === 軌道・相互作用パラメータ
 
@@ -594,7 +654,7 @@ tempK = 50
 
 = テストコード
 
-`tests/` ディレクトリには, 主要な数値カーネルと物理ベンチマークを確認するための回帰テストが含まれています。`pytest` がインストールされていない環境でも, 各テストファイルを Python スクリプトとして直接実行できます。
+`tests/` ディレクトリには, 数値カーネルと物理ベンチマークの回帰テストが 7 ファイル・151 項目 含まれています。`pytest` がインストールされていない環境でも, 各テストファイルを Python スクリプトとして直接実行できます。
 
 実行前に Fortran 共有ライブラリ `libs/libfmod.so` がコンパイル済みである必要があります。未コンパイルの場合は `libs` ディレクトリで `make FC=<compiler> SL=<library>` を実行してください。
 
@@ -603,62 +663,42 @@ tempK = 50
 個別に実行する場合:
 
 ```bash
-python tests/test_eilenberger.py
+python tests/test_transport.py
 python tests/test_rpa_flex.py
 ```
 
-`pytest` が利用できる環境では以下でも実行できます。
+サマリ表付きで全て実行する場合（`pytest` 不要）:
 
 ```bash
-pytest tests
+python tests/run_all.py          # 全ファイル
+python tests/run_all.py rpa      # ファイル名に "rpa" を含むものだけ
 ```
 
-=== `tests/test_eilenberger.py`
+`pytest` が利用できる環境では `pytest tests` でも実行できます。一部のテストは `tmp_path` フィクスチャを取るため `pytest` でのみ実行され, 単体ランナーではスキップされます。
 
-準古典 Eilenberger / Riccati ソルバーのテストです。均一系, 表面, 渦糸, 渦糸格子, model Fermi surface, Pauli 制限, triplet $d$-vector texture など, Eilenberger 関連の物理ベンチマークを確認します。
+=== ファイル別のカバー範囲
 
-主な確認項目:
+#table(
+  columns: (auto, auto, auto, 1fr),
+  align: (left, right, right, left),
+  table.header([*ファイル*], [*項目数*], [*時間*], [*確認している内容*]),
+  [`test_eilenberger.py`], [39], [336 s],
+    [準古典 Eilenberger / Riccati ソルバー: 均一系の極限, Fortran カーネルと Python 参照実装の一致, 表面 Andreev 束縛状態, 渦糸および自己無撞着渦糸格子, 凝縮自由エネルギー, model / Wannier フェルミ面, Pauli 制限, triplet $d$-vector texture],
+  [`test_rpa_flex.py`], [30], [0.4 s],
+    [RPA / FLEX / Eliashberg の構成要素: 相互作用頂点, RPA 行列代数, 厳密 Lindhard 和・対バブルとの照合による $chi_0$ と $phi_0$, テイル補正 $chi_0$, 自己エネルギーの再グリッド, および時間反転対称性下の既約 $bold(k)$ メッシュ],
+  [`test_effmass.py`], [29], [3.9 s],
+    [直交基底・MLO 基底での逆有効質量（バンド間項, overlap 項, 縮退の扱い）と, dHvA 極値軌道の抽出: 断面の幾何, 開軌道の棄却, ゾーン還元],
+  [`test_nmr.py`], [22], [15 s],
+    [超伝導状態の NMR: BCS ギャップ内挿, $bold(q)$ メッシュの折り畳み, 自己無撞着 Eliashberg ギャップの読み込み, Knight shift（Yosida と triplet）, Hebel--Slichter ピーク, ライン節の $T^3$ 則],
+  [`test_transport.py`], [18], [0.6 s],
+    [直流極限での Kubo$arrow.l.r$ボルツマン一致, Wiedemann--Franz 則, 対称化されたバンド間熱流頂点, バンド縮退, および弱磁場ホール応答: スカラー参照との $sigma^((1))$ 一致, $R_H arrow -1\/(n e)$ と格子角非依存性, Luttinger 体積によるキャリア密度],
+  [`test_velocity_mlo.py`], [7], [0.3 s],
+    [非直交（MLO）基底でのバンド速度: $-epsilon_n C^dagger (partial S\/partial k) C$ の overlap 項, エルミート性, 直交経路への完全一致でのディスパッチ],
+  [`test_tools.py`], [6], [0.3 s],
+    [他ファイルが照合先とする参照実装: Fermi / Bose 恒等式, 閉形式のモデル束, Fortran 畳み込みの検証に使う厳密 $chi_0$],
+)
 
-- 松原周波数 cutoff の温度スケーリング
-- Anderson theorem と Abrikosov--Gor'kov pair breaking の再現
-- 弱結合 BCS 比 $2 Delta_0 / k_B T_c approx 3.53$
-- Fortran Riccati カーネルと Python 参照実装の一致
-  - scalar `riccati_chords`
-  - spin-matrix `matrix_riccati_batch`
-  - batched chord `matrix_riccati_chords`
-- $d$波表面でのギャップ抑制と zero-energy bound state
-- 渦糸芯での CdGM zero-energy peak
-- 渦糸格子での Volovik 型 field dependence
-- `build_model_fs` の規格化と等方 Fermi surface 極限
-- singlet Pauli 抑制と triplet equal-spin pairing の耐性
-- 表面・渦糸芯における triplet $d$-vector texture
-
-このテストは比較的物理寄りのベンチマークであり, 実行時間は環境により数十秒程度かかる場合があります。
-
-=== `tests/test_rpa_flex.py`
-
-RPA / FLEX / Eliashberg の基本部品を対象にした軽量な回帰テストです。Eilenberger 以外の Fortran wrapper, RPA 行列演算, FLEX 用 bubble / vertex, Eliashberg solver の smoke test を確認します。
-
-主な確認項目:
-
-- `get_chi_orb_list` の multi-site orbital-pair / site index の整合性
-- `gen_SCmatrix` の 2 軌道 Kanamori 型 vertex の基準値
-- `gen_SCmatrix_orb` の軌道依存 `Umat`, `Jmat` vertex の基準値
-- 1 軌道 RPA 公式
-  $ chi_s = chi^0 / (1 - U chi^0) $
-  の確認
-- `S=C=0` のとき `get_chis_chic` が bare $chi^0$ に戻ること
-- 1 軌道 tight-binding model に対する `gen_Green0` の解析式
-  $ G^0(k,i omega_n) = 1 / (i omega_n + mu - epsilon_k) $
-  の確認
-- `get_chi0` と `get_chi0_conv` の一致
-- `get_Vsigma_nosoc_flex` が相互作用ゼロでゼロ vertex を返すこと
-- `linearized_eliashberg` が相互作用ゼロで $lambda = 0$ を返し, 有限な配列を返すこと
-- `nonlinear_eliashberg` がゼロ seed / ゼロ相互作用で自明解 $Delta=0$ を保つこと
-- `_load_sigma_from_file` が `self_en.npz` 不在時にクラッシュせず `None` を返すこと
-- `output_gap_function` の 1 軌道出力 smoke test
-
-このテストは小さな 1 軌道模型と小さい $k$ メッシュを使うため, RPA/FLEX 周辺の API 破壊を素早く検出する用途に向いています。
+実行時間は極端に偏っており, `test_lattice_symmetry_wannier_fs_rotation` 1 項目だけで全体の約 56% を占めます（自己無撞着な渦格子計算を 6 回実行するため）。スイートを軽くしたい場合はこのテストの `Ng` / `nbeta` を下げてください。
 
 = トラブルシューティング
 
@@ -675,3 +715,9 @@ RPA / FLEX / Eliashberg の基本部品を対象にした軽量な回帰テス�
 - *FLEX で max$|Sigma|$ が発散*: `sw_rescale_flex=True` を設定するか, `U` を下げてください。
 
 - *伝導率の単位が合わない*: `sw_unit=True` になっているか確認してください。`False` にすると無次元系になります。
+
+- *ホール係数が $bold(k)$ メッシュで符号が変わる*: これは $sigma^((1))$ の典型的な破綻の仕方であり, バグではありません。`hall_mesh_list` でスイープし, 2つの診断値を見てください。$N_"eff"$ が $10^3$ を下回っていればフェルミ窓を担う状態数が足りず, 相殺率が $10^(-2)$ を下回っていれば補償近傍で $sigma_(x x)$ よりはるかに細かいメッシュが必要です。`tempK` を上げてフェルミ窓を広げるのも有効です。
+
+- *ホールキャリア密度が実験と合わない*: 同じ出力に併記される Luttinger 体積と突き合わせてください。$n_e \/ n_h approx 1$ なら補償金属であり, $n_H$ はそもそもキャリア密度ではありません（移動度の比較や二流体フィットを行ってください）。また `sw_soc` が正しく設定されているか（スピン縮退因子を決めます）, 実験磁場での $omega_c tau$ が $lt.tilde 0.1$ に収まっているかも確認してください。
+
+- *$R_H$ に温度依存性が出ない*: `tau_mode='const'` では当然の挙動です。$R_H$ は $tau^2\/tau^2$ を持つため定数 $tau$ は厳密に相殺します。`epa_file` を用意して `tau_mode='epa'` にすると $bold(k)$ 依存の $tau$ が入ります。

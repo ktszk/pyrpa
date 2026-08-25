@@ -4,6 +4,7 @@
 Higher-level calculation routines: FLEX, Eliashberg, susceptibility spectra, carrier analysis.
 """
 import numpy as np
+import scipy.linalg as sclin
 import libs.flibs as flibs
 from ._bands import get_eigs, get_emesh, calc_mu
 from ._eilenberger import BCS_RATIO
@@ -339,7 +340,252 @@ def calc_path_spectrum(kind:str, mu:float, temp:float, klist, qlist, chiolist, e
 
     return w, sp, spec
 
-def get_carrier_num(kmesh, rvec, ham_r, S_r, mu:float, Arot):
+# --------------------------------------------------------------------------- #
+#  Weak-field (B-linear) Hall response
+# --------------------------------------------------------------------------- #
+#  The k-space kernels themselves live in fortran (fcond.f90):
+#    flibs.calc_sigma_hall  -> S[Norb,3,3,3], the B-linear Hall kernel for all
+#                              three field directions plus its absolute-value sum
+#    flibs.calc_k0_band     -> K0[Norb,3,3], the per-band charge kernel
+#  Only the 3x3 algebra that turns them into R_H stays here.
+
+
+def hall_coefficient(K0: np.ndarray, Shall: np.ndarray, Vuc: float, wsum: float,
+                     gsp: float) -> np.ndarray:
+    """
+    @fn hall_coefficient
+    @brief Hall coefficient for the three field directions from the full
+    conductivity and Hall-kernel tensors.
+
+        rho^(1) = -sigma^-1 sigma^(1) sigma^-1
+        R_H^(g) = rho^(1)_{ba}/B = -(wsum*Vuc/gsp) [K0^-1 S^(g) K0^-1]_{b,a}
+
+    with (a,b,g) cyclic.  All unit prefactors cancel between sigma^(1) and the
+    two factors of sigma^-1 except (wsum*Vuc/gsp), so tau (and tau_unit) drop
+    out of R_H for a k-independent tau -- which is why this is expressed in the
+    bare calc_Kn / calc_sigma_hall sums.
+
+    @param     K0: Boltzmann charge kernel [3,3] from calc_Kn (proportional to sigma)
+    @param  Shall: Hall kernel [3,3,3] from flibs.calc_sigma_hall (band summed,
+                  or one band's slice for a per-sheet R_H)
+    @param    Vuc: Unit cell volume in m^3
+    @param   wsum: Sum of the k-point weights (Nk for a uniform mesh)
+    @param    gsp: Spin degeneracy factor (2 without SOC, 1 with)
+    @return    Rh: Hall coefficient [3] in m^3/C, index = field direction
+    """
+    pref = -(wsum*Vuc/gsp)
+    scale = (max(np.trace(K0), 0.0)/3.)**3
+    Rh = np.full(3, np.nan)
+    full_ok = abs(sclin.det(K0)) > 1.0e-12*scale
+    K0inv = sclin.inv(K0) if full_ok else None
+    for g in range(3):
+        a, b = (g+1) % 3, (g+2) % 3
+        if full_ok:
+            Rh[g] = pref*K0inv.dot(Shall[:, :, g]).dot(K0inv)[b, a]
+            continue
+        # sigma singular: a band with no dispersion along some axis (a strictly 2D
+        # model has sigma_zz = 0) makes the full tensor non-invertible while R_H
+        # for B along that axis is still perfectly well defined.  Fall back to the
+        # 2x2 block in the plane the current actually flows in, which reproduces
+        # the diagonal expression exactly when sigma has no coupling to g.
+        idx = np.ix_([a, b], [a, b])
+        K2 = K0[idx]
+        if abs(sclin.det(K2)) > 1.0e-12*(max(np.trace(K2), 0.0)/2.)**2:
+            K2inv = sclin.inv(K2)
+            Rh[g] = pref*K2inv.dot(Shall[:, :, g][idx]).dot(K2inv)[1, 0]
+    return Rh
+
+
+def hall_carrier_density(Rh: np.ndarray, eC: float) -> tuple[np.ndarray, list]:
+    """
+    @fn hall_carrier_density
+    @brief Convert R_H into a POSITIVE carrier density plus the carrier sign.
+
+    n_H = 1/(e|R_H|).  The single-band relations are R_H = -1/(n_e e) for
+    electrons and R_H = +1/(n_h e) for holes, so the sign of R_H selects the
+    carrier type and only |R_H| sets the magnitude.  (The old
+    nh = -1/(R_H e) returned a NEGATIVE number for a hole-like band and
+    labelled it a hole density.)
+
+    Valid as a true carrier count only for a single closed sheet; for a
+    multi-band / compensated metal n_H is the two-fluid combination
+    (p mu_h^2 - n mu_e^2)/... , not n or p.  Compare against the Luttinger
+    volume from fs_carrier_density before reading it as a density.
+
+    @param  Rh: Hall coefficient [3] in m^3/C
+    @param  eC: Elementary charge in C
+    @return (n_H, kind): density [3] in cm^-3 and 'electron'/'hole' per direction
+    """
+    Rh = np.atleast_1d(np.asarray(Rh, dtype=np.float64))
+    with np.errstate(divide='ignore'):
+        n_H = 1.0/(np.abs(Rh)*eC)/1.0e6                 # m^-3 -> cm^-3
+    kind = ['-' if not np.isfinite(r) else ('electron' if r < 0 else 'hole') for r in Rh]
+    return n_H, kind
+
+def _periodic_components(mask: np.ndarray) -> list:
+    """
+    @fn _periodic_components
+    @brief Connected components of a 3-D boolean k-space mask under PERIODIC
+    boundaries, each tagged with its volume fraction and whether it spans the zone.
+
+    Both properties are essential here.  The periodic merge matters because a
+    pocket centred on Gamma is split across the array edges of the [0,1) mesh
+    get_emesh uses, and would be counted as up to 8 separate pockets.  The span
+    flag separates a CLOSED pocket, whose volume is a Luttinger carrier count,
+    from the percolating background of a partly filled band (and from a genuinely
+    open Fermi sheet, which has no carrier count at all).
+
+    @param mask: occupied (or unoccupied) region on the [Nx,Ny,Nz] mesh
+    @return list of (fraction, spans) per component, largest fraction first
+    """
+    from scipy import ndimage
+    lab, n = ndimage.label(mask)
+    if n == 0:
+        return []
+    parent = list(range(n+1))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for ax in range(3):                                  # glue the opposite faces
+        lo, hi = np.take(lab, 0, axis=ax), np.take(lab, -1, axis=ax)
+        sel = (lo > 0) & (hi > 0)
+        if not sel.any():
+            continue
+        # collapse the face to its DISTINCT label pairs first: a face carries N^2
+        # cells but only a handful of pairs, and the union loop is python
+        pairs = np.unique(np.stack([lo[sel].ravel(), hi[sel].ravel()], axis=1), axis=0)
+        for u, v in pairs:
+            ru, rv = find(int(u)), find(int(v))
+            if ru != rv:
+                parent[rv] = ru
+    labels = np.array([find(i) for i in range(n+1)])[lab]
+    nlab = n+1
+    size = np.bincount(labels.ravel(), minlength=nlab)
+    # "spans axis ax" <=> the component appears in EVERY layer along ax.  Counting
+    # occupied layers with one bincount per layer is O(Nk) for the whole axis;
+    # testing each component with its own full-array mask would be O(Ncomp*Nk)
+    # and dominates the carrier analysis on a fine mesh.
+    spans = np.zeros(nlab, dtype=bool)
+    for ax in range(3):
+        n_ax = labels.shape[ax]
+        cnt = np.zeros(nlab, dtype=np.int64)
+        for i in range(n_ax):
+            cnt += np.bincount(np.take(labels, i, axis=ax).ravel(), minlength=nlab) > 0
+        spans |= (cnt == n_ax)
+    total = labels.size
+    out = [(size[u]/total, bool(spans[u])) for u in range(1, nlab) if size[u] > 0]
+    return sorted(out, key=lambda p: -p[0])
+
+
+def fs_carrier_density(eig: np.ndarray, mu: float, Vuc: float, gsp: float = 2.0,
+                       mesh: tuple | None = None) -> dict:
+    """
+    @fn fs_carrier_density
+    @brief Carrier density from the LUTTINGER VOLUME of every closed Fermi-surface
+    pocket -- the quantity an experimental carrier density is actually compared to.
+
+    Each band's occupied region (e<mu) and unoccupied region (e>=mu) are split
+    into connected components under periodic boundary conditions.  A CLOSED
+    occupied component is an electron pocket holding gsp*frac/Vuc carriers; a
+    CLOSED unoccupied component is a hole pocket holding the same of the opposite
+    sign.  The component that percolates through the zone is the filled/empty
+    background of that band and carries nothing.
+
+    Working per pocket rather than per band matters: bands are sorted by energy at
+    each k, so one band index routinely carries an electron pocket in one part of
+    the zone and a hole pocket in another (wherever two bands cross).  A single
+    occupied fraction per band would assign that band one type and silently drop
+    the other pocket.
+
+    An OPEN sheet (both regions percolate) has no Luttinger volume and is reported
+    as such rather than as a number.
+
+    This is NOT what the Hall coefficient returns.  n_H = 1/(e|R_H|) coincides
+    with it only for a single closed sheet; comparing the two is how a
+    discrepancy with experiment gets attributed to compensation rather than to a
+    misplaced mu.
+
+    @param   eig: Eigenvalues [Nk,Norb] float64 (eV), on the uniform [0,1) mesh
+    @param    mu: Chemical potential in eV
+    @param   Vuc: Unit cell volume in m^3
+    @param   gsp: Spin degeneracy factor (2 without SOC, 1 with)
+    @param  mesh: (Nx,Ny,Nz).  Required for the pocket decomposition; if None the
+                  routine falls back to one occupied-fraction per band and sets
+                  'approx' True.
+    @return dict with per-band arrays 'ne_band','nh_band' [cm^-3], 'npocket_e',
+            'npocket_h', 'open_sheet', 'focc', 'kind', and totals 'n_e','n_h'
+    """
+    Norb = eig.shape[1]
+    scale = gsp/(Vuc*1.0e6)                              # BZ fraction -> cm^-3
+    focc = np.array([(eig[:, n] < mu).mean() for n in range(Norb)])
+    ne_band = np.zeros(Norb)
+    nh_band = np.zeros(Norb)
+    npocket_e = np.zeros(Norb, dtype=int)
+    npocket_h = np.zeros(Norb, dtype=int)
+    open_sheet = np.zeros(Norb, dtype=bool)
+    kind = []
+    for n in range(Norb):
+        if not eig[:, n].min() < mu < eig[:, n].max():
+            kind.append('full' if focc[n] > 0.5 else 'empty')
+            continue
+        if mesh is None:                                 # crude single-pocket fallback
+            if focc[n] <= 0.5:
+                ne_band[n], npocket_e[n] = scale*focc[n], 1
+            else:
+                nh_band[n], npocket_h[n] = scale*(1.-focc[n]), 1
+        else:
+            band = eig[:, n].reshape(mesh)
+            for frac, spans in _periodic_components(band < mu):
+                if not spans:
+                    ne_band[n] += scale*frac
+                    npocket_e[n] += 1
+            for frac, spans in _periodic_components(band >= mu):
+                if not spans:
+                    nh_band[n] += scale*frac
+                    npocket_h[n] += 1
+            open_sheet[n] = (npocket_e[n] == 0 and npocket_h[n] == 0)
+        if open_sheet[n]:
+            kind.append('open')
+        elif npocket_e[n] and npocket_h[n]:
+            kind.append('both')
+        elif npocket_h[n]:
+            kind.append('hole')
+        else:
+            kind.append('electron')
+    return {'ne_band': ne_band, 'nh_band': nh_band, 'npocket_e': npocket_e,
+            'npocket_h': npocket_h, 'open_sheet': open_sheet, 'focc': focc,
+            'kind': np.array(kind), 'approx': mesh is None,
+            'n_e': ne_band.sum(), 'n_h': nh_band.sum()}
+
+
+def report_band_filling(kmesh, rvec, ham_r, S_r, mu:float, Arot):
+    """
+    @fn report_band_filling
+    @brief Print, for each band, the fraction of the mesh lying above and below mu.
+
+    The unoccupied fraction is the hole-like side of that band and the occupied
+    fraction the electron-like side, so the pair says at a glance whether a sheet
+    sits near the bottom or the top of its band.  The occupied fractions sum to
+    the electron count per unit cell, which is the consistency check against `fill`.
+
+    Both fractions ARE Luttinger volumes, normalized per unit cell per spin
+    rather than per cm^3: a band with no Fermi surface reads 1 (one electron per
+    cell) or 0, and a band with a pocket reads that pocket's V_occ/V_BZ on the
+    corresponding side.  fs_carrier_density reports the same volumes multiplied
+    by gsp/V_uc, so n*V_uc/gsp returns the fraction printed here exactly.  This
+    normalization is the one that pairs with `fill`; the cm^-3 one is what an
+    experimental carrier concentration is compared against.
+    @param  kmesh: k-mesh (used for all three axes)
+    @param   rvec: Real-space lattice vectors (Wannier R-vectors)
+    @param  ham_r: Hamiltonian in real space
+    @param    S_r: Real-space overlap blocks ([] for an orthogonal basis)
+    @param     mu: Chemical potential in eV
+    @param   Arot: Rotation matrix passed through to get_emesh
+    """
     Nk, eig, kweight = get_emesh(kmesh, kmesh, kmesh, ham_r, S_r, rvec, Arot)
     if Nk <= 0:
         print("Error: Number of k-points (Nk) is non-positive", flush=True)

@@ -220,17 +220,48 @@ subroutine calc_kn(K0,K1,K2,eig,veloc,kweight,tau,temp,mu,Nk,Norb) bind(C)
   !$omp end parallel
 end subroutine calc_kn
 
-subroutine calc_sigma_hall(eig,veloc,imass,kweight,tau,temp,mu,Nk,Norb,sigma_hall) bind(C)
-  !!@param sigma_hall,out: conductivity in MF and EF
-  !!@param        eig,in: energy of bands
-  !!@param      veloc,in: group velocity:
-  !!@param      imass,in: inverse of effective mass
-  !!@param    kweight,in: weight of k-points
-  !!@param        tau,in: relaxation time
-  !!@param       temp,in: Temperature
-  !!@param         mu,in: chemical potential
-  !!@param         Nk,in: The number of k-points
-  !!@param       Norb,in: The number of orbitals
+subroutine calc_sigma_hall(shall,sabs,eig,veloc,imass,kweight,tau,temp,mu,Nk,Norb) bind(C)
+  !> calc_sigma_hall
+  !> Weak-field (B-linear) Boltzmann Hall kernel for ALL THREE field directions,
+  !> band resolved, antisymmetrized in the two current indices:
+  !>
+  !>   A(a,b,g) = sum_{k,n} w_k tau^2 (-df/de) eps_{g,u,v} v_a M^-1_{b,u} v_v
+  !>   S(a,b,g) = 0.5*(A(a,b,g) - A(b,a,g))
+  !>
+  !> sigma^(1)_{ab}(B||g)/B is S(a,b,g) times the prefactor that turns calc_kn's
+  !> K0 into sigma, so the normalization matches calc_kn: a kweight-weighted SUM
+  !> over k with no 1/Nk.
+  !>
+  !> Returning the whole tensor rather than the single B||z scalar is what lets
+  !> the caller build rho^(1) = -sigma^-1 sigma^(1) sigma^-1 properly.  Reading
+  !> R_H off sigma_xy/(sigma_xx sigma_yy) instead assumes sigma is diagonal in
+  !> xyz, which is false for any cell whose axes are not mutually orthogonal --
+  !> a monoclinic cell has sigma_xy /= 0 already at B=0.  The band resolution
+  !> feeds the two-fluid decomposition needed in a compensated metal, and the
+  !> three field directions are what experiment actually varies.
+  !>
+  !> Contracting at (a,b,g)=(x,y,z) gives, term by term,
+  !>   -0.5 w (vx^2 M^-1_yy + vy^2 M^-1_xx - 2 vx vy M^-1_xy),
+  !> i.e. minus the textbook one-sided scalar, PROVIDED M^-1 is symmetric (it is,
+  !> being d2e/dk_a dk_b).  An asymmetric M^-1 means a non-hermitian H(k) or a
+  !> broken get_imassk, and breaks that equivalence.
+  !>
+  !> sabs accumulates sum |contribution| with the same indexing.  The Hall
+  !> integrand changes sign around the Fermi surface, and |S|/sabs is the
+  !> cancellation ratio: where it is small the total is a tiny residue of large
+  !> opposing parts and R_H is dominated by k-mesh noise, which is what makes its
+  !> SIGN move with the mesh.
+  !!@param    shall,out: Hall kernel [3,3,3,Norb] (fortran (g,b,a,n))
+  !!@param     sabs,out: sum of |contribution|, same indexing
+  !!@param       eig,in: energy of bands
+  !!@param     veloc,in: group velocity
+  !!@param     imass,in: inverse of effective mass
+  !!@param   kweight,in: weight of k-points
+  !!@param       tau,in: relaxation time
+  !!@param      temp,in: Temperature
+  !!@param        mu,in: chemical potential
+  !!@param        Nk,in: The number of k-points
+  !!@param      Norb,in: The number of orbitals
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nk,Norb
@@ -239,39 +270,95 @@ subroutine calc_sigma_hall(eig,veloc,imass,kweight,tau,temp,mu,Nk,Norb,sigma_hal
   real(c_double),intent(in),dimension(Nk):: kweight
   real(c_double),intent(in),dimension(3,Norb,Nk):: veloc
   real(c_double),intent(in),dimension(3,3,Norb,Nk):: imass
-  real(c_double),intent(out):: sigma_hall
+  real(c_double),intent(out),dimension(3,3,3,Norb):: shall,sabs
 
-  real(c_double),dimension(Norb,Nk):: dfermi
-  integer(c_int32_t) i,j
-  real(c_double) temp_safe
-  sigma_hall=0.0d0
+  integer(c_int32_t) i,j,ia,ib,ig,iu,iv
+  real(c_double) w,temp_safe,t,cv(3),d(3)
+  real(c_double) eps(3,3,3)
+
+  eps(:,:,:)=0.0d0
+  eps(1,2,3)=1.0d0; eps(2,3,1)=1.0d0; eps(3,1,2)=1.0d0
+  eps(1,3,2)=-1.0d0; eps(3,2,1)=-1.0d0; eps(2,1,3)=-1.0d0
   temp_safe=max(temp,1.0d-12)
-  !$omp parallel
-  !$omp do private(j)
-  get_dfermi: do i=1,Nk
-     do j=1,Norb
-        dfermi(j,i)=0.25d0*(1.0d0-tanh(0.5d0*(eig(j,i)-mu)/temp_safe)**2)/temp_safe
-     end do
-  end do get_dfermi
-  !$omp end do
+  shall(:,:,:,:)=0.0d0
+  sabs(:,:,:,:)=0.0d0
 
-  !$omp do private(i,j) reduction(+:sigma_hall)
-  ! sigma_Hall ~ sum_{k,n} 0.5*(vx^2*m^-1_yy + vy^2*m^-1_xx - 2*vx*vy*m^-1_xy) * (-df/de) * tau^2
-  ! Semi-classical Hall formula (B||z) in the relaxation-time approximation.
-  ! The x<->y symmetrized integrand equals the one-sided form (vx^2*m^-1_yy - vx*vy*m^-1_xy)
-  ! over the full BZ (integration by parts), but converges better on a finite mesh and is
-  ! the manifestly antisymmetric Hall response.
-  get_Kn: do i=1,Nk
+  !$omp parallel do private(i,j,ia,ib,ig,iu,iv,w,t,cv,d) reduction(+:shall,sabs)
+  k_loop: do i=1,Nk
      band_loop: do j=1,Norb
-        sigma_hall=sigma_hall+0.5d0*(veloc(1,j,i)*veloc(1,j,i)*imass(2,2,j,i)&
-             +veloc(2,j,i)*veloc(2,j,i)*imass(1,1,j,i)&
-             -2.0d0*veloc(1,j,i)*veloc(2,j,i)*imass(1,2,j,i))&
-             *dfermi(j,i)*kweight(i)*tau(j,i)**2
+        ! -df/de = 0.25*(1-tanh^2((e-mu)/2T))/T, times tau^2 and the k-weight
+        w=0.25d0*(1.0d0-tanh(0.5d0*(eig(j,i)-mu)/temp_safe)**2)/temp_safe &
+             *tau(j,i)*tau(j,i)*kweight(i)
+        if(abs(w)<1.0d-300) cycle band_loop
+        field_loop: do ig=1,3
+           do iu=1,3                       ! cv(u) = eps_{g,u,v} v_v
+              cv(iu)=0.0d0
+              do iv=1,3
+                 cv(iu)=cv(iu)+eps(ig,iu,iv)*veloc(iv,j,i)
+              end do
+           end do
+           do ib=1,3                       ! d(b) = M^-1_{b,u} cv(u)
+              d(ib)=0.0d0
+              do iu=1,3
+                 d(ib)=d(ib)+imass(ib,iu,j,i)*cv(iu)
+              end do
+           end do
+           do ia=1,3
+              do ib=1,3
+                 t=0.5d0*w*(veloc(ia,j,i)*d(ib)-veloc(ib,j,i)*d(ia))
+                 shall(ig,ib,ia,j)=shall(ig,ib,ia,j)+t
+                 sabs(ig,ib,ia,j)=sabs(ig,ib,ia,j)+abs(t)
+              end do
+           end do
+        end do field_loop
      end do band_loop
-  end do get_Kn
-  !$omp end do
-  !$omp end parallel
+  end do k_loop
+  !$omp end parallel do
 end subroutine calc_sigma_hall
+
+subroutine calc_k0_band(K0n,eig,veloc,kweight,tau,temp,mu,Nk,Norb) bind(C)
+  !> calc_k0_band
+  !> Per-band charge transport kernel K0n(i,j,n) = sum_k v_i v_j tau (-df/de) w_k.
+  !> calc_kn returns only the band SUM; keeping the bands apart is what allows
+  !> the two-fluid decomposition sigma = sum_n sigma_n that explains a Hall
+  !> coefficient in a compensated metal.  Sums over n to calc_kn's K0.
+  !!@param      K0n,out: per-band charge kernel [3,3,Norb]
+  !!@param       eig,in: energy of bands
+  !!@param     veloc,in: group velocity
+  !!@param   kweight,in: weight of k-points
+  !!@param       tau,in: relaxation time
+  !!@param      temp,in: Temperature
+  !!@param        mu,in: chemical potential
+  !!@param        Nk,in: The number of k-points
+  !!@param      Norb,in: The number of orbitals
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  implicit none
+  integer(c_int64_t),intent(in):: Nk,Norb
+  real(c_double),intent(in):: temp,mu
+  real(c_double),intent(in),dimension(Norb,Nk):: eig,tau
+  real(c_double),intent(in),dimension(Nk):: kweight
+  real(c_double),intent(in),dimension(3,Norb,Nk):: veloc
+  real(c_double),intent(out),dimension(3,3,Norb):: K0n
+
+  integer(c_int32_t) i,j,l,m
+  real(c_double) w,temp_safe
+
+  temp_safe=max(temp,1.0d-12)
+  K0n(:,:,:)=0.0d0
+  !$omp parallel do private(i,j,l,m,w) reduction(+:K0n)
+  k_loop: do i=1,Nk
+     band_loop: do j=1,Norb
+        w=0.25d0*(1.0d0-tanh(0.5d0*(eig(j,i)-mu)/temp_safe)**2)/temp_safe &
+             *tau(j,i)*kweight(i)
+        do l=1,3
+           do m=1,3
+              K0n(m,l,j)=K0n(m,l,j)+veloc(m,j,i)*veloc(l,j,i)*w
+           end do
+        end do
+     end do band_loop
+  end do k_loop
+  !$omp end parallel do
+end subroutine calc_k0_band
 
 subroutine calc_tdf(tdf,eig,veloc,kweight,tau,Nw,Nk,Norb) bind(C)
   !> calc tdf function

@@ -324,23 +324,270 @@ def test_imass_orbital_tensor_matches_analytic_second_derivative():
                         assert abs(imk[ik, l, m, b, a] - M[a, b, m, l]) < 1e-12
 
 
-def test_imass_band_tensor_is_symmetric():
-    """The band-basis inverse mass tensor must be symmetric in its two axes."""
-    rvec = np.array([[1, 1, 0], [-1, -1, 0], [1, 0, 0], [-1, 0, 0],
-                     [0, 1, 0], [0, -1, 0]], dtype=np.float64)
-    ham_r = np.zeros((len(rvec), 2, 2), dtype=np.complex128)
-    for n, r in enumerate(rvec):
-        ham_r[n, 0, 0] = -1.0
-        ham_r[n, 1, 1] = -0.7
-    ham_r[0, 0, 1] = 0.3 + 0.2j
-    ham_r[1, 1, 0] = np.conj(ham_r[0, 0, 1])
-    klist = np.array([[0.13, 0.27, 0.0], [0.41, -0.19, 0.0]])
-    mrot = np.array([[1.0, 0.2, 0.0], [0.0, 1.1, 0.0], [0.0, 0.0, 0.9]])
-    eig, uni = F.get_eig(F.gen_ham(klist, ham_r, rvec))
-    imass = F.get_imassk(F.get_imass0(klist, ham_r, rvec), mrot, uni,
-                         F.get_vlm0(klist, ham_r, rvec), eig)
-    assert np.abs(imass - imass.transpose(0, 1, 3, 2)).max() < 1e-12
-    assert np.abs(imass).max() > 0.0
+# --------------------------------------------------------------------------- #
+#  weak-field Hall response (fcond.f90 calc_sigma_hall / plibs.hall_coefficient)
+# --------------------------------------------------------------------------- #
+def _free_electron_cell(gamma_deg, a=4.0):
+    """One s-band on a simple lattice whose a and b axes meet at gamma_deg.
+
+    gamma != 90 makes the Cartesian axes non-orthogonal to the lattice, so
+    sigma_xy is already nonzero at B=0 -- the case where the old
+    R_H = sigma_xy/(sigma_xx*sigma_yy) shortcut breaks down.
+    """
+    g = np.radians(gamma_deg)
+    avec = np.array([[a, 0., 0.], [a*np.cos(g), a*np.sin(g), 0.], [0., 0., a]])
+    rvec = np.array([[1, 0, 0], [-1, 0, 0], [0, 1, 0],
+                     [0, -1, 0], [0, 0, 1], [0, 0, -1]], dtype=np.float64)
+    ham_r = np.full((6, 1, 1), -0.5, dtype=np.complex128)
+    return avec, rvec, ham_r
+
+
+def _hall_setup(gamma_deg, N=60, fill=0.005, TK=100.):
+    import libs.plibs as P
+    hbar = 6.582119569e-16                     # eV s
+    kb = 8.617333262e-5                        # eV/K
+    eC = 1.602176634e-19                       # C
+    avec, rvec, ham_r = _free_electron_cell(gamma_deg)
+    temp = TK*kb
+    Nk, eig, vk, imass, kw = P.get_emesh(N, N, N, ham_r, [], rvec, avec.T*(1e-10/hbar),
+                                         sw_veloc=True, sw_mass=True)
+    mu = P.calc_mu(eig, Nk, fill, temp)
+    tau = eig*0. + 1.0
+    return dict(P=P, eig=eig, vk=vk, imass=imass/eC, kw=kw, tau=tau, temp=temp, mu=mu,
+                avec=avec, Vuc=abs(np.linalg.det(avec))*1e-30, fill=fill, eC=eC)
+
+
+def _hall_kernel(s, band_resolved=False):
+    """Band-summed (or band-resolved) Hall kernel from fcond.f90."""
+    S, _ = F.calc_sigma_hall(s['eig'], s['vk'], s['imass'], s['kw'], s['tau'],
+                             s['temp'], s['mu'])
+    return S if band_resolved else S.sum(axis=0)
+
+
+def _multiorbital_model(Norb=3, seed=3, t=0.2):
+    """Hermitian multi-orbital model: H(-R) = H(R)^dagger, on-site H(0) = H(0)^dagger.
+
+    Getting this wrong (independent random blocks on +R and -R) makes H(k)
+    non-hermitian, and the band-basis inverse mass then comes out ASYMMETRIC --
+    which silently breaks every identity below, since d2e/dk_a dk_b is symmetric
+    by construction.  Built explicitly so the test cannot regress into that.
+    """
+    rng = np.random.default_rng(seed)
+    nn = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=np.float64)
+    rvec = np.vstack([[[0., 0., 0.]], nn, -nn])
+    ham_r = np.zeros((7, Norb, Norb), dtype=np.complex128)
+    h0 = rng.standard_normal((Norb, Norb)) + 1j*rng.standard_normal((Norb, Norb))
+    ham_r[0] = 0.5*(h0 + h0.conj().T)
+    for i in range(1, 4):
+        h = (rng.standard_normal((Norb, Norb)) + 1j*rng.standard_normal((Norb, Norb)))*t
+        ham_r[i], ham_r[i+3] = h, h.conj().T
+    return rvec, ham_r
+
+
+def _sigma_hall_scalar_reference(eig, veloc, imass, kweight, tau, temp, mu):
+    """Pure-numpy mirror of the textbook one-sided B||z Hall scalar,
+
+        sum_k 0.5 (vx^2 M_yy + vy^2 M_xx - 2 vx vy M_xy) (-df/de) tau^2 w_k,
+
+    band resolved.  Deliberately written in the symmetrized scalar form rather
+    than the Levi-Civita contraction fcond.f90 uses, so agreement pins the
+    kernel instead of restating it.  Equals -S[...,x,y,z] when M is symmetric.
+    """
+    df = 0.25*(1. - np.tanh(0.5*(eig - mu)/temp)**2)/temp
+    w = df*tau*tau*kweight[:, None]
+    vx, vy = veloc[:, :, 0], veloc[:, :, 1]
+    integ = 0.5*(vx*vx*imass[:, :, 1, 1] + vy*vy*imass[:, :, 0, 0]
+                 - 2.*vx*vy*imass[:, :, 0, 1])
+    return (w*integ).sum(axis=0)                              # [Norb]
+
+
+def test_sigma_hall_matches_the_scalar_reference():
+    """calc_sigma_hall's (x,y,z) component must equal minus the textbook scalar,
+    band by band, for a k- and band-dependent tau on a non-orthogonal cell.
+
+    Contracting the Levi-Civita form at (a,b,g)=(x,y,z) gives
+    -0.5 w (vx^2 M_yy + vy^2 M_xx - 2 vx vy M_xy) term by term, so the two agree
+    exactly -- PROVIDED the inverse mass tensor is symmetric.  That makes this a
+    live check on get_imassk (and on H(k) hermiticity) as much as on the kernel.
+    """
+    import libs.plibs as P
+    hbar, eC, kb = 6.582119569e-16, 1.602176634e-19, 8.617333262e-5
+    Norb = 3
+    rvec, ham_r = _multiorbital_model(Norb)
+    for gamma in (90., 113.):
+        g = np.radians(gamma)
+        avec = np.array([[4., 0., 0.], [4*np.cos(g), 4*np.sin(g), 0.], [0., 0., 4.]])
+        N, temp = 16, 200.*kb
+        Nk, eig, vk, imass, kw = P.get_emesh(N, N, N, ham_r, [], rvec, avec.T*(1e-10/hbar),
+                                             sw_veloc=True, sw_mass=True)
+        im = imass/eC
+        assert np.abs(im - im.transpose(0, 1, 3, 2)).max() <= 1e-10*np.abs(im).max()
+        mu = P.calc_mu(eig, Nk, 1.3, temp)
+        tau = 1. + 0.5*np.abs(np.sin(eig*7))          # k- and band-dependent
+        S, Sabs = F.calc_sigma_hall(eig, vk, im, kw, tau, temp, mu)
+        ref = _sigma_hall_scalar_reference(eig, vk, im, kw, tau, temp, mu)
+        assert np.abs(S[:, 0, 1, 2] + ref).max() <= 1e-9*np.abs(ref).max()   # per band
+        Stot = S.sum(axis=0)
+        assert abs(Stot[0, 1, 2] + ref.sum()) <= 1e-9*abs(ref.sum())
+        # a Hall conductivity is antisymmetric in its two current indices
+        assert np.abs(Stot + Stot.swapaxes(0, 1)).max() <= 1e-10*np.abs(Stot).max()
+        # the absolute-value companion bounds the signed sum term by term
+        assert np.all(np.abs(S) <= Sabs + 1e-30)
+        assert np.abs(Stot).max() > 0.0
+
+
+def test_hall_coefficient_is_lattice_angle_independent():
+    """A nearly empty band is free-electron-like, at every lattice angle.
+
+    R_H must be -1/(n e) with n = gsp*fill/Vuc (the dilute limit), and it cannot
+    depend on the angle between the a,b axes, since that is the same electron gas
+    described in skewed coordinates.  The old sigma-is-diagonal formula drifted by
+    -9/-22/-35% at gamma = 105/120/135 deg because it ignored sigma_xy(B=0); the
+    rho^(1) = -sigma^-1 sigma^(1) sigma^-1 form is flat to the non-parabolicity
+    residue, which is what the second assertion pins.
+    """
+    gsp, err = 2.0, []
+    for gamma in (90., 105., 120., 135.):
+        s = _hall_setup(gamma, N=60, fill=0.005)
+        K0, _, _ = F.calc_Kn(s['eig'], s['vk'], s['kw'], s['temp'], s['mu'], s['tau'])
+        S = _hall_kernel(s)
+        Rh = s['P'].hall_coefficient(K0, S, s['Vuc'], s['kw'].sum(), gsp)
+        if gamma == 90.:
+            assert np.all(Rh < 0.0)                           # electron-like
+            assert np.abs(Rh/Rh[2] - 1.0).max() < 1e-8        # cubic cell: isotropic
+        else:
+            assert abs(K0[0, 1]) > 0.1*abs(K0[0, 0])          # sigma_xy(B=0) is real here
+        err.append(Rh[2]/(-1.0/(gsp*s['fill']/s['Vuc']*s['eC'])) - 1.0)
+    err = np.array(err)
+    assert np.abs(err).max() < 0.05                           # each angle accurate
+    assert np.abs(err - err[0]).max() < 5e-3                  # and the SAME error at every angle
+
+
+def test_hall_carrier_density_sign_and_magnitude():
+    """n_H must be positive for both carrier types, with the type read off sign(R_H)."""
+    import libs.plibs as P
+    eC = 1.602176634e-19
+    n_H, kind = P.hall_carrier_density(np.array([-2.0e-8, +2.0e-8, -1.0e-9]), eC)
+    assert kind == ['electron', 'hole', 'electron']
+    assert np.all(n_H > 0.0)
+    assert abs(n_H[0]/(1.0/(2.0e-8*eC)/1e6) - 1.0) < 1e-12
+    assert abs(n_H[0] - n_H[1]) < 1e-6*n_H[0]                 # |R_H| alone sets the magnitude
+
+
+def _two_pocket_model(a=4.0, t=0.5, tp=0.25, delta=0.4):
+    """Two non-crossing bands: an electron pocket at Gamma and a hole pocket at R.
+
+    e1 = -2t*S + 6t   (minimum 0 at Gamma),  e2 = -2tp*S - 6tp + delta
+    (maximum delta at R), with S = cos kx + cos ky + cos kz.  e2 < e1 everywhere,
+    so band 0 is the hole sheet and band 1 the electron sheet.  fill = 1 puts the
+    two pocket volumes in exact compensation.
+    """
+    avec = np.eye(3)*a
+    nn = np.array([[1, 0, 0], [-1, 0, 0], [0, 1, 0],
+                   [0, -1, 0], [0, 0, 1], [0, 0, -1]], dtype=np.float64)
+    rvec = np.vstack([[[0., 0., 0.]], nn])
+    ham_r = np.zeros((7, 2, 2), dtype=np.complex128)
+    ham_r[0] = np.diag([6*t, -6*tp+delta]).astype(np.complex128)
+    for i in range(1, 7):
+        ham_r[i] = np.diag([-t, -tp]).astype(np.complex128)
+    return avec, rvec, ham_r
+
+
+def test_luttinger_volume_finds_both_pocket_types():
+    """fill=1 of the two-pocket model is exactly compensated: n_e must equal n_h.
+
+    Both pockets must also be found as ONE closed pocket each -- a pocket sitting
+    on Gamma is split across all eight corners of the [0,1) mesh, so this only
+    works if the components are merged across the periodic faces.
+    """
+    import libs.plibs as P
+    kb = 8.617333262e-5
+    avec, rvec, ham_r = _two_pocket_model()
+    N, temp = 40, 150.*kb
+    Nk, eig, kw = P.get_emesh(N, N, N, ham_r, [], rvec, avec.T)
+    mu = P.calc_mu(eig, Nk, 1.0, temp)
+    Vuc = np.linalg.det(avec)*1e-30
+    car = P.fs_carrier_density(eig, mu, Vuc, 2.0, mesh=(N, N, N))
+    assert list(car['kind']) == ['hole', 'electron']
+    assert car['npocket_h'][0] == 1 and car['npocket_e'][0] == 0
+    assert car['npocket_e'][1] == 1 and car['npocket_h'][1] == 0
+    assert not car['open_sheet'].any()
+    assert car['n_e'] > 0.0
+    # residual is the lattice-count discretization of the two pocket volumes
+    assert abs(car['n_e']/car['n_h'] - 1.0) < 0.08          # compensation by construction
+    # doping breaks it: the hole pocket must close up and only electrons remain
+    mu2 = P.calc_mu(eig, Nk, 1.1, temp)
+    car2 = P.fs_carrier_density(eig, mu2, Vuc, 2.0, mesh=(N, N, N))
+    assert car2['n_h'] == 0.0 and car2['n_e'] > car['n_e']
+
+
+def test_luttinger_volume_flags_an_open_sheet():
+    """A band dispersing along kx only has a percolating sheet, not a pocket."""
+    import libs.plibs as P
+    N = 24
+    kx = np.linspace(0, 1, N, endpoint=False)
+    e = np.cos(2*np.pi*kx)[:, None, None]*np.ones((N, N, N))   # flat in ky,kz
+    eig = e.reshape(-1, 1)
+    car = P.fs_carrier_density(eig, 0.0, 1e-28, 2.0, mesh=(N, N, N))
+    assert car['kind'][0] == 'open'
+    assert car['open_sheet'][0]
+    assert car['n_e'] == 0.0 and car['n_h'] == 0.0
+
+
+def test_luttinger_volume_of_a_dilute_pocket_matches_the_filling():
+    """One nearly empty band: the pocket volume IS the electron count gsp*fill/Vuc."""
+    import libs.plibs as P
+    kb, gsp, fill = 8.617333262e-5, 2.0, 0.005
+    avec, rvec, ham_r = _free_electron_cell(90.)
+    N, temp = 40, 100.*kb
+    Nk, eig, kw = P.get_emesh(N, N, N, ham_r, [], rvec, avec.T)
+    mu = P.calc_mu(eig, Nk, fill, temp)
+    Vuc = np.linalg.det(avec)*1e-30
+    car = P.fs_carrier_density(eig, mu, Vuc, gsp, mesh=(N, N, N))
+    assert car['kind'][0] == 'electron' and car['npocket_e'][0] == 1
+    assert abs(car['n_e']/(gsp*fill/(Vuc*1e6)) - 1.0) < 0.05
+
+
+def test_calc_k0_band_sums_to_calc_Kn():
+    """The two-fluid decomposition must be a decomposition, not a reformulation."""
+    eig, vk, veloc = _band_diagonal_model(Nk=200, Norb=4, seed=7)
+    kw = np.ones(len(eig))
+    tau = np.abs(np.random.default_rng(1).standard_normal(eig.shape)) + 0.5
+    K0, _, _ = F.calc_Kn(eig, veloc, kw, 0.02, 0.0, tau)
+    K0n = F.calc_k0_band(eig, veloc, kw, 0.02, 0.0, tau)
+    assert np.abs(K0n.sum(axis=0) - K0).max() < 1e-9*np.abs(K0).max()
+    assert np.abs(K0n - K0n.transpose(0, 2, 1)).max() < 1e-12*np.abs(K0n).max()
+
+
+def test_hall_coefficient_survives_a_singular_conductivity():
+    """A strictly 2-D band has sigma_zz = 0, so the full 3x3 sigma cannot be
+    inverted -- yet R_H for B||z is perfectly well defined.  The in-plane 2x2
+    fallback must reproduce the plain sigma_xy/(sigma_xx sigma_yy) value there,
+    and report R_H for the two in-plane field directions as undefined rather than
+    as a number.
+    """
+    import libs.plibs as P
+    hbar, eC, kb = 6.582119569e-16, 1.602176634e-19, 8.617333262e-5
+    avec = np.eye(3)*4.0
+    rvec = np.array([[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]], dtype=np.float64)
+    ham_r = np.full((4, 1, 1), -0.5, dtype=np.complex128)
+    N, temp = 30, 100.*kb
+    Nk, eig, vk, imass, kw = P.get_emesh(N, N, 4, ham_r, [], rvec, avec.T*(1e-10/hbar),
+                                         sw_veloc=True, sw_mass=True)
+    mu = P.calc_mu(eig, Nk, 0.02, temp)
+    tau = eig*0. + 1.0
+    K0, _, _ = F.calc_Kn(eig, vk, kw, temp, mu, tau)
+    assert abs(K0[2, 2]) < 1e-6*abs(K0[0, 0])                  # no dispersion along z
+    S, _ = F.calc_sigma_hall(eig, vk, imass/eC, kw, tau, temp, mu)
+    S = S.sum(axis=0)
+    Vuc = np.linalg.det(avec)*1e-30
+    Rh = P.hall_coefficient(K0, S, Vuc, kw.sum(), 2.0)
+    scal = _sigma_hall_scalar_reference(eig, vk, imass/eC, kw, tau, temp, mu).sum()
+    ref = -Vuc*kw.sum()*scal/(2.0*K0[0, 0]*K0[1, 1])
+    assert np.isfinite(Rh[2]) and abs(Rh[2]/ref - 1.0) < 1e-10
+    assert not np.isfinite(Rh[0]) and not np.isfinite(Rh[1])
+    n_H, kind = P.hall_carrier_density(Rh, eC)
+    assert kind == ['-', '-', 'electron']
 
 
 # --------------------------------------------------------------------------- #

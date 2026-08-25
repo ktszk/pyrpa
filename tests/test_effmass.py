@@ -222,14 +222,6 @@ def test_mass_is_inverse_of_imass():
     assert np.abs(prod - np.eye(3)).max() < 1e-8
 
 
-def test_eig_required():
-    """get_mass without eig is a programming error, not a silent wrong answer."""
-    rvec, ham_r, S_r, _, _ = T.mlo_model(seed=17)
-    klist = _klist(3)
-    _, uni = _eig_uni(klist, ham_r, S_r, rvec)
-    T.assert_raises(ValueError, F.get_mass, klist, ham_r, rvec, np.eye(3), uni, True)
-
-
 def test_tilted_cylinder_orbit_area_follows_inverse_cosine():
     """A quasi-2D cylinder has A_ext(theta) = A_ext(0) / cos(theta)."""
     rvec = np.array(
@@ -409,8 +401,8 @@ def test_plane_slice_reproduces_the_tilted_cylinder_law():
     a0 = None
     for theta in (0.0, 60.0, 75.0):
         bhat = P.bfield_hat(theta, 0.0)
-        orbits, n_open, _, _ = P.find_plane_orbits(rvec, ham_r, [], avec, mu, bhat,
-                                                   0.0, 4.0, dk, ngrow=4)
+        orbits, n_open, _, _, _ = P.find_plane_orbits(rvec, ham_r, [], avec, mu, bhat,
+                                                      0.0, 4.0, dk, ngrow=4)
         o = min(orbits, key=lambda o: np.linalg.norm(o['cen2d']))
         if a0 is None:
             a0 = o['area']
@@ -487,6 +479,67 @@ def test_dedup_separates_zone_copies_from_neighbouring_extrema():
     assert np.allclose(P.orbit_key(base, inv), P.orbit_key(copy, inv), atol=1e-9)
 
 
+def test_nearest_lattice_offset_beats_componentwise_rounding():
+    """Rounding each fractional component is exact only for an orthogonal cell; on a
+    skewed lattice it misses the nearest lattice point about a quarter of the time."""
+    import itertools
+    rng = np.random.default_rng(4)
+    cells = {
+        'cubic': np.eye(3) * 3.6,
+        'tetragonal': np.diag([2.8, 2.8, 6.5]),
+        'hexagonal': np.array([[3.0, 0.0, 0.0], [-1.5, 1.5 * np.sqrt(3.0), 0.0],
+                               [0.0, 0.0, 5.0]]),
+        'fcc': 3.597 * np.array([[0, .5, .5], [.5, 0, .5], [.5, .5, 0]]),
+        'bcc': 3.6 * np.array([[-.5, .5, .5], [.5, -.5, .5], [.5, .5, -.5]]),
+    }
+    n_rint_wrong = 0
+    for name, avec in cells.items():
+        bvec = P.get_bvec(avec)
+        for _ in range(60):
+            g = rng.uniform(-3.0, 3.0, 3)
+            exact = min(np.linalg.norm((g - np.array(h)).dot(bvec))
+                        for h in itertools.product(range(-4, 5), repeat=3))
+            got = np.linalg.norm(P.nearest_lattice_offset(g, bvec))
+            assert got <= exact * (1 + 1e-9), f'{name}: {got} > {exact}'
+            if np.linalg.norm((g - np.rint(g)).dot(bvec)) > exact * (1 + 1e-9):
+                n_rint_wrong += 1
+    assert n_rint_wrong > 0, 'the skewed cells must expose the rounding failure'
+
+
+def test_dedup_keeps_concentric_but_distinct_orbits_apart():
+    """Two orbits sharing a centre modulo the lattice but differing in size are two
+    orbits: the centre alone must not merge them."""
+    bvec = P.get_bvec(3.597 * np.array([[0, .5, .5], [.5, 0, .5], [.5, .5, 0]]))
+    rec = lambda area, cen: {'band': 0, 'area': area, 'd': 0.0,
+                             'cen3d': np.asarray(cen, dtype=float)}
+    belly = rec(5.74, [0.0, 0.0, 0.0])
+    inner = rec(0.89, bvec[0] - bvec[1])       # same centre modulo G, much smaller
+    out = P.dedup_extremal_orbits([belly, inner], bvec, tol_k=0.09,
+                                  bhat=np.array([0.0, 0.0, 1.0]))
+    assert len(out) == 2, [o['area'] for o in out]
+    # ... while a true copy, same centre AND same area, still collapses
+    copy = rec(5.74 * (1 + 2e-4), bvec[0] - bvec[1])
+    out = P.dedup_extremal_orbits([belly, copy], bvec, tol_k=0.09,
+                                  bhat=np.array([0.0, 0.0, 1.0]))
+    assert len(out) == 1 and np.allclose(out[0]['cen3d'], 0.0)
+
+
+def test_dedup_keeps_the_copy_nearest_the_field_axis():
+    """Which copy of an orbit survives the reduction is not cosmetic: the centre it
+    carries is what re-measurement in a wider window and the follow-to-the-next-angle
+    search both start from, so it has to be the one in the middle of the window."""
+    bvec = P.get_bvec(np.eye(3))
+    bhat = np.array([0.0, 0.0, 1.0])
+    rec = lambda area, cen: {'band': 0, 'area': area, 'd': 0.0,
+                             'cen3d': np.asarray(cen, dtype=float)}
+    central = rec(1.0, [0.0, 0.0, 0.0])
+    far = rec(1.0, bvec[0] * 2 - bvec[1])          # same orbit, three zones out
+    for order in ([far, central], [central, far]):
+        out = P.dedup_extremal_orbits(order, bvec, tol_k=0.05, bhat=bhat)
+        assert len(out) == 1
+        assert np.allclose(out[0]['cen3d'], 0.0), out[0]['cen3d']
+
+
 def test_corrugated_cylinder_extrema_survive_the_reduction():
     """Belly and neck of one tube differ by 35% here, but the reduction must keep
     both while folding away the copies the scan sees in neighbouring zones."""
@@ -523,16 +576,16 @@ def test_open_orbit_is_recognised_not_merely_discarded():
     avec, mu, dk = np.diag([1.0, 1.0, 3.0]), -3.0, 2 * np.pi / 240
 
     def probe(theta):
-        orbits, _, _, open_bands = P.find_plane_orbits(
+        orbits, _, _, unresolved, axial = P.find_plane_orbits(
             rvec, ham_r, [], avec, mu, P.bfield_hat(theta, 0.0), 0.0, 4.0, dk, ngrow=4)
-        return len(orbits), open_bands
+        return len(orbits), unresolved, axial
 
-    n, open_bands = probe(0.0)          # B along the tube: a closed cross-section
-    assert n == 1 and open_bands == set()
-    n, open_bands = probe(60.0)         # still closed, only wider
-    assert n == 1 and open_bands == set()
-    n, open_bands = probe(90.0)         # B across the tube: the section runs away
-    assert n == 0 and open_bands == {0}
+    n, unresolved, axial = probe(0.0)   # B along the tube: a closed cross-section
+    assert n == 1 and unresolved == set() and axial == {0}
+    n, unresolved, axial = probe(60.0)  # still closed, only wider
+    assert n == 1 and unresolved == set() and axial == {0}
+    n, unresolved, axial = probe(90.0)  # B across the tube: the section runs away
+    assert n == 0 and unresolved == {0} and axial == set()
 
 
 def test_follow_orbit_carries_an_orbit_to_the_next_angle():

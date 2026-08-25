@@ -24,15 +24,28 @@ The main features currently supported are:
 - Density of states (DOS) calculation
 - Spectral function $A(bold(k), omega)$ calculation
 - Various transport coefficients (electrical conductivity, thermal conductivity, Seebeck coefficient, etc.) via Boltzmann theory and linear response theory
+- Weak-field Hall coefficient $R_H$, Hall carrier density and Hall mobility, with a band-resolved (two-fluid) decomposition
 - Spin susceptibility $chi_s$ and pairing susceptibility $phi$ based on RPA
 - Dynamic spin susceptibility $chi_s^"SC"$ in the superconducting state
 - Self-energy calculation via FLEX (Fluctuation EXchange approximation)
 - Linearized Eliashberg equation for the superconducting eigenvalue and gap function
 - Nonlinear Eliashberg equation for self-consistent SC gap functions
-- Carrier number, cyclotron mass, and dHvA frequency calculations
+- Band filling, cyclotron mass, and dHvA frequency calculations
 - Spectral function with impurities and via CPA
 
 All settings in pyrpa are controlled by modifying variables at the top of `main.py`, above the library import lines.
+
+= Notes on This Revision
+
+Several changes alter results produced by earlier versions. The first two invalidate previously computed data outright; the rest change what is reported. If you have output from before this revision, re-check it against the notes below.
+
+- *Irreducible $bold(k)$-mesh under time reversal.* `generate_irr_kpoint_inv` matched $bold(k)$-point coordinates with a tolerance of $1\/max(N_x,N_y,N_z)$ — exactly one mesh spacing — and silently matched a *neighbouring* point whenever $1\/N$ was not a binary fraction. Meshes with $N$ a power of two ($4,8,16,32,64$) were unaffected; others were not, e.g. $12^3$ mismapped 919 of its 1728 points. The mapping is now built from integer mesh indices and is exact for every mesh. Any FLEX / Eliashberg / SC-$chi$ result obtained on a non-power-of-two mesh should be regarded as unreliable and recomputed. The same routine was $O(N_"kall"^2)$ and is now $O(N_"kall")$ (9.2 s $arrow$ 0.009 s at $64^3$).
+
+- *Irreducible wedge for $N_x$ odd with $N_y$ even.* That parity combination was an unimplemented branch in `gen_irr_k`: the wedge was left unfilled and the routine wrote past the end of `klist`, crashing for $N_z >= 3$. It is now implemented, and the wedge has been verified against `TRS_irr.typ` for all 384 mesh/parity combinations up to $8 times 8 times 6$.
+
+- *Spin degeneracy in transport.* option=5 and option=6 now take the spin factor from `sw_soc`. Previously $g_s=2$ was applied unconditionally, so results for a Hamiltonian that already carried both spins were a factor of two off.
+
+- *Hall coefficient.* $R_H$ is now formed from the full conductivity tensors rather than from $sigma_(x y)\/(sigma_(x x) sigma_(y y))$, and the Hall carrier density is reported as a positive number with its carrier type. See option=5.
 
 = Requirements
 
@@ -134,14 +147,49 @@ and plots it along the symmetry line. With `sw_self=True`, the self-energy from 
 
 === option=5: Boltzmann Transport (`CONDUCTIVITY_BT`)
 
-Calculates various transport coefficients using the Boltzmann transport equation under the relaxation time approximation ($tau = $ `tau_const` fs).
+Calculates transport coefficients from the Boltzmann equation in the relaxation-time approximation. The relaxation-time model is chosen with `tau_mode` (constant $tau$ by default).
 
-Output quantities:
+Thermoelectric quantities:
 - Electrical conductivity tensor $sigma_{i j}$ (unit: S/m)
 - Thermal conductivity tensor $kappa_{i j}$ (unit: W/m/K)
 - Seebeck coefficient tensor $S_{i j}$ (unit: V/K)
 - Power factor $sigma S^2$ (unit: $upright(W \/ m \/K^2)$)
 - Peltier coefficient, Lorenz number
+
+==== Weak-field Hall response
+
+The same mode also reports the $B$-linear Hall response. The Hall kernel is evaluated for *all three field directions* and resolved by band,
+
+$ S_(a b)^((g)) = 1/2 sum_(bold(k),n) w_bold(k) tau^2 (-partial f \/ partial epsilon) epsilon_(g u v) [v_a (M^(-1))_(b u) v_v - (a <-> b)] $
+
+and the Hall coefficient follows from the full tensors,
+
+$ rho^((1)) = -sigma^(-1) sigma^((1)) sigma^(-1), quad R_H^((g)) = rho^((1))_(b a) \/ B quad (a,b,g " cyclic"). $
+
+Using $sigma_(x y)\/(sigma_(x x) sigma_(y y))$ instead would assume $sigma$ is diagonal in $x y z$, which is false for any cell whose axes are not mutually orthogonal — a monoclinic cell has $sigma_(x y) eq.not 0$ already at $B=0$. If $sigma$ is singular (a strictly two-dimensional band has $sigma_(z z)=0$), the in-plane $2 times 2$ block is used for the field direction normal to it, and the other two directions are reported as undefined.
+
+Output quantities:
+- Hall coefficient $R_H$ for $bold(B) parallel x, y, z$ (unit: $upright(m^3 \/ C)$)
+- Hall carrier density $n_H = 1\/(e |R_H|)$ (unit: $upright(c m^(-3))$), labelled `electron` or `hole` from $"sign"(R_H)$
+- Hall mobility $mu_H = R_H sigma_(a a)$ (unit: $upright(c m^2 \/ V s)$) and $omega_c tau$ per tesla
+- $sigma^((1))_(x y)\/B$ (unit: $upright(S \/ m T)$)
+- The field range over which the weak-field expansion $omega_c tau < 0.1$ this mode assumes remains valid
+
+#block(fill: luma(240), inset: 8pt, radius: 4pt, width: 100%)[
+  $n_H = 1\/(e|R_H|)$ equals the true carrier density *only for a single closed Fermi-surface sheet*. In a multi-band metal it is a two-fluid average, $R_H = (p mu_h^2 - n mu_e^2)\/(e(p mu_h + n mu_e)^2)$, which can diverge or change sign near compensation. Compare it against the Luttinger volumes printed alongside (below) before reading it as a density.
+]
+
+==== $bold(k)$-mesh convergence
+
+$sigma^((1))$ carries one more $bold(k)$-derivative than $sigma$ (through $M^(-1)$) and its integrand changes sign around the Fermi surface, so it converges far more slowly: on an under-converged mesh $R_H$ can come out with the *wrong sign*. Setting `hall_mesh_list` runs the whole calculation on a sequence of meshes and prints a convergence table, flagging a sign flip or a change above 5% between the two finest meshes.
+
+Two diagnostics are printed per mesh:
+- $N_"eff"$ — the participation ratio of the $-partial f\/partial epsilon$ weights, i.e. the effective number of states carrying the Fermi window. Everything is an average over $N_"eff"$ states, so this sets the noise floor; a warning is issued below $10^3$.
+- The cancellation ratio $|sum| \/ sum |dot|$ of the Hall integrand. Where this is small the total is a tiny residue of large opposing contributions (near compensation), and the sign may still be mesh-dependent; a warning is issued below $10^(-2)$.
+
+==== Band-resolved decomposition
+
+$sigma$ and $sigma^((1))$ are both plain band sums, so each Fermi-surface sheet is also reported separately: its Luttinger-volume carrier density (the volume of each closed pocket, computed here), its $sigma_(x x)$, its own $R_H$ and $n_H$, and its mobility. Comparing a sheet's own $n_H$ against its Luttinger volume shows whether it behaves as one simple closed pocket; the gap between the total $n_H$ and $n_e\/n_h$ is then the compensation the experiment is actually seeing.
 
 === option=6: Linear Response Transport (`CONDUCTIVITY_PT`)
 
@@ -228,9 +276,9 @@ Reads the gap function from `gap.npy` (produced by option=15) and computes:
 - The anomalous Green's function $F(bold(k), i omega_n)$
 - Analytic continuation to the real-frequency axis via Padé approximation
 
-=== option=17: Carrier Number (`CARRIER_NUM`)
+=== option=17: Band Filling (`BAND_FILLING`)
 
-Calculates the electron (particle) and hole counts for each band from the volume of the Fermi surface. Useful for checking consistency with `fill`.
+A quick diagnostic on the band occupations. For each band it prints the fraction of the $bold(k)$-mesh lying above and below $mu$: the unoccupied fraction is the hole-like side of that band, the occupied fraction the electron-like side, so the pair says at a glance whether a sheet sits near the bottom or the top of its band. The occupied fractions sum to the electron count per unit cell, which is the consistency check against `fill`. Both fractions are Luttinger volumes normalized per unit cell per spin rather than per $upright(c m^3)$: a band with no Fermi surface reads 1 (one electron per cell) or 0, and a band with a pocket reads that pocket's $V_"occ"\/V_"BZ"$ on the corresponding side. `fs_carrier_density`, used by option=5, reports the same volumes multiplied by $g_s\/V_"uc"$; this normalization is the one that pairs with `fill`, the $upright(c m^(-3))$ one is what an experimental carrier concentration is compared against.
 
 === option=18: Cyclotron Mass (`CYCLOTRON_MASS`)
 
@@ -384,9 +432,21 @@ This section explains all parameters in the upper part of `main.py`, including t
 
 === Transport Parameters
 
-- `tau_const` (float, unit: fs): Constant relaxation time $tau$ for Boltzmann theory (option=5). In the constant relaxation time approximation, this is a free parameter typically chosen by comparison with experiment (typical metals: 1–100 fs).
+- `tau_const` (float, unit: fs): Constant relaxation time $tau$ used when `tau_mode='const'`. In the constant relaxation-time approximation this is a free parameter typically chosen by comparison with experiment (typical metals: 1–100 fs). Note that $R_H$ carries $tau^2\/tau^2$ and is therefore *independent* of a constant $tau$: with `tau_mode='const'` the Hall coefficient is a pure band-structure number with no temperature dependence beyond the Fermi window.
+
+- `tau_mode` (str, default `'const'`): Relaxation-time model for option=5.
+  - `'const'`: constant `tau_const`, $bold(k)$- and band-independent.
+  - `'epa'`: $tau(bold(k))$ from the electron--phonon averaged coupling (Samsonidze--Kozinsky EPA), read from `epa_file`. This is what makes $R_H (T)$ and sheet-dependent mobilities meaningful.
+  - `'dos1'` / `'dos2'`: DOS-based $tau$, scaled by `tau_const`.
+  A summary is printed with the Fermi-surface average $angle.l tau angle.r$, its range over the Fermi window, and $angle.l tau^2 angle.r \/ angle.l tau angle.r^2$ — which is 1 exactly when $tau$ is constant and quantifies how far $tau(bold(k))$ shifts $R_H$ away from the constant-$tau$ value.
+
+- `epa_file` (str or `None`): Path to the `epa.x` (`job='egrid'`) output read when `tau_mode='epa'`.
+
+- `hall_mesh_list` (list or `None`, default `None`): $bold(k)$-mesh convergence sweep for the Hall coefficient in option=5, e.g. `[20,30,40]` or `[(20,20,10),(30,30,15)]`. Each entry is either a single integer (cubic mesh) or an `(Nx,Ny,Nz)` tuple. `None` runs a single mesh `(Nx,Ny,Nz)` and gives no convergence information. Because $sigma^((1))$ can come out with the wrong sign on a coarse mesh, running a sweep at least once for a new material is strongly recommended.
 
 - `sw_tdf` (bool): If `True`, the transport distribution function (TDF) is computed first, and transport coefficients are obtained by energy integration. Relevant when using an energy-dependent relaxation time.
+
+Spin degeneracy in all three transport modes (option=5,6) follows `sw_soc`: with `sw_soc=False` the bands are spin-degenerate and a factor $g_s=2$ is applied, with `sw_soc=True` both spins are already in the Hamiltonian and $g_s=1$ is used.
 
 === Orbital and Interaction Parameters
 
@@ -593,7 +653,7 @@ Setting `option = 13` instead computes $chi_s^"SC"(omega)$ at the single $bold(q
 
 = Test Suite
 
-The `tests/` directory contains regression tests for the main numerical kernels and physics benchmarks. Each test file can be run directly as a Python script, so `pytest` is optional.
+The `tests/` directory contains regression tests for the numerical kernels and physics benchmarks: 151 tests across seven files. Each file can be run directly as a Python script, so `pytest` is optional.
 
 Before running the tests, the Fortran shared library `libs/libfmod.so` must be compiled. If it is missing, enter the `libs` directory and run `make FC=<compiler> SL=<library>`.
 
@@ -602,60 +662,42 @@ Before running the tests, the Fortran shared library `libs/libfmod.so` must be c
 Run individual test files directly:
 
 ```bash
-python tests/test_eilenberger.py
+python tests/test_transport.py
 python tests/test_rpa_flex.py
 ```
 
-If `pytest` is available, the whole test directory can also be run with:
+Run everything with a summary table (no `pytest` needed):
 
 ```bash
-pytest tests
+python tests/run_all.py          # everything
+python tests/run_all.py rpa      # only files matching "rpa"
 ```
 
-=== `tests/test_eilenberger.py`
+If `pytest` is available, the whole directory can also be run with `pytest tests`. A handful of tests take a `tmp_path` fixture and are reachable only under `pytest`; the standalone runner skips them.
 
-This file tests the quasiclassical Eilenberger / Riccati solvers. It covers homogeneous systems, surfaces, vortices, vortex lattices, model Fermi surfaces, Pauli limiting, and triplet $d$-vector textures.
+=== Coverage by file
 
-Main checks:
+#table(
+  columns: (auto, auto, auto, 1fr),
+  align: (left, right, right, left),
+  table.header([*File*], [*Tests*], [*Time*], [*What it pins down*]),
+  [`test_eilenberger.py`], [39], [336 s],
+    [Quasiclassical Eilenberger/Riccati solvers: homogeneous limits, Fortran kernels against Python references, surface Andreev states, vortices and self-consistent vortex lattices, condensation free energy, model and Wannier Fermi surfaces, Pauli limiting, triplet $d$-vector textures],
+  [`test_rpa_flex.py`], [30], [0.4 s],
+    [RPA/FLEX/Eliashberg building blocks: interaction vertices, RPA algebra, $chi_0$ and $phi_0$ against exact Lindhard/pair sums, tail-corrected $chi_0$, self-energy regridding, and the irreducible $bold(k)$-mesh under time reversal],
+  [`test_effmass.py`], [29], [3.9 s],
+    [Inverse effective mass in the orthogonal and MLO bases (interband and overlap terms, degeneracies), and the dHvA extremal-orbit machinery: slice geometry, open-orbit rejection, and the zone reduction],
+  [`test_nmr.py`], [22], [15 s],
+    [NMR in the SC state: BCS gap interpolation, $bold(q)$-mesh folding, loading a self-consistent Eliashberg gap, Knight shift (Yosida vs triplet), Hebel--Slichter peak and the $T^3$ law of line nodes],
+  [`test_transport.py`], [18], [0.6 s],
+    [Kubo$arrow.l.r$Boltzmann equivalence in the dc limit, Wiedemann--Franz, the symmetrized interband heat-current vertex, band degeneracies, and the weak-field Hall response: $sigma^((1))$ against the scalar reference, $R_H arrow -1\/(n e)$ and its independence of the lattice angle, and Luttinger-volume carrier densities],
+  [`test_velocity_mlo.py`], [7], [0.3 s],
+    [Band velocity in a non-orthogonal (MLO) basis: the $-epsilon_n C^dagger (partial S\/partial k) C$ overlap term, Hermiticity, and bit-for-bit dispatch back to the orthogonal path],
+  [`test_tools.py`], [6], [0.3 s],
+    [The shared references the other files check against: Fermi/Bose identities, closed-form model bundles, and the exact $chi_0$ used to validate the Fortran convolution],
+)
 
-- Matsubara cutoff scaling with temperature
-- Anderson theorem and Abrikosov--Gor'kov pair breaking
-- Weak-coupling BCS ratio $2 Delta_0 / k_B T_c approx 3.53$
-- Agreement between Fortran Riccati kernels and Python reference implementations
-  - scalar `riccati_chords`
-  - spin-matrix `matrix_riccati_batch`
-  - batched chord `matrix_riccati_chords`
-- Gap suppression and zero-energy bound states at a $d$-wave surface
-- CdGM zero-energy peak at a vortex core
-- Volovik-like field dependence in a vortex lattice
-- Normalization of `build_model_fs` and the isotropic Fermi-surface limit
-- Singlet Pauli suppression and robustness of triplet equal-spin pairing
-- Triplet $d$-vector textures near surfaces and vortex cores
-
-This is a physics-oriented benchmark suite and may take several tens of seconds depending on the machine.
-
-=== `tests/test_rpa_flex.py`
-
-This file provides lightweight regression tests for the RPA / FLEX / Eliashberg building blocks outside the Eilenberger suite. It targets Fortran wrappers, RPA matrix algebra, FLEX bubble / vertex kernels, and Eliashberg smoke tests.
-
-Main checks:
-
-- Consistency of multi-site orbital-pair and site-index generation in `get_chi_orb_list`
-- Reference values of the two-orbital Kanamori-type vertex from `gen_SCmatrix`
-- Reference values of orbital-dependent `Umat`, `Jmat` vertices from `gen_SCmatrix_orb`
-- One-orbital RPA formula
-  $ chi_s = chi^0 / (1 - U chi^0) $
-- `get_chis_chic` reduces to bare $chi^0$ when `S=C=0`
-- Analytic one-orbital Green's function check for `gen_Green0`:
-  $ G^0(k,i omega_n) = 1 / (i omega_n + mu - epsilon_k) $
-- Agreement between `get_chi0` and `get_chi0_conv`
-- `get_Vsigma_nosoc_flex` returns a zero vertex at zero interaction
-- `linearized_eliashberg` returns $lambda = 0$ and finite arrays at zero interaction
-- `nonlinear_eliashberg` preserves the trivial solution $Delta=0$ for zero seed and zero interaction
-- `_load_sigma_from_file` returns `None` without crashing when `self_en.npz` is absent
-- One-orbital smoke test for `output_gap_function`
-
-This test uses a very small one-orbital model and a small $k$ mesh, so it is intended to catch RPA/FLEX API regressions quickly.
+Runtime is heavily concentrated: `test_lattice_symmetry_wannier_fs_rotation` alone accounts for roughly 56% of the total, since it runs six self-consistent vortex-lattice solves. Reduce `Ng`/`nbeta` there if a faster suite is needed.
 
 = Troubleshooting
 
@@ -672,3 +714,9 @@ This test uses a very small one-orbital model and a small $k$ mesh, so it is int
 - *FLEX self-energy diverges*: Set `sw_rescale_flex=True` or reduce `U`.
 
 - *Transport coefficients have wrong units*: Make sure `sw_unit=True`. Setting it to `False` switches to a dimensionless unit system.
+
+- *The Hall coefficient changes sign with the $bold(k)$-mesh*: This is the normal failure mode of $sigma^((1))$, not a bug. Run a sweep with `hall_mesh_list` and read the two diagnostics: if $N_"eff"$ is below $10^3$ the Fermi window is carried by too few states, and if the cancellation ratio is below $10^(-2)$ the system is near compensation and needs a much finer mesh than $sigma_(x x)$ does. Raising `tempK` also widens the Fermi window.
+
+- *The Hall carrier density disagrees with experiment*: Check it against the Luttinger volumes reported in the same output. If $n_e \/ n_h approx 1$ the metal is compensated and $n_H$ is not a carrier density at all — compare mobilities or fit a two-fluid model instead. Also verify that `sw_soc` is set correctly, since it selects the spin degeneracy factor, and that $omega_c tau$ times your experimental field is still $lt.tilde 0.1$.
+
+- *$R_H$ shows no temperature dependence*: With `tau_mode='const'` this is expected — $R_H$ carries $tau^2\/tau^2$ and a constant $tau$ cancels exactly. Use `tau_mode='epa'` with an `epa_file` to get a $bold(k)$-dependent $tau$.

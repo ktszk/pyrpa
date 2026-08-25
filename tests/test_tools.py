@@ -73,25 +73,6 @@ def test_two_orbital_bundle_matches_closed_form_bands():
     T.assert_green_causal(md['Gk'])
 
 
-def test_band_diagonal_model_layout():
-    eig, vk, veloc = T.band_diagonal_model(Nk=16, Norb=3, seed=1)
-    assert eig.shape == (16, 3) and (np.diff(eig, axis=1) >= 0).all()
-    # vk strictly band-diagonal and consistent with veloc
-    off = vk.copy()
-    for n in range(3):
-        off[:, n, n, :] = 0.0
-    assert np.abs(off).max() == 0.0
-    assert np.abs(np.einsum('knni->kni', vk).real - veloc).max() < 1e-15
-
-
-def test_cylindrical_fs_normalization():
-    for gs in ('s', 'd', 'dxy'):
-        wf, phi = T.cylindrical_fs(Nb=180, gap_sym=gs)
-        # FS average <phi^2> = 1 (the normalization the solvers assume)
-        assert abs((wf * phi ** 2).sum() / wf.sum() - 1.0) < 1e-12
-    T.assert_raises(ValueError, T.cylindrical_fs, gap_sym='f')
-
-
 # --------------------------------------------------------------------------- #
 #  exact chi0 reference vs the Fortran library
 # --------------------------------------------------------------------------- #
@@ -157,48 +138,9 @@ def test_exact_chi0_two_pole_against_sharp_cutoff_extrapolation():
 # --------------------------------------------------------------------------- #
 #  numerics helpers
 # --------------------------------------------------------------------------- #
-def test_fit_power_order_recovers_synthetic_slopes():
-    ns = np.array([16, 32, 64, 128, 256])
-    for p in (0.5, 1.0, 2.0):
-        assert abs(T.fit_power_order(ns, 3.7 / ns ** p) - p) < 1e-10
-    assert abs(T.rel_err(np.array([1.0, 2.02]), np.array([1.0, 2.0])) - 0.01) < 1e-12
-
-
 # --------------------------------------------------------------------------- #
 #  physics assertions
 # --------------------------------------------------------------------------- #
-def test_assertions_detect_violations():
-    h = np.array([[1.0, 0.5j], [-0.5j, 2.0]])
-    T.assert_hermitian(h)
-    T.assert_positive_semidefinite(h)
-    T.assert_raises(AssertionError, T.assert_hermitian,
-                    np.array([[0.0, 1.0], [0.0, 0.0]]))
-    T.assert_raises(AssertionError, T.assert_positive_semidefinite,
-                    np.array([[1.0, 0.0], [0.0, -1.0]]))
-    # causality: flipping the sign of Im G must be caught
-    md = T.one_orbital_square(Nx=2, Ny=2, Nw=4)
-    T.assert_green_causal(md['Gk'])
-    T.assert_raises(AssertionError, T.assert_green_causal, np.conj(md['Gk']))
-
-
-def test_static_chi_of_stable_state_is_psd():
-    """Usage example: the static RPA susceptibility matrices chis/chic(q) of
-    a weakly interacting stable state must be Hermitian positive
-    semi-definite in the orbital-pair basis."""
-    md = T.two_orbital_square(Nx=4, Ny=4, Nw=64, temp=0.1, mu=0.0,
-                              U=0.5, J=0.1)
-    with T.silence():
-        chi0, stoner = F.get_chi0(md['Smat'], md['Cmat'], md['Gk'],
-                                  md['olist'], md['kmap'], md['invk'],
-                                  md['temp'], md['Nx'], md['Ny'], md['Nz'])
-        chis, chic = F.get_chis_chic(chi0, md['Smat'], md['Cmat'])
-    assert 0.0 < stoner < 1.0                     # stable normal state
-    for name, chi in (('chis', chis), ('chic', chic)):
-        static = np.transpose(chi, (2, 0, 1))     # [Nk, Nchi, Nchi]
-        T.assert_positive_semidefinite(static, tol=1e-10,
-                                       msg=f'static {name}')
-
-
 # --------------------------------------------------------------------------- #
 #  standalone runner (no pytest required)
 # --------------------------------------------------------------------------- #

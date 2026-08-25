@@ -50,7 +50,7 @@ class CalcMode(IntEnum):
     FLEX               = (14, "calc self energy")                          # self-energy calculation using FLEX
     LIN_ELIASHBERG     = (15, "solve linearized eliashberg equation")      # solve linearized Eliashberg equation
     GAP_FUNCTION       = (16, "gap_function")                              # post-process and output gap functions
-    CARRIER_NUM        = (17, "calculate carrier number")                  # carrier number calculation
+    BAND_FILLING       = (17, "check band filling and electron/hole character")  # per-band filling & FS character
     CYCLOTRON_MASS     = (18, "calculate cyclotron mass")                  # cyclotron mass calculation
     DHVA               = (19, "plot dHvA frequency")                       # dHvA frequency vs angle plot (not implemented)
     ELECTRON_MASS      = (20, "calculate electron mass")                   # electron mass calculation (not implemented)
@@ -98,7 +98,7 @@ MODES_PRINT_UJ      = frozenset({M.CHIS_SPECTRUM,M.CHIS_QPOINT,M.CHIS_QMAP,M.FLE
 MODES_SELF_MU       = frozenset({M.CONDUCTIVITY_BT,M.CONDUCTIVITY_PT,M.SPECTRUM_IMPURITY,M.SIGMA_CPA,M.EILENBERGER_SURFACE,M.EILENBERGER_VORTEX})
 # k-mesh reporting groups
 MODES_KMESH_SYMLINE = frozenset({M.BAND,M.SPECTRUM})
-MODES_KMESH_SINGLE  = frozenset({M.FERMI_2D,M.FERMI_3D,M.CHIS_QMAP,M.PHI_QMAP,M.CARRIER_NUM,M.CYCLOTRON_MASS,M.EILENBERGER})
+MODES_KMESH_SINGLE  = frozenset({M.FERMI_2D,M.FERMI_3D,M.CHIS_QMAP,M.PHI_QMAP,M.BAND_FILLING,M.CYCLOTRON_MASS,M.EILENBERGER})
 MODES_MATSUBARA     = frozenset({M.FLEX,M.LIN_ELIASHBERG})
 # dispatch groups
 MODES_CHI_NORMAL    = frozenset({M.CHIS_SPECTRUM,M.CHIS_QPOINT,M.CHIS_QMAP,M.PHI_SPECTRUM,M.PHI_QMAP})
@@ -192,6 +192,18 @@ Umat=None      #orbital-dependent U matrix (Norb x Norb); set when orb_dep=True
 Jmat=None      #orbital-dependent J matrix (Norb x Norb); set when orb_dep=True
 sw_unit=True    #True: use physical constants (SI/eV units), False: set all constants to 1 (dimensionless test mode)
 sw_tdf=False   #True: compute the transport distribution function first, then energy-integrate (energy-dependent tau)
+tau_mode='const' #relaxation time model for the Boltzmann transport modes (option 5).
+                 #'const': tau_const [fs], k- and band-independent. R_H then carries tau^2/tau^2
+                 #         and is tau-INDEPENDENT, i.e. a pure band-structure number with no T
+                 #         dependence beyond the Fermi window.
+                 #'epa'  : tau(k) from the electron-phonon averaged coupling; needs epa_file.
+                 #         This is what makes R_H(T) and sheet-dependent mobilities meaningful.
+                 #'dos1'/'dos2': DOS-based tau (flibs.get_tau modes 1/2), scaled by tau_const.
+epa_file=None    #path to the epa.x (job='egrid') output read when tau_mode='epa'
+hall_mesh_list=None #k-mesh convergence sweep for the Hall coefficient (option 5), e.g. [20,30,40]
+                    #or [(20,20,10),(30,30,15)]. sigma^(1) converges much more slowly than sigma
+                    #and can come out with the wrong SIGN on a coarse mesh, so check before use.
+                    #None: single mesh (Nx,Ny,Nz), no convergence information.
 sw_omega=False #True: real freq, False: Matsubara freq.
 sw_rescale_flex=True #True: rescale self energy to make max|Sigma|~U, False: no rescaling
 sw_chi0_tail=True #True: tail-corrected chi0 in FLEX/Eliashberg (conv[G]-conv[G0]+analytic reference; O(1/Nw^2) Matsubara truncation error). no-SOC path only
@@ -583,8 +595,134 @@ def plot_spectrum(k_sets,xlabel,kmesh,bvec,mu:float,ham_r,S_r,rvec,Emin:float,Em
     plt.colorbar()
     plt.show()
 
+def build_tau(eig,mu:float,temp:float,tau_const,rvec=None,ham_r=None,S_r=None,avec=None,
+              Nx=None,Ny=None,Nz=None,Nw:int=300):
+    '''
+    Relaxation time tau[Nk,Norb] in units of tau_unit, per the tau_mode switch.
+
+    R_H is INDEPENDENT of a constant tau (it carries tau^2/tau^2), so the whole
+    temperature dependence of the Hall coefficient -- and any difference between
+    the mobilities of two Fermi-surface sheets -- lives in tau(k).  With
+    tau_mode='const' the R_H printed by get_hall_coe is a pure band-structure
+    number; only a k-dependent tau makes R_H(T) meaningful.
+
+    Returns (tau, label).
+    '''
+    if tau_mode=='const':
+        return eig*0.+tau_const,f'constant tau = {tau_const} '+('fs' if sw_unit else '')
+    if tau_mode=='epa':
+        if not epa_file:
+            raise ValueError("tau_mode='epa' needs epa_file (epa.x job='egrid' output)")
+        ngrid,nmodes,edge,step,nbin,wavg,gavg=plibs.read_epa_output(epa_file)
+        # calc_tau_epa works with hbar=1 and energies in eV, so it returns hbar/eV;
+        # the Boltzmann kernels expect tau in units of tau_unit.
+        tau=flibs.calc_tau_epa(eig,gavg,wavg,edge,step,nbin,mu,temp)*hbar/tau_unit
+        return tau,f'EPA tau(k) from {epa_file} ({nmodes} modes)'
+    if tau_mode in ('dos1','dos2'):
+        Nk2,klist,eig2,uni,kw2=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec.T,sw_uni=True)
+        wlist=np.linspace(eig.min()-mu,eig.max()-mu,Nw,True)
+        Dos=flibs.gen_dos(eig2,uni,mu,wlist,delta)
+        return (flibs.get_tau(Dos.sum(axis=0),eig,tau_const,int(tau_mode[-1])),
+                f'DOS-based tau (mode {tau_mode[-1]}, capped at {tau_const})')
+    raise ValueError(f"unknown tau_mode '{tau_mode}' (use 'const', 'epa', 'dos1' or 'dos2')")
+
+def print_tau_summary(tau,eig,mu:float,temp:float,label:str,indent='  '):
+    '''Report tau where it matters: weighted by the Fermi window -df/de, not over all bands.'''
+    print(f'{indent}tau: {label}',flush=True)
+    w=0.25*(1.-np.tanh(0.5*(eig-mu)/temp)**2)/temp
+    if w.sum()<=0:
+        return
+    tav=(w*tau).sum()/w.sum()
+    sel=w>0.01*w.max()          # states actually inside the Fermi window
+    unit='fs' if sw_unit else ''
+    print(f'{indent}     <tau>_FS = {tav:.4g} {unit}   range over the Fermi window '
+          f'[{tau[sel].min():.4g}, {tau[sel].max():.4g}] {unit}',flush=True)
+    if tau.std()>0:
+        # R_H picks up <tau^2>/<tau>^2, which is 1 only for a constant tau
+        r=((w*tau*tau).sum()/w.sum())/tav**2
+        print(f'{indent}     <tau^2>/<tau>^2 = {r:.4f} '
+              +('(constant tau: R_H is tau-independent)' if abs(r-1.)<1e-6
+                else '(>1: tau(k) shifts R_H away from the constant-tau value)'),flush=True)
+
+def _hall_at_mesh(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,temp:float,
+                  tau_const,gsp:float,Nw:int=300,detail:bool=False):
+    '''
+    Weak-field (B-linear) Boltzmann Hall response on ONE k-mesh.
+    detail=True additionally builds the band-resolved (two-fluid) decomposition
+    and the Luttinger-volume carrier densities; that part is only worth its cost
+    on the mesh actually being reported, not on every step of a convergence sweep.
+    Returns a dict; all printing is done by get_hall_coe.
+    '''
+    Nk,eig,vk,imass,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec.T*ihbar,sw_veloc=True,sw_mass=True)
+    Vuc=sclin.det(avec)*1e-30
+    wsum=kweight.sum()          # NOT Nk: stays correct if a symmetry-reduced mesh is ever used
+    mu=plibs.calc_mu(eig,Nk,fill,temp)
+    tau,tau_label=build_tau(eig,mu,temp,tau_const,rvec,ham_r,S_r,avec,Nx,Ny,Nz,Nw)
+    K0,K1,K2=flibs.calc_Kn(eig,vk,kweight,temp,mu,tau)
+    # Full Hall kernel S[n,a,b,g] for the three field directions g, band resolved.
+    # The tensor (rather than the single B||z scalar) is what allows the proper
+    # rho^(1) = -sigma^-1 sigma^(1) sigma^-1 below instead of assuming sigma is
+    # diagonal in xyz.
+    Shall_n,Sabs_n=flibs.calc_sigma_hall(eig,vk,imass/eC,kweight,tau,temp,mu)
+    Shall=Shall_n.sum(axis=0)
+    Rh=plibs.hall_coefficient(K0,Shall,Vuc,wsum,gsp)          # m^3/C, per field axis
+    nH,kind=plibs.hall_carrier_density(Rh,eC)                 # cm^-3, 'electron'/'hole'
+    sigma=gsp*tau_unit*eC*K0/(wsum*Vuc)                       # S/m
+    # sigma^(1)/B carries one more power of e and of tau than sigma  -> S/(m T)
+    sigma1=gsp*eC*eC*tau_unit*tau_unit*Shall/(wsum*Vuc)
+    # Hall mobility mu_H = R_H * sigma_aa with the current in the plane normal to B.
+    # omega_c*tau = mu_H[SI]*B, so mu_H directly measures how far the weak-field
+    # expansion this whole routine is built on can be trusted.
+    muH=np.array([Rh[g]*sigma[(g+1)%3,(g+1)%3] for g in range(3)])   # m^2/(V s)
+    # --- two k-mesh adequacy diagnostics -----------------------------------
+    dfermi=0.25*(1.-np.tanh(0.5*(eig-mu)/temp)**2)/temp
+    # (i) effective number of states carrying the Fermi window, as the
+    #     participation ratio of the -df/de weights.  Everything here is an
+    #     average over Neff states, so Neff sets the statistical noise floor.
+    Neff=dfermi.sum()**2/(dfermi**2).sum()
+    # (ii) cancellation ratio of the Hall integrand: it changes sign around the
+    #     Fermi surface, and when |sum| << sum|.| the total is a small residue of
+    #     large opposing parts -- exactly the regime where R_H keeps changing
+    #     sign with the mesh.  sigma_xx has no such cancellation, which is why it
+    #     looks converged long before sigma^(1) is.
+    cancel=abs(Shall[0,1,2])/max(Sabs_n[:,0,1,2].sum(),1e-300)
+    out={'mesh':(Nx,Ny,Nz),'Nk':Nk,'mu':mu,'Rh':Rh,'nH':nH,'kind':kind,
+         'sigma':sigma,'sigma1':sigma1,'muH':muH,'Neff':Neff,'cancel':cancel,'K0':K0,
+         'tau_label':tau_label}
+    if detail:
+        # keep the per-state arrays only for the mesh that gets reported: holding
+        # eig/tau for every step of a sweep is hundreds of MB on a fine mesh
+        out['tau'],out['eig']=tau,eig
+        # --- two-fluid decomposition -----------------------------------------
+        # sigma and sigma^(1) are both plain band sums, so each sheet can be given
+        # its own conductivity, Hall coefficient and mobility.  Comparing a band's
+        # OWN n_H against its Luttinger volume shows whether that sheet behaves as
+        # one simple closed pocket; the mismatch between the total n_H and n_e/n_h
+        # is then the compensation the experiment is really seeing.
+        K0n=flibs.calc_k0_band(eig,vk,kweight,temp,mu,tau)                   # [Norb,3,3]
+        Norb=len(K0n)
+        trK0=np.trace(K0)
+        Rh_n=np.full(Norb,np.nan)
+        for n in range(Norb):
+            if np.trace(K0n[n])>1e-8*trK0:
+                Rh_n[n]=plibs.hall_coefficient(K0n[n],Shall_n[n],Vuc,wsum,gsp)[2]
+        out['car']=plibs.fs_carrier_density(eig,mu,Vuc,gsp,mesh=(Nx,Ny,Nz))
+        out['sigma_n']=gsp*tau_unit*eC*K0n/(wsum*Vuc)                        # [Norb,3,3] S/m
+        out['Rh_n']=Rh_n
+    return out
+
 def get_hall_coe(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
-                               fill:float,temp:float,tau_const,Nw=300,with_spin=False):
+                 fill:float,temp:float,tau_const,Nw=300,with_spin=False,
+                 mesh_list=None):
+    '''
+    Weak-field Hall coefficient R_H and the Hall carrier density n_H=1/(e|R_H|).
+
+    R_H is formed from the FULL tensors, rho^(1)=-sigma^-1 sigma^(1) sigma^-1,
+    for all three field directions.  Give mesh_list (e.g. [20,30,40] or
+    [(20,20,10),...]) to run a k-mesh convergence sweep: sigma^(1) converges far
+    more slowly than sigma and can come out with the WRONG SIGN on an
+    under-converged mesh, so a single-mesh number is not usable on its own.
+    '''
     # Parameter validation
     if temp <= 0:
         print("Error: Temperature (temp) is non-positive",flush=True)
@@ -592,43 +730,94 @@ def get_hall_coe(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
     if tau_const <= 0:
         print("Error: Relaxation time (tau_const) is non-positive",flush=True)
         return
-
-    Nk,eig,vk,imass,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec.T*ihbar,sw_veloc=True,sw_mass=True)
-    Vuc=sclin.det(avec)*1e-30
-    if Vuc <= 0:
+    if sclin.det(avec) <= 0:
         print("Error: Unit cell volume (Vuc) is non-positive",flush=True)
         return
     gsp=(1.0 if with_spin else 2.0) # spin degeneracy factor
-    mu=plibs.calc_mu(eig,Nk,fill,temp)
-    tau_mode=0
-    if tau_mode==0:
-        tau=eig*0.+tau_const  # constant relaxation time (k- and band-independent)
+    if mesh_list:
+        meshes=[(m,m,m) if np.isscalar(m) else tuple(m) for m in mesh_list]
     else:
-        # Energy-dependent tau from DOS (tau_mode != 0 path; not fully implemented)
-        Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=True)
-        wlist=np.linspace(eig.min()-mu,eig.max()-mu,Nw,True)
-        Dos=flibs.gen_dos(eig,uni,mu,wlist,delta)
-        tau=flibs.get_tau(Dos.sum(axis=0),eig,tau_const,tau_mode)
+        meshes=[(Nx,Ny,Nz)]
     print(f"T = {temp/kb:.3f} K",flush=True)
-    print(f"mu = {mu:.4f} eV",flush=True)
-    if tau_mode==0:
-        print(f"tau = {tau_const} "+('fs' if sw_unit else ''),flush=True)
+    print(f"spin degeneracy gsp = {gsp:.0f} "
+          f"({'SOC: both spins already in H' if with_spin else 'spin-degenerate bands'})",flush=True)
+    print('  mesh          Nk      mu[eV]     Neff   cancel      R_H^x        R_H^y        R_H^z    [m^3/C]',flush=True)
+    results=[]
+    for i,(nx,ny,nz) in enumerate(meshes):
+        r=_hall_at_mesh(rvec,ham_r,S_r,avec,nx,ny,nz,fill,temp,tau_const,gsp,Nw,
+                        detail=(i==len(meshes)-1))
+        results.append(r)
+        print(f'  {nx:3d}x{ny:3d}x{nz:3d} {r["Nk"]:9d}  {r["mu"]:9.4f} {r["Neff"]:8.3g} {r["cancel"]:8.2e} '
+              +' '.join(f'{v:+12.4e}' for v in r['Rh']),flush=True)
+    res=results[-1]
+    # --- k-mesh convergence verdict -----------------------------------------
+    if len(results)>1:
+        prev=results[-2]['Rh']; last=res['Rh']
+        print('  k-mesh convergence (finest vs previous):',flush=True)
+        for g,ax in enumerate('xyz'):
+            if abs(last[g])<1e-30:
+                continue
+            if prev[g]*last[g] < 0:
+                msg='SIGN FLIP - not converged'
+            else:
+                d=abs(last[g]/prev[g]-1.)*100
+                msg=f'{d:6.2f}% change'+('  <- not converged' if d>5. else '')
+            print(f'    B||{ax}: {msg}',flush=True)
     else:
-        print(f"max tau = {tau.max()} "+('fs' if sw_unit else ''),flush=True)
-    sigma_hall=flibs.calc_sigmahall(eig,vk,imass/eC,kweight,tau,temp,mu)
-    # K0 = charge transport kernel, K1 = thermoelectric kernel, K2 = thermal transport kernel
-    K0,K1,K2=flibs.calc_Kn(eig,vk,kweight,temp,mu,tau)
-    print(f"sigma_hall={sigma_hall:.6e}, K0[0,0]={K0[0,0]:.6e}, K0[1,1]={K0[1,1]:.6e}")
-    # Check if K0 diagonal elements are non-zero (use tolerance for floating-point comparison)
-    tol=1e-14
-    if abs(K0[0,0]) < tol or abs(K0[1,1]) < tol:
-        print("Error: K0 diagonal elements are too small. Cannot compute Hall coefficient",flush=True)
-        return
-    # Rh = -1/(n*e) from sigma_xy / (sigma_xx * sigma_yy); nh in cm^-3
-    Rh=-Vuc*Nk*sigma_hall/(gsp*K0[0,0]*K0[1,1])
-    nh=-1./(Rh*eC)/1e6
-    print(f"Hall coefficient Rh = {Rh:.6e}",flush=True)
-    print(f"Hole carrier density nh = {nh:.6e}",flush=True)
+        print('  (single mesh: pass mesh_list=[...] to check k-mesh convergence)',flush=True)
+    # --- detail on the finest mesh ------------------------------------------
+    print(f'--- {res["mesh"][0]}x{res["mesh"][1]}x{res["mesh"][2]} mesh, mu = {res["mu"]:.4f} eV ---',flush=True)
+    print_tau_summary(res['tau'],res['eig'],res['mu'],temp,res['tau_label'])
+    print_matrix('sigma matrix (S/m)',res['sigma'])
+    for g,ax in enumerate('xyz'):
+        a=(g+1)%3
+        print(f'  B||{ax}: R_H = {res["Rh"][g]:+.5e} m^3/C   '
+              f'n_H = {res["nH"][g]:.5e} cm^-3 ({res["kind"][g]})   '
+              f'mu_H = {1e4*res["muH"][g]:+.4e} cm^2/Vs   '
+              f'omega_c*tau = {abs(res["muH"][g]):.3e} /T',flush=True)
+    print(f'  sigma^(1)_xy/B = {res["sigma1"][0,1,2]:+.5e} S/(m T)  (B||z)',flush=True)
+    # --- validity warnings ---------------------------------------------------
+    print(f'  Fermi-window sampling: Neff = {res["Neff"]:.4g} states, '
+          f'Hall-integrand cancellation |sum|/sum|.| = {res["cancel"]:.3e}',flush=True)
+    if res['Neff'] < 1.0e3:
+        print(f'  WARNING: only ~{res["Neff"]:.4g} states carry the Fermi window. '
+              f'Refine the k-mesh (or raise T) before trusting R_H.',flush=True)
+    if res['cancel'] < 1.0e-2:
+        print(f'  WARNING: the Hall integrand cancels to {res["cancel"]:.2e} of its absolute weight. '
+              f'R_H is a small residue of large opposing contributions here (near-compensation), '
+              f'so it needs a much finer mesh than sigma_xx and its SIGN may still be mesh-dependent.',flush=True)
+    Bmax=0.1/max(abs(res['muH']).max(),1e-30)
+    print(f'  weak-field limit omega_c*tau<0.1 holds up to B ~ {Bmax:.3g} T',flush=True)
+    # --- band-resolved (two-fluid) decomposition vs the Luttinger volume ------
+    car=res['car']
+    print('--- carrier densities: Luttinger volume vs Hall, band by band ---',flush=True)
+    print('  band  type      n_e[cm^-3]    n_h[cm^-3]   pk e/h   sigma_xx[S/m]   R_H(band)'
+          '    n_H(band)   mu_H[cm^2/Vs]',flush=True)
+    for n,k in enumerate(car['kind']):
+        if k in ('full','empty'):
+            continue
+        rn=res['Rh_n'][n]
+        if np.isnan(rn) or abs(rn)<1e-30:
+            hall=f'{"-":>12s} {"-":>12s} {"-":>13s}'
+        else:
+            hall=(f'{rn:+12.4e} {1./(abs(rn)*eC)/1e6:12.4e}'
+                  f' {1e4*abs(rn*res["sigma_n"][n,0,0]):13.4e}')
+        print(f'  {n+1:4d}  {k:8s}  {car["ne_band"][n]:.5e}   {car["nh_band"][n]:.5e}  '
+              f'{car["npocket_e"][n]:2d}/{car["npocket_h"][n]:<2d}   '
+              f'{res["sigma_n"][n,0,0]:.5e}  {hall}',flush=True)
+    ne,nh=car['n_e'],car['n_h']
+    print(f'  Luttinger total: n_e = {ne:.5e}   n_h = {nh:.5e} cm^-3'
+          +(f'   n_e/n_h = {ne/nh:.4f}' if nh>0 else ''),flush=True)
+    print(f'  Hall (all bands, B||z): n_H = {res["nH"][2]:.5e} cm^-3 ({res["kind"][2]})'
+          '   <- the number to compare with experiment',flush=True)
+    if (car['kind']=='open').any():
+        print('  note: an OPEN sheet percolates the zone and has no Luttinger volume, so the '
+              'n_e/n_h totals above miss whatever it carries.',flush=True)
+    if ne>0 and nh>0 and abs(ne/nh-1.)<0.2:
+        print('  note: nearly compensated (n_e ~ n_h). n_H is then a small difference of '
+              'large terms, extremely sensitive to mu, and is NOT a carrier density -- '
+              'compare mobilities/two-fluid fits with experiment instead.',flush=True)
+    return results
 
 def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
                                fill:float,temp:float,tau_const,Nw=300,with_spin=False):
@@ -653,20 +842,10 @@ def calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,
     iNV=1./(Nk*Vuc)
     itemp=1./temp
     mu=plibs.calc_mu(eig,Nk,fill,temp)
-    tau_mode=0
-    if tau_mode==0:
-        tau=eig*0.+tau_const
-    else:
-        Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=True)
-        wlist=np.linspace(eig.min()-mu,eig.max()-mu,Nw,True)
-        Dos=flibs.gen_dos(eig,uni,mu,wlist,delta)
-        tau=flibs.get_tau(Dos.sum(axis=0),eig,tau_const,tau_mode)
+    tau,tau_label=build_tau(eig,mu,temp,tau_const,rvec,ham_r,S_r,avec,Nx,Ny,Nz,Nw)
     print(f"T = {temp/kb:.3f} K",flush=True)
     print(f"mu = {mu:.4f} eV",flush=True)
-    if tau_mode==0:
-        print(f"tau = {tau_const} "+('fs' if sw_unit else ''),flush=True)
-    else:
-        print(f"max tau = {tau.max()} "+('fs' if sw_unit else ''),flush=True)
+    print_tau_summary(tau,eig,mu,temp,tau_label,indent='')
     if sw_tdf:
         tdf=flibs.calc_tdf(eig,vk,kweight,tau,Nw)
         # absolute-energy grid matching the calc_tdf bin CENTRES: E_i = emin + (i-1/2)*dw
@@ -1047,7 +1226,8 @@ def get_dhva_band(mesh,rvec,ham_r,S_r,avec,bvec,mu:float,theta_list,phi=0.,meshk
         return {}
 
     all_results={}  # band_idx -> [(theta, F), ...]
-    open_dirs={}    # band_idx -> angles whose central section is an open orbit
+    has_axial={}    # band_idx -> angles with a closed orbit encircling the field axis
+    no_axial={}     # band_idx -> angles without one
     seeds=[]        # orbits found at earlier angles, followed into the next
     seed_life=3     # angles a seed survives without being found again
     n_open_tot=n_rej=0
@@ -1062,11 +1242,11 @@ def get_dhva_band(mesh,rvec,ham_r,S_r,avec,bvec,mu:float,theta_list,phi=0.,meshk
         d_end=min(dmax,0.5*period) if period is not None else dmax
         sym_end=d_end if (period is not None and 0.5*period<=dmax*(1.+1e-9)) else None
         L0,d_arr=2.6*radius,np.linspace(0.,d_end,meshkz,True)
-        S_scan,orbit_cache,n_open,open_bands=plibs.scan_plane_area(
+        S_scan,orbit_cache,n_open,axial_bands=plibs.scan_plane_area(
             rvec,ham_r,S_r,avec,mu,bhat,d_arr,L0,dk,egrid=egrid)
         n_open_tot+=n_open
-        for b in open_bands:
-            open_dirs.setdefault(b,[]).append(theta)
+        for b in S_scan:
+            (has_axial if b in axial_bands else no_axial).setdefault(b,[]).append(theta)
         # follow every orbit through the scan, take dA/dd=0 per branch, then collapse
         # the copies that differ by a whole reciprocal lattice vector
         branches=plibs.track_orbit_branches(orbit_cache,d_arr)
@@ -1090,14 +1270,14 @@ def get_dhva_band(mesh,rvec,ham_r,S_r,avec,bvec,mu:float,theta_list,phi=0.,meshk
             f['_age']=0
             ext.append(f)
             alive.append(f)
-        ext=plibs.dedup_extremal_orbits(ext,bvec,tol_k=step)
+        ext=plibs.dedup_extremal_orbits(ext,bvec,tol_k=step,bhat=bhat)
         # an area that moves with the sampling window is not an orbit (see the docstring)
         ext,rejected=plibs.verify_orbits_window(ext,rvec,ham_r,S_r,avec,mu,bhat,
-                                                2.6*radius,dk,egrid=egrid)
+                                                L0,dk,egrid=egrid)
         n_rej+=len(rejected)
         # seeds come from before the window check: continuity across angles is stronger
         # evidence than that check, and a rejected orbit must still be able to seed
-        seeds=plibs.dedup_extremal_orbits(ext+alive,bvec,tol_k=step)
+        seeds=plibs.dedup_extremal_orbits(ext+alive,bvec,tol_k=step,bhat=bhat)
         for e in ext:
             all_results.setdefault(e['band'],[]).append((theta,e['area']*F_factor))
 
@@ -1106,14 +1286,18 @@ def get_dhva_band(mesh,rvec,ham_r,S_r,avec,bvec,mu:float,theta_list,phi=0.,meshk
               +("" if period is None else f" (period {period:.3f})")+", "
               f"{len(branches)} branches -> {len(ext)} extremal orbits"
               +(f" ({len(rejected)} rejected: window dependent)" if rejected else "")
-              +(f"  [central section OPEN: band(s) {[b+1 for b in sorted(open_bands)]}]"
-                if open_bands else ""),flush=True)
+              +(f"  [no orbit encircles the axis: band(s) "
+                f"{[b+1 for b in sorted(set(S_scan)-axial_bands)]}]"
+                if set(S_scan)-axial_bands else ""),flush=True)
 
-    for b in sorted(open_dirs):
-        th=open_dirs[b]
-        print(f"Band {b+1}: the CENTRAL section is an OPEN orbit for theta = "
-              f"{', '.join(f'{t:g}' for t in th)} deg -- no dHvA oscillation from the central "
-              "orbit there (it shows up in magnetoresistance instead).",flush=True)
+    # Only worth saying for a band that HAS a central orbit somewhere in the sweep:
+    # a sheet that never encircles the axis (electron pockets off at X, say) is not an
+    # open orbit, it simply lives elsewhere.
+    for b in sorted(set(has_axial) & set(no_axial)):
+        print(f"Band {b+1}: no closed orbit encircles the field axis for theta = "
+              f"{', '.join(f'{t:g}' for t in no_axial[b])} deg, so the central orbit of "
+              "this sheet gives no dHvA oscillation there (open orbits show up in "
+              "magnetoresistance instead).",flush=True)
     if n_open_tot:
         print(f"Note: {n_open_tot} contour piece(s) never closed in the sampling window; "
               "open orbits and window-cut copies together.",flush=True)
@@ -1497,10 +1681,12 @@ def main():
     elif option==CalcMode.SPECTRUM: #plot spectrum
         plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw,sw_self)
     elif option==CalcMode.CONDUCTIVITY_BT: #calc conductivity
-        get_hall_coe(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,tau_const)
-        calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,tau_const)
+        get_hall_coe(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,tau_const,
+                     with_spin=sw_soc,mesh_list=hall_mesh_list)
+        calc_conductivity_Boltzmann(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,tau_const,
+                                    with_spin=sw_soc)
     elif option==CalcMode.CONDUCTIVITY_PT: #calc_optical conductivity
-        calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta)
+        calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp,Nw,delta,with_spin=sw_soc)
     elif option in MODES_CHI_NORMAL: #calc_chis_spectrum
         print("calculate electron energy",flush=True)
         Nk,klist,eig,uni,kweight=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=True)
@@ -1799,11 +1985,9 @@ def main():
                               kappa=(eil_kappa if eil_vort_field else 0.0),tilt_deg=eil_vort_tilt,
                               fs_kind=eil_fs_kw,fs_params=eil_fs_params,fs=eil_fs_obj,
                               Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
-    elif option==CalcMode.CARRIER_NUM: #calc carrier number
-        n_carr=plibs.calc_carrier(rvec,ham_r,S_r,avec,Nx,Ny,Nz,fill,temp)
-        print(n_carr)
-        print(n_carr.sum())
-        plibs.get_carrier_num(Nx,rvec,ham_r,S_r,mu,Arot)
+    elif option==CalcMode.BAND_FILLING: #per-band filling and electron/hole character
+        print('band, hole fraction, electron fraction:',flush=True)
+        plibs.report_band_filling(Nx,rvec,ham_r,S_r,mu,Arot)
     elif option==CalcMode.CYCLOTRON_MASS: #calc cyclotron mass
         get_mass(Nx,rvec,ham_r,S_r,avec,bvec,mu)
     elif option==CalcMode.DHVA: #plot dHvA frequency vs angle

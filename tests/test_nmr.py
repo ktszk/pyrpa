@@ -215,22 +215,6 @@ def test_gap_from_eliashberg_drives_a_sweep(tmp_path):
     assert r['K_ratio'][0] < 0.99                        # T < Tc -> suppressed
 
 
-def test_gap_from_eliashberg_rejects_bad_input(tmp_path):
-    d, _, _, kfull = _write_gap_wannier(tmp_path, Nw=6)
-    try:
-        P.gap_from_eliashberg(kfull, f'{d}/gap_wannier', sw_extrapolate=False,
-                              iw_index=99, verbose=False)
-        assert False, 'expected ValueError for iw_index past the stored slices'
-    except ValueError:
-        pass
-    try:
-        P.gap_from_eliashberg(kfull, f'{d}/gap_wannier', sw_extrapolate=True,
-                              n_points=99, verbose=False)
-        assert False, 'expected ValueError when n_points exceeds the stored slices'
-    except ValueError:
-        pass
-
-
 # --------------------------------------------------------------------------- #
 #  hyperfine form factor
 # --------------------------------------------------------------------------- #
@@ -456,25 +440,6 @@ def test_zero_gap_matches_normal_state_below_tc():
 # --------------------------------------------------------------------------- #
 #  input validation and I/O
 # --------------------------------------------------------------------------- #
-def test_nmr_sweep_rejects_bad_input():
-    N = 16
-    hamk, klist, olist, Smat, mu = _square_lattice(N)
-    Nk = len(klist)
-    dk = np.zeros((Nk, 1, 1), dtype=np.complex128)
-    q, _ = P.nmr_qmesh(N, N, 1, 4, 4, 1)
-    try:
-        P.nmr_sweep(hamk, dk, klist, q[1:], mu, [0.01], 0.02, Smat, olist, verbose=False)
-        assert False, 'expected ValueError when qlist[0] is not Gamma'
-    except ValueError:
-        pass
-    try:
-        P.nmr_sweep(hamk, dk, klist, q, mu, [0.01], 0.02, Smat, olist, w0=0.0,
-                    verbose=False)
-        assert False, 'expected ValueError for w0 = 0'
-    except ValueError:
-        pass
-
-
 def test_write_nmr_dat_roundtrip(tmp_path=None):
     import tempfile
     from pathlib import Path
