@@ -406,8 +406,13 @@ def test_lattice_sc_dvector_texture():
     the vortex-core d-vector texture, now on the periodic cell."""
     wc, T = 0.3, 3e-3
     om = E.matsubara(T, wc)
+    # Ng=14, not 10: the core is a single point, so the shallowest grid value is a
+    # resolution artefact -- min|A_dom|/Dref converges 0.265 / 0.130 / 0.080 / 0.058 for
+    # Ng = 10 / 14 / 20 / 28.  (Ng=10 used to squeak under the threshold only because the
+    # matrix Riccati's backward sweep was using the FORWARD generator, which is wrong for
+    # the complex Abrikosov-phase gap -- see riccati_gen in feilenberger.f90.)
     st = SP.solve_lattice_sc_dvector((0.7, 0.66), T, om, windings=(1, 0), field=0.1,
-                                     lattice='square', Ng=10, nbeta=8, Lchord=5.0,
+                                     lattice='square', Ng=14, nbeta=8, Lchord=5.0,
                                      itemax=35, mix=0.4, eps=5e-3)
     A, Db = st['A'], st['Dbulk']; Dref = max(Db)
     assert Db[0] > 0 and Db[1] < 1e-3 * Db[0]          # dominant supercritical, subdom subcritical
@@ -877,6 +882,589 @@ def test_scalar_vortex_rejects_chiral():
     xg, Psi, Db, xi = V.solve_vortex2d(0.6, T, om, gap_sym='px',
                                        ngrid=9, nbeta=4, itemax=1)
     assert np.isfinite(np.abs(Psi)).all()                   # real px still runs
+
+
+def _tb2(lam):
+    """2-orbital 3D model.  lam=0 gives real hoppings, i.e. a time-reversal SYMMETRIC
+    normal state H(-k)=conj(H(k)).  lam>0 adds an imaginary on-site inter-orbital term,
+    which BREAKS time reversal in the normal state: H(k) is complex with H(-k)=H(k), so
+    LAPACK returns u(-k)=u(k) and the legacy 'diag' pair partner is not conj(u(k))."""
+    rv, hm = [], []
+    for R, M in [((1, 0, 0), [[-1, 0], [0, .6]]), ((-1, 0, 0), [[-1, 0], [0, .6]]),
+                 ((0, 1, 0), [[-1, 0], [0, .6]]), ((0, -1, 0), [[-1, 0], [0, .6]]),
+                 ((0, 0, 1), [[-.3, 0], [0, -.3]]), ((0, 0, -1), [[-.3, 0], [0, -.3]]),
+                 ((0, 0, 0), [[0, 1j * lam], [-1j * lam, .5]])]:
+        rv.append(R); hm.append(np.array(M, dtype=complex))
+    return np.array(rv, dtype=np.float64), np.array(hm)
+
+
+def test_pair_gauge_is_gauge_invariant():
+    """The band projection pairs |k> with a partner state, and the partner must be given
+    in the SAME gauge as u(k).  Two invariants pin this down:
+
+      (a) Delta_orb = identity is orbital blind, so the band gap MUST be band uniform
+          (phi = 1) for every k -- whatever the eigenvector phases are.
+      (b) phi must not change when each u(k) is multiplied by an arbitrary phase.
+
+    The gauge-fixed routes ('trs', 'soc') satisfy both; the legacy 'diag' route (an
+    independently diagonalized u(-k)) fails (a) badly on a complex Hamiltonian -- it
+    produces a spurious anisotropy with a sign change on a single sheet -- which is why
+    it is not the default.  A model with REAL hoppings cannot detect this at all
+    (u(-k)=conj(u(k)) then holds exactly), so this test deliberately uses a complex one."""
+    rvec, ham_r = _tb2(0.25)
+    fs = E.build_wannier_fs(rvec, ham_r, [], np.eye(3), 0.2, mesh=120)
+    assert np.abs(fs['evec'].imag).max() > 0.1                 # genuinely complex u(k)
+    # (a) Delta = I -> phi == 1
+    E.project_gap_to_band(fs, np.eye(2), normalize=False, gauge='trs')
+    assert np.allclose(fs['phi'], 1.0, atol=1e-10)
+    E.project_gap_to_band(fs, np.eye(2), normalize=False, gauge='diag')
+    assert not np.allclose(fs['phi'], 1.0, atol=1e-3)           # legacy route is wrong
+    assert fs['phi'].real.min() < 0 < fs['phi'].real.max()      # ...and even flips sign
+    # (b) invariance under an arbitrary per-k phase on u(k)
+    D = np.diag([1.0, -1.0])
+    ref = E.project_gap(fs['evec'], D, fs['kf'], gauge='trs')
+    rng = np.random.default_rng(0)
+    ph = np.exp(2j * np.pi * rng.random(len(fs['evec'])))[:, None]
+    got = E.project_gap(fs['evec'] * ph, D, fs['kf'], gauge='trs')
+    assert np.abs(got - ref).max() < 1e-12
+    # 'soc': the time-reversed partner (i sigma_y) conj(u) is gauge invariant too
+    sm = E.spin_pair_map(2, 'block')
+    r2 = E.project_gap(fs['evec'], D, fs['kf'], gauge='soc', spin_map=sm)
+    g2 = E.project_gap(fs['evec'] * ph, D, fs['kf'], gauge='soc', spin_map=sm)
+    assert np.abs(g2 - r2).max() < 1e-12
+    # the diagnostic sees the discrepancy that makes 'diag' unsafe here
+    assert E.check_trs_gauge(fs['evec'], fs['evec_mk'], warn=False) > 1e-6
+
+
+def test_pair_gauge_survives_a_chiral_order_parameter():
+    """A CHIRAL order parameter breaks time reversal in the SUPERCONDUCTING state, but
+    the gauge fixing rests on a symmetry of the NORMAL state H(k) -- Delta never enters
+    the construction of the pair partner.  So on a time-reversal-symmetric normal state
+    the projection stays valid for a chiral gap, and the winding of Delta_orb(k) is
+    passed through to phi rather than being destroyed or faked."""
+    rvec, ham_r = _tb2(0.0)                                    # real h(R): TRS normal state
+    fs = E.build_wannier_fs(rvec, ham_r, [], np.eye(3), 0.2, mesh=360)
+    # the partner really is the same band at -k, independently of Delta
+    assert E.check_pair_partner(fs['evec'], fs['evec_mk'], warn=False) > 1.0 - 1e-10
+    A, kf = 2.0 * np.pi, fs['kf']
+    dpid = ((np.cos(A * kf[:, 0]) - np.cos(A * kf[:, 1]))
+            + 2j * np.sin(A * kf[:, 0]) * np.sin(A * kf[:, 1]))     # d + i dxy
+    gorb = lambda k: np.eye(2) * ((np.cos(A * k[0]) - np.cos(A * k[1]))
+                                  + 2j * np.sin(A * k[0]) * np.sin(A * k[1]))
+    phi = E.project_gap(fs['evec'], gorb, kf, gauge='trs')
+    assert np.abs(phi - dpid).max() < 1e-10                    # orbital-blind -> phi = f(k)
+    assert np.abs(phi).min() > 0.5                             # chiral state: no node
+    ang = np.unwrap(np.angle(phi[np.argsort(fs['th'])]))
+    assert abs(abs(ang[-1] - ang[0]) / (2 * np.pi) - 2.0) < 0.05   # winding 2 (d+id)
+    # still gauge invariant with a chiral Delta
+    rng = np.random.default_rng(1)
+    ph = np.exp(2j * np.pi * rng.random(len(fs['evec'])))[:, None]
+    assert np.abs(E.project_gap(fs['evec'] * ph, gorb, kf, gauge='trs') - phi).max() < 1e-10
+
+
+def test_pair_partner_detects_a_trs_broken_normal_state():
+    """The failure mode of the gauge fixing is a time-reversal-broken NORMAL state
+    (ferromagnetic superconductor, Zeeman term inside H, Haldane-type hoppings), not a
+    chiral gap.  There T|k,n> is not the band-n state at -k, so no gauge-fixed scalar
+    partner exists and only |phi| is meaningful -- check_pair_partner sees it."""
+    rv_ok, hr_ok = _tb2(0.0)
+    rv_bad, hr_bad = _tb2(0.25)
+    fs_ok = E.build_wannier_fs(rv_ok, hr_ok, [], np.eye(3), 0.2, mesh=120)
+    fs_bad = E.build_wannier_fs(rv_bad, hr_bad, [], np.eye(3), 0.2, mesh=120)
+    assert E.check_pair_partner(fs_ok['evec'], fs_ok['evec_mk'], warn=False) > 1.0 - 1e-10
+    assert E.check_pair_partner(fs_bad['evec'], fs_bad['evec_mk'], warn=False) < 0.95
+    # |phi| survives the ambiguity even there; the phase does not
+    D = np.diag([1.0, -1.0])
+    a = E.project_gap(fs_bad['evec'], D, fs_bad['kf'], gauge='trs')
+    assert np.isfinite(a).all()
+
+
+def test_pair_gauge_real_model_agrees_with_legacy():
+    """For REAL hoppings H(-k)=conj(H(k)) and LAPACK returns u(-k)=conj(u(k)) exactly,
+    so the gauge-fixed 'trs' partner and the legacy 'diag' partner coincide: the change
+    of default cannot move any published real-hopping number."""
+    import libs.plibs as p
+    hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                       'inputs', 'hop2.input')
+    if not os.path.exists(hop):
+        return
+    rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
+    fs = E.build_wannier_fs(rvec, ham_r, [], np.eye(3), 0.0, mesh=140)
+    assert E.check_trs_gauge(fs['evec'], fs['evec_mk'], warn=False) < 1e-12
+    D = np.diag([1.0, -1.0])
+    a = E.project_gap(fs['evec'], D, fs['kf'], fs['evec_mk'], gauge='trs')
+    b = E.project_gap(fs['evec'], D, fs['kf'], fs['evec_mk'], gauge='diag')
+    assert np.abs(a - b).max() < 1e-12
+
+
+def test_chiral_harmonics_and_eliashberg_seed_guard():
+    """gap_symms gains the two chiral combinations: 6 = d+id (in plane) and
+    7 = dxz+idyz, whose |phi| vanishes on the whole kz=0 plane -- a HORIZONTAL line
+    node, unlike the vertical nodes of the in-plane harmonics.  They are Eilenberger
+    form factors only: the linearized Eliashberg kernel and seed are real, so seeding
+    it with a chiral harmonic is refused with an explanation instead of failing in
+    ctypes."""
+    import libs.plibs as p
+    k = np.array([[0.2, 0.1, 0.3], [0.2, 0.1, 0.0], [0.11, -0.07, 0.25]])
+    d, dxy = p.gap_symms(k, 1, 1)[0], p.gap_symms(k, 1, 3)[0]
+    assert np.allclose(p.gap_symms(k, 1, 6)[0], d + 1j * dxy)
+    dxz, dyz = p.gap_symms(k, 1, 4)[0], p.gap_symms(k, 1, 5)[0]
+    assert np.allclose(p.gap_symms(k, 1, 7)[0], dxz + 1j * dyz)
+    assert p.gap_symms(k, 1, 7)[0][1] == 0.0                   # kz=0 -> horizontal node
+    assert abs(p.gap_symms(k, 1, 7)[0][0]) > 0.1
+    for gs in (6, 7, -3):
+        try:
+            p.get_initial_gap(k, 1, gs)
+        except ValueError as e:
+            assert 'chiral' in str(e)
+        else:
+            raise AssertionError(f'chiral gap_sym={gs} was accepted as an Eliashberg seed')
+    # continuum counterpart: d+id is e^{2 i beta}, already <|phi|^2>=1
+    beta = np.linspace(0.0, 2.0 * np.pi, 32, endpoint=False)
+    assert E._gap_sym_str(6) == 'd+id'
+    assert abs(np.mean(np.abs(E.form_factor(beta, 'd+id')) ** 2) - 1.0) < 1e-12
+    assert np.abs(E.form_factor(beta, 'd+id') - np.exp(2j * beta)).max() < 1e-12
+
+
+def test_wannier_fs_kz_stack():
+    """build_wannier_fs(nkz>1) stacks k_z slices into a true 3D Fermi surface.  The
+    decisive check is the one that motivated it: a k_z-dependent gap (7 = dxz+idyz)
+    is IDENTICALLY ZERO on the single k_z=0 slice the FS used to be pinned to, and
+    only becomes finite once the k_z stacking is on."""
+    import libs.plibs as p
+    base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        'inputs', 'FeS')
+    if not os.path.exists(base + '_hr.dat'):
+        return
+    rvec, ham_r, Norb, Nr = p.import_hoppings(base, 2)
+    from libs.plibs._bands import get_emesh
+    _, _, eig, _, _ = get_emesh(12, 12, 8, ham_r, [], rvec, np.eye(3), sw_uni=True)
+    mu = float(np.quantile(eig.ravel(), 0.6))
+    f1 = E.build_wannier_fs(rvec, ham_r, [], np.eye(3), mu, mesh=60, nkz=1, gap_sym=7)
+    f3 = E.build_wannier_fs(rvec, ham_r, [], np.eye(3), mu, mesh=60, nkz=12, gap_sym=7)
+    assert f1['nkz'] == 1 and f3['nkz'] == 12
+    assert np.abs(f1['phi']).max() == 0.0                      # the k_z=0 pathology
+    assert np.abs(f3['phi']).max() > 0.1                       # 3D FS: finite gap
+    assert len(f3['kx']) > 5 * len(f1['kx'])
+    for key in ('kz', 'vz', 'vabs3', 'nkz'):
+        assert key in f3
+    assert abs(f3['nf'].sum() - 1.0) < 1e-12
+    assert abs((f3['nf'] * np.abs(f3['phi']) ** 2).sum() - 1.0) < 1e-10
+    assert len(np.unique(f3['kz'])) == 12                      # every slice is present
+    # vabs is the IN-PLANE speed (chord velocity and DOS measure); vabs3 the full one
+    assert np.allclose(f3['vabs'], np.hypot(f3['vx'], f3['vy']))
+    assert (f3['vabs3'] >= f3['vabs'] - 1e-12).all()
+    assert np.abs(f3['vz']).max() > 0.0
+    # the specular reflection partner stays inside its own k_z slice
+    j = S._reflection_index(f3)
+    assert np.allclose(f3['kz'][j], f3['kz'])
+    assert (f3['band'][j] == f3['band']).all()
+
+
+def test_build_fs_band_projection_3d():
+    """build_fs (the full 3D k-mesh route) can now project an orbital-basis pair
+    potential band-resolved onto the Fermi surface, which is what an ACCIDENTAL node
+    needs: no gap_symms harmonic carries the orbital character that makes the gap
+    depend on k_z and change sign between sheets.  Invariants: Delta=I is band
+    uniform; an orbital-selective Delta tracks the orbital weight; delta0 gives the
+    phenomenological per-sheet s+- signs the harmonic route used to be unable to."""
+    import libs.plibs as p
+    base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        'inputs', 'FeS')
+    if not os.path.exists(base + '_hr.dat'):
+        return
+    rvec, ham_r, Norb, Nr = p.import_hoppings(base, 2)
+    from libs.plibs._bands import get_emesh
+    _, klist, eig, uni, _ = get_emesh(16, 16, 8, ham_r, [], rvec, np.eye(3), sw_uni=True)
+    mu = float(np.quantile(eig.ravel(), 0.6))
+    # Delta = I -> band uniform (and hence exactly the normalized constant)
+    wf, phi = E.build_fs(eig, klist, mu, 0, 2e-2, uni=uni, gap_orbital=np.eye(Norb))
+    assert np.abs(phi.imag).max() < 1e-12
+    assert phi.real.std() < 1e-10 and abs(phi.real.mean() - 1.0) < 1e-10
+    # orbital selective -> phi == the orbital weight (up to the <|phi|^2>=1 scale)
+    sel = np.zeros((Norb, Norb)); sel[0, 0] = 1.0
+    wf2, phi2, info = E.build_fs(eig, klist, mu, 0, 2e-2, uni=uni, gap_orbital=sel,
+                                 sw_band=True)
+    ik, ibnd = info['ik'], info['band']
+    u = uni[ik, ibnd, :]
+    w0 = np.abs(u[:, 0]) ** 2 / (np.abs(u) ** 2).sum(axis=1)   # normalized orbital weight
+    assert np.corrcoef(phi2.real, w0)[0, 1] > 0.999
+    assert abs((wf2 * np.abs(phi2) ** 2).sum() / wf2.sum() - 1.0) < 1e-10
+    assert set(info) == {'band', 'ik', 'kz'} and len(info['kz']) == len(wf2)
+    # delta0: per-band signs on the harmonic route (multiband s+-)
+    d0 = np.where(np.arange(Norb) < Norb // 2, 1.0, -1.0)
+    _, phid = E.build_fs(eig, klist, mu, 0, 2e-2, delta0=d0)
+    assert phid.real.min() < 0 < phid.real.max()
+    # gap_orbital without eigenvectors, and the mesh route with the legacy gauge, refuse
+    for kw in (dict(gap_orbital=np.eye(Norb)),
+               dict(gap_orbital=np.eye(Norb), uni=uni, gauge='diag')):
+        try:
+            E.build_fs(eig, klist, mu, 0, 2e-2, **kw)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f'build_fs accepted {sorted(kw)} silently')
+
+
+def test_model_fs_3d_stacking():
+    """build_model_fs gains the same k_z stacking as build_wannier_fs, plus genuinely
+    3D dispersions.  Invariants: an IN-PLANE kind stacked over k_z reproduces the
+    single-slice cylinder exactly (v_z=0, identical FS averages); a corrugated cylinder
+    disperses along k_z and carries the fractional k so the k_z-dependent gap_symms
+    harmonics work on it; a closed sheet drops the slices past its pole."""
+    f1 = E.build_model_fs('tb', Nth=90, params=1.0)
+    f8 = E.build_model_fs('tb', Nth=90, params=1.0, nkz=8)
+    assert f1['nkz'] == 1 and f8['nkz'] == 8 and len(f8['kx']) == 8 * len(f1['kx'])
+    assert np.abs(f8['vz']).max() == 0.0                    # in-plane kind: no k_z dispersion
+    for key in ('vabs', 'vx'):                              # stacking must not bias the average
+        assert abs((f8['nf'] * f8[key] ** 2).sum() - (f1['nf'] * f1[key] ** 2).sum()) < 1e-12
+    assert abs(f8['nf'].sum() - 1.0) < 1e-12
+    # corrugated cylinder: real k_z dispersion, and the lattice harmonics apply
+    fc = E.build_model_fs('cyl', Nth=90, nkz=16, params=(1.0, 0.3))
+    assert np.abs(fc['vz']).max() > 0.5 and 'kf' in fc
+    assert (fc['vabs3'] >= fc['vabs'] - 1e-12).all()
+    assert np.abs(E.fs_form_factor(fc, 7)).max() > 0.1      # dxz+idyz needs k_z: finite here
+    assert np.abs(E.fs_form_factor(E.build_model_fs('cyl', Nth=90, params=(1.0, 0.3)), 7)).max() == 0.0
+    # closed sheet: slices beyond the pole carry no FS and are dropped, not crashed on
+    fsph = E.build_model_fs('sphere', Nth=60, nkz=24, kz_max=np.pi / 2)
+    assert 0 < fsph['nkz'] < 24
+    assert abs(fsph['nf'].sum() - 1.0) < 1e-12
+    kk = np.hypot(np.hypot(fsph['kx'], fsph['ky']), fsph['kz'])
+    assert kk.std() / kk.mean() < 1e-6                      # it really is a sphere
+
+
+def test_superfluid_density_zz():
+    """The c-axis superfluid density is the direct measure of three-dimensionality.
+    On a corrugated cylinder rho_zz is suppressed by (v_z/v_x)^2, giving the mass
+    anisotropy lambda_c/lambda_ab; with no k_z dispersion v_z == 0 and rho_zz is
+    reported as 0 instead of 0/0.  For an isotropic gap every component shares the
+    same temperature dependence, which pins the normalization."""
+    T, wc, lam = 3e-4, 0.5, 0.5
+    flat = E.build_model_fs('tb', Nth=90, params=1.0, nkz=8)
+    D, rxx, ryy, rzz = E.superfluid_density_fs(lam, T, wc, flat, 's')
+    assert D > 0 and rxx > 0 and rzz == 0.0                 # no v_z -> no c-axis response
+    for tz in (0.3, 0.6):
+        fc = E.build_model_fs('cyl', Nth=90, nkz=16, params=(1.0, tz))
+        D, rxx, ryy, rzz = E.superfluid_density_fs(lam, T, wc, fc, 's')
+        assert abs(rxx - ryy) < 1e-9                        # C4
+        assert 0.0 < rzz and abs(rzz - rxx) < 1e-6          # s wave: same T dependence
+    # stronger warping -> less anisotropic
+    a3 = E.build_model_fs('cyl', Nth=90, nkz=16, params=(1.0, 0.3))
+    a6 = E.build_model_fs('cyl', Nth=90, nkz=16, params=(1.0, 0.6))
+    aniso = lambda f: np.sqrt((f['nf'] * f['vx'] ** 2).sum() / (f['nf'] * f['vz'] ** 2).sum())
+    assert aniso(a3) > aniso(a6) > 1.0
+
+
+def test_free_energy_selects_the_chiral_partner():
+    """The condensation energy is the only thing that can choose between the two members
+    of a degenerate pair -- linear theory leaves them degenerate at Tc.  On a 3D FS the
+    real partners dxz and dyz must come out EXACTLY degenerate (C4), and the chiral
+    combination dxz+idyz must win, having fewer nodes.  Both were unreachable before:
+    calc_free_energy converted gap_sym through the 2D continuum map and raised on 4/5/7."""
+    fc = E.build_model_fs('cyl', Nth=120, nkz=16, params=(1.0, 0.3))
+    T, wc, lam = 5e-5, 0.5, 0.45
+    dO4, D4 = E.condensation_energy(lam, T, wc, 4, fs=fc)
+    dO5, D5 = E.condensation_energy(lam, T, wc, 5, fs=fc)
+    dO7, D7 = E.condensation_energy(lam, T, wc, 7, fs=fc)
+    assert D4 > 0 and abs(D4 - D5) < 1e-12 and abs(dO4 - dO5) < 1e-18   # exactly degenerate
+    assert dO7 < dO4 and D7 > D4                            # chiral wins, larger gap
+    assert dO4 < 0.0
+    # the sweep driver accepts the k_z-dependent harmonic and an explicit phi alike
+    rows = E.calc_free_energy(lam, T, wc, 7, fs=fc, t_list=np.array([T]),
+                              fname=os.devnull)
+    assert len(rows) == 1 and abs(rows[0][2] - dO7) < 1e-18
+    phi = E.fs_form_factor(fc, 7)
+    r2 = E.calc_free_energy(lam, T, wc, phi=phi, wnf=fc['nf'], t_list=np.array([T]),
+                            fname=os.devnull)
+    assert abs(r2[0][2] - dO7) < 1e-18
+    # chiral continuum harmonics reach the cylinder branch too (used to be a KeyError)
+    dO, D = E.condensation_energy(lam, T, wc, 'd+id')
+    assert D > 0 and dO < 0
+
+
+def test_pauli_and_spin_accept_the_projected_gap():
+    """calc_pauli_limit / calc_spin_pauli used to call build_fs positionally, so the
+    band-projected 3D gap could not reach them: Pauli limiting and the singlet-vs-triplet
+    Zeeman response were stuck on the analytic harmonics.  They now take the same
+    gap_orbital/delta0/gauge arguments as calc_eilenberger, and must reproduce the gap
+    that build_fs + solve_gap give for the same projection."""
+    import inspect
+    import libs.plibs as p
+    from libs.plibs import _eilenberger_spin as SP
+    for fn in (E.calc_pauli_limit, SP.calc_spin_pauli):
+        got = set(inspect.signature(fn).parameters)
+        assert {'gap_orbital', 'delta0', 'gauge', 'spin_map'} <= got, fn.__name__
+    base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        'inputs', 'FeS')
+    if not os.path.exists(base + '_hr.dat'):
+        return
+    rvec, ham_r, Norb, Nr = p.import_hoppings(base, 2)
+    from libs.plibs._bands import get_emesh
+    _, klist, eig, uni, _ = get_emesh(12, 12, 8, ham_r, [], rvec, np.eye(3), sw_uni=True)
+    mu = float(np.quantile(eig.ravel(), 0.6))
+    D = np.eye(Norb); D[4, 4] = D[Norb - 1, Norb - 1] = -1.0
+    T, om = 2e-4, E.matsubara(2e-4, 0.5)
+    wf, phi = E.build_fs(eig, klist, mu, 0, 2e-2, uni=uni, gap_orbital=D)
+    wf0, phi0 = E.build_fs(eig, klist, mu, 0, 2e-2)
+    assert np.abs(phi - phi0).max() > 1e-3                  # the projection really differs
+    dref = E.solve_gap(T, wf, phi, om, 0.0, 1e8, 0.45)
+    assert dref > 0
+    cwd = os.getcwd()
+    tmp = os.path.join(cwd, '_pauli_tmp')
+    os.makedirs(tmp, exist_ok=True)
+    try:
+        os.chdir(tmp)
+        E.calc_pauli_limit(12, 12, 8, 0.5, ham_r, [], rvec, np.eye(3), mu, T, 0, 0.45,
+                           h_list=np.array([0.0]), fs_width=2e-2, gap_orbital=D)
+        d0 = float(np.loadtxt('pauli_gap.dat')[1])          # Delta(h=0)/Delta0 == 1
+        assert abs(d0 - 1.0) < 1e-6
+    finally:
+        os.chdir(cwd)
+        for f in ('pauli_gap.dat', 'pauli_dos.dat'):
+            if os.path.exists(os.path.join(tmp, f)):
+                os.remove(os.path.join(tmp, f))
+        os.rmdir(tmp)
+
+
+def test_surface_gap_heals_to_bulk():
+    """The far edge of the surface slab MUST sit at the bulk gap: whatever the surface
+    does to the order parameter, several coherence lengths away it has to be the
+    homogeneous solution.  solve_surface_fs used to fail this on every Fermi surface --
+    it took Dbulk from the FULL FS while the kernel summed over the CHORD set, which is
+    a different ensemble (near-grazing chords are dropped and the nearest-k_par specular
+    map is not a bijection, so the chord weights sum to ~0.96-0.99).  The gap equation is
+    exponential in the effective coupling, so that few per cent of missing weight parked
+    the whole profile at the wrong level -- flat, but 5-12% low -- instead of healing.
+
+    Both ensembles are now the same one, so the far field is the homogeneous fixed point
+    by construction.  The sign-changing case is the sharp one: it must be strongly
+    suppressed AT the surface and still heal to 1 away from it."""
+    om = E.matsubara(3e-4, 0.5)
+    for kind, par in (('iso', None), ('tb', 1.0)):
+        fs = E.build_model_fs(kind, Nth=180, params=par)
+        for gs in ('s', 'd'):                              # [100] surface: not sign changing
+            x, Damp, Db = S.solve_surface_fs(0.5, 3e-4, om, fs, gs, Lxi=8.0, nper=8)
+            assert Db > 0
+            assert abs(Damp[-1] / Db - 1.0) < 5e-3, (kind, gs, Damp[-1] / Db)
+            assert Damp[0] / Db > 0.9                      # no suppression for these
+        # sign changing on this surface: suppressed at x=0, still heals to the bulk
+        x, Damp, Db = S.solve_surface_fs(0.5, 3e-4, om, fs, 'dxy', Lxi=8.0, nper=8)
+        assert Damp[0] / Db < 0.15 and abs(Damp[-1] / Db - 1.0) < 1e-2
+        assert (np.diff(Damp) > -1e-12 * Db).all()         # monotonic recovery
+    # a 3D (k_z stacked) FS must heal just as well
+    fc = E.build_model_fs('cyl', Nth=90, nkz=8, params=(1.0, 0.3))
+    x, Damp, Db = S.solve_surface_fs(0.5, 3e-4, om, fc, 's', Lxi=8.0, nper=8)
+    assert abs(Damp[-1] / Db - 1.0) < 5e-3
+
+
+def test_fs_hvf_sets_the_coherence_length():
+    """xi = hvf/(pi*Dbulk) fixes the physical size of the slab, so hvf must be the real
+    Fermi speed of the FS, not 1.  It must NOT also be handed to the chord kernel: the
+    step there is already dx/|v_x| with the true velocity, so passing both double counts
+    the speed -- which is why surface_ldos_fs no longer takes an hvf at all."""
+    import inspect
+    om = E.matsubara(3e-4, 0.5)
+    fs = E.build_model_fs('tb', Nth=180, params=1.0)
+    hv = E.fs_hvf(fs)
+    assert abs(hv - (fs['nf'] * fs['vabs']).sum()) < 1e-12
+    assert hv > 1.5                                        # this FS is nowhere near 1
+    assert E.fs_hvf(None, 2.5) == 2.5                      # no FS -> the cylinder value
+    x, Damp, Db = S.solve_surface_fs(0.5, 3e-4, om, fs, 's', Lxi=8.0, nper=8)
+    assert abs(x[-1] - 8.0 * hv / (np.pi * Db)) < 1e-9     # default: xi from <|v_par|>
+    x1, _, Db1 = S.solve_surface_fs(0.5, 3e-4, om, fs, 's', Lxi=8.0, nper=8, hvf=1.0)
+    assert abs(x1[-1] - 8.0 / (np.pi * Db1)) < 1e-9        # explicit override still honoured
+    assert abs(Db1 - Db) < 1e-12                           # ...and it is only a length unit
+    assert 'hvf' not in inspect.signature(S.surface_ldos_fs).parameters
+
+
+def test_reduce_fs_trajectories():
+    """The vortex/lattice solvers cost one chord integration per FS point, so a 3D FS
+    (10^3-10^4 points against the 24 directions of the model cylinder) has to be reduced.
+    They see a trajectory only through (beta, |v_par|, phi), so points are quantized on
+    that grid and each cell becomes one weighted direction.  What has to be preserved:
+    the weights and the <|phi|^2>=1 convention (or lambda changes meaning), the mean
+    speed (it sets xi), and the bulk gap -- convergently, as the bins are refined."""
+    fc = E.build_model_fs('cyl', Nth=180, nkz=24, params=(1.0, 0.3))
+    om = E.matsubara(3e-4, 0.5)
+    n0 = len(fc['vabs'])
+    assert n0 > 4000
+    for gs in (0, 1):
+        Dfull = E.bulk_gap_fs(0.5, 3e-4, om, fc, gs)
+        prev = None
+        for nb, nv, nph in ((24, 3, 3), (32, 3, 6), (64, 4, 8)):
+            r = E.reduce_fs_trajectories(fc, gs, nbeta=nb, nv=nv, nphi=nph, verbose=False)
+            assert r['ntraj'] == len(r['nf']) < n0 and r['nfs_full'] == n0
+            assert abs(r['nf'].sum() - 1.0) < 1e-12
+            assert abs((r['nf'] * np.abs(r['phi']) ** 2).sum() - 1.0) < 1e-12
+            assert abs((r['nf'] * r['vabs']).sum() / E.fs_hvf(fc) - 1.0) < 0.02
+            assert np.allclose(r['vabs'], np.hypot(r['vx'], r['vy']))
+            err = abs(E.bulk_gap_fs(0.5, 3e-4, om, r, gs) / Dfull - 1.0)
+            assert err < 0.02
+            if prev is not None:
+                assert err <= prev + 5e-3                  # refining bins does not diverge
+            prev = err
+    # phi is part of the key: sheets of OPPOSITE sign that share a direction and a speed
+    # must not be merged, or an s+- gap would cancel itself into nothing
+    th = np.linspace(0.0, 2.0 * np.pi, 64, endpoint=False)
+    two = dict(vx=np.concatenate([np.cos(th)] * 2), vy=np.concatenate([np.sin(th)] * 2),
+               vabs=np.ones(2 * len(th)), nf=np.full(2 * len(th), 1.0 / (2 * len(th))),
+               phi=np.concatenate([np.ones(len(th)), -np.ones(len(th))]).astype(complex))
+    r = E.reduce_fs_trajectories(two, nbeta=16, nv=1, nphi=2, verbose=False)
+    assert r['phi'].real.min() < -0.9 and r['phi'].real.max() > 0.9     # both signs survive
+    assert abs((r['nf'] * np.abs(r['phi']) ** 2).sum() - 1.0) < 1e-12
+    assert abs((r['nf'] * r['phi']).sum()) < 1e-12         # ...and still cancel in the mean
+
+
+def test_matrix_riccati_complex_gap():
+    """The matrix Riccati must be EXACT for a homogeneous gap of any phase: f = Delta/R.
+    It was exact only for a REAL one, because the backward (gamma-tilde) sweep used the
+    FORWARD generator -- gamma-tilde obeys the same equation with Delta and Delta^dag
+    interchanged, and the two coincide only when Delta^dag = Delta.  The error was 15.3%
+    at beta = 90 deg (Delta purely imaginary), step- and grid-independent, and it inflated
+    the chiral homogeneous fixed point to 1.494 x its bulk value.  The scalar kernel had
+    it right all along (it integrates the reverse path with conjg(dd))."""
+    from libs import flibs
+    sx, sy, sz = SP._pauli()
+    S = sz @ (1j * sy); Sd = np.conj(S).T
+    D, w, ns = 1.8e-3, 3.6e-3, 32
+    R = np.sqrt(w ** 2 + D ** 2)
+    for bdeg in (0.0, 30.0, 45.0, 90.0, 137.0, 180.0):
+        b = np.radians(bdeg)
+        Dp = np.zeros((ns, 1, 2, 2), dtype=np.complex128)
+        Dp[:, :] = D * np.exp(1j * b) * S
+        _, f = flibs.matrix_riccati_chords(np.full((ns, 1, 1), w, dtype=np.complex128),
+                                           np.ascontiguousarray(Dp), 1.0, 300.0, 0.0)
+        fa = np.trace(Sd @ f[ns // 2, 0, 0]) / np.trace(Sd @ S)
+        assert abs(fa - D * np.exp(1j * b) / R) < 1e-9 * D / R, (bdeg, fa)
+
+
+def test_chiral_vortex():
+    """A CHIRAL vortex: the two components are e^{+-i l beta} on ONE spin matrix, so their
+    relative phase IS the chirality -- exactly what the scalar real-amplitude solver
+    cannot hold (_reject_chiral_ff) and what the multi-component complex-amplitude solver
+    can.  Their windings must differ by 2l or the ansatz is not axisymmetric.
+
+    Two things are checked: the pure chiral state is a FIXED POINT (start on it and it
+    stays), and the vortex has the right structure -- the dominant vanishes at the core
+    and heals, while the opposite chirality is induced, vanishing BOTH at the core
+    (winding m+2l, so ~rho^3) and in the bulk."""
+    assert SP.chiral_windings(1, 1) == (1, 3) and SP.chiral_windings(1, 2) == (1, 5)
+    ch = SP.chiral_channels(1)
+    assert np.allclose(ch[0][2], ch[1][2])                 # ONE spin matrix
+    beta = np.linspace(0.0, 2.0 * np.pi, 16, endpoint=False)
+    assert np.allclose(np.abs(ch[0][1](beta)), 1.0)
+    T, wc, lam = 4e-4, 0.5, 0.5
+    om = E.matsubara(T, wc)
+    omf = np.concatenate([om, -om])
+    Dchi = float(SP._coupled_bulk_gap(np.array([lam]), T, omf,
+                                      np.ones((1, 180)), np.full(180, 1.0 / 180))[0])
+    assert Dchi > 0
+    # (a) pure chiral is a fixed point: seed it exactly, A_- must stay ~0
+    ng = 21
+    A0 = np.zeros((2, ng, ng), dtype=np.complex128); A0[0] = Dchi
+    _, A, _, _ = SP.solve_vortex2d_dvector((lam, lam), T, om, channels=ch, windings=(0, 0),
+                                           Dbulk=np.array([Dchi, 0.0]), Lxi=7.0, ngrid=ng,
+                                           nbeta=16, itemax=20, A_init=A0)
+    ic = ng // 2
+    assert abs(abs(A[0, ic, ic]) / Dchi - 1.0) < 0.02      # holds the bulk gap
+    assert abs(A[1, ic, ic]) / Dchi < 5e-3                 # no opposite chirality
+    # (b) the vortex itself
+    ng = 31
+    xg, A, _, xi = SP.solve_vortex2d_dvector((lam, lam), T, om, channels=ch,
+                                             windings=SP.chiral_windings(1, 1),
+                                             Dbulk=np.array([Dchi, 0.0]), Lxi=8.0,
+                                             ngrid=ng, nbeta=16, itemax=60)
+    ic = ng // 2
+    ap = np.abs(A[0, ic:, ic]) / Dchi
+    am = np.abs(A[1, ic:, ic]) / Dchi
+    assert ap[0] < 0.02 and ap[-1] > 0.9                   # dominant: node at core, heals
+    assert (np.diff(ap[:len(ap) // 2]) > -1e-3).all()      # monotonic out of the core
+    assert am[0] < 0.02                                    # induced also vanishes at the core
+    assert 0.01 < am.max() < 0.3                           # ...but is induced, and stays small
+    assert am.argmax() not in (0, len(am) - 1)             # peaks in between
+
+
+def test_field_direction_frame():
+    """A field that is not along c is still a 2D problem: the vortex lines run along B, so
+    the order parameter varies in the plane PERPENDICULAR to it.  fs_field_frame supplies
+    the trajectory set in that plane.  Invariants: for B || c it reproduces the historical
+    (x, y) set exactly; on an isotropic Fermi surface nothing depends on the direction; on
+    a quasi-2D one the two axes of the vortex plane differ by <|v_ab|>/<|v_c|>; and the FS
+    points whose velocity is PARALLEL to B (zero speed in the plane, infinite chord step)
+    are dropped rather than handed to LAPACK."""
+    fc = E.build_model_fs('cyl', Nth=90, nkz=24, params=(1.0, 0.3))
+    fr = E.fs_field_frame(fc, (0, 0, 1), gap_sym=0)
+    # 1e-9, not machine epsilon: with C4 the two rms velocities are equal only to
+    # rounding, so the (area-preserving) rescale factors are 1 to about 1e-11, not to 1
+    assert np.abs(fr['dirs'] - np.arctan2(fc['vy'], fc['vx'])).max() < 1e-9
+    assert np.abs(fr['vabs'] - np.hypot(fc['vx'], fc['vy'])).max() < 1e-9
+    assert abs(fr['aniso_ratio'] - 1.0) < 1e-9 and fr['keep'].all()
+    assert np.allclose(fr['e1'], [1, 0, 0]) and np.allclose(fr['e2'], [0, 1, 0])
+    # quasi-2D with B in-plane: strongly elliptical, and v || B points are dropped
+    fx = E.fs_field_frame(fc, (1, 0, 0), gap_sym=0)
+    assert fx['aniso_ratio'] > 3.0
+    assert not fx['keep'].all() and (~fx['keep']).sum() < 0.01 * len(fx['keep'])
+    assert fx['vabs'].min() > 0.0 and abs(fx['nf'].sum() - 1.0) < 1e-12
+    # weaker warping -> less elliptical
+    f6 = E.fs_field_frame(E.build_model_fs('cyl', Nth=90, nkz=24, params=(1.0, 0.6)),
+                          (1, 0, 0), gap_sym=0)
+    assert 1.0 < f6['aniso_ratio'] < fx['aniso_ratio']
+    # isotropic sphere: no direction dependence
+    sp = E.build_model_fs('sphere', Nth=90, nkz=48, kz_max=np.pi / 2)
+    r0 = E.fs_field_frame(sp, (0, 0, 1), gap_sym=0)
+    for bd in ((1, 0, 0), (1, 1, 1)):
+        r = E.fs_field_frame(sp, bd, gap_sym=0)
+        assert abs(r['aniso_ratio'] - 1.0) < 0.05
+        assert abs(r['hvf_eff'] / r0['hvf_eff'] - 1.0) < 0.02
+    # a strictly 2D FS has no orbital response to an in-plane field: refuse, do not fudge
+    try:
+        E.fs_field_frame(E.build_model_fs('tb', Nth=90, params=1.0), (1, 0, 0), gap_sym=0)
+    except ValueError as e:
+        assert '2D Fermi' in str(e)
+    else:
+        raise AssertionError('an in-plane field on a 2D FS was accepted')
+
+
+def test_vortex_in_plane_field():
+    """The vortex itself with the field off the c axis.  The plane perpendicular to B has
+    its two axes rescaled by their rms velocities, which is an affine (area-preserving) map,
+    so the square grid and the rotate-interpolate machinery still apply and the core comes
+    out circular in the SCALED plane -- i.e. elliptical in real space, with the ellipticity
+    set by the Fermi-velocity anisotropy.  Checked for the scalar solver and for the chiral
+    two-component one."""
+    from libs.plibs import _eilenberger_vortex as V
+    T, wc, lam = 4e-4, 0.5, 0.5
+    om = E.matsubara(T, wc)
+    fc = E.build_model_fs('cyl', Nth=90, nkz=16, params=(1.0, 0.3))
+
+    def core(xg, amp, Db, xi, scale):
+        ic = len(xg) // 2
+        r = xg[ic:] / xi
+        c1 = np.interp(0.5, np.abs(amp[ic:, ic]) / Db, r) * scale[0]
+        c2 = np.interp(0.5, np.abs(amp[ic, ic:]) / Db, r) * scale[1]
+        return c1, c2
+
+    # explicit B || c must be bit-identical to the default
+    a = V.solve_vortex2d(lam, T, om, gap_sym=0, fs=fc, ngrid=25, Lxi=6.0, itemax=12)
+    b = V.solve_vortex2d(lam, T, om, gap_sym=0, fs=fc, ngrid=25, Lxi=6.0, itemax=12,
+                         bdir=(0, 0, 1))
+    assert np.abs(a[1] - b[1]).max() == 0.0 and a[3] == b[3]
+    for bd, lo, hi in (((0, 0, 1), 0.95, 1.05), ((1, 0, 0), 3.2, 4.4)):
+        fr = E.fs_field_frame(fc, bd, gap_sym=0)
+        xg, Psi, Db, xi = V.solve_vortex2d(lam, T, om, gap_sym=0, fs=fc, ngrid=31,
+                                           Lxi=6.0, itemax=25, bdir=bd)
+        assert np.abs(Psi[len(xg) // 2, len(xg) // 2]) / Db < 0.05     # node at the core
+        c1, c2 = core(xg, Psi, Db, xi, fr['scale'])
+        assert lo < c1 / c2 < hi, (bd, c1 / c2)                        # core ellipticity
+        assert abs(c1 / c2 / fr['aniso_ratio'] - 1.0) < 0.08           # ...tracks <v> ratio
+    # a finite field on an anisotropic plane is refused rather than silently wrong
+    try:
+        V.solve_vortex2d(lam, T, om, gap_sym=0, fs=fc, ngrid=15, Lxi=4.0, itemax=2,
+                         field=0.2, bdir=(1, 0, 0))
+    except NotImplementedError as e:
+        assert 'Doppler' in str(e)
+    else:
+        raise AssertionError('a finite field with an anisotropic vortex plane was accepted')
 
 
 # --------------------------------------------------------------------------- #

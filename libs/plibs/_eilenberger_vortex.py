@@ -29,7 +29,7 @@ conditions -- on top of the same chord integration and self-consistency here.
 """
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
-from ._eilenberger import matsubara, form_factor
+from ._eilenberger import matsubara, form_factor, fs_hvf, fs_field_frame
 from ._eilenberger_surface import _bulk_gap, _bulk_gap_imp
 from ..flibs import riccati_chords
 
@@ -236,7 +236,7 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
                    Dbulk: float = None, Lxi: float = 8.0, ngrid: int = 49, nbeta: int = 24,
                    hvf: float = 1.0, imp_gamma: float = 0.0, imp_c: float = 1.0e8,
                    field: float = 0.0, fs: dict = None, qprof=None, eps: float = 2.0e-3,
-                   itemax: int = 80, mix: float = 0.3):
+                   itemax: int = 80, mix: float = 0.3, bdir=None):
     """
     @fn solve_vortex2d
     @brief Self-consistently solve the complex 2D order-parameter field Psi(r) of a
@@ -266,6 +266,13 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
     @param    ngrid,nbeta: grid points per axis / number of v_F directions
     @param imp_gamma,imp_c: normal-state scattering rate [eV] and T-matrix c (0=clean)
     @param    field: B/Hc2 (0 = isolated vortex; >0 = circular-cell vortex lattice)
+    @param     bdir: field / vortex-line direction (default c axis).  The vortex lines run
+                     along B, so the order parameter varies in the plane PERPENDICULAR to
+                     it and the problem stays 2D -- fs_field_frame supplies the trajectory
+                     set in that plane, rescaling its two axes by their rms velocities so a
+                     square grid still fits an elliptical core.  Needs a 3D Fermi surface
+                     for anything but B || c.  The returned grid is in those SCALED units;
+                     multiply axis i by fs_field_frame(...)['scale'][i] for real lengths.
     @return (xg, Psi, Dbulk, xi): grid axis, complex field [ngrid,ngrid], bulk gap, xi
     """
     _reject_chiral_ff(gap_sym, 'solve_vortex2d')
@@ -273,7 +280,17 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
     use_fs = fs is not None
     # representative velocity scale (sets the coherence length xi); per-direction
     # |v_F| is used in each Riccati and Doppler so the field effect is consistent
-    hvf_eff = float((fs['nf'] * fs['vabs']).sum()) if use_fs else hvf
+    frame = fs_field_frame(fs, (0.0, 0.0, 1.0) if bdir is None else bdir,
+                           gap_sym) if use_fs else None
+    if frame is not None and field > 0.0 and abs(frame['aniso_ratio'] - 1.0) > 0.05:
+        # the Doppler term needs the PHYSICAL position and velocity, which the
+        # area-preserving rescaling of the two axes no longer hands over directly
+        raise NotImplementedError(
+            f"solve_vortex2d: a finite field with an anisotropic vortex plane "
+            f"(xi_1/xi_2 = {frame['aniso_ratio']:.3f}) is not supported yet -- the "
+            "circular-cell Doppler shift assumes the unscaled plane.  Use field=0 "
+            "(isolated vortex) for a tilted / in-plane field.")
+    hvf_eff = frame['hvf_eff'] if use_fs else hvf
     bfull = np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False)
     if Dbulk is None:
         if use_fs:
@@ -298,12 +315,10 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
     Rg = np.sqrt(X ** 2 + Y ** 2)
     theta = np.arctan2(Y, X)                            # analytic vortex phase
     A = Dbulk * np.tanh(Rg / xi)                        # real amplitude field |Psi|
-    if use_fs:                                          # model FS: trajectory along v_hat, nf weights
-        from ._eilenberger import fs_form_factor
-        dirs = np.arctan2(fs['vy'], fs['vx'])           # v_F direction angles
-        phi = fs_form_factor(fs, gap_sym)               # phi at the k-direction
-        hvfarr = fs['vabs']                             # |v_F| per trajectory (Riccati velocity)
-        wt_dir = fs['nf']                               # FS-average weight (sum 1)
+    if use_fs:                    # trajectories in the plane perpendicular to B (any bdir)
+        dirs, phi = frame['dirs'], frame['phi']
+        hvfarr = frame['vabs']                          # in-plane |v_F| (Riccati velocity)
+        wt_dir = frame['nf']                            # FS-average weight (sum 1)
         nbeta = len(dirs)
     else:                                               # isotropic cylinder (v_hat = k_hat, uniform)
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
@@ -528,7 +543,8 @@ def vortex_field_profile(rgrid, Dr, Dbulk, xi, kappa, omega):
 def calc_vortex(coupling: float, temp: float, wc: float, gap_sym: str = 's', kb: float = 1.0,
                 sw_ldos: bool = True, imp_gamma: float = 0.0, imp_c: float = 1.0e8,
                 field: float = 0.0, h: float = 0.0, kappa: float = 0.0, tilt_deg: float = 0.0,
-                fs_kind: str = None, fs_params=None, fs=None, Lxi: float = 8.0, ngrid: int = 81):
+                fs_kind: str = None, fs_params=None, fs=None, Lxi: float = 8.0, ngrid: int = 81,
+                bdir=None):
     """
     @fn calc_vortex
     @brief Driver: self-consistent vortex profile and (optionally) LDOS.
@@ -554,7 +570,7 @@ def calc_vortex(coupling: float, temp: float, wc: float, gap_sym: str = 's', kb:
             from ._eilenberger import build_model_fs
             fs = build_model_fs(fs_kind, 64, params=fs_params)
         return _calc_vortex_dwave(coupling, temp, wc, gap_sym, kb, sw_ldos, Lxi, ngrid,
-                                  imp_gamma, imp_c, field, h_eff, fs)
+                                  imp_gamma, imp_c, field, h_eff, fs, bdir=bdir)
     omega = matsubara(temp, wc)
     print("isolated-vortex quasiclassical Eilenberger (Riccati, s-wave, clean)", flush=True)
     print(f"T={temp/kb:.2f} K, lambda={coupling:.3f}, {len(omega)} Matsubara freqs, "
@@ -604,7 +620,7 @@ def calc_vortex(coupling: float, temp: float, wc: float, gap_sym: str = 's', kb:
 
 
 def _calc_vortex_dwave(coupling, temp, wc, gap_sym, kb, sw_ldos, Lxi, ngrid,
-                       imp_gamma=0.0, imp_c=1.0e8, field=0.0, h=0.0, fs=None):
+                       imp_gamma=0.0, imp_c=1.0e8, field=0.0, h=0.0, fs=None, bdir=None):
     """Driver for the general 2D vortex (non-s pairing, impurities, finite field =
     circular-cell vortex lattice, Zeeman h, and/or a model FS with Fermi velocities):
     full 2D self-consistent Psi(r), the azimuthally-averaged amplitude profile, the
@@ -623,7 +639,7 @@ def _calc_vortex_dwave(coupling, temp, wc, gap_sym, kb, sw_ldos, Lxi, ngrid,
     print(f"T={temp/kb:.2f} K, lambda={coupling:.3f}, {len(omega)} Matsubara freqs, "
           f"grid={ng2d}x{ng2d}, Gamma_N={imp_gamma:.3e} eV", flush=True)
     xg, Psi, Dbulk, xi = solve_vortex2d(coupling, temp, omega, gap_sym, Lxi=Lxi, ngrid=ng2d,
-                                        imp_gamma=imp_gamma, imp_c=imp_c, field=field, fs=fs)
+                                        imp_gamma=imp_gamma, imp_c=imp_c, field=field, fs=fs, bdir=bdir)
     if Dbulk <= 0.0:
         print("normal state (Dbulk=0); nothing to profile", flush=True)
         return xg, Psi
@@ -857,7 +873,7 @@ def solve_lattice(coupling, temp, omega, gap_sym='d', field=0.2, kappa=5.0,
     @return dict (F1,F2,X,Y,absD,Qx,Qy,Brel,Minv,a1,a2,S,xi,Dbulk,acell,lam)
     """
     bfull = np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False)
-    hvf_eff = float((fs['nf'] * fs['vabs']).sum()) if fs is not None else hvf
+    hvf_eff = fs_hvf(fs, hvf)
     if Dbulk is None:
         if fs is not None:
             from ._eilenberger import bulk_gap_fs
@@ -1342,7 +1358,7 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
     """
     _reject_chiral_ff(gap_sym, 'solve_lattice_sc')
     bfull = np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False)
-    hvf_eff = float((fs['nf'] * fs['vabs']).sum()) if fs is not None else hvf
+    hvf_eff = fs_hvf(fs, hvf)
     if fs is not None:
         from ._eilenberger import bulk_gap_fs, fs_form_factor
         Dbulk = bulk_gap_fs(coupling, temp, omega, fs, gap_sym)

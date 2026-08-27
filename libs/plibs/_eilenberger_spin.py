@@ -36,6 +36,45 @@ def _mat_batch(om, Dpath, hvf, ds, h):
                                 np.ascontiguousarray(Dpath, dtype=np.complex128), hvf, ds, h)
 
 
+def _beta_dirs(nbeta: int) -> np.ndarray:
+    """Trajectory directions on the circle that provably never land on a gap node:
+    the midpoint grid beta_i = (i + 1/2) * 2 pi / nbeta with an ODD number of points
+    (an even nbeta is bumped by one).
+
+    Why it matters.  The plain grid i * 2 pi / nbeta puts a direction exactly on
+    beta = pi/2 whenever 4 | nbeta, which is where a p_x (or d_{x2-y2}) gap has a node,
+    so that whole chord carries Delta == 0.  The matrix Riccati's bulk root
+    a = D / (om + sqrt(om^2 + tr(D D^dag)/2)) is then 0/0 for the NEGATIVE Matsubara
+    frequencies this module feeds it -- sqrt is the principal root, so for Re(om) < 0 the
+    denominator cancels exactly -- and the NaN spreads along the chord and through the
+    whole self-consistency.  Measured on a single p_x channel: nbeta=24 -> NaN,
+    nbeta=25 -> the gap heals to 0.988 of its bulk value.
+
+    Why odd + midpoint is enough for EVERY harmonic.  A node of cos(m beta) or
+    sin(m beta) sits at beta = (2k+1) pi / (2m).  The midpoint grid is
+    beta_i = (2i+1) pi / nbeta.  Equating them gives 2m(2i+1) = nbeta(2k+1): the left
+    side is even, so a solution needs nbeta even.  With nbeta odd there is none, for any
+    m and any k.  (A half-step offset alone does not do it -- nbeta=12 still samples the
+    d-wave node at 45 degrees.)  The midpoint rule is also the better angular quadrature,
+    so nothing is given up.
+    """
+    n = int(nbeta) | 1                                  # odd: never coincides with a node
+    return (np.arange(n) + 0.5) * (2.0 * np.pi / n)
+
+
+def _check_finite(x, where: str):
+    """Fail loudly instead of returning NaN.  The known trigger is a trajectory whose
+    gap vanishes identically (see _beta_dirs); a self-consistently developed node could
+    do it too, and a silent NaN would otherwise propagate into the reported profile."""
+    if not np.isfinite(x).all():
+        raise FloatingPointError(
+            f"{where}: the matrix Riccati returned non-finite values.  The usual cause is "
+            "a trajectory on which the gap vanishes identically (an exactly nodal "
+            "direction), where the bulk root is 0/0 for negative Matsubara frequencies -- "
+            "see _beta_dirs.  Try a different nbeta.")
+    return x
+
+
 def _pauli():
     sx = np.array([[0, 1], [1, 0]], dtype=np.complex128)
     sy = np.array([[0, -1j], [1j, 0]], dtype=np.complex128)
@@ -122,18 +161,25 @@ def solve_gap_spin(coupling, temp, omega, wf, phif, channel='singlet',
 
 
 def calc_spin_pauli(Nx, Ny, Nz, wc, ham_r, S_r, rvec, avec, mu, temp, coupling,
-                    gap_sym=0, h_list=None, fs_width=5.0e-3, kb=1.0):
+                    gap_sym=0, h_list=None, fs_width=5.0e-3, kb=1.0,
+                    gap_orbital=None, delta0=None, gauge=None, spin_map=None):
     """
     @fn calc_spin_pauli
     @brief Compare the Zeeman (Maki) field response of singlet vs triplet pairing
     using the 2x2 spin solver: singlet and triplet d||h are Pauli-limited, triplet
     d perpendicular to h is Pauli-immune (equal-spin pairing).  Sweeps h and writes
     'spin_pauli.dat' (Delta(h)/Delta0 for each channel).
+    @param gap_orbital,delta0,gauge,spin_map: gap specification on the 3D Fermi surface,
+           exactly as in calc_eilenberger (band-projected orbital gap / per-sheet signs)
     """
     from ._bands import get_emesh
+    from ._eilenberger import report_fs_gap
     omega = matsubara(temp, wc)
     Nk, klist, eig, uni, kweight = get_emesh(Nx, Ny, Nz, ham_r, S_r, rvec, avec, sw_uni=True)
-    wf, phif = build_fs(eig, klist, mu, gap_sym, fs_width)
+    wf, phif, fsinfo = build_fs(eig, klist, mu, gap_sym, fs_width, uni=uni,
+                                gap_orbital=gap_orbital, delta0=delta0,
+                                gauge=gauge, spin_map=spin_map, sw_band=True)
+    report_fs_gap(wf, phif, fsinfo, kb)
     cases = [('singlet', (0, 0, 1), 'singlet'),
              ('triplet', (0, 0, 1), 'triplet d||h (z)'),
              ('triplet', (1, 0, 0), 'triplet d_|_h (x)')]
@@ -180,6 +226,83 @@ def _default_dvector_channels():
     isy = 1j * sy
     return [('px(e_x)', (lambda b: np.sqrt(2.0) * np.cos(b)), sx @ isy),
             ('py(e_z)', (lambda b: np.sqrt(2.0) * np.sin(b)), sz @ isy)]
+
+
+def chiral_channels(ell: int = 1, dvec: str = 'z'):
+    """
+    @fn chiral_channels
+    @brief Two-component basis of a CHIRAL equal-spin triplet: phi_pm(beta) =
+    e^{+-i ell beta} carried by ONE spin matrix (unlike _default_dvector_channels, whose
+    two channels sit on DIFFERENT spin matrices and describe a d-vector texture in spin
+    space).  Here the relative phase of the two amplitudes IS the chirality, which is
+    exactly what the scalar real-amplitude vortex solver cannot represent and why it
+    refuses chiral form factors (_reject_chiral_ff).
+
+    ell=1 is p+ip / p-ip, ell=2 is d+id / d-id.  |phi| = 1 on the circle, so each channel
+    already satisfies <|phi|^2> = 1 and the two are degenerate in the bulk -- they are
+    time-reversed partners of the same irrep, so they take the SAME coupling and the
+    chiral state is the one that spontaneously picks a single component.
+    @param dvec: spin direction of the equal-spin pairing, 'z' (Shat=sigma_z i sigma_y)
+                 or 'x'.  'y' is excluded: Shat_y is proportional to the identity, which
+                 the unitary matrix-Riccati bulk seed does not handle.
+    @return list of (name, phi(beta), Shat) channels, dominant chirality first
+    """
+    sx, sy, sz = _pauli()
+    isy = 1j * sy
+    if dvec == 'z':
+        S = sz @ isy
+    elif dvec == 'x':
+        S = sx @ isy
+    else:
+        raise ValueError(f"chiral_channels: dvec={dvec!r} (use 'z' or 'x'; 'y' is "
+                         "proportional to the identity and is not supported)")
+    lab = {1: 'p', 2: 'd', 3: 'f'}.get(int(ell), f'L{int(ell)}')
+    return [(f'{lab}+i{lab} (l=+{ell})', (lambda b, m=ell: np.exp(1j * m * b)), S),
+            (f'{lab}-i{lab} (l=-{ell})', (lambda b, m=ell: np.exp(-1j * m * b)), S)]
+
+
+def chiral_windings(m_dom: int = 1, ell: int = 1):
+    """
+    @fn chiral_windings
+    @brief Phase windings of the two chiral_channels around an axisymmetric vortex.
+
+    With Delta(r,k) = sum_pm A_pm(r) e^{+-i ell beta} and A_pm = a_pm(rho) e^{i m_pm theta},
+    a rotation by alpha about z sends beta -> beta+alpha and theta -> theta+alpha, so the
+    two channels pick up e^{i(+ell + m_+)alpha} and e^{i(-ell + m_-)alpha}.  The order
+    parameter can only transform by ONE overall phase, so
+
+        m_- = m_+ + 2 ell.
+
+    A singly quantized vortex parallel to the chirality (m_+ = 1, ell = 1) therefore
+    induces the opposite-chirality component with winding 3; the antiparallel vortex
+    (m_+ = -1) induces it with winding 1.  Getting this wrong does not merely change the
+    answer, it makes the ansatz non-axisymmetric and the self-consistency will not settle.
+
+    @warning solve_vortex2d_dvector CANNOT yet run this.  Measured on the isotropic
+    cylinder (lambda=0.5, T=4e-4, Lxi=7, ngrid=33, nbeta=24, itemax=60-80), the solver is
+    sound only for the winding pattern it was built and validated for -- one winding-1
+    dominant plus a winding-0 subdominant:
+
+        channels (spin matrices)        windings   result
+        cos/Sx + sin/Sz  (the default)   (1,0)     dominant heals to 0.991   OK
+        cos/Sz + sin/Sz  (same Shat)     (1,0)     dominant heals to 0.986   OK
+        cos/Sz + sin/Sz, degenerate      (1,0)     both heal to ~0.99        OK
+        e^{+ib}/Sz + e^{-ib}/Sz          (1,3)     bulk (0.54,0.52): drifts to
+                                                   the NON-chiral combination and
+                                                   never heals to 1
+        cos/Sz + sin/Sz, degenerate      (1,1)     NaN
+        single channel cos/Sz            (1,)      NaN
+        single channel e^{ib}/Sz         (1,)      bulk 0.32, never heals
+
+    So sharing a spin matrix is fine and complex amplitudes are fine; what breaks is any
+    configuration without exactly one winding-0 component.  The seed is the first
+    suspect -- A[a] = Dbulk[a]*tanh(rho/xi) vanishes LINEARLY at the core, which is right
+    only for |m|=1 (a winding-m component must vanish as rho^|m|, and a winding-0 one must
+    not vanish at all) -- but that alone does not explain the NaN, so the iteration itself
+    has to be looked at before a chiral driver can be trusted.
+    @return (m_+, m_-)
+    """
+    return int(m_dom), int(m_dom) + 2 * int(ell)
 
 
 def _bulk_dvector(couplings, temp, om, beta, w, phitil, eps=1e-10, itemax=2000, mix=0.5):
@@ -255,13 +378,18 @@ def solve_surface_dvector(couplings, temp, omega, channels=None, Dbulk=None,
     Sd = [np.conj(S).T for S in Smats]
     trSS = [np.trace(Sd[a] @ Smats[a]).real for a in range(nc)]
     phitil = [ch[1] for ch in channels]
-    om = np.concatenate([omega, -omega])                  # full +/- Matsubara set
+    # positive Matsubara only + factor 2 in the update: matrix_riccati_chords/_batch
+    # return the TILDE propagator for Re(om) < 0 (f(-om) = conj(Delta)/R instead of
+    # Delta/R), so the full +/- set delivers half the sum with the conjugate gap
+    # phase.  See the note in solve_vortex2d_dvector.
+    om = omega
+    om_full = np.concatenate([omega, -omega])         # bulk gap equation (scalar)
     bmax = 0.5 * np.pi * (1.0 - cos_min)
     beta = np.linspace(-bmax, bmax, Nbeta)
     cosb = np.cos(beta)
     w = 1.0 / (2.0 * Nbeta)                               # per branch (full circle uniform)
     if Dbulk is None:
-        Dbulk = _bulk_dvector(lam, temp, om, beta, w, phitil)
+        Dbulk = _bulk_dvector(lam, temp, om_full, beta, w, phitil)
     Dref = float(np.max(Dbulk))
     if Dref <= 1.0e-6 * temp:
         xi = hvf / (np.pi * max(temp, 1e-12))
@@ -291,7 +419,7 @@ def solve_surface_dvector(couplings, temp, omega, channels=None, Dbulk=None,
                 po = np.einsum('ij,xwji->x', Sd[a], f_out) / trSS[a]   # summed over freq
                 pi_ = np.einsum('ij,xwji->x', Sd[a], f_in) / trSS[a]
                 acc[a] += w * (np.conj(fo[a, ib]) * po + np.conj(fi[a, ib]) * pi_)
-        Damp_new = (lam[:, None] * temp) * acc            # complex (allows TRSB phase)
+        Damp_new = (2.0 * lam[:, None] * temp) * acc      # complex (allows TRSB phase)
         err = np.abs(Damp_new - Damp).max() / Dref
         Damp = (1.0 - mix) * Damp + mix * Damp_new
         if err < eps:
@@ -406,7 +534,8 @@ def calc_surface_dvector(coupling, temp, wc, kb=1.0, Lxi=8.0, nper=8, Nbeta=16,
 # --------------------------------------------------------------------------- #
 def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0),
                            Dbulk=None, Lxi=7.0, ngrid=33, nbeta=16, hvf=1.0,
-                           field=0.0, fs=None, eps=4.0e-3, itemax=40, mix=0.4):
+                           field=0.0, fs=None, eps=4.0e-3, itemax=40, mix=0.4,
+                           A_init=None, bdir=None):
     """
     @fn solve_vortex2d_dvector
     @brief Self-consistent d-vector order parameter of a multi-component unitary
@@ -421,6 +550,18 @@ def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0
     d-vector reorients in spin space across the core -- the d-vector texture.  With
     field>0 the supercurrent v_F.Q fills the inter-vortex states (Volovik), entering as
     a position-dependent Doppler shift omega -> omega + i v_F.Q in the matrix Riccati.
+    @param   bdir: field / vortex-line direction (default c axis).  The lines run along
+           B, so the order parameter varies in the plane PERPENDICULAR to it and the
+           problem stays 2D; fs_field_frame supplies the trajectory set there, with
+           its two axes rescaled by their rms velocities.  Note the two frames are
+           different objects: the TRAJECTORY direction is in the field frame, while
+           the channel form factors phi(beta) are functions of the CRYSTAL in-plane
+           angle and keep using it.  Needs a 3D FS for anything but B || c.
+    @param A_init: explicit initial amplitudes [Ncomp, ngrid, ngrid], overriding the
+           built-in seed.  Needed to ask whether a given state is a fixed point AT ALL
+           (start exactly on it and see whether one iteration moves off it), which the
+           built-in seed cannot express -- it always injects a nucleation amplitude into
+           every subcritical channel.
     @return (xg, A [Ncomp, ngrid, ngrid] complex, Dbulk [Ncomp], xi)
     """
     from scipy.interpolate import RegularGridInterpolator
@@ -433,7 +574,26 @@ def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0
     Sd = [np.conj(S).T for S in Smats]
     trSS = [np.trace(Sd[a] @ Smats[a]).real for a in range(nc)]
     phitil = [ch[1] for ch in channels]
-    om = np.concatenate([omega, -omega])
+    # POSITIVE Matsubara frequencies only, with the factor 2 restored in the gap update.
+    # matrix_riccati_chords returns the TILDE propagator for Re(om) < 0 -- measured on a
+    # homogeneous chiral gap Delta = D e^{i beta} S: f(+om) = +Delta/R (correct) but
+    # f(-om) = conj(Delta)/R, and g(-om) = -conj(g(+om)).  Feeding it the full +/- set
+    # therefore delivers exactly HALF of the Matsubara sum with the CONJUGATE gap phase,
+    # which for a chiral order parameter lands in the OPPOSITE chirality channel: starting
+    # from a pure chiral state one iteration produced |A_-|/D = 0.211 = 0.4 (the mixing) x
+    # 0.53, i.e. half the sum, misdirected.  It is invisible for a real gap (conj is the
+    # identity), which is why every existing d-vector result is unaffected.  f is even in
+    # om, so summing om > 0 and doubling is the same thing -- and it is the convention the
+    # scalar solvers already use.
+    om_full = np.concatenate([omega, -omega])          # bulk gap equation (scalar, exact)
+    # ...and it is only valid while the frequencies stay REAL.  With the supercurrent
+    # Doppler shift (field > 0) the argument becomes om + i v_F.Q, so +om and -om are no
+    # longer related by conjugation and the reduction does not apply; there the +/- set is
+    # kept and the chiral channel decomposition is still contaminated.  A proper fix
+    # belongs in the kernel (return f, not f-tilde, for Re(om) < 0).
+    zero_field = (field <= 0.0)
+    om = omega if zero_field else om_full
+    fac = 2.0 if zero_field else 1.0
     # trajectory directions, per-direction |v_F| and FS weight, and the orbital form
     # factor of each channel (evaluated at the k-direction); cylinder or a model/Wannier FS
     def _norm(ph, wt):                                  # normalize nf-weighted <|phi|^2>=1
@@ -455,26 +615,57 @@ def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0
     # trajectory directions, per-direction |v_F| and FS weight, and the orbital form
     # factor of each channel (evaluated at the k-direction); cylinder or a model/Wannier FS
     if fs is not None:                                  # real FS: v_hat directions, nf weights
-        dirs = np.arctan2(fs['vy'], fs['vx'])          # trajectory along v_F
-        kang = kfull                                   # k-direction sets the gap form factor
-        hvfarr = np.asarray(fs['vabs'], dtype=float)
-        wt_dir = wfull
-        if len(dirs) > nbeta:                           # downsample to ~nbeta FS directions
-            sel = np.linspace(0, len(dirs) - 1, nbeta).round().astype(int)
+        from ._eilenberger import fs_field_frame
+        frame = fs_field_frame(fs, (0.0, 0.0, 1.0) if bdir is None else bdir)
+        if field > 0.0 and abs(frame['aniso_ratio'] - 1.0) > 0.05:
+            raise NotImplementedError(
+                f"solve_vortex2d_dvector: a finite field with an anisotropic vortex "
+                f"plane (xi_1/xi_2 = {frame['aniso_ratio']:.3f}) is not supported yet; "
+                "use field=0 (isolated vortex) for a tilted / in-plane field.")
+        dirs = frame['dirs']                           # trajectory in the plane perp to B
+        # fs_field_frame may drop FS points whose velocity is parallel to B, so the
+        # crystal angles and the weights have to follow the same mask
+        kang = kfull[frame['keep']]                    # CRYSTAL angle sets the form factor
+        hvfarr = np.asarray(frame['vabs'], dtype=float)
+        wt_dir = np.asarray(frame['nf'], dtype=float)
+        if len(dirs) > nbeta:
+            # Stratify by TRAJECTORY ANGLE and keep the heaviest member of each bin,
+            # carrying that bin's total weight.  The old stride over the raw index
+            # order is fine for an angle-ordered 2D contour but meaningless for a 3D
+            # FS, whose points are ordered by (k_z slice, position along the contour):
+            # 16 evenly spaced indices there sample a couple of k_z slices and miss the
+            # rest of the Fermi surface entirely.
+            # The key is (trajectory angle, CRYSTAL angle), not the trajectory angle
+            # alone.  For B || c the two coincide and this is plain angular binning; for
+            # a tilted or in-plane field they decouple completely, and a bin of fixed
+            # trajectory direction then holds FS points spread over the whole crystal
+            # angle -- i.e. over the whole range of the channel form factors phi(beta).
+            # Keeping one representative of such a bin and giving it the bin's entire
+            # weight is what made the in-plane chiral vortex diverge (A_+ ran to 2.3 and
+            # the induced component to 5.3 times the bulk gap).
+            nk = 8
+            ib = np.minimum(((dirs + np.pi) / (2.0 * np.pi) * nbeta).astype(np.int64),
+                            nbeta - 1)
+            ik = np.minimum(((kang + np.pi) / (2.0 * np.pi) * nk).astype(np.int64), nk - 1)
+            keys, inv = np.unique(ib * nk + ik, return_inverse=True)
+            wsum = np.bincount(inv, weights=wt_dir)
+            sel = np.array([np.where(inv == k)[0][np.argmax(wt_dir[inv == k])]
+                            for k in range(len(keys))])
             dirs, kang = dirs[sel], kang[sel]
             hvfarr = hvfarr[sel]
-            wt_dir = wt_dir[sel] / wt_dir[sel].sum()    # renormalize the FS weights
+            wt_dir = wsum / wsum.sum()                  # bin weights, normalized
         nbeta = len(dirs)
         phid = _norm(np.array([phitil[a](kang) for a in range(nc)], dtype=np.complex128), wt_dir)
-        hvf_eff = float((np.asarray(fs['nf']) * np.asarray(fs['vabs'])).sum())
+        hvf_eff = frame['hvf_eff']
     else:                                              # isotropic cylinder (v_hat = k_hat)
-        dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
+        dirs = _beta_dirs(nbeta)
+        nbeta = len(dirs)                              # _beta_dirs rounds up to odd
         hvfarr = np.full(nbeta, hvf)
         wt_dir = np.full(nbeta, 1.0 / nbeta)
         phid = np.array([phitil[a](dirs) for a in range(nc)], dtype=np.complex128)
         hvf_eff = hvf
     if Dbulk is None:                                   # coupled multi-channel bulk gap (dense set)
-        Dbulk = _coupled_bulk_gap(lam, temp, om, phid_b, wfull)
+        Dbulk = _coupled_bulk_gap(lam, temp, om_full, phid_b, wfull)
     Dref = float(np.max(Dbulk))
     xi = hvf_eff / (np.pi * Dref)
     Rc = np.sqrt(2.0 / field) * xi if field > 0.0 else np.inf   # Wigner-Seitz cell radius
@@ -490,11 +681,20 @@ def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0
     # seed: winding-1 components vanish at the core (tanh); core-localized (m=0)
     # subcritical components get a small core-peaked seed so they can nucleate
     A = np.empty((nc, ngrid, ngrid), dtype=np.complex128)
+    tanh_r = np.tanh(Rg / xi)
     for a in range(nc):
+        # A winding-m amplitude must vanish as rho^|m| at the core (only m=0 survives
+        # there), so the seed carries tanh^|m|.  The old seed was tanh^1 for every m != 0
+        # and core-PEAKED for any subcritical channel, which is right for the m=(1,0)
+        # dominant+subdominant pair it was written for and wrong for anything else --
+        # a winding-3 induced component was being started with a core antinode.
+        prof = tanh_r ** abs(int(mwind[a])) if mwind[a] != 0 else 1.0
         if Dbulk[a] > 1.0e-3 * Dref:
-            A[a] = Dbulk[a] * (np.tanh(Rg / xi) if mwind[a] != 0 else 1.0)
-        else:
-            A[a] = 0.15 * Dref / np.cosh(Rg / xi)      # core-localized nucleation seed
+            A[a] = Dbulk[a] * prof
+        else:                                          # subcritical / induced: nucleation seed
+            A[a] = 0.15 * Dref * prof / np.cosh(Rg / xi)
+    if A_init is not None:
+        A = np.array(A_init, dtype=np.complex128).reshape(nc, ngrid, ngrid).copy()
     ewind = np.exp(1j * theta)
     for it in range(itemax):
         Ai = [RegularGridInterpolator((xg, xg), A[a], bounds_error=False,
@@ -518,12 +718,14 @@ def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0
                 om_ch = om                                          # [Nw] (broadcast in wrapper)
             _, fch = matrix_riccati_chords(om_ch, np.ascontiguousarray(Dpath),
                                            hvfarr[ib], dx, 0.0)     # [ns,nb,Nw,2,2]
+            _check_finite(fch, 'solve_vortex2d_dvector')
             for a in range(nc):
                 fa = np.einsum('ij,snwji->sn', Sd[a], fch) / trSS[a]   # summed over freq
                 accf[a] += wt_dir[ib] * np.conj(phid[a, ib]) * _eval_field(fa, xg, sxy, bxy, fill=0.0)
         err = 0.0
         for a in range(nc):
-            A_new = (lam[a] * temp) * (accf[a] * np.conj(ewind) ** mwind[a])   # remove winding
+            # factor 2: only om > 0 is summed (f is even in om), see the note above
+            A_new = (fac * lam[a] * temp) * (accf[a] * np.conj(ewind) ** mwind[a])  # remove winding
             err = max(err, np.abs(A_new - A[a]).max() / Dref)
             A[a] = (1.0 - mix) * A[a] + mix * A_new
         if err < eps:
@@ -558,7 +760,13 @@ def solve_lattice_sc_dvector(couplings, temp, omega, channels=None, windings=(1,
     Sd = [np.conj(S).T for S in Smats]
     trSS = [np.trace(Sd[a] @ Smats[a]).real for a in range(nc)]
     phitil = [ch[1] for ch in channels]
-    om = np.concatenate([omega, -omega])
+    # NOTE the +/- Matsubara set is kept here even though the kernel returns the TILDE
+    # propagator for Re(om) < 0 (see solve_vortex2d_dvector): this solver always carries
+    # the supercurrent Doppler shift om -> om + i v_F.Q, so +om and -om are not related by
+    # conjugation and the positive-only reduction used there is not available.  Harmless
+    # for a real order parameter, which is every configuration this solver is used for;
+    # a CHIRAL lattice would need the kernel fixed first.
+    om = om_full = np.concatenate([omega, -omega])
     mwind = np.asarray(windings, dtype=int)
 
     def _norm(ph, wt):                                  # normalize nf-weighted <|phi|^2>=1
@@ -584,11 +792,12 @@ def solve_lattice_sc_dvector(couplings, temp, omega, channels=None, windings=(1,
         phid = _norm(np.array([phitil[a](kang) for a in range(nc)], dtype=np.complex128), wt_dir)
         hvf_eff = float((np.asarray(fs['nf']) * np.asarray(fs['vabs'])).sum())
     else:
-        dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
+        dirs = _beta_dirs(nbeta)
+        nbeta = len(dirs)                              # _beta_dirs rounds up to odd
         hvfarr = np.full(nbeta, hvf); wt_dir = np.full(nbeta, 1.0 / nbeta)
         phid = np.array([phitil[a](dirs) for a in range(nc)], dtype=np.complex128)
         hvf_eff = hvf
-    Dbulk = _coupled_bulk_gap(lam, temp, om, phid_b, wfull)   # coupled multi-channel bulk gap
+    Dbulk = _coupled_bulk_gap(lam, temp, om_full, phid_b, wfull)   # coupled multi-channel bulk gap
     Dref = float(np.max(Dbulk))
     if Dref <= 0:
         return None
@@ -694,7 +903,8 @@ def lattice_dos_sc_dvector(state, wlist, delta=None, nbeta=16, hvf=1.0, fs=None,
             wt_dir = wt_dir[sel] / wt_dir[sel].sum()
         nbeta = len(dirs)
     else:
-        dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False); kang = dirs
+        dirs = _beta_dirs(nbeta); kang = dirs
+        nbeta = len(dirs)                              # _beta_dirs rounds up to odd
         hvfarr = np.full(nbeta, hvf); wt_dir = np.full(nbeta, 1.0 / nbeta)
     phid = np.array([phitil[a](kang) for a in range(nc)], dtype=np.complex128)
     nrm = np.array([np.sqrt((wt_dir * np.abs(phid[a]) ** 2).sum()) for a in range(nc)])
@@ -725,7 +935,7 @@ def lattice_dos_sc_dvector(state, wlist, delta=None, nbeta=16, hvf=1.0, fs=None,
 
 
 def calc_vortex_dvector(coupling, temp, wc, kb=1.0, Lxi=7.0, ngrid=33, nbeta=16,
-                        sub_ratio=0.95, field=0.0, fs=None):
+                        sub_ratio=0.95, field=0.0, fs=None, bdir=None):
     """
     @fn calc_vortex_dvector
     @brief Driver: self-consistent d-vector order parameter of a triplet superconductor
@@ -744,7 +954,8 @@ def calc_vortex_dvector(coupling, temp, wc, kb=1.0, Lxi=7.0, ngrid=33, nbeta=16,
     print(f"T={temp/kb:.2f} K, lambda_px={couplings[0]:.3f}, lambda_py={couplings[1]:.3f}, "
           f"{len(omega)} Matsubara freqs, grid={ngrid}x{ngrid}", flush=True)
     xg, A, Dbulk, xi = solve_vortex2d_dvector(couplings, temp, omega, Lxi=Lxi,
-                                              ngrid=ngrid, nbeta=nbeta, field=field, fs=fs)
+                                              ngrid=ngrid, nbeta=nbeta, field=field,
+                                              fs=fs, bdir=bdir)
     Dref = float(np.max(np.abs(Dbulk)))
     if Dref <= 0.0:
         print("normal state (Dbulk=0); nothing to profile", flush=True)
@@ -765,6 +976,80 @@ def calc_vortex_dvector(coupling, temp, wc, kb=1.0, Lxi=7.0, ngrid=33, nbeta=16,
                 fh.write(f"{r[j]/xi:10.4f} {apx[j]/Dref:12.5e} {apz[j]/Dref:12.5e} {theta[j]:9.3f}\n")
     except IOError as e:
         print(f"Error writing vortex_dvector.dat: {e}", flush=True)
+    return xg, A
+
+
+def calc_vortex_chiral(coupling, temp, wc, ell=1, m_dom=1, dvec='z', kb=1.0, Lxi=8.0,
+                       ngrid=41, nbeta=24, fs=None, eps=4.0e-3, itemax=100, bdir=None):
+    """
+    @fn calc_vortex_chiral
+    @brief Driver: self-consistent isolated vortex of a CHIRAL equal-spin triplet
+    (p+ip for ell=1, d+id for ell=2), via the multi-component spin-matrix Riccati.
+
+    This is the case the scalar vortex solver refuses (_reject_chiral_ff): a chiral order
+    parameter has a genuinely complex amplitude and the core induces the OPPOSITE
+    chirality, neither of which a single real scalar field can carry.  The two components
+    are e^{+-i ell beta} on ONE spin matrix (chiral_channels), their windings differ by
+    2*ell (chiral_windings), and their complex amplitudes are solved self-consistently.
+
+    The bulk reference is deliberately NOT the degenerate two-channel gap equation: the
+    two chiralities are time-reversed partners of one irrep and share a coupling, so that
+    equation returns them with equal amplitude -- the non-chiral (nematic) combination.
+    The chiral state has one component at the isotropic-gap value and the other exactly
+    zero, and it IS a fixed point of the solver (verified: starting on it, |A_-|/D stays
+    at 4e-4 and A_+ holds 0.996 of the bulk).
+
+    Measured for p+ip, m=(1,3), lambda=0.5, T=4e-4, Lxi=8, ngrid=41: A_+ rises from
+    0.0003 at the core to 0.98 at the edge, and the induced opposite chirality peaks at
+    |A_-|/Db = 0.073 around r = 3 xi, vanishing both at the core (winding 3 -> rho^3) and
+    in the bulk.
+    @param     ell: chirality (1 = p+ip, 2 = d+id)
+    @param   m_dom: winding of the dominant component (+1 parallel to the chirality,
+                    -1 antiparallel); the induced one follows chiral_windings
+    @param    dvec: equal-spin direction, 'z' or 'x' (see chiral_channels)
+    @param      fs: model / Wannier FS dict (None = isotropic cylinder)
+    @return (xg, A): grid axis and the complex amplitudes [2, ngrid, ngrid]
+    """
+    omega = matsubara(temp, wc)
+    om_full = np.concatenate([omega, -omega])
+    channels = chiral_channels(ell, dvec)
+    mw = chiral_windings(m_dom, ell)
+    nd = 180
+    # |phi_pm| = 1, so the dominant chirality obeys the isotropic-gap equation
+    Dchi = float(_coupled_bulk_gap(np.array([coupling]), temp, om_full,
+                                   np.ones((1, nd)), np.full(nd, 1.0 / nd))[0])
+    fstxt = ', model/Wannier FS+v_F' if fs is not None else ', isotropic cylinder'
+    print(f"chiral vortex (isolated{fstxt}): {channels[0][0]} dominant + induced "
+          f"{channels[1][0]}, 2D spin-matrix Riccati", flush=True)
+    print(f"T={temp/kb:.2f} K, lambda={coupling:.3f} (both chiralities, degenerate), "
+          f"windings m=({mw[0]},{mw[1]}), {len(omega)} Matsubara freqs, "
+          f"grid={ngrid}x{ngrid}", flush=True)
+    if Dchi <= 0.0:
+        print("normal state (Dbulk=0); nothing to profile", flush=True)
+        return None, None
+    xg, A, Dbulk, xi = solve_vortex2d_dvector((coupling, coupling), temp, omega,
+                                              channels=channels, windings=mw,
+                                              Dbulk=np.array([Dchi, 0.0]), Lxi=Lxi,
+                                              ngrid=ngrid, nbeta=nbeta, field=0.0,
+                                              fs=fs, eps=eps, itemax=itemax, bdir=bdir)
+    ic = ngrid // 2
+    r = xg[ic:]                                          # radial cut along +x (y=0)
+    ap = np.abs(A[0, ic:, ic]) / Dchi
+    am = np.abs(A[1, ic:, ic]) / Dchi
+    jm = int(np.argmax(am))
+    print(f"Dbulk = {Dchi:.4e} eV,  xi = {xi:.4g}", flush=True)
+    print(f"  core  r=0:  |A_+|/Db={ap[0]:.4f}   |A_-|/Db={am[0]:.4f}", flush=True)
+    print(f"  edge  r=R:  |A_+|/Db={ap[-1]:.4f}   |A_-|/Db={am[-1]:.4f}", flush=True)
+    print(f"  induced opposite chirality: max |A_-|/Db = {am[jm]:.4f} at r/xi = "
+          f"{r[jm]/xi:.2f}  (0 at the core and in the bulk = chiral state preserved)",
+          flush=True)
+    try:
+        with open('vortex_chiral.dat', 'w') as fh:
+            fh.write("# r/xi  |A_+|/Db  |A_-|/Db   (dominant / induced opposite chirality)\n")
+            for j in range(len(r)):
+                fh.write(f"{r[j]/xi:10.4f} {ap[j]:12.5e} {am[j]:12.5e}\n")
+    except IOError as e:
+        print(f"Error writing vortex_chiral.dat: {e}", flush=True)
     return xg, A
 
 

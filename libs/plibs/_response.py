@@ -444,6 +444,12 @@ def gap_symms(klist: np.ndarray, Norb: int, gap_sym: int):
         row=2*np.sin(A*ky)
     elif gap_sym==-3:     # p+ip (chiral, complex): px + i py
         row=2*np.sin(A*kx)+2j*np.sin(A*ky)
+    elif gap_sym==6:      # d+id (chiral, complex): dx2-y2 + i dxy  (indices 1 + i*3)
+        row=(np.cos(A*kx)-np.cos(A*ky))+2j*np.sin(A*kx)*np.sin(A*ky)
+    elif gap_sym==7:      # dxz+idyz (chiral, complex, kz dependent): indices 4 + i*5.
+        # |phi| vanishes on the whole kz=0 (and zone-boundary) plane -> HORIZONTAL line
+        # node, unlike the vertical nodes of the in-plane harmonics.
+        row=2*np.sin(A*kx)*np.sin(A*kz)+2j*np.sin(A*ky)*np.sin(A*kz)
     else:
         row=np.zeros(len(klist),dtype=np.float64)
     return np.tile(row,(Norb,1))
@@ -458,9 +464,22 @@ def get_initial_gap(klist: np.ndarray, Norb: int, gap_sym: int) -> np.ndarray:
     @return init_gap: Initial gap function array [Norb, Nk]
     """
     if gap_sym>=0:
-        gapsym=['s','dx2-y2','spm','dxy','dxz','dyz']
+        gapsym=['s','dx2-y2','spm','dxy','dxz','dyz','d+id','dxz+idyz']
         print('gap symmetry is '+gapsym[gap_sym])
     else:
         gapsym=['s','px','py','p+ip']
         print('gap symmetry is '+gapsym[-gap_sym])
-    return gap_symms(klist,Norb,gap_sym)
+    row=gap_symms(klist,Norb,gap_sym)
+    # The linearized Eliashberg seed is passed to Fortran as real(c_double) and the
+    # kernel itself is real, so a CHIRAL harmonic cannot be used as a seed: the two
+    # members of a degenerate pair (e.g. dxz and dyz) must be obtained from separate
+    # real runs and combined as Delta_1 +- i Delta_2 afterwards, with the chirality
+    # selected below Tc by the condensation energy (linear theory cannot select it).
+    if np.iscomplexobj(row) and np.abs(row.imag).max()>0.0:
+        raise ValueError(
+            f'gap_sym={gap_sym} is a chiral (complex) harmonic and cannot seed the '
+            'linearized Eliashberg equation (real kernel, real seed). Run the two real '
+            'partners separately (e.g. 1 and 3 for d+id, 4 and 5 for dxz+idyz), check '
+            'that they are degenerate and orthogonal, and build Delta_1 +- i Delta_2 '
+            'afterwards. The chiral harmonics are for the Eilenberger form factor.')
+    return row

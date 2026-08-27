@@ -189,8 +189,22 @@ end subroutine matrix_riccati_batch
 
 
 subroutine riccati_gen(om,D,h,sgn,sz,N)
-!> 4x4 Mobius generator (matches _riccati_N): N=[[-2 om I + i sgn h sz, D],
-!> [conj(D)^T, i sgn h sz]].
+!> 4x4 Mobius generator for ONE sweep.  sgn=+1 is the forward (gamma) sweep,
+!> sgn=-1 the backward (gamma-tilde) sweep.
+!>
+!> The two sweeps do NOT share a generator.  gamma obeys
+!>     hv d_s gamma  = Delta - 2 om gamma - gamma Delta^dag gamma,
+!> while gamma-tilde, integrated in the REVERSE direction, obeys the same form with
+!> Delta and Delta^dag INTERCHANGED:
+!>     hv d_(-s) gammat = Delta^dag - 2 om gammat - gammat Delta gammat.
+!> So the backward generator must carry Delta^dag in the (1,2) block and Delta in
+!> (2,1).  Using the forward generator for both is exact whenever Delta^dag = Delta
+!> -- which is every REAL gap, i.e. every configuration this module was validated on
+!> -- and wrong for a COMPLEX one.  Measured before the fix, for a constant gap
+!> Delta = D e^{i beta} S: exact at beta = 0 and 180 deg, and 15.3% too large at
+!> beta = 90 deg, independent of the step size.  That is what inflated the chiral
+!> homogeneous fixed point to 1.494 x its bulk value.  Note the vortex solvers carry
+!> a winding phase e^{i m theta}, so their gap is complex too and they were affected.
   use,intrinsic:: iso_c_binding, only: c_double
   implicit none
   complex(c_double),intent(in):: om,D(2,2),sz(2,2)
@@ -200,9 +214,14 @@ subroutine riccati_gen(om,D,h,sgn,sz,N)
   I2=reshape([(1d0,0d0),(0d0,0d0),(0d0,0d0),(1d0,0d0)],[2,2])
   zee=(0d0,1d0)*sgn*h*sz
   N(1:2,1:2)=-2d0*om*I2+zee
-  N(1:2,3:4)=D
-  N(3:4,1:2)=transpose(conjg(D))
   N(3:4,3:4)=zee
+  if(sgn>0d0)then                       ! forward (gamma)
+     N(1:2,3:4)=D
+     N(3:4,1:2)=transpose(conjg(D))
+  else                                  ! backward (gamma-tilde): Delta <-> Delta^dag
+     N(1:2,3:4)=transpose(conjg(D))
+     N(3:4,1:2)=D
+  end if
 end subroutine riccati_gen
 
 
@@ -214,14 +233,40 @@ subroutine bulk_root(om,D,is_a,a)
   complex(c_double),intent(in):: om,D(2,2)
   logical,intent(in):: is_a
   complex(c_double),intent(out):: a(2,2)
-  complex(c_double) DDd(2,2),E,d2
+  complex(c_double) DDd(2,2),E,d2,src(2,2)
+  complex(c_double),parameter:: I2b(2,2)=reshape([(1d0,0d0),(0d0,0d0),(0d0,0d0),(1d0,0d0)],[2,2])
   DDd=matmul(D,transpose(conjg(D)))
   d2=0.5d0*(DDd(1,1)+DDd(2,2))
   E=sqrt(om*om+d2)
+  ! src=D (forward root) or D^dag (backward root)
   if(is_a)then
-     a=D/(om+E)
+     src=D
   else
-     a=transpose(conjg(D))/(om+E)
+     src=transpose(conjg(D))
+  end if
+  ! For Re(om)<0 the principal square root makes om+E CANCEL: E -> |om| as d2 -> 0, so
+  ! the denominator loses every significant digit on a weakly gapped trajectory and
+  ! becomes exactly 0 once d2 underflows relative to om^2 -- 0/0 = NaN, which the Mobius
+  ! sweep then carries along the whole chord.  (This module is fed the negative Matsubara
+  ! frequencies by the d-vector solvers, so it is reached routinely; the scalar
+  ! riccati_homogeneous guards the same 0/0 with a where(|Delta|>0).)  The algebraically
+  ! identical form src*(E-om)/d2 has no cancellation for Re(om)<0, since E-om = E+|om|.
+  ! d2 exactly 0 means no pairing on this trajectory.  For Re(om)>=0 the root is 0; for
+  ! Re(om)<0 the limit is a -> infinity, which is what reproduces g -> -I, f -> 0.  It has
+  ! to be a multiple of the IDENTITY, not of src: src is the zero matrix there, so scaling
+  ! it leaves a=0 and g comes out +I with the wrong sign.  With a=b=c*I one gets
+  ! g=(1-c^2)/(1+c^2) I and f=2c/(1+c^2) I, so c=1e8 gives g=-I and f=0 to 16 digits
+  ! while staying far from overflow.
+  if(abs(d2)<=0d0)then
+     if(real(om)>=0d0)then
+        a=(0d0,0d0)
+     else
+        a=(1d8,0d0)*I2b
+     end if
+  else if(real(om)<0d0)then
+     a=src*(E-om)/d2
+  else
+     a=src/(om+E)
   end if
 end subroutine bulk_root
 

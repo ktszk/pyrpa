@@ -44,6 +44,211 @@ from ._response import gap_symms
 BCS_RATIO = 1.764        # weak-coupling BCS gap ratio Delta0 / (kB Tc)
 
 
+# --------------------------------------------------------------------------- #
+#  Pair-partner gauge
+# --------------------------------------------------------------------------- #
+# The band-projected pair potential (Nagai-Nakamura, JPSJ 85, 074707 (2016) Eq. 43)
+#
+#     phi(k_F) = sum_ab conj(u_a(k_F)) Delta_orb,ab(k_F) conj(u_b(-k_F))
+#
+# pairs |k> with a PARTNER state, and the partner must be specified in the same
+# gauge as u(k).  Feeding an independently diagonalized u(-k) does NOT do that:
+# LAPACK fixes no phase convention, so u(k) -> e^{i theta(k)} u(k) sends
+# phi -> e^{-i(theta(k)+theta(-k))} phi and the result is gauge DEPENDENT --
+# a silently wrong, k-dependent phase (and, for real eigenvectors, sign) on phi.
+#
+# The partner is therefore always constructed from u(k) alone:
+#
+#   'trs'  spinless / single pseudo-spin sector with time-reversal symmetry,
+#          H(-k) = conj(H(k)) (guaranteed when the hoppings h(R) are real).
+#          NOTE this is a symmetry of the NORMAL-STATE H(k), not of Delta: a
+#          CHIRAL order parameter breaks time reversal in the superconducting
+#          state but leaves H untouched, so the gauge fixing stays valid and the
+#          projected phi correctly inherits the winding of Delta_orb(k).  What
+#          does invalidate it is a time-reversal-broken NORMAL state (a
+#          ferromagnetic superconductor, a Zeeman term inside H, Haldane-type
+#          complex hoppings) -- there the time-reversed state is not an
+#          eigenstate at -k at all; check_pair_partner detects exactly that.
+#          Then u(-k) = conj(u(k)) and conj(u(-k)) = u(k), so
+#          phi = u^dag Delta u -- manifestly gauge invariant, real for a
+#          Hermitian Delta, and equal to 1 for Delta = identity.  DEFAULT.
+#   'soc'  spinful basis: the partner is the time-reversed state
+#          T u = (i sigma_y) conj(u), whose conjugate has components
+#          conj(T u)_{a,up} = +u_{a,dn},  conj(T u)_{a,dn} = -u_{a,up}.
+#          Needs ``spin_map`` (see spin_pair_map) to know the spin partner of
+#          each basis index.  Also gauge invariant.
+#   'diag' legacy: the independently diagonalized u(-k).  Gauge DEPENDENT; kept
+#          only for comparison / reproducing older numbers.  It happens to agree
+#          with 'trs' exactly whenever LAPACK returns u(-k) = conj(u(k)), which
+#          holds for real h(R) -- verify with ``check_trs_gauge``.
+
+PAIR_GAUGE = 'trs'          # module default, see set_pair_gauge
+PAIR_SPIN_MAP = None        # (jidx, sgn) for PAIR_GAUGE='soc'
+
+
+def set_pair_gauge(gauge: str, spin_map=None):
+    """
+    @fn set_pair_gauge
+    @brief Set the module-wide pair-partner gauge used by the band-projection
+    routines (project_gap_to_band, gap_color_3d, build_fs).
+    @param   gauge: 'trs' (default), 'soc' (needs spin_map) or 'diag' (legacy)
+    @param spin_map: (jidx, sgn) arrays for 'soc', from ``spin_pair_map``
+    """
+    global PAIR_GAUGE, PAIR_SPIN_MAP
+    if gauge not in ('trs', 'soc', 'diag'):
+        raise ValueError(f"unknown pair gauge {gauge!r} (use 'trs', 'soc' or 'diag')")
+    if gauge == 'soc' and spin_map is None and PAIR_SPIN_MAP is None:
+        raise ValueError("pair gauge 'soc' needs spin_map=(jidx,sgn); see spin_pair_map")
+    PAIR_GAUGE = gauge
+    if spin_map is not None:
+        PAIR_SPIN_MAP = (np.asarray(spin_map[0], dtype=np.int64),
+                         np.asarray(spin_map[1], dtype=np.float64))
+    return PAIR_GAUGE
+
+
+def spin_pair_map(Nbasis: int, order: str = 'block'):
+    """
+    @fn spin_pair_map
+    @brief Build the (jidx, sgn) spin-partner map required by the 'soc' pair gauge:
+    conj(T u)_i = sgn[i] * u[jidx[i]], i.e. up -> +down, down -> -up.
+    @param Nbasis: total number of basis functions (orbitals x spin, must be even)
+    @param  order: 'block' = [orb_1..orb_N (up), orb_1..orb_N (down)] (pyrpa SOC
+                   convention); 'interleave' = [orb_1 up, orb_1 dn, orb_2 up, ...]
+    @return (jidx, sgn)
+    """
+    if Nbasis % 2:
+        raise ValueError(f"spin_pair_map: Nbasis={Nbasis} is odd (not a spinful basis)")
+    j = np.arange(Nbasis, dtype=np.int64)
+    sgn = np.ones(Nbasis, dtype=np.float64)
+    if order == 'block':
+        N = Nbasis // 2
+        j = np.concatenate([np.arange(N, Nbasis), np.arange(0, N)]).astype(np.int64)
+        sgn[N:] = -1.0
+    elif order == 'interleave':
+        j = (j ^ 1).astype(np.int64)                 # 0<->1, 2<->3, ...
+        sgn[1::2] = -1.0
+    else:
+        raise ValueError(f"unknown spin ordering {order!r} ('block' or 'interleave')")
+    return j, sgn
+
+
+def pair_partner_conj(ev: np.ndarray, evm: np.ndarray = None, gauge: str = None,
+                      spin_map=None) -> np.ndarray:
+    """
+    @fn pair_partner_conj
+    @brief The array that plays the role of ``conj(u_b(-k_F))`` in the band
+    projection, built in the requested gauge (see the block comment above).
+    @param  ev: band eigenvectors u(k_F) [Nfs, Nbasis]
+    @param evm: independently diagonalized u(-k_F); only used by gauge='diag'
+    @param gauge,spin_map: override the module defaults (set_pair_gauge)
+    @return [Nfs, Nbasis] array to contract as conj(u(-k))
+    """
+    gauge = PAIR_GAUGE if gauge is None else gauge
+    if gauge == 'trs':
+        return ev                                    # conj(u(-k)) = conj(conj(u(k)))
+    if gauge == 'soc':
+        sm = PAIR_SPIN_MAP if spin_map is None else spin_map
+        if sm is None:
+            raise ValueError("pair gauge 'soc' needs spin_map=(jidx,sgn); see spin_pair_map")
+        j, sgn = np.asarray(sm[0], dtype=np.int64), np.asarray(sm[1])
+        if len(j) != ev.shape[1]:
+            raise ValueError(f"spin_map length {len(j)} != basis size {ev.shape[1]}")
+        return ev[:, j] * sgn[None, :]
+    if gauge == 'diag':
+        if evm is None:
+            raise ValueError("pair gauge 'diag' needs the u(-k) eigenvectors (evm)")
+        return np.conj(evm)
+    raise ValueError(f"unknown pair gauge {gauge!r}")
+
+
+def check_trs_gauge(ev: np.ndarray, evm: np.ndarray, tol: float = 1.0e-8,
+                    warn: bool = True) -> float:
+    """
+    @fn check_trs_gauge
+    @brief Diagnostic: max |u(-k) - conj(u(k))| over the Fermi surface.  It is 0 to
+    machine precision for real hoppings (H(-k)=conj(H(k)) and LAPACK is conjugation
+    consistent), in which case the legacy 'diag' route coincides with 'trs'.  A
+    finite value means the two differ and only the gauge-fixed routes are correct.
+    @return the max deviation (and warns above ``tol`` when ``warn``)
+    """
+    dev = float(np.abs(evm - np.conj(ev)).max()) if len(ev) else 0.0
+    if warn and dev > tol:
+        print(f"Warning: u(-k) != conj(u(k)) (max dev {dev:.3e}); the pair partner is "
+              f"gauge fixed by PAIR_GAUGE={PAIR_GAUGE!r} -- 'diag' would be gauge dependent",
+              flush=True)
+    return dev
+
+
+def check_pair_partner(ev: np.ndarray, evm: np.ndarray, gauge: str = None, spin_map=None,
+                       tol: float = 1.0e-6, warn: bool = True) -> float:
+    """
+    @fn check_pair_partner
+    @brief The decisive validity check of the gauge fixing: the time-reversed state
+    T|k,n> must BE the band n state at -k, i.e. |<u(-k) | T u(k)>| = 1.  Unlike
+    check_trs_gauge this is gauge invariant (insensitive to the arbitrary phase of
+    u(-k)) and correct for both 'trs' and 'soc'.
+
+    It is 1 whenever the NORMAL STATE has time-reversal symmetry -- including when
+    the order parameter is chiral, since Delta plays no part in it.  It drops below
+    1 only when H(k) itself breaks time reversal (ferromagnetic superconductor, a
+    Zeeman/exchange term inside H, Haldane-type complex hoppings); no gauge-fixed
+    scalar pair partner exists in that case and only |phi| stays meaningful, so the
+    projection is reported as unreliable rather than silently used.
+    @return the minimum overlap over the Fermi surface (warns below 1 - tol)
+    """
+    if not len(ev):
+        return 1.0
+    part = pair_partner_conj(ev, evm, gauge, spin_map)        # conj(T u)
+    ov = float(np.abs(np.einsum('ia,ia->i', evm, part)).min())
+    if warn and ov < 1.0 - tol:
+        print(f"Warning: |<u(-k)|T u(k)>| drops to {ov:.4f} (should be 1): the NORMAL "
+              f"state breaks time-reversal symmetry, so the band-projected pair "
+              f"potential has no gauge-fixed phase -- only |phi| is meaningful "
+              f"(a chiral Delta alone does NOT cause this)", flush=True)
+    return ov
+
+
+def _eval_gap_orbital(gap_orbital, kfrac: np.ndarray) -> np.ndarray:
+    """Evaluate an orbital-basis pair potential on a batch of k-points [Nk,3].
+    Accepts a constant matrix, a callable that already handles a batch (returning
+    [Nk,N,N]), or a per-k callable (looped).  @return [Nk, N, N] complex."""
+    kfrac = np.atleast_2d(np.asarray(kfrac, dtype=np.float64))
+    if not callable(gap_orbital):
+        D = np.asarray(gap_orbital, dtype=np.complex128)
+        return np.broadcast_to(D, (len(kfrac),) + D.shape)
+    try:                                             # batched callable (fast path)
+        out = np.asarray(gap_orbital(kfrac), dtype=np.complex128)
+        if out.ndim == 3 and out.shape[0] == len(kfrac):
+            return out
+    except Exception:
+        pass
+    return np.array([np.asarray(gap_orbital(k), dtype=np.complex128) for k in kfrac],
+                    dtype=np.complex128)
+
+
+def project_gap(ev: np.ndarray, gap_orbital, kfrac: np.ndarray, evm: np.ndarray = None,
+                gauge: str = None, spin_map=None) -> np.ndarray:
+    """
+    @fn project_gap
+    @brief Band-diagonal projection phi_i = sum_ab conj(u_a(k_i)) Delta_orb,ab(k_i) P_b(k_i)
+    with the pair partner P = pair_partner_conj(...).  The single place where the
+    Nagai-Nakamura Eq. 43 contraction is performed; shared by the FS-dict, 3D-mesh
+    and 3D-plot routes so they cannot drift apart.
+    @return phi [Nfs] complex (unnormalized)
+    """
+    part = pair_partner_conj(ev, evm, gauge, spin_map)
+    kfrac = np.atleast_2d(np.asarray(kfrac, dtype=np.float64))
+    phi = np.empty(len(ev), dtype=np.complex128)
+    # Chunked: a 3D Fermi surface easily has 10^5 points, and materializing
+    # Delta_orb(k) for all of them at once is Nfs*Norb^2 complex numbers.
+    for i0 in range(0, len(ev), 8192):
+        sl = slice(i0, i0 + 8192)
+        D = _eval_gap_orbital(gap_orbital, kfrac[sl])            # [chunk, N, N]
+        phi[sl] = np.einsum('ia,iab,ib->i', np.conj(ev[sl]), D, part[sl])
+    return phi
+
+
+
 def _fs_average(values: np.ndarray, w: np.ndarray) -> np.ndarray:
     """DOS-weighted Fermi-surface average over the FS-point axis (axis 0).
     @param values: array [Nfs, ...] of the quantity to average
@@ -54,7 +259,9 @@ def _fs_average(values: np.ndarray, w: np.ndarray) -> np.ndarray:
 
 
 def build_fs(eig: np.ndarray, klist: np.ndarray, mu: float, gap_sym: int,
-             width: float, w_cut: float = 1.0e-4):
+             width: float, w_cut: float = 1.0e-4, uni: np.ndarray = None,
+             gap_orbital=None, delta0=None, gauge: str = None, spin_map=None,
+             sw_band: bool = False):
     """
     @fn build_fs
     @brief Select Fermi-surface points from a band mesh and build their DOS
@@ -64,6 +271,22 @@ def build_fs(eig: np.ndarray, klist: np.ndarray, mu: float, gap_sym: int,
     ``width``) provides the DOS weight, so no explicit FS triangulation is
     needed and all bands are handled uniformly.  Points with negligible weight
     are discarded because the quasiclassical propagators live on the FS.
+    Because the mesh is the FULL 3D k-grid, every sheet and every k_z is kept:
+    this is the 3D Fermi-surface route.
+
+    The form factor comes from one of three sources, in decreasing priority:
+
+      * ``gap_orbital`` -- an orbital-basis pair potential (constant matrix or
+        callable kfrac->NxN, e.g. an RPA/FLEX gap loaded by
+        ``gap_orbital_from_wannier``) projected BAND-RESOLVED onto the Fermi
+        surface (Nagai-Nakamura Eq. 43, ``project_gap``, gauge fixed).  This is
+        the only route that can produce an ACCIDENTAL node: the k_z dependence
+        and the multi-sheet sign structure come from the orbital character of
+        each band, not from a chosen harmonic.  Needs ``uni``.
+      * ``gap_sym`` -- an analytic lattice harmonic (``gap_symms``), identical on
+        every band, optionally scaled per band by ``delta0`` (phenomenological
+        multiband s+- signs / amplitude ratios).
+      * ``gap_sym`` alone -- the historical behaviour.
 
     @param    eig: band energies on the mesh [Nk, Norb]
     @param  klist: k-points in fractional coordinates [Nk, 3]
@@ -71,23 +294,93 @@ def build_fs(eig: np.ndarray, klist: np.ndarray, mu: float, gap_sym: int,
     @param gap_sym: gap-symmetry index passed to ``gap_symms``
     @param  width: Gaussian broadening of the FS delta function [eV]
     @param  w_cut: keep points with weight > w_cut * max(weight)
-    @return (wf, phif): FS weights [Nfs] and normalized form factor [Nfs]
+    @param    uni: band eigenvectors on the same mesh [Nk, Nband, Norb]
+                   (``get_emesh(..., sw_uni=True)``); required by gap_orbital
+    @param gap_orbital: orbital-basis pair potential to project (see above)
+    @param delta0: per-band gap amplitudes/signs indexed by band; applied to the
+                   harmonic route (and, if given, on top of the projection)
+    @param gauge,spin_map: pair-partner gauge (see set_pair_gauge); the mesh route
+                   has no independently diagonalized u(-k), so 'diag' is rejected
+    @param sw_band: also return per-point provenance (band index, mesh index, k_z)
+    @return (wf, phif) or (wf, phif, info): FS weights [Nfs], normalized form
+            factor [Nfs] and optionally info = dict(band, ik, kz)
     """
     # Gaussian-broadened delta(eps - mu); the overall constant cancels in averages.
     de = eig - mu
     w = np.exp(-0.5 * (de / width) ** 2)            # [Nk, Norb]
-    # form factor depends on k only; broadcast to every band
-    phi_row = gap_symms(klist, 1, gap_sym)[0]        # [Nk]
-    phi = np.repeat(phi_row[:, None], eig.shape[1], axis=1)  # [Nk, Norb]
     mask = w > w_cut * w.max()
+    ik, ib = np.nonzero(mask)                       # mesh index / band index per FS point
     wf = w[mask]
-    phif = phi[mask]
+    if gap_orbital is not None:
+        if uni is None:
+            raise ValueError("build_fs: gap_orbital needs the band eigenvectors "
+                             "(get_emesh(..., sw_uni=True) -> uni)")
+        if (PAIR_GAUGE if gauge is None else gauge) == 'diag':
+            raise ValueError("build_fs: pair gauge 'diag' needs u(-k) from a second "
+                             "diagonalization and is not available on the mesh route; "
+                             "use 'trs' (real hoppings) or 'soc'")
+        ev = uni[ik, ib, :]                          # u_band(k) on the FS  [Nfs, Norb]
+        nrm = np.sqrt((np.abs(ev) ** 2).sum(axis=1))  # (MLO basis is non-orthogonal)
+        ev = ev / np.where(nrm > 0, nrm, 1.0)[:, None]
+        phif = project_gap(ev, gap_orbital, klist[ik], None, gauge, spin_map)
+    else:
+        phif = gap_symms(klist, 1, gap_sym)[0][ik].astype(np.complex128)   # k only
+    if delta0 is not None:                           # per-band ratio / sign
+        phif = phif * np.asarray(delta0, dtype=np.float64)[ib]
     # normalize so that <|phi|^2>_FS = 1 -> lambda is the dimensionless coupling
     # (|phi|^2, not phi^2, so complex/chiral form factors normalize correctly too)
     norm = np.sqrt(_fs_average(np.abs(phif) ** 2, wf))
     if norm > 0:
         phif = phif / norm
+    if sw_band:
+        return wf, phif, dict(band=ib, ik=ik, kz=klist[ik, 2])
     return wf, phif
+
+
+def report_fs_gap(wf: np.ndarray, phif: np.ndarray, info: dict, kb: float = 1.0):
+    """
+    @fn report_fs_gap
+    @brief Print the sheet-resolved structure of a Fermi-surface form factor: the
+    weight and |phi| of every band, whether Re[phi] changes sign ON one sheet
+    (accidental node) or only BETWEEN sheets (s+- type), and -- for a 3D FS -- how
+    phi varies with |k_z|, which is where a HORIZONTAL line node shows up.
+    @param wf,phif,info: the three outputs of build_fs(..., sw_band=True)
+    """
+    band, kz = info['band'], np.abs(info['kz'])
+    wsum = wf.sum()
+    # A chiral phi has no meaningful sign -- its phase winds -- so a node is where
+    # |phi| vanishes, not where Re[phi] crosses zero (which would flag phantom nodes).
+    chiral = np.abs(phif.imag).max() > 1.0e-10
+    val = np.abs(phif) if chiral else phif.real
+    lab = "|phi|" if chiral else "Re[phi]"
+    small = 0.05 * np.abs(phif).mean()
+    nodal = (lambda v: v.min() < small) if chiral else (lambda v: v.min() < 0.0 < v.max())
+    print(f"  sheet   weight   <|phi|>    {lab} min    max   node"
+          f"{'   (chiral: nodes are |phi|=0)' if chiral else ''}", flush=True)
+    for b in np.unique(band):
+        m = band == b
+        print(f"  band {b:<3d} {wf[m].sum()/wsum:7.3f} {np.abs(phif[m]).mean():9.4f} "
+              f"{val[m].min():+10.4f} {val[m].max():+8.4f}   "
+              f"{'ON-SHEET' if nodal(val[m]) else '-':>8s}", flush=True)
+    if len(np.unique(np.round(kz, 10))) > 2:          # 3D FS: k_z resolved profile
+        edges = np.linspace(0.0, 0.5, 6)
+        print(f"  {lab} vs |k_z| (0 -> 1/2), per sheet:", flush=True)
+        for b in np.unique(band):
+            m = band == b
+            prof = [val[m & (kz >= a) & (kz < c)].mean()
+                    if (m & (kz >= a) & (kz < c)).sum() > 3 else np.nan
+                    for a, c in zip(edges[:-1], edges[1:])]
+            row = " ".join(f"{v:+7.3f}" if np.isfinite(v) else "   --  " for v in prof)
+            good = [v for v in prof if np.isfinite(v)]
+            if chiral:      # |phi| dips to zero somewhere inside a k_z bin (binning the
+                            # MEAN would wash a thin node plane out, so test the minima)
+                hit = any(val[m & (kz >= a) & (kz < c)].min() < small
+                          for a, c in zip(edges[:-1], edges[1:])
+                          if (m & (kz >= a) & (kz < c)).sum() > 3)
+            else:
+                hit = good and min(good) < 0.0 < max(good)
+            print(f"    band {b:<3d} {row}"
+                  f"{' <- HORIZONTAL node along k_z' if hit else ''}", flush=True)
 
 
 def matsubara(temp: float, wc: float, Nw_max: int = 2000000) -> np.ndarray:
@@ -359,7 +652,8 @@ def dos_zeeman(wlist: np.ndarray, Damp: float, wf: np.ndarray, phif: np.ndarray,
 
 def calc_pauli_limit(Nx: int, Ny: int, Nz: int, wc: float, ham_r, S_r, rvec, avec,
                      mu: float, temp: float, gap_sym: int, coupling: float,
-                     h_list=None, fs_width: float = 5.0e-3, kb: float = 1.0):
+                     h_list=None, fs_width: float = 5.0e-3, kb: float = 1.0,
+                     gap_orbital=None, delta0=None, gauge: str = None, spin_map=None):
     """
     @fn calc_pauli_limit
     @brief Sweep the Zeeman (Maki) field h and report the singlet gap Delta(h) (the
@@ -369,10 +663,15 @@ def calc_pauli_limit(Nx: int, Ny: int, Nz: int, wc: float, ham_r, S_r, rvec, ave
     Zeeman-split bulk DOS at h = 0.5*Delta0 to 'pauli_dos.dat'.
     @param Nx,Ny,Nz,ham_r,S_r,rvec,avec,mu: Fermi-surface inputs (as in calc_eilenberger)
     @param h_list: list of Zeeman energies h [eV] (default fractions of Delta0)
+    @param gap_orbital,delta0,gauge,spin_map: gap specification on the 3D Fermi surface,
+           exactly as in calc_eilenberger (band-projected orbital gap / per-sheet signs)
     """
     omega = matsubara(temp, wc)
     Nk, klist, eig, uni, kweight = get_emesh(Nx, Ny, Nz, ham_r, S_r, rvec, avec, sw_uni=True)
-    wf, phif = build_fs(eig, klist, mu, gap_sym, fs_width)
+    wf, phif, fsinfo = build_fs(eig, klist, mu, gap_sym, fs_width, uni=uni,
+                                gap_orbital=gap_orbital, delta0=delta0,
+                                gauge=gauge, spin_map=spin_map, sw_band=True)
+    report_fs_gap(wf, phif, fsinfo, kb)
     D0 = solve_gap(temp, wf, phif, omega, 0.0, 1.0e8, coupling, h=0.0)
     if D0 <= 0:
         print("normal state at h=0; nothing to do", flush=True)
@@ -397,11 +696,11 @@ def calc_pauli_limit(Nx: int, Ny: int, Nz: int, wc: float, ham_r, S_r, rvec, ave
     print(f"  spinodal h* (SC branch collapses) ~ {h_sp/D0:.2f} Delta0", flush=True)
     # Zeeman-split DOS at h = 0.5 Delta0
     wl = np.linspace(-3 * D0, 3 * D0, 301)
-    Nz = dos_zeeman(wl, D0, wf, phif, 0.5 * D0, 0.03 * D0)
+    ndos = dos_zeeman(wl, D0, wf, phif, 0.5 * D0, 0.03 * D0)
     try:
         with open('pauli_dos.dat', 'w') as f2:
             f2.write("# w/Delta0   N(w)/N0  (Zeeman split, h=0.5 Delta0)\n")
-            for w, n in zip(wl, Nz):
+            for w, n in zip(wl, ndos):
                 f2.write(f"{w/D0:10.4f} {n:12.5e}\n")
     except IOError as e:
         print(f"Error writing pauli_dos.dat: {e}", flush=True)
@@ -412,7 +711,8 @@ def calc_eilenberger(Nx: int, Ny: int, Nz: int, wc: float, ham_r, S_r, rvec, ave
                      imp_gamma: float = 0.0, imp_c: float = 1.0e8,
                      fs_width: float = 5.0e-3, kb: float = 1.0, method: str = 'normalization',
                      sw_find_tc: bool = False, sw_imp_sweep: bool = False,
-                     imp_sweep: np.ndarray = None):
+                     imp_sweep: np.ndarray = None, gap_orbital=None, delta0=None,
+                     gauge: str = None, spin_map=None):
     """
     @fn calc_eilenberger
     @brief High-level driver for the homogeneous multi-orbital quasiclassical
@@ -441,17 +741,32 @@ def calc_eilenberger(Nx: int, Ny: int, Nz: int, wc: float, ham_r, S_r, rvec, ave
     @param sw_find_tc: if True, bisect for Tc at the given impurity setting
     @param sw_imp_sweep: if True, sweep imp_sweep (Gamma values) and write Tc(Gamma)
     @param  imp_sweep: array of Gamma values [eV] for the sweep
+    @param gap_orbital: orbital-basis pair potential (constant matrix or callable
+                       kfrac->NxN, e.g. an RPA/FLEX gap from gap_orbital_from_wannier).
+                       It is projected BAND-RESOLVED onto the 3D Fermi surface, so the
+                       k_z dependence and the multi-sheet signs come from the orbital
+                       character -- the only route to an ACCIDENTAL (e.g. horizontal)
+                       node, which no gap_symms harmonic can represent.
+    @param    delta0: per-band gap amplitudes/signs (phenomenological multiband s+-)
+    @param gauge,spin_map: pair-partner gauge for the projection (set_pair_gauge)
     """
     print("calculate homogeneous quasiclassical Eilenberger equation", flush=True)
     Nk, klist, eig, uni, kweight = get_emesh(Nx, Ny, Nz, ham_r, S_r, rvec, avec, sw_uni=True)
-    wf, phif = build_fs(eig, klist, mu, gap_sym, fs_width)
+    wf, phif, fsinfo = build_fs(eig, klist, mu, gap_sym, fs_width, uni=uni,
+                                gap_orbital=gap_orbital, delta0=delta0,
+                                gauge=gauge, spin_map=spin_map, sw_band=True)
     print(f"Fermi-surface points kept: {len(wf)} (of {eig.size})", flush=True)
     if len(wf) == 0:
         print("Error: no Fermi-surface points found; check mu / fs_width", flush=True)
         return
+    if gap_orbital is not None:
+        print(f"pairing form factor: band projection of an orbital gap "
+              f"(pair gauge '{PAIR_GAUGE if gauge is None else gauge}')", flush=True)
+    report_fs_gap(wf, phif, fsinfo, kb)
     omega = matsubara(temp, wc)
     print(f"Matsubara cutoff wc = {wc:.4e} eV ({len(omega)} freqs at this T)", flush=True)
-    print(f"pairing coupling lambda = {coupling:.4f}, gap_sym = {gap_sym}", flush=True)
+    print(f"pairing coupling lambda = {coupling:.4f}, gap_sym = "
+          f"{'projected orbital gap' if gap_orbital is not None else gap_sym}", flush=True)
     print(f"impurity: Gamma = {imp_gamma:.4e} eV, c = {imp_c:.3e} "
           f"({'clean' if imp_gamma == 0 else 'Born' if imp_c > 10 else 'unitary'})", flush=True)
     print(f"homogeneous solver method: {method}", flush=True)
@@ -591,40 +906,54 @@ def calc_penetration_depth(coupling: float, temp: float, wc: float, gap_sym: str
 
 
 def _disp(kind, params):
-    """Return (eps(kx,ky), grad eps -> (vx,vy), default mu, radial search rmax)."""
+    """Return (eps(kx,ky,kz), grad eps -> (vx,vy,vz), default mu, radial search rmax).
+
+    The in-plane kinds ('iso', 'ellipse', 'tb') ignore k_z and have v_z = 0, so
+    stacking k_z slices reproduces the exact cylinder -- which makes them the
+    control case for the genuinely 3D kinds:
+      'cyl'      corrugated cylinder -2t(cos kx + cos ky) - 2 tz cos kz, params=(t,tz).
+                 The canonical quasi-2D -> 3D testbed: tz/t tunes the warping, and a
+                 k_z-dependent gap (dxz/dyz/dxz+idyz, horizontal nodes) lives on it.
+      'sphere'   isotropic 3D (kx^2+ky^2+kz^2)/2 -- a CLOSED sheet, so slices beyond
+                 the pole carry no Fermi surface and are dropped.
+      'spheroid' anisotropic 3D, params=(mx,my,mz).
+    """
     if kind == 'iso':
-        return (lambda kx, ky: 0.5 * (kx ** 2 + ky ** 2),
-                lambda kx, ky: (kx, ky), 1.0, 10.0)
+        return (lambda kx, ky, kz: 0.5 * (kx ** 2 + ky ** 2),
+                lambda kx, ky, kz: (kx, ky, np.zeros_like(kx)), 1.0, 10.0)
     if kind == 'ellipse':
         mx, my = (params or (1.0, 0.5))
-        return (lambda kx, ky: 0.5 * (kx ** 2 / mx + ky ** 2 / my),
-                lambda kx, ky: (kx / mx, ky / my), 1.0, 10.0)
+        return (lambda kx, ky, kz: 0.5 * (kx ** 2 / mx + ky ** 2 / my),
+                lambda kx, ky, kz: (kx / mx, ky / my, np.zeros_like(kx)), 1.0, 10.0)
     if kind == 'tb':
         t = (params or 1.0)
         t = t if np.isscalar(t) else t[0]
-        return (lambda kx, ky: -2.0 * t * (np.cos(kx) + np.cos(ky)),
-                lambda kx, ky: (2.0 * t * np.sin(kx), 2.0 * t * np.sin(ky)), -2.0 * t * 0.6, np.pi - 1e-6)
+        return (lambda kx, ky, kz: -2.0 * t * (np.cos(kx) + np.cos(ky)),
+                lambda kx, ky, kz: (2.0 * t * np.sin(kx), 2.0 * t * np.sin(ky), np.zeros_like(kx)),
+                -2.0 * t * 0.6, np.pi - 1e-6)
+    if kind == 'cyl':
+        t, tz = (params or (1.0, 0.2))[:2]
+        return (lambda kx, ky, kz: -2.0 * t * (np.cos(kx) + np.cos(ky)) - 2.0 * tz * np.cos(kz),
+                lambda kx, ky, kz: (2.0 * t * np.sin(kx), 2.0 * t * np.sin(ky),
+                                    2.0 * tz * np.sin(kz) * np.ones_like(kx)),
+                -2.0 * t * 0.6, np.pi - 1e-6)
+    if kind == 'sphere':
+        return (lambda kx, ky, kz: 0.5 * (kx ** 2 + ky ** 2 + kz ** 2),
+                lambda kx, ky, kz: (kx, ky, kz * np.ones_like(kx)), 1.0, 10.0)
+    if kind == 'spheroid':
+        mx, my, mz = (params or (1.0, 1.0, 0.5))[:3]
+        return (lambda kx, ky, kz: 0.5 * (kx ** 2 / mx + ky ** 2 / my + kz ** 2 / mz),
+                lambda kx, ky, kz: (kx / mx, ky / my, kz / mz * np.ones_like(kx)), 1.0, 10.0)
     raise ValueError(f"unknown FS kind: {kind}")
 
 
-def build_model_fs(kind: str = 'iso', Nth: int = 360, mu: float = None, params=None):
-    """
-    @fn build_model_fs
-    @brief Build a model Fermi surface (radial parametrization, convex single sheet)
-    with Fermi velocities and DOS weights.
-    @param kind: 'iso', 'ellipse' (params=(mx,my)), or 'tb' (params=t)
-    @param Nth: number of FS points (angular samples)
-    @param  mu: chemical potential (default per dispersion)
-    @return dict: th,kx,ky,vx,vy,vabs,vhx,vhy,nf  (nf normalized to sum 1)
-    """
-    eps, grad, mu0, rmax = _disp(kind, params)
-    if mu is None:
-        mu = mu0
-    th = np.linspace(0.0, 2.0 * np.pi, Nth, endpoint=False)
-    kF = np.empty(Nth)
+def _radial_kf(eps, mu, th, kzv, rmax):
+    """Radial Fermi wavenumber k_F(theta) of a convex sheet on one k_z slice, or None
+    if the slice carries no Fermi surface (beyond the pole of a closed sheet)."""
+    kF = np.empty(len(th))
     for i, t in enumerate(th):
         c, s = np.cos(t), np.sin(t)
-        f = lambda r: eps(r * c, r * s) - mu
+        f = lambda r: eps(r * c, r * s, kzv) - mu
         lo, hi = 1e-6, rmax
         try:
             kF[i] = brentq(f, lo, hi)
@@ -632,20 +961,296 @@ def build_model_fs(kind: str = 'iso', Nth: int = 360, mu: float = None, params=N
             rs = np.linspace(lo, hi, 200)
             fv = np.array([f(r) for r in rs])
             sgn = np.where(np.diff(np.sign(fv)) != 0)[0]
-            kF[i] = brentq(f, rs[sgn[0]], rs[sgn[0] + 1]) if len(sgn) else np.nan
-    kx, ky = kF * np.cos(th), kF * np.sin(th)
-    vx, vy = grad(kx, ky)
-    vabs = np.sqrt(vx ** 2 + vy ** 2)
+            if not len(sgn):
+                return None                            # no crossing on this slice
+            kF[i] = brentq(f, rs[sgn[0]], rs[sgn[0] + 1])
+    return kF
+
+
+def build_model_fs(kind: str = 'iso', Nth: int = 360, mu: float = None, params=None,
+                   nkz: int = 1, kz_max: float = np.pi):
+    """
+    @fn build_model_fs
+    @brief Build a model Fermi surface (radial parametrization, convex single sheet)
+    with Fermi velocities and DOS weights -- the analytic counterpart of
+    build_wannier_fs, with the same k_z stacking and the same conventions.
+
+    @param kind: in-plane 'iso', 'ellipse' (params=(mx,my)), 'tb' (params=t); 3D
+                 'cyl' (corrugated cylinder, params=(t,tz)), 'sphere',
+                 'spheroid' (params=(mx,my,mz)).  See _disp.
+    @param Nth: FS points per k_z slice (angular samples)
+    @param  mu: chemical potential (default per dispersion)
+    @param nkz: number of k_z slices (1 = the historical single-slice, quasi-2D FS).
+                Slices are uniform on k_z in [-kz_max, kz_max); those carrying no
+                Fermi surface (a closed sheet past its pole) are dropped.
+    @param kz_max: half width of the k_z range (pi for a lattice kind)
+    @return dict: th,kx,ky,kz,vx,vy,vz,vabs,vabs3,vhx,vhy,nf,nkz [,kf]
+            (nf normalized to sum 1)
+
+    @note  ``vabs`` is the IN-PLANE speed, which is the correct chord velocity AND
+           the correct DOS measure in 3D as well -- see the note on build_wannier_fs.
+           The lattice kinds ('tb', 'cyl') also carry ``kf`` = k/(2 pi), the fractional
+           coordinate, so the gap_symms lattice harmonics (including the k_z dependent
+           4 dxz / 5 dyz / 7 dxz+idyz) work directly on the model FS.
+    """
+    eps, grad, mu0, rmax = _disp(kind, params)
+    if mu is None:
+        mu = mu0
+    lattice = kind in ('tb', 'cyl')                    # Cartesian k with a = 1
+    kzs = (np.array([0.0]) if nkz <= 1 else
+           np.linspace(-kz_max, kz_max, int(nkz), endpoint=False))
+    th = np.linspace(0.0, 2.0 * np.pi, Nth, endpoint=False)
     dth = th[1] - th[0]
-    dkF = (np.roll(kF, -1) - np.roll(kF, 1)) / (2.0 * dth)
-    dl = np.sqrt(kF ** 2 + dkF ** 2) * dth                # arc length element
-    nf = dl / vabs
+    ths, kxs, kys, kzl, vxs, vys, vzs, nfs = ([] for _ in range(8))
+    for kzv in kzs:
+        kF = _radial_kf(eps, mu, th, kzv, rmax)
+        if kF is None:
+            continue                                   # closed sheet: past the pole
+        kx, ky = kF * np.cos(th), kF * np.sin(th)
+        vx, vy, vz = grad(kx, ky, kzv)
+        vab = np.sqrt(vx ** 2 + vy ** 2)
+        dkF = (np.roll(kF, -1) - np.roll(kF, 1)) / (2.0 * dth)
+        dl = np.sqrt(kF ** 2 + dkF ** 2) * dth         # arc length element
+        ths.append(th); kxs.append(kx); kys.append(ky)
+        kzl.append(np.full(Nth, kzv))
+        vxs.append(vx); vys.append(vy); vzs.append(np.broadcast_to(vz, kx.shape).copy())
+        nfs.append(dl / np.maximum(vab, 1e-12))        # dk_z uniform -> cancels below
+    if not kxs:
+        raise ValueError(f"model FS '{kind}': no Fermi surface at mu={mu}")
+    kx = np.concatenate(kxs); ky = np.concatenate(kys); kz = np.concatenate(kzl)
+    vx = np.concatenate(vxs); vy = np.concatenate(vys); vz = np.concatenate(vzs)
+    vabs = np.sqrt(vx ** 2 + vy ** 2)
+    nf = np.concatenate(nfs)
     nf = nf / nf.sum()
-    return dict(th=th, kx=kx, ky=ky, vx=vx, vy=vy, vabs=vabs,
-                vhx=vx / vabs, vhy=vy / vabs, nf=nf)
+    fs = dict(th=np.concatenate(ths), kx=kx, ky=ky, kz=kz, vx=vx, vy=vy, vz=vz,
+              vabs=vabs, vabs3=np.sqrt(vx ** 2 + vy ** 2 + vz ** 2),
+              vhx=vx / vabs, vhy=vy / vabs, nf=nf, nkz=len(kxs))
+    if lattice:                                        # fractional k -> gap_symms harmonics
+        fs['kf'] = np.stack([kx, ky, kz], axis=1) / (2.0 * np.pi)
+    return fs
 
 
-_INT_GAP_STR = {0: 's', 1: 'd', 2: 's', 3: 'dxy', -1: 'px', -2: 'py', -3: 'p+ip'}   # int -> continuum phi
+def fs_hvf(fs, hvf: float = 1.0) -> float:
+    """
+    @fn fs_hvf
+    @brief The representative Fermi speed that sets the coherence length
+    xi = hvf/(pi*Dbulk), i.e. the nf-weighted mean IN-PLANE speed <|v_par|> of a
+    Fermi surface (``hvf`` itself when there is no FS, i.e. the isotropic cylinder).
+
+    Single definition shared by every trajectory solver: xi fixes the physical size
+    of the computational domain, so taking it as 1 while the chords run at the real
+    |v_F| silently shrinks the box and the order parameter never heals to its bulk
+    value.  Note this is only the GEOMETRY scale -- each chord still integrates with
+    its own velocity.
+    """
+    if fs is None:
+        return float(hvf)
+    return float((np.asarray(fs['nf']) * np.asarray(fs['vabs'])).sum())
+
+
+def fs_field_frame(fs, bdir=(0.0, 0.0, 1.0), gap_sym=None, aniso=True, vmin_frac=1.0e-3,
+                   verbose=False):
+    """
+    @fn fs_field_frame
+    @brief Trajectory set for vortex lines along an ARBITRARY field direction.
+
+    The vortex lines run along B, so the order parameter varies only in the plane
+    PERPENDICULAR to B and the transport term is v_perp . grad_perp: the problem stays
+    TWO DIMENSIONAL, just in a different plane.  Everything the 2D chord solvers need is
+    therefore still available -- a direction in the plane, a speed along it, a weight and
+    a form factor -- and this returns exactly that, in an orthonormal frame (e1, e2, n)
+    with n = B_hat.  For B along c the frame is (x, y) and the historical set is
+    reproduced identically.
+
+    Anisotropy.  With B in the plane of a quasi-2D Fermi surface the two directions of the
+    vortex plane are wildly different: |v_e1| ~ v_F but |v_e2| ~ v_z << v_F, so the core is
+    elliptical with xi_1/xi_2 = <|v_1|>/<|v_2|>, and a square grid would be mostly wasted.
+    With aniso=True each axis is rescaled by its own rms velocity.  That is an AFFINE map,
+    so trajectories stay straight and the square grid plus rotate-interpolate machinery
+    apply verbatim; the vortex is a winding-1 point in the SCALED plane, which is exactly
+    the anisotropic-GL solution.  Physical coordinates come back as
+    r_1 = (s1/sbar) u,  r_2 = (s2/sbar) w  with the returned ``scale`` = (s1/sbar, s2/sbar).
+
+    The Fermi-surface weight ``nf`` is untouched: it is the 3D DOS measure
+    dS/|v_F| = dk_z dl/|v_par| and knows nothing about the field direction.  Only the
+    chord VELOCITY changes, from |v_xy| to the in-plane part of v in the new frame.
+
+    @param      fs: FS dict; needs vz for anything but B || c (build_wannier_fs(nkz>1) or
+                    a 3D build_model_fs kind).  A 2D FS is treated as vz = 0, which is the
+                    exact cylinder limit -- and then B in-plane has NO orbital effect at
+                    all (v_perp -> |v_z| = 0), so it is rejected rather than silently
+                    returning a zero-velocity trajectory set.
+    @param    bdir: field direction (need not be normalized)
+    @param   aniso: rescale the two axes by their rms velocities (see above)
+    @param vmin_frac: drop trajectories whose perpendicular speed is below this fraction of
+           the mean, and renormalize the weights.  A Fermi-surface point whose velocity is
+           PARALLEL to B does not move in the vortex plane at all, so its chord step
+           ds/|v_perp| is infinite -- the matrix exponential is then handed a non-finite
+           generator and LAPACK fails deep inside with a stream of MKL parameter errors.
+           Such points exist for any field direction that is not a symmetry axis of the FS
+           (on a corrugated cylinder with B in-plane they are the points with k_y=k_z=0),
+           but they are isolated, i.e. of measure zero, so dropping them is the right
+           treatment rather than a fudge.
+    @return dict(e1, e2, n, dirs, vabs, nf, phi, scale, hvf_eff, aniso_ratio); phi is None
+            when neither gap_sym nor a baked-in fs['phi'] is available
+    """
+    n = np.asarray(bdir, dtype=np.float64)
+    nn = np.sqrt((n ** 2).sum())
+    if nn <= 0:
+        raise ValueError("fs_field_frame: bdir must be a non-zero vector")
+    n = n / nn
+    # e1, e2 completing a right-handed frame.  e2 is taken as the most c-LIKE direction
+    # available (the component of z_hat perpendicular to B), so that as B rotates the two
+    # axes keep their meaning: e2 is the out-of-plane one and aniso_ratio is consistently
+    # xi_(in plane)/xi_c.  Choosing e2 off whichever coordinate axis is least aligned with
+    # B instead makes the pair SWAP as B turns -- for B rotating in the ab plane the ratio
+    # jumped 0.667 -> 1.525 between phi = 0 and 15 degrees (the same physics with the two
+    # labels exchanged), which is useless for an in-plane field-angle scan.  For B || c the
+    # construction is degenerate and falls back to exactly (x, y).
+    zc = np.array([0.0, 0.0, 1.0])
+    e2 = zc - (zc @ n) * n
+    if np.sqrt((e2 ** 2).sum()) < 1.0e-8:              # B || c: keep the historical frame
+        e1, e2 = np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0])
+    else:
+        e2 /= np.sqrt((e2 ** 2).sum())
+        e1 = np.cross(e2, n)
+    vz = fs.get('vz')
+    v = np.stack([np.asarray(fs['vx']), np.asarray(fs['vy']),
+                  np.zeros_like(fs['vx']) if vz is None else np.asarray(vz)], axis=1)
+    v1, v2 = v @ e1, v @ e2
+    nf = np.asarray(fs['nf'], dtype=np.float64)
+    s1 = np.sqrt((nf * v1 ** 2).sum())
+    s2 = np.sqrt((nf * v2 ** 2).sum())
+    if min(s1, s2) <= 1.0e-12 * max(s1, s2, 1.0e-30):
+        raise ValueError(
+            f"fs_field_frame: the Fermi velocity has no component along e2 for this field "
+            f"direction (<v_1^2>={s1**2:.3e}, <v_2^2>={s2**2:.3e}).  A strictly 2D Fermi "
+            "surface has no orbital response to an in-plane field; use a 3D FS "
+            "(build_wannier_fs(nkz>1) or a 3D build_model_fs kind).")
+    if aniso:
+        sbar = np.sqrt(s1 * s2)
+        c1, c2 = sbar / s1, sbar / s2                  # scaled velocity = (c1 v1, c2 v2)
+    else:
+        sbar, c1, c2 = 1.0, 1.0, 1.0
+    w1, w2 = c1 * v1, c2 * v2
+    vperp = np.hypot(w1, w2)
+    keep = vperp > vmin_frac * float((nf * vperp).sum())   # drop v || B (see vmin_frac)
+    if not keep.all():
+        w1, w2, vperp = w1[keep], w2[keep], vperp[keep]
+        nf = nf[keep] / nf[keep].sum()
+        fs = {k: (v[keep] if isinstance(v, np.ndarray) and len(v) == len(keep) else v)
+              for k, v in fs.items()}
+    # phi is optional: the d-vector solvers carry their own per-channel form factors and
+    # pass no gap_sym, so asking fs_form_factor for one would fail on a bare FS dict
+    have_phi = (gap_sym is not None) or ('phi' in fs)
+    out = dict(e1=e1, e2=e2, n=n, dirs=np.arctan2(w2, w1), vabs=vperp, nf=nf,
+               phi=fs_form_factor(fs, gap_sym).astype(np.complex128) if have_phi else None,
+               scale=(1.0 / c1, 1.0 / c2), aniso_ratio=float(s1 / s2), keep=keep)
+    out['hvf_eff'] = float((nf * out['vabs']).sum())
+    if verbose:
+        print(f"  field frame: B_hat=({n[0]:+.3f},{n[1]:+.3f},{n[2]:+.3f})  "
+              f"e1=({e1[0]:+.3f},{e1[1]:+.3f},{e1[2]:+.3f})  "
+              f"e2=({e2[0]:+.3f},{e2[1]:+.3f},{e2[2]:+.3f})", flush=True)
+        print(f"  rms velocities <v_1^2>^1/2={s1:.4f} <v_2^2>^1/2={s2:.4f}  -> "
+              f"xi_1/xi_2 = {s1/s2:.3f}"
+              + ("  (axes rescaled)" if aniso else "  (NOT rescaled)"), flush=True)
+        if not keep.all():
+            print(f"  dropped {int((~keep).sum())} of {len(keep)} FS points whose velocity "
+                  f"is nearly parallel to B", flush=True)
+    return out
+
+
+def reduce_fs_trajectories(fs, gap_sym=None, nbeta: int = 48, nv: int = 4, nphi: int = 8,
+                           wmin: float = 1.0e-5, verbose: bool = True):
+    """
+    @fn reduce_fs_trajectories
+    @brief Reduce a Fermi surface to a small set of WEIGHTED in-plane trajectories for
+    the 2D-plane Riccati solvers (vortex, vortex lattice), whose cost is strictly linear
+    in the number of trajectories: each one is a separate chord integration over the
+    whole (x,y) grid, for every frequency, on every self-consistency iteration.  A 3D
+    Fermi surface has 10^3-10^4 points, against the 24 directions of the model cylinder.
+
+    Those solvers see a trajectory through exactly three numbers -- the in-plane
+    direction beta, the in-plane speed |v_par| (the chord velocity) and the form factor
+    phi -- so points are quantized on a (beta, |v_par|, Re phi, Im phi) grid and each
+    occupied cell becomes ONE trajectory carrying the weighted mean of the three and the
+    summed weight.
+
+    phi is part of the key deliberately: two points can share a direction and a speed
+    while sitting on sheets of OPPOSITE gap sign (s+-), and merging those would cancel a
+    gap that is physically there.  |v_par| is binned by QUANTILE, so the bins follow the
+    actual velocity distribution instead of being wasted on a sparse tail.  phi is
+    rescaled back to the <|phi|^2> = 1 convention on the reduced set, so lambda keeps its
+    meaning.
+
+    Not for the surface solver: that one needs k_y, k_z and the band index to find the
+    specular partner, which this reduction throws away.
+
+    @param      fs: FS dict (build_model_fs / build_wannier_fs)
+    @param gap_sym: pairing symmetry (ignored when fs already carries 'phi')
+    @param   nbeta: direction bins over the full circle
+    @param      nv: |v_par| quantile bins;  nphi: bins per phi component.
+           Measured against the FULL 1920-direction d-wave vortex of a corrugated
+           cylinder (ngrid=41, Lxi=6): the deviations shrink monotonically, so this is
+           an ordinary discretization -- raise the bins until the answer stops moving.
+
+             bins        dirs  speedup   dDbulk   rms d|Psi|   dN(core,0)  max_w dN
+             (32,3,6)     108    x28.8    1.10%     0.013        0.063       0.230
+             (48,4,8)     176    x17.7    0.54%     0.012        0.015       0.117   <- default
+             (64,5,10)    284    x11.0    0.22%     0.004        0.017       0.082
+
+           (N(core,0) itself is 7.05, so the default is ~0.2% on the core peak.)
+    @param    wmin: drop cells below this fraction of the total weight
+    @return a light FS dict (th,kx,ky,vx,vy,vabs,nf,phi,ntraj,nfs_full) for the solvers
+    """
+    beta = np.arctan2(np.asarray(fs['vy']), np.asarray(fs['vx']))
+    v = np.asarray(fs['vabs'], dtype=np.float64)
+    w = np.asarray(fs['nf'], dtype=np.float64)
+    phi = np.asarray(fs_form_factor(fs, gap_sym), dtype=np.complex128)
+    n0 = len(v)
+
+    def _bin(x, nb):                                   # uniform bins over the data range
+        if nb <= 1 or x.max() - x.min() < 1e-12 * max(1.0, abs(x).max()):
+            return np.zeros(len(x), dtype=np.int64), 1
+        e = np.linspace(x.min(), x.max(), nb + 1)[1:-1]
+        return np.searchsorted(e, x).astype(np.int64), nb
+
+    ib = np.minimum(((beta + np.pi) / (2.0 * np.pi) * nbeta).astype(np.int64), nbeta - 1)
+    if nv > 1:                                         # quantile bins follow the |v| spread
+        qe = np.unique(np.quantile(v, np.linspace(0.0, 1.0, nv + 1)))[1:-1]
+        iv, nvb = np.searchsorted(qe, v).astype(np.int64), max(len(qe) + 1, 1)
+    else:
+        iv, nvb = np.zeros(n0, dtype=np.int64), 1
+    ir, nrb = _bin(phi.real, nphi)
+    ii, nib = _bin(phi.imag, nphi if np.abs(phi.imag).max() > 1e-12 else 1)
+
+    key = ((ib * nvb + iv) * nrb + ir) * nib + ii
+    _, inv = np.unique(key, return_inverse=True)
+    ws = np.bincount(inv, weights=w)
+    rep = lambda q: np.bincount(inv, weights=w * q) / ws
+    br = np.arctan2(rep(np.sin(beta)), rep(np.cos(beta)))          # circular mean
+    vr, pr = rep(v), rep(phi.real) + 1j * rep(phi.imag)
+
+    keep = ws > wmin * ws.sum()
+    br, vr, pr, ws = br[keep], vr[keep], pr[keep], ws[keep]
+    ws = ws / ws.sum()
+    nrm = np.sqrt((ws * np.abs(pr) ** 2).sum())                    # restore <|phi|^2> = 1
+    if nrm > 0:
+        pr = pr / nrm
+    if verbose:
+        print(f"  FS trajectories: {n0} points -> {len(ws)} weighted directions "
+              f"(nbeta={nbeta}, nv={nv}, nphi={nphi}); <|v_par|> "
+              f"{(w * v).sum():.4f} -> {(ws * vr).sum():.4f}", flush=True)
+    out = dict(th=br, kx=np.cos(br), ky=np.sin(br), vx=vr * np.cos(br), vy=vr * np.sin(br),
+               vabs=vr, vhx=np.cos(br), vhy=np.sin(br), nf=ws, phi=pr,
+               ntraj=len(ws), nfs_full=n0)
+    if 'nkz' in fs:
+        out['nkz'] = fs['nkz']
+    return out
+
+
+_INT_GAP_STR = {0: 's', 1: 'd', 2: 's', 3: 'dxy', 6: 'd+id',
+                -1: 'px', -2: 'py', -3: 'p+ip'}   # int -> continuum phi
 
 
 def _gap_sym_str(gap_sym):
@@ -660,7 +1265,8 @@ def _gap_sym_str(gap_sym):
             raise ValueError(
                 f"gap_sym={int(gap_sym)} has no 2D continuum form factor "
                 f"(supported indices: {sorted(_INT_GAP_STR)}); kz-dependent symmetries "
-                "like 4 dxz / 5 dyz need a lattice FS (gap_symms harmonics)") from None
+                "like 4 dxz / 5 dyz / 7 dxz+idyz need a 3D Fermi surface (the gap_symms "
+                "lattice harmonics on a build_fs mesh or a build_wannier_fs(nkz>1) FS)") from None
     return gap_sym
 
 
@@ -672,7 +1278,7 @@ def form_factor(beta: np.ndarray, gap_sym, beta_surf: float = 0.0) -> np.ndarray
     lambda keeps its bulk BCS meaning).  May be complex (chiral / triplet
     states).  Shared by the surface and vortex solvers.
     @param     beta: FS angle(s) [rad]
-    @param  gap_sym: singlet: 's', 'd' (d_{x^2-y^2}), 'dxy';
+    @param  gap_sym: singlet: 's', 'd' (d_{x^2-y^2}), 'dxy', chiral 'd+id'/'d-id';
                      triplet (odd parity): 'px', 'py', 'p+ip' / 'p-ip' (chiral);
                      or an integer (gap_symms index, mapped by _gap_sym_str)
     @param beta_surf: rotation of the gap relative to the reference axis
@@ -697,6 +1303,10 @@ def form_factor(beta: np.ndarray, gap_sym, beta_surf: float = 0.0) -> np.ndarray
         return np.exp(1j * a) * np.ones_like(beta, dtype=np.complex128)
     if gap_sym == 'p-ip':
         return np.exp(-1j * a) * np.ones_like(beta, dtype=np.complex128)
+    if gap_sym == 'd+id':          # d_{x2-y2} + i d_{xy} = e^{2 i beta} (|phi|=1 already)
+        return np.exp(2j * a) * np.ones_like(beta, dtype=np.complex128)
+    if gap_sym == 'd-id':
+        return np.exp(-2j * a) * np.ones_like(beta, dtype=np.complex128)
     raise ValueError(f"unknown gap_sym: {gap_sym}")
 
 
@@ -733,6 +1343,10 @@ def fs_form_factor(fs: dict, gap_sym) -> np.ndarray:
         phi = np.exp(1j * a)
     elif gap_sym == 'p-ip':
         phi = np.exp(-1j * a)
+    elif gap_sym == 'd+id':
+        phi = np.exp(2j * a)
+    elif gap_sym == 'd-id':
+        phi = np.exp(-2j * a)
     else:
         raise ValueError(f"unknown gap_sym: {gap_sym}")
     norm = np.sqrt((fs['nf'] * np.abs(phi) ** 2).sum())
@@ -751,6 +1365,13 @@ def set_fs_gap(fs: dict, gap_sym, delta0=None):
         d0 = np.asarray(delta0, dtype=np.float64)
         phi = phi * d0[fs['band']]                       # band-resolved ratio + sign
     norm = np.sqrt((fs['nf'] * np.abs(phi) ** 2).sum())
+    if norm <= 0.0:
+        # A k_z-dependent harmonic (4 dxz, 5 dyz, 7 dxz+idyz) vanishes identically on
+        # the k_z = 0 plane -- exactly where a single-slice FS lives.  Silently
+        # returning phi == 0 would make the gap zero for no visible reason.
+        print(f"Warning: form factor gap_sym={gap_sym} vanishes on this Fermi surface "
+              f"({fs.get('nkz', 1)} k_z slice(s)).  A k_z-dependent gap needs a 3D FS: "
+              "build_wannier_fs(..., nkz>1) / eil_fs_nkz>1", flush=True)
     fs['phi'] = phi / norm if norm > 0 else phi
     return fs
 
@@ -777,68 +1398,92 @@ def bulk_gap_fs(coupling, temp, omega, fs, gap_sym, eps=1e-8, itemax=500, mix=0.
 def superfluid_density_fs(coupling, temp, wc, fs, gap_sym):
     """
     @fn superfluid_density_fs
-    @brief Superfluid-density tensor (rho_xx, rho_yy)/rho_n(0) on a model FS with
-    Fermi velocities.  rho_ii(T)/rho_ii(0) = pi <v_i^2 2T sum_n Dk^2/(w^2+Dk^2)^{3/2}>_nf
+    @brief Superfluid-density tensor (rho_xx, rho_yy, rho_zz)/rho_n(0) on a model FS
+    with Fermi velocities.  rho_ii(T)/rho_ii(0) = pi <v_i^2 2T sum_n Dk^2/(w^2+Dk^2)^{3/2}>_nf
     / <v_i^2>_nf (the bracket -> 1 as T->0).  The weight uses the FULL velocity
-    components v_i (rho_ii ~ integral dl/|v_F| v_i^2), not the unit direction:
-    with nf = dl/|v_F| this weights fast FS sections by |v_F|^2, which sets both
+    components v_i (rho_ii ~ integral dS/|v_F| v_i^2), not the unit direction:
+    with nf = dl/|v_par| this weights fast FS sections by |v_F|^2, which sets both
     the anisotropy ratio and the T dependence.  Anisotropic FS / nodes give an
     anisotropic penetration depth lambda_ii = 1/sqrt(rho_ii).
-    @return (Delta, rho_xx, rho_yy)
+
+    rho_zz is the out-of-plane (c-axis) response, so lambda_c/lambda_ab = sqrt(rho_xx/rho_zz)
+    measures the mass anisotropy directly.  It needs a 3D Fermi surface: on a single
+    k_z slice (or an in-plane model kind) v_z == 0 everywhere and rho_zz is returned as
+    0 rather than 0/0.
+    @return (Delta, rho_xx, rho_yy, rho_zz)
     """
     omega = matsubara(temp, wc)
     Delta = bulk_gap_fs(coupling, temp, omega, fs, gap_sym)
     if Delta <= 1.0e-6 * temp:
-        return 0.0, 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0.0
     phi = fs_form_factor(fs, gap_sym)
     Dk = Delta * np.abs(phi)
     fac = 2.0 * temp * (Dk[:, None] ** 2 /
                         (omega[None, :] ** 2 + Dk[:, None] ** 2) ** 1.5).sum(axis=1)
     nf = fs['nf']
-    vx2, vy2 = fs['vx'] ** 2, fs['vy'] ** 2
-    rho_xx = np.pi * (nf * vx2 * fac).sum() / (nf * vx2).sum()
-    rho_yy = np.pi * (nf * vy2 * fac).sum() / (nf * vy2).sum()
-    return Delta, rho_xx, rho_yy
+
+    def rho(vi2):                                      # pi <v_i^2 fac> / <v_i^2>
+        den = (nf * vi2).sum()
+        return np.pi * (nf * vi2 * fac).sum() / den if den > 0.0 else 0.0
+
+    vz = fs.get('vz')
+    return (Delta, rho(fs['vx'] ** 2), rho(fs['vy'] ** 2),
+            rho(vz ** 2) if vz is not None else 0.0)
 
 
 def calc_fs_penetration(coupling, temp, wc, kind='ellipse', gap_sym='s', Nth=360,
-                        mu=None, params=None, t_list=None, kb=1.0):
+                        mu=None, params=None, t_list=None, kb=1.0, nkz=1,
+                        kz_max=np.pi, fs=None):
     """
     @fn calc_fs_penetration
     @brief Temperature sweep of the anisotropic superfluid density / penetration
-    depth on a model Fermi surface with Fermi velocities.  An anisotropic FS gives
+    depth on a Fermi surface with Fermi velocities.  An anisotropic FS gives
     lambda_xx != lambda_yy, and nodes give the linear-in-T penetration depth.
+    With a 3D FS (nkz>1, or a prebuilt ``fs``) the out-of-plane rho_zz and the mass
+    anisotropy lambda_c/lambda_ab are reported as well.
     Writes 'fs_penetration.dat'.
+    @param nkz,kz_max: k_z stacking of the model FS (see build_model_fs)
+    @param     fs: prebuilt FS dict (build_model_fs / build_wannier_fs), overriding kind
     """
-    gap_sym = _gap_sym_str(gap_sym)                   # accept the global int index too
-    fs = build_model_fs(kind, Nth, mu, params)
-    # full-velocity weights <v_i^2>_nf (nf = dl/|v_F|), consistent with superfluid_density_fs
+    fs = build_model_fs(kind, Nth, mu, params, nkz=nkz, kz_max=kz_max) if fs is None else fs
+    if not (isinstance(gap_sym, (int, np.integer)) and 'kf' in fs):
+        gap_sym = _gap_sym_str(gap_sym)               # continuum harmonic (no lattice FS)
+    d3 = fs.get('nkz', 1) > 1
+    # full-velocity weights <v_i^2>_nf (nf = dl/|v_par|), consistent with superfluid_density_fs
     vx2 = (fs['nf'] * fs['vx'] ** 2).sum()
     vy2 = (fs['nf'] * fs['vy'] ** 2).sum()
-    print(f"model FS '{kind}' (Nth={Nth}): <|v_F|>={fs['vabs'].mean():.4f}, "
-          f"<v_x^2>/<v_y^2> = {vx2:.3f}/{vy2:.3f}, "
-          f"absolute lambda_xx/lambda_yy(0) = {np.sqrt(vy2/vx2):.3f}", flush=True)
-    print(f"penetration depth on model FS: {gap_sym}-wave, lambda={coupling:.3f}", flush=True)
+    vz2 = (fs['nf'] * fs.get('vz', np.zeros_like(fs['vx'])) ** 2).sum()
+    print(f"model FS '{kind}' (Nth={Nth}, {fs.get('nkz', 1)} k_z slice(s), "
+          f"{len(fs['kx'])} pts): <|v_par|>={fs['vabs'].mean():.4f}, "
+          f"<v_x^2>/<v_y^2>/<v_z^2> = {vx2:.3f}/{vy2:.3f}/{vz2:.3f}, "
+          f"absolute lambda_xx/lambda_yy(0) = {np.sqrt(vy2/vx2):.3f}"
+          + (f", lambda_c/lambda_ab(0) = {np.sqrt(vx2/vz2):.3f}" if vz2 > 0 else ""),
+          flush=True)
+    print(f"penetration depth on model FS: gap {gap_sym}, lambda={coupling:.3f}", flush=True)
     if t_list is None:
         t_hi = temp
         for _ in range(8):
-            D, _x, _y = superfluid_density_fs(coupling, t_hi, wc, fs, gap_sym)
-            if D > 0:
+            if superfluid_density_fs(coupling, t_hi, wc, fs, gap_sym)[0] > 0:
                 break
             t_hi *= 0.6
         t_list = np.linspace(0.05 * t_hi, 1.02 * t_hi, 14)
-    print("  T[K]    Delta     rho_xx   rho_yy   lam_xx/lam_yy", flush=True)
+    print("  T[K]    Delta     rho_xx   rho_yy   rho_zz   lam_xx/lam_yy  lam_c/lam_ab",
+          flush=True)
     rows = []
     for T in t_list:
-        D, rxx, ryy = superfluid_density_fs(coupling, T, wc, fs, gap_sym)
+        D, rxx, ryy, rzz = superfluid_density_fs(coupling, T, wc, fs, gap_sym)
         ratio = np.sqrt(ryy / rxx) if (rxx > 1e-9 and ryy > 1e-9) else np.nan
-        rows.append((T, D, rxx, ryy, ratio))
-        print(f"  {T/kb:6.2f}  {D:9.3e}  {rxx:7.4f}  {ryy:7.4f}   {ratio:7.4f}", flush=True)
+        rat_c = np.sqrt(rxx / rzz) if (rxx > 1e-9 and rzz > 1e-9) else np.nan
+        rows.append((T, D, rxx, ryy, rzz, ratio, rat_c))
+        print(f"  {T/kb:6.2f}  {D:9.3e}  {rxx:7.4f}  {ryy:7.4f}  {rzz:7.4f}   "
+              f"{ratio:9.4f}     {rat_c:9.4f}", flush=True)
     try:
         with open('fs_penetration.dat', 'w') as fh:
-            fh.write("# T[eV]  Delta[eV]  rho_xx  rho_yy  lambda_xx/lambda_yy\n")
-            for T, D, rxx, ryy, ratio in rows:
-                fh.write(f"{T:12.6e} {D:12.6e} {rxx:12.6e} {ryy:12.6e} {ratio:12.6e}\n")
+            fh.write("# T[eV]  Delta[eV]  rho_xx  rho_yy  rho_zz  lambda_xx/lambda_yy"
+                     "  lambda_c/lambda_ab\n")
+            for T, D, rxx, ryy, rzz, ratio, rat_c in rows:
+                fh.write(f"{T:12.6e} {D:12.6e} {rxx:12.6e} {ryy:12.6e} {rzz:12.6e} "
+                         f"{ratio:12.6e} {rat_c:12.6e}\n")
     except IOError as e:
         print(f"Error writing fs_penetration.dat: {e}", flush=True)
     return rows
@@ -858,29 +1503,53 @@ def calc_fs_penetration(coupling, temp, wc, kind='ellipse', gap_sym='s', Nth=360
 # spatial order parameter.)
 
 
-def condensation_energy(coupling, temp, wc, gap_sym='s', fs=None, Damp=None):
+def free_energy_weights(gap_sym='s', fs=None, phi=None, wnf=None, Nb=240):
+    """
+    @fn free_energy_weights
+    @brief Resolve the (phi, weights, label) triple the free-energy routines average
+    over, from any of the three ways of specifying a gap.  Factored out so the
+    condensation energy is not restricted to the handful of in-plane harmonics it
+    used to hard-code -- the chiral-versus-real selection of a degenerate pair is
+    decided by this quantity, and both members need to be expressible.
+
+      * ``phi`` given   -- an explicit form factor with weights ``wnf`` (default
+        uniform); this is what build_fs returns, so a gap on the full 3D k-mesh
+        (band projected, k_z dependent, multi-sheet) can be fed straight in.
+      * ``fs`` given    -- a model / Wannier FS dict; an INTEGER gap_sym then uses the
+        gap_symms lattice harmonics on fs['kf'], so the k_z dependent 4/5/7 work.
+      * neither         -- the isotropic cylinder, via the continuum ``form_factor``
+        (every continuum harmonic, chiral 'd+id' / 'p+ip' included).
+    @return (phi [Nfs] complex, wnf [Nfs] summing to 1, label)
+    """
+    if phi is not None:
+        phi = np.asarray(phi, dtype=np.complex128)
+        w = np.full(len(phi), 1.0 / len(phi)) if wnf is None else np.asarray(wnf, float)
+        return phi, w / w.sum(), 'given phi'
+    if fs is not None:
+        return (fs_form_factor(fs, gap_sym).astype(np.complex128),
+                np.asarray(fs['nf'], float), str(gap_sym))
+    beta = np.linspace(0.0, 2.0 * np.pi, Nb, endpoint=False)
+    lab = _gap_sym_str(gap_sym)
+    return (form_factor(beta, lab).astype(np.complex128),
+            np.full(Nb, 1.0 / Nb), lab)
+
+
+def condensation_energy(coupling, temp, wc, gap_sym='s', fs=None, Damp=None,
+                        phi=None, wnf=None):
     """
     @fn condensation_energy
     @brief Homogeneous superconducting condensation free energy (Omega_s-Omega_n)/N0
     [eV^2] at temperature ``temp`` (coupling-independent quasiclassical Matsubara form).
-    @param gap_sym: pairing symmetry; with a model FS pass ``fs`` (else cylinder)
+    @param gap_sym: pairing symmetry; with a model/Wannier FS pass ``fs`` (else cylinder)
     @param   Damp: bulk gap [eV] (computed self-consistently if None)
+    @param phi,wnf: explicit form factor and FS weights (e.g. straight from build_fs),
+                    overriding gap_sym/fs -- see free_energy_weights
     @return (dOmega, Damp): condensation energy per N0 [eV^2] (<=0) and the bulk gap
     """
     omega = matsubara(temp, wc)
-    if fs is not None:
-        phi = fs_form_factor(fs, gap_sym)
-        wnf = fs['nf']
-        if Damp is None:
-            Damp = bulk_gap_fs(coupling, temp, omega, fs, gap_sym)
-    else:
-        Nb = 240
-        beta = np.linspace(0.0, 2.0 * np.pi, Nb, endpoint=False)
-        phi = ({'s': np.ones(Nb), 'd': np.sqrt(2.0) * np.cos(2.0 * beta),
-                'dxy': np.sqrt(2.0) * np.sin(2.0 * beta)}[gap_sym]).astype(np.complex128)
-        wnf = np.full(Nb, 1.0 / Nb)
-        if Damp is None:
-            Damp = solve_gap(temp, np.ones(Nb), phi, omega, 0.0, 1e8, coupling)
+    phi, wnf, _ = free_energy_weights(gap_sym, fs, phi, wnf)
+    if Damp is None:
+        Damp = solve_gap(temp, wnf, phi, omega, 0.0, 1.0e8, coupling)
     if Damp <= 1.0e-6 * temp:
         return 0.0, 0.0
     Dk2 = (Damp ** 2) * (phi * np.conj(phi)).real        # |Delta_k|^2 per FS point
@@ -890,48 +1559,51 @@ def condensation_energy(coupling, temp, wc, gap_sym='s', fs=None, Damp=None):
     return dOmega, Damp
 
 
-def calc_free_energy(coupling, temp, wc, gap_sym='s', fs=None, t_list=None, kb=1.0):
+def calc_free_energy(coupling, temp, wc, gap_sym='s', fs=None, t_list=None, kb=1.0,
+                     phi=None, wnf=None, fname='free_energy.dat'):
     """
     @fn calc_free_energy
     @brief Temperature sweep of the homogeneous condensation free energy
     (Omega_s-Omega_n)/N0 (coupling-constant integration).  Writes 'free_energy.dat'.
+    @param fs,phi,wnf: how the gap is specified -- see free_energy_weights.  Any
+           harmonic works, k_z dependent (4 dxz, 5 dyz, 7 dxz+idyz on a 3D FS) and
+           chiral included, so two members of a degenerate pair can be compared:
+           the one with the LOWER dOmega is the realized state, which is the only
+           way to choose between them (linear theory leaves them degenerate at Tc).
+    @param fname: output file (rename it when comparing several states)
     """
-    gap_sym = _gap_sym_str(gap_sym)                   # accept the global int index too
+    phi, wnf, lab = free_energy_weights(gap_sym, fs, phi, wnf)
     if t_list is None:
         t_hi = temp
         for _ in range(8):
-            D = (bulk_gap_fs(coupling, t_hi, matsubara(t_hi, wc), fs, gap_sym) if fs is not None
-                 else solve_gap(t_hi, np.ones(240),
-                                ({'s': np.ones(240), 'd': np.sqrt(2.0) * np.cos(2.0 * np.linspace(0, 2 * np.pi, 240, endpoint=False)),
-                                  'dxy': np.sqrt(2.0) * np.sin(2.0 * np.linspace(0, 2 * np.pi, 240, endpoint=False))}[gap_sym]).astype(np.complex128),
-                                matsubara(t_hi, wc), 0.0, 1e8, coupling))
-            if D > 0:
+            if solve_gap(t_hi, wnf, phi, matsubara(t_hi, wc), 0.0, 1e8, coupling) > 0:
                 break
             t_hi *= 0.6
         t_list = np.linspace(0.05 * t_hi, 1.05 * t_hi, 16)
-    print(f"condensation free energy: {gap_sym}-wave, lambda={coupling:.3f}, "
-          f"{'model FS' if fs is not None else 'cylinder'}", flush=True)
+    src = 'given phi' if lab == 'given phi' else ('FS dict' if fs is not None else 'cylinder')
+    print(f"condensation free energy: gap {lab}, lambda={coupling:.3f}, {src} "
+          f"({len(phi)} FS points)", flush=True)
     print("  T[K]      Delta[eV]     dOmega/N0 [eV^2]   dOmega/Delta0^2", flush=True)
     rows = []
     D0 = None
     for T in t_list:
-        dO, D = condensation_energy(coupling, T, wc, gap_sym, fs=fs)
+        dO, D = condensation_energy(coupling, T, wc, phi=phi, wnf=wnf)
         if D0 is None and D > 0:
             D0 = D
         rows.append((T, D, dO))
     D0 = D0 or 1.0
     try:
-        with open('free_energy.dat', 'w') as fh:
+        with open(fname, 'w') as fh:
             fh.write("# T[eV]  Delta[eV]  dOmega/N0[eV^2]  dOmega/Delta0^2\n")
             for T, D, dO in rows:
                 print(f"  {T/kb:7.3f}  {D:12.5e}  {dO:14.6e}   {dO/D0**2:9.4f}", flush=True)
                 fh.write(f"{T:12.6e} {D:12.6e} {dO:14.6e} {dO/D0**2:12.6e}\n")
     except IOError as e:
-        print(f"Error writing free_energy.dat: {e}", flush=True)
+        print(f"Error writing {fname}: {e}", flush=True)
     return rows
 
 
-def project_gap_to_band(fs, gap_orbital, normalize=True):
+def project_gap_to_band(fs, gap_orbital, normalize=True, gauge=None, spin_map=None):
     """
     @fn project_gap_to_band
     @brief Band-basis pairing form factor by the systematic low-energy projection of an
@@ -947,15 +1619,14 @@ def project_gap_to_band(fs, gap_orbital, normalize=True):
            constant array (k-independent on-site/orbital pairing) or a callable
            kfrac(3,) -> N x N array (k-dependent, e.g. an extended/d-wave bond pairing)
     @param normalize: rescale to the nf-weighted <|phi|^2> = 1 convention
+    @param gauge,spin_map: pair-partner gauge overriding the module default
+           (see set_pair_gauge / pair_partner_conj); 'trs' (default) is gauge
+           invariant, the legacy 'diag' route is not
     @return fs (with fs['phi'] set)
     """
     ev, evm = fs['evec'], fs['evec_mk']                # [Nfs, Norb]
-    if callable(gap_orbital):
-        phi = np.array([np.conj(ev[i]) @ np.asarray(gap_orbital(fs['kf'][i]), dtype=np.complex128)
-                        @ np.conj(evm[i]) for i in range(ev.shape[0])], dtype=np.complex128)
-    else:
-        D = np.asarray(gap_orbital, dtype=np.complex128)
-        phi = np.einsum('ia,ab,ib->i', np.conj(ev), D, np.conj(evm))
+    check_pair_partner(ev, evm, gauge, spin_map)       # warn if H breaks time reversal
+    phi = project_gap(ev, gap_orbital, fs['kf'], evm, gauge, spin_map)
     if normalize:
         nrm = np.sqrt((fs['nf'] * np.abs(phi) ** 2).sum())
         phi = phi / nrm if nrm > 0 else phi
@@ -1004,14 +1675,24 @@ def gap_orbital_from_wannier(fname='gap_wannier', iw_index=0, n_avg=1):
     gR = gap[:, :, n0:n1, :].mean(axis=2)            # (Norb,Norb,Nr) over chosen slices
     rg = np.ascontiguousarray(rvec, dtype=np.float64)
 
+    No, Nr = gR.shape[0], gR.shape[2]
+    gR2 = gR.reshape(No * No, Nr)                    # BLAS-friendly (Norb^2, Nr)
+
     def gap_orbital(kfrac):                          # Delta_orb(k) = sum_R e^{-i 2pi k.R} Delta(R)
-        ph = np.exp(-2j * np.pi * (rg @ np.asarray(kfrac, dtype=np.float64)))
-        return (gR * ph).sum(axis=-1)               # (Norb, Norb)
+        k = np.asarray(kfrac, dtype=np.float64)
+        if k.ndim == 1:                              # single k -> (Norb, Norb)
+            return (gR * np.exp(-2j * np.pi * (rg @ k))).sum(axis=-1)
+        out = np.empty((len(k), No, No), dtype=np.complex128)   # batch -> (Nk, Norb, Norb)
+        for i0 in range(0, len(k), 4096):            # chunked: keeps the phase array small
+            kc = k[i0:i0 + 4096]
+            out[i0:i0 + len(kc)] = (gR2 @ np.exp(-2j * np.pi * (rg @ kc.T))).T.reshape(len(kc), No, No)
+        return out
     return gap_orbital
 
 
-def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, band=None, RotMat=None,
-                     gap_sym=None, delta0=None, gap_orbital=None):
+def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, nkz=1, kz_list=None,
+                     band=None, RotMat=None, gap_sym=None, delta0=None, gap_orbital=None,
+                     gauge=None, spin_map=None):
     """
     @fn build_wannier_fs
     @brief Build the Fermi surface (with Fermi velocities) of a REAL Wannier tight-
@@ -1021,7 +1702,15 @@ def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, band=None, Ro
     velocity (get_veloc), and the DOS weight is nf = dl/|v_F| (arc length over speed).
     @param rvec,ham_r,S_r: Wannier R-vectors, hopping, overlap (S_r=[] for orthogonal)
     @param avec: lattice vectors (velocity metric; Cartesian k = 2 pi * fractional)
-    @param   mu: chemical potential [eV];  mesh: 2D k-mesh;  kz: fixed k_z slice
+    @param   mu: chemical potential [eV];  mesh: 2D k-mesh
+    @param   kz: fixed k_z slice used when nkz == 1 and kz_list is None
+    @param  nkz: number of k_z slices stacked into a full 3D Fermi surface
+                 (1 = the historical single-slice, quasi-2D FS).  The slices are
+                 uniform on k_z in [-1/2, 1/2), so every sheet and the whole k_z
+                 dispersion enter -- required for k_z-dependent gaps (horizontal
+                 line nodes, dxz/dyz/dxz+idyz), which vanish identically on the
+                 k_z = 0 plane that the single-slice FS is pinned to.
+    @param kz_list: explicit list of k_z slices (overrides nkz/kz)
     @param band: keep only this band index (None = all FS sheets)
     @param gap_sym: if given (integer index, gap_symms convention), bake in the pairing
                     form factor phi(k) via set_fs_gap (lattice harmonics on the real FS)
@@ -1031,63 +1720,85 @@ def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, band=None, Ro
                     if given, the band gap phi(k) is the low-energy PROJECTION of it onto
                     the FS bands (Nagai-Nakamura Eq 43, project_gap_to_band) -- the orbital
                     character is built in, superseding the phenomenological gap_sym/delta0
-    @return dict th,kx,ky,kf,band,vx,vy,vabs,vhx,vhy,nf,evec,evec_mk [,phi]  (in-plane k,
-            kf = fractional k, band = per-point band index; nf sums to 1)
+    @param gauge,spin_map: pair-partner gauge for the projection (set_pair_gauge)
+    @return dict th,kx,ky,kz,kf,band,vx,vy,vz,vabs,vabs3,vhx,vhy,nf,nkz,evec,evec_mk [,phi]
+
+    @note  ``vabs`` (and vhx,vhy) is the IN-PLANE speed |v_par| = sqrt(vx^2+vy^2),
+           and it is the right quantity in both places it is used, also in 3D:
+           for a z-independent Delta(x,y) the transport term is v_F.grad =
+           v_par.grad_par, so the chord velocity is |v_par|; and the Fermi-surface
+           measure factorizes as
+               int dS/|v_F| = int dk_z ( contour_int dl / |v_par| ),
+           so the per-slice weight nf = dl/|v_par| with a uniform dk_z (which
+           cancels in the normalization) is the exact 3D DOS weight.  The full
+           3D velocity is kept as vz / vabs3 for quantities that need it
+           (e.g. rho_zz, out-of-plane response).
     """
     from ._bands import get_eigs_2d, get_kf_points, get_eigs
     from .. import flibs
     if RotMat is None:
         RotMat = np.eye(3)
-    eig2d = get_eigs_2d(mesh, rvec, ham_r, S_r, RotMat, kz)
-    kf, fsband = get_kf_points(eig2d, mesh, mu, kz)
-    kxs, kys, vxs, vys, nfs, kfs, bnd, evs, evms = [], [], [], [], [], [], [], [], []
-    for contlist, b in zip(kf, fsband):
-        if band is not None and b != band:
-            continue
-        for cont in contlist:                          # one connected FS piece
-            pts = np.ascontiguousarray(cont, dtype=np.float64)   # [Np,3] fractional
-            if len(pts) < 2:
+    if kz_list is not None:
+        kzs = np.asarray(kz_list, dtype=np.float64)
+    elif nkz > 1:
+        kzs = np.linspace(-0.5, 0.5, int(nkz), endpoint=False)   # uniform dk_z
+    else:
+        kzs = np.array([float(kz)])
+    kxs, kys, vxs, vys, vzs, nfs, kfs, bnd, evs, evms = ([] for _ in range(10))
+    for kz_i in kzs:
+        eig2d = get_eigs_2d(mesh, rvec, ham_r, S_r, RotMat, kz_i)
+        kf, fsband = get_kf_points(eig2d, mesh, mu, kz_i)
+        for contlist, b in zip(kf, fsband):
+            if band is not None and b != band:
                 continue
-            eg, uni = get_eigs(pts, ham_r, S_r, rvec)
-            # S_r/eg carry the -eps*dS/dk overlap term for a non-orthogonal (MLO) basis
-            vk = flibs.get_veloc(pts, ham_r, rvec, avec.T, uni, S_r, eg).real   # [Np,Norb,3]
-            v = vk[:, b, :]
-            # band eigenvectors u(k_F) and u(-k_F) (orbital content) for the gap projection
-            ub = uni[:, b, :].copy()                   # [Np, Norb] (Eilenberger band a=b)
-            ub /= np.sqrt((np.abs(ub) ** 2).sum(axis=1))[:, None]
-            _, uni_m = get_eigs(np.ascontiguousarray(-pts), ham_r, S_r, rvec)
-            umb = uni_m[:, b, :].copy()
-            umb /= np.sqrt((np.abs(umb) ** 2).sum(axis=1))[:, None]
-            kc = 2.0 * np.pi * pts[:, :2]              # Cartesian in-plane k (a=1)
-            seg = np.sqrt((np.diff(kc, axis=0) ** 2).sum(axis=1))      # piece segments
-            dl = np.zeros(len(pts))
-            dl[:-1] += 0.5 * seg
-            dl[1:] += 0.5 * seg
-            vab = np.sqrt(v[:, 0] ** 2 + v[:, 1] ** 2)
-            kxs.append(kc[:, 0]); kys.append(kc[:, 1])
-            vxs.append(v[:, 0]); vys.append(v[:, 1])
-            nfs.append(dl / np.maximum(vab, 1e-12))
-            kfs.append(pts); bnd.append(np.full(len(pts), b, dtype=int))
-            evs.append(ub); evms.append(umb)
+            for cont in contlist:                      # one connected FS piece
+                pts = np.ascontiguousarray(cont, dtype=np.float64)   # [Np,3] fractional
+                if len(pts) < 2:
+                    continue
+                eg, uni = get_eigs(pts, ham_r, S_r, rvec)
+                # S_r/eg carry the -eps*dS/dk overlap term for a non-orthogonal (MLO) basis
+                vk = flibs.get_veloc(pts, ham_r, rvec, avec.T, uni, S_r, eg).real  # [Np,Norb,3]
+                v = vk[:, b, :]
+                # band eigenvectors u(k_F) and u(-k_F) (orbital content) for the gap projection
+                ub = uni[:, b, :].copy()               # [Np, Norb] (Eilenberger band a=b)
+                ub /= np.sqrt((np.abs(ub) ** 2).sum(axis=1))[:, None]
+                _, uni_m = get_eigs(np.ascontiguousarray(-pts), ham_r, S_r, rvec)
+                umb = uni_m[:, b, :].copy()
+                umb /= np.sqrt((np.abs(umb) ** 2).sum(axis=1))[:, None]
+                kc = 2.0 * np.pi * pts[:, :2]          # Cartesian in-plane k (a=1)
+                seg = np.sqrt((np.diff(kc, axis=0) ** 2).sum(axis=1))  # piece segments
+                dl = np.zeros(len(pts))
+                dl[:-1] += 0.5 * seg
+                dl[1:] += 0.5 * seg
+                vab = np.sqrt(v[:, 0] ** 2 + v[:, 1] ** 2)             # in-plane speed
+                kxs.append(kc[:, 0]); kys.append(kc[:, 1])
+                vxs.append(v[:, 0]); vys.append(v[:, 1]); vzs.append(v[:, 2])
+                nfs.append(dl / np.maximum(vab, 1e-12))                # dk_z is uniform
+                kfs.append(pts); bnd.append(np.full(len(pts), b, dtype=int))
+                evs.append(ub); evms.append(umb)
     if not kxs:
-        raise ValueError("no Fermi surface at this mu/kz")
+        raise ValueError(f"no Fermi surface at this mu over {len(kzs)} k_z slice(s)")
     kx = np.concatenate(kxs); ky = np.concatenate(kys)
-    vx = np.concatenate(vxs); vy = np.concatenate(vys)
+    vx = np.concatenate(vxs); vy = np.concatenate(vys); vz = np.concatenate(vzs)
     nf = np.concatenate(nfs)
-    vabs = np.sqrt(vx ** 2 + vy ** 2)
+    vabs = np.sqrt(vx ** 2 + vy ** 2)                  # in-plane |v_par| (see @note)
     nf = nf / nf.sum()
-    fs = dict(th=np.arctan2(ky, kx), kx=kx, ky=ky, kf=np.concatenate(kfs),
-              band=np.concatenate(bnd), vx=vx, vy=vy, vabs=vabs,
+    kfrac = np.concatenate(kfs)
+    fs = dict(th=np.arctan2(ky, kx), kx=kx, ky=ky, kz=kfrac[:, 2], kf=kfrac,
+              band=np.concatenate(bnd), vx=vx, vy=vy, vz=vz, vabs=vabs,
+              vabs3=np.sqrt(vx ** 2 + vy ** 2 + vz ** 2), nkz=len(kzs),
               vhx=vx / vabs, vhy=vy / vabs, nf=nf,
               evec=np.concatenate(evs), evec_mk=np.concatenate(evms))  # u(k_F), u(-k_F)
     if gap_orbital is not None:
-        project_gap_to_band(fs, gap_orbital)           # band gap = U^dag Delta_orb U*  (Nagai Eq 43)
+        # band gap = gauge-fixed U^dag Delta_orb U  (Nagai-Nakamura Eq 43)
+        project_gap_to_band(fs, gap_orbital, gauge=gauge, spin_map=spin_map)
     elif gap_sym is not None:
         set_fs_gap(fs, gap_sym, delta0)                # phenomenological per-band ratio/sign
     return fs
 
 
-def gap_color_3d(centers, blist, rvec, ham_r, S_r, gap_sym=None, delta0=None, gap_orbital=None):
+def gap_color_3d(centers, blist, rvec, ham_r, S_r, gap_sym=None, delta0=None, gap_orbital=None,
+                 gauge=None, spin_map=None, sw_abs=None):
     """
     @fn gap_color_3d
     @brief Re[phi(k)] at each face center of the 3D Wannier Fermi surface
@@ -1119,15 +1830,14 @@ def gap_color_3d(centers, blist, rvec, ham_r, S_r, gap_sym=None, delta0=None, ga
             _, uni_m = get_eigs(-k, ham_r, S_r, rvec)
             umb = uni_m[:, b, :].copy()                           # u(-k) [Nfaces,Norb]
             umb /= np.sqrt((np.abs(umb) ** 2).sum(axis=1))[:, None]
-            if callable(gap_orbital):
-                phi = np.array([np.conj(ub[i]) @ np.asarray(gap_orbital(k[i]), dtype=np.complex128)
-                                @ np.conj(umb[i]) for i in range(len(k))], dtype=np.complex128)
-            else:
-                D = np.asarray(gap_orbital, dtype=np.complex128)
-                phi = np.einsum('ia,ab,ib->i', np.conj(ub), D, np.conj(umb))
+            check_pair_partner(ub, umb, gauge, spin_map)
+            phi = project_gap(ub, gap_orbital, k, umb, gauge, spin_map)
         else:
             phi = gap_symms(k, 1, int(gap_sym))[0].astype(np.complex128)
             if delta0 is not None:
                 phi = phi * np.asarray(delta0, dtype=np.float64)[b]
-        clist.append(phi.real)
+        # A chiral phi has no meaningful sign: Re[phi] would draw spurious nodes where
+        # only the phase winds, so colour such sheets by |phi| instead.
+        use_abs = (np.abs(phi.imag).max() > 1e-12) if sw_abs is None else bool(sw_abs)
+        clist.append(np.abs(phi) if use_abs else phi.real)
     return clist

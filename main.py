@@ -228,8 +228,12 @@ eil_free_energy=False #True: condensation free energy (Omega_s-Omega_n)/N0 vs T 
 eil_spin=False       #True: spin-2x2 Zeeman response, singlet vs triplet d-vector (d||h Pauli-limited, d_|_h immune)
 eil_lambda=False     #True: superfluid density rho_s(T)/penetration depth lambda(T) sweep (s exp-flat, d linear-in-T)
 eil_fs=False         #True: model-FS + Fermi-velocity penetration depth (anisotropic lambda_xx/lambda_yy)
-eil_fs_kind=None     #Fermi surface for ALL eilenberger modes (homogeneous penetration / surface / vortex): None=isotropic (cylinder; homogeneous falls back to 'ellipse'), 'iso'/'ellipse'(params=(mx,my))/'tb'(params=t) model FS, or 'wannier' (loaded band FS+v_F; surface/vortex symmetry/multiband from gap_sym,delta0)
+eil_fs_kind=None     #Fermi surface for ALL eilenberger modes (homogeneous penetration / surface / vortex): None=isotropic (cylinder; homogeneous falls back to 'ellipse'), in-plane model FS 'iso'/'ellipse'(params=(mx,my))/'tb'(params=t), 3D model FS 'cyl'(corrugated cylinder, params=(t,tz))/'sphere'/'spheroid'(params=(mx,my,mz)) -- use with eil_fs_nkz>1, or 'wannier' (loaded band FS+v_F; surface/vortex symmetry/multiband from gap_sym,delta0)
 eil_fs_params=(1.0,0.4) #model-FS parameters (ellipse masses or tb hopping)
+eil_fs_nkz=1         #k_z slices stacked into the FS (eil_fs_kind='wannier' or a 3D model kind): 1=single k_z=0 cut (quasi-2D), >1=true 3D Fermi surface. REQUIRED (>=16) for k_z-dependent gaps: a horizontal line node lives on the k_z=0 plane, where a single-slice FS makes the gap identically zero
+eil_fs_traj=None     #trajectory reduction for the VORTEX/lattice solvers, whose cost is linear in the number of FS points (a 3D FS has 10^3-10^4 vs the 24 directions of the model cylinder): None=use every point, int=number of beta bins, (nbeta,nv,nphi)=full control (direction / |v_par| quantile / phi bins). default (48,4,8) reduces a 1920-direction FS to 176 with an x17.7 speedup, the bulk gap to 0.5% and the vortex-core LDOS peak to 0.2%. Raise until the answer stops moving. Not used by the surface solver (it needs k_par and the band index for the specular partner)
+eil_pair_gauge='trs' #pair-partner gauge of the band gap projection: 'trs' (default; spinless/real hoppings, phi=u^dag.Delta.u, gauge invariant), 'soc' (spinful basis, time-reversed partner (i sigma_y)u*), 'diag' (legacy independently diagonalized u(-k); GAUGE DEPENDENT, comparison only). The condition is time-reversal symmetry of the NORMAL state H(k), not of Delta: a CHIRAL order parameter is fine (its winding is passed through to phi), a time-reversal-broken NORMAL state (ferromagnetic SC, Zeeman inside H, Haldane-type hoppings) is not -- check_pair_partner warns when |<u(-k)|T u(k)>| < 1
+eil_spin_order='block' #basis ordering for eil_pair_gauge='soc': 'block'=[orb1..orbN up, orb1..orbN dn], 'interleave'=[orb1 up, orb1 dn, ...]
 eil_zeeman=0.0       #Zeeman (Maki) field [eV] for the LDOS (surface: splits the d[110] ZEBS into +-h; vortex: spin-splits the core bound states)
 #----- EILENBERGER inhomogeneous (surface & vortex, Riccati; model cylindrical FS) -----
 eil_ldos=True            #True: also compute the real-frequency LDOS (bound/core states) (surface & vortex)
@@ -239,6 +243,11 @@ eil_dvec_subratio=0.9    #subdominant/dominant coupling ratio for the d-vector t
 eil_vort_lxi=8.0         #vortex cell half-width in coherence lengths xi (isolated vortex, field=0)
 eil_vort_ngrid=81        #vortex 2D grid points per axis
 eil_vort_field=False     #True: also compute the self-consistent finite-kappa Maxwell field profile B(rho) of the vortex (uses eil_kappa)
+eil_vort_chiral=False    #True: self-consistent isolated CHIRAL vortex (p+ip for eil_chiral_ell=1, d+id for 2) via the multi-component complex-amplitude spin-matrix solver -- the case the scalar vortex solver refuses, since the core induces the OPPOSITE chirality and the amplitude is genuinely complex. Both chiralities share one coupling (degenerate partners of the same irrep); the bulk is the single-channel isotropic gap, not the equal-amplitude (nematic) combination
+eil_chiral_ell=1         #chirality of eil_vort_chiral: 1=p+ip, 2=d+id
+eil_chiral_m=1           #winding of the DOMINANT chiral component (+1 parallel to the chirality, -1 antiparallel); the induced opposite component follows m_- = m_+ + 2*ell (chiral_windings)
+eil_field_dir=None       #field / vortex-line direction for the ISOLATED vortex (eil_field=0), e.g. (0,0,1)=c axis (default), (1,0,0)=in-plane. The vortex lines run along B, so the order parameter varies in the plane PERPENDICULAR to it and the problem stays 2D; that plane's two axes are rescaled by their rms Fermi velocities, so a square grid still fits the elliptical core (xi_1/xi_2 is reported). Needs a 3D Fermi surface (eil_fs_nkz>1 or a 3D eil_fs_kind) for anything but B||c. A finite eil_field with an anisotropic plane is NOT supported yet (the circular-cell Doppler assumes the unscaled plane) and raises
+eil_chiral_dvec='z'      #equal-spin direction of the chiral triplet: 'z' or 'x' ('y' is proportional to the identity and is not supported by the unitary matrix-Riccati seed)
 eil_vort_dvector=False   #True: self-consistent triplet d-vector TEXTURE around the vortex core (dominant p_x(e_x) winding + core-localized subdominant p_y(e_z), 2D spin-matrix Riccati; uses eil_dvec_subratio)
 eil_vort_current=False   #True: circulating charge supercurrent j_phi(rho) of an isolated vortex (writes vortex_current.dat)
 eil_vort_maxwell=False   #True: circular-cell vortex with the self-consistent finite-kappa vector potential A(r) (Maxwell back-reaction; needs eil_field>0, uses eil_kappa)
@@ -526,7 +535,7 @@ def plot_3d_surf(fspolys,fscenters,fscolors,surface_opt,kscale,bvec):
     #plt.savefig(fname='3DFS.png',dpi=300)
     
 def set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist,
-                      gap_sym=None,delta0=None,gap_orbital=None):
+                      gap_sym=None,delta0=None,gap_orbital=None,gauge_kw=None):
     if color_option==0:
         fspolys=polys
         fscenters=[]
@@ -534,7 +543,8 @@ def set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist
         return fspolys,fscenters,fscolors
     else:
         if color_option==ColorMode.GAP: #the actual Eilenberger pairing gap, on the real 3D FS
-            colors=plibs.gap_color_3d(centers,blist,rvec,ham_r,S_r,gap_sym,delta0,gap_orbital)
+            colors=plibs.gap_color_3d(centers,blist,rvec,ham_r,S_r,gap_sym,delta0,gap_orbital,
+                                      **(gauge_kw or {}))
         else:
             colors=plibs.get_colors(centers,blist,ihbar*avec.T,rvec,ham_r,S_r,olist,color_option)
         fspolys=[]
@@ -1400,6 +1410,13 @@ def calc_cpa_Akw(k_sets: list, kmesh: int, bvec: np.ndarray,
     plt.show()
     return Akw
 
+def set_eil_gauge(Norb):
+    """Pair-partner gauge kwargs for the band-gap projection (eil_pair_gauge).
+    'soc' additionally needs the spin-partner map of the spinful basis."""
+    if eil_pair_gauge=='soc':
+        return dict(gauge='soc',spin_map=plibs.spin_pair_map(Norb,eil_spin_order))
+    return dict(gauge=eil_pair_gauge)
+
 def get_eil_gap_fs(rvec,ham_r,S_r,avec,Arot,temp,fill):
     """Shared FS/gap preparation for the Eilenberger modes: the RPA/FLEX gap
     (eil_gap_file) or the explicit orbital gap (eil_gap_orbital) as form factor,
@@ -1411,7 +1428,9 @@ def get_eil_gap_fs(rvec,ham_r,S_r,avec,Arot,temp,fill):
     if eil_fs_kind=='wannier': #real Wannier-band FS + v_F (gap symmetry/multiband from gap_sym,delta0)
         fs=plibs.build_wannier_fs(rvec,ham_r,S_r,avec,
                                   plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill),
-                                  gap_sym=gap_sym,delta0=delta0,gap_orbital=gorb) #gap_orbital=projection (Nagai)
+                                  nkz=eil_fs_nkz, #>1: stack k_z slices into a true 3D FS
+                                  gap_sym=gap_sym,delta0=delta0,gap_orbital=gorb, #gap_orbital=projection (Nagai)
+                                  **set_eil_gauge(len(ham_r[0])))
         return fs,None                      #the (int) gap_sym is baked into fs['phi']
     return None,eil_fs_kind                 #model FS/cylinder: the int gap_sym -> continuum harmonic
 
@@ -1676,7 +1695,7 @@ def main():
         gorb=(plibs.gap_orbital_from_wannier(eil_gap_file,eil_gap_iw,eil_gap_navg) #RPA/FLEX gap as form factor
               if eil_gap_file else eil_gap_orbital)
         fspolys,fscenters,fscolors=set_init_3dfsplot(color_option,polys,centers,blist,avec,rvec,ham_r,S_r,olist,
-                                                      gap_sym,delta0,gorb)
+                                                      gap_sym,delta0,gorb,set_eil_gauge(len(ham_r[0])))
         plot_3d_surf(fspolys,fscenters,fscolors,color_option,kscale,bvec)
     elif option==CalcMode.SPECTRUM: #plot spectrum
         plot_spectrum(k_sets,xlabel,kmesh,bvec,mu,ham_r,S_r,rvec,Emin,Emax,delta,Nw,sw_self)
@@ -1926,24 +1945,38 @@ def main():
             elif option==CalcMode.GAP_FUNCTION: #post gap calculation, output gap function/anomalous green's function
                 output_Fk(Nx,Ny,Nz,Nw,ham_r,S_r,rvec,plist,mu,temp,sw_self,iperm=iperm)
     elif option==CalcMode.EILENBERGER: #solve homogeneous quasiclassical Eilenberger equation
-        if eil_fs: #model FS + Fermi velocity: anisotropic penetration depth lambda_xx/lambda_yy
+        #the orbital gap (RPA/FLEX export or explicit matrix) is projected band-resolved
+        #onto the FULL 3D Fermi surface -> k_z dependence and multi-sheet signs come from
+        #the orbital character, which is what an accidental/horizontal node needs
+        gorb=(plibs.gap_orbital_from_wannier(eil_gap_file,eil_gap_iw,eil_gap_navg)
+              if eil_gap_file else eil_gap_orbital)
+        gkw=dict(gap_orbital=gorb,delta0=delta0,**set_eil_gauge(len(ham_r[0])))
+        if eil_fs: #model FS + Fermi velocity: anisotropic penetration depth (+ rho_zz if 3D)
             plibs.calc_fs_penetration(eil_coupling,temp,eil_wc,kind=(eil_fs_kind or 'ellipse'),
-                                      gap_sym=gap_sym,params=eil_fs_params,kb=kb)
+                                      gap_sym=gap_sym,params=eil_fs_params,kb=kb,
+                                      nkz=eil_fs_nkz)
         elif eil_lambda: #superfluid density / penetration depth lambda(T) (s exp-flat, d linear-in-T)
             plibs.calc_penetration_depth(eil_coupling,temp,eil_wc,gap_sym=gap_sym,kb=kb)
         elif eil_spin: #spin-2x2 Zeeman response: singlet vs triplet d-vector (d||h vs d_|_h)
             plibs.calc_spin_pauli(Nx,Ny,Nz,eil_wc,ham_r,S_r,rvec,avec,mu,temp,eil_coupling,
-                                  gap_sym=gap_sym,fs_width=eil_fs_width,kb=kb)
+                                  gap_sym=gap_sym,fs_width=eil_fs_width,kb=kb,**gkw)
         elif eil_pauli: #Zeeman (Maki) Pauli-limiting sweep: singlet gap Delta(h), spinodal, Zeeman-split DOS
             plibs.calc_pauli_limit(Nx,Ny,Nz,eil_wc,ham_r,S_r,rvec,avec,mu,temp,gap_sym,eil_coupling,
-                                   fs_width=eil_fs_width,kb=kb)
+                                   fs_width=eil_fs_width,kb=kb,**gkw)
         elif eil_free_energy: #condensation free energy (Omega_s-Omega_n)/N0 vs T (coupling-independent)
-            plibs.calc_free_energy(eil_coupling,temp,eil_wc,gap_sym=gap_sym,kb=kb)
+            #the 3D FS gap (any harmonic incl. kz-dependent/chiral, or the projected orbital
+            #gap) -> the condensation energy that selects between degenerate partners
+            _,klist,eig,uni,_=plibs.get_emesh(Nx,Ny,Nz,ham_r,S_r,rvec,avec,sw_uni=True)
+            wf,phif=plibs.build_fs(eig,klist,mu,gap_sym,eil_fs_width,uni=uni,**gkw)
+            plibs.calc_free_energy(eil_coupling,temp,eil_wc,kb=kb,phi=phif,wnf=wf)
         else:
+            #the orbital gap (RPA/FLEX export or explicit matrix) is projected band-resolved
+            #onto the FULL 3D Fermi surface -> k_z dependence and multi-sheet signs come from
+            #the orbital character, which is what an accidental/horizontal node needs
             plibs.calc_eilenberger(Nx,Ny,Nz,eil_wc,ham_r,S_r,rvec,avec,mu,temp,gap_sym,eil_coupling,
                                    imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,fs_width=eil_fs_width,kb=kb,
                                    method=eil_method,sw_find_tc=eil_find_tc,sw_imp_sweep=eil_imp_sweep,
-                                   imp_sweep=eil_imp_list)
+                                   imp_sweep=eil_imp_list,**gkw)
     elif option==CalcMode.EILENBERGER_SURFACE: #specular surface state via Riccati Eilenberger (model FS)
         if eil_surf_dvector: #self-consistent triplet d-vector texture (spin-matrix Riccati)
             plibs.calc_surface_dvector(eil_coupling,temp,eil_wc,kb=kb,sub_ratio=eil_dvec_subratio,sw_ldos=eil_ldos)
@@ -1954,12 +1987,20 @@ def main():
                                fs_kind=sfk,fs_params=eil_fs_params,fs=sfs)
     elif option==CalcMode.EILENBERGER_VORTEX: #vortex / vortex lattice via Riccati Eilenberger (model FS)
         eil_fs_obj,eil_fs_kw=get_eil_gap_fs(rvec,ham_r,S_r,avec,Arot,temp,fill)
+        if eil_fs_obj is not None and eil_fs_traj is not None: #one chord integration per FS point
+            tj=[eil_fs_traj] if np.isscalar(eil_fs_traj) else list(eil_fs_traj)
+            nbeta=tj[0]; nv=tj[1] if len(tj)>1 else 4; nphi=tj[2] if len(tj)>2 else 8
+            eil_fs_obj=plibs.reduce_fs_trajectories(eil_fs_obj,gap_sym,nbeta,nv,nphi)
         if eil_vort_maxwell: #self-consistent finite-kappa vector potential A(r) (Maxwell back-reaction)
             plibs.calc_vortex_maxwell(eil_coupling,temp,eil_wc,gap_sym=gap_sym,field=eil_field,
                                       kappa=eil_kappa,kb=kb,Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
         elif eil_vort_current: #circulating charge supercurrent j_phi(rho) of an isolated vortex
             plibs.calc_vortex_current(eil_coupling,temp,eil_wc,gap_sym=gap_sym,kb=kb,
                                       Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
+        elif eil_vort_chiral: #chiral (p+ip / d+id) vortex: complex two-component amplitude, core-induced opposite chirality
+            plibs.calc_vortex_chiral(eil_coupling,temp,eil_wc,ell=eil_chiral_ell,m_dom=eil_chiral_m,
+                                     dvec=eil_chiral_dvec,kb=kb,Lxi=eil_vort_lxi,
+                                     ngrid=eil_vort_ngrid,fs=eil_fs_obj,bdir=eil_field_dir)
         elif eil_vort_dvector: #self-consistent triplet d-vector vortex/lattice (spin-matrix Riccati)
             dfs=(plibs.build_wannier_fs(rvec,ham_r,S_r,avec,plibs.get_mu(ham_r,S_r,rvec,Arot,temp,fill))
                  if eil_fs_kind=='wannier' else None)  #FS geometry only (d-vector channels carry the gap)
@@ -1969,7 +2010,7 @@ def main():
                                                      kappa=(None if eil_kappa>=1e3 else eil_kappa),fs=dfs)
             else: #isolated vortex (eil_field=0) or circular-cell lattice (eil_field>0)
                 plibs.calc_vortex_dvector(eil_coupling,temp,eil_wc,kb=kb,sub_ratio=eil_dvec_subratio,
-                                          field=eil_field,fs=dfs)
+                                          field=eil_field,fs=dfs,bdir=eil_field_dir)
         elif eil_vort_lattice_sc and eil_field_list is not None: #je-style self-consistent periodic lattice (formulation A); eil_lattice square/triangular; eil_nvortex=Vw flux quanta/cell; finite eil_kappa = London A back-reaction, >=1e3 = bare extreme
             plibs.calc_vortex_lattice_sc(eil_coupling,temp,eil_wc,gap_sym=gap_sym,
                                          field_list=eil_field_list,lattice=eil_lattice,kb=kb,fs=eil_fs_obj,
@@ -1984,7 +2025,7 @@ def main():
                               imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,field=eil_field,h=eil_zeeman,
                               kappa=(eil_kappa if eil_vort_field else 0.0),tilt_deg=eil_vort_tilt,
                               fs_kind=eil_fs_kw,fs_params=eil_fs_params,fs=eil_fs_obj,
-                              Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
+                              Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid,bdir=eil_field_dir)
     elif option==CalcMode.BAND_FILLING: #per-band filling and electron/hole character
         print('band, hole fraction, electron fraction:',flush=True)
         plibs.report_band_filling(Nx,rvec,ham_r,S_r,mu,Arot)

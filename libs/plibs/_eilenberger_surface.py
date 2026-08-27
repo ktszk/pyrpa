@@ -365,8 +365,10 @@ def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
     if Dbulk <= 0.0:
         print("normal state (Dbulk=0); nothing to profile", flush=True)
         return x, Damp
-    xi = 1.0 / (np.pi * Dbulk)   # hvf=1
-    print(f"Dbulk = {Dbulk:.6e} eV,  xi = {xi:.4g} (hvf=1 units)", flush=True)
+    from ._eilenberger import fs_hvf
+    hvf_eff = fs_hvf(fsobj)      # <|v_par|> on a real FS, 1 for the cylinder
+    xi = hvf_eff / (np.pi * Dbulk)
+    print(f"Dbulk = {Dbulk:.6e} eV,  xi = {xi:.4g}  (hvf = {hvf_eff:.4g})", flush=True)
     print(f"Delta(0)/Dbulk = {Damp[0]/Dbulk:.4f}   Delta(L)/Dbulk = {Damp[-1]/Dbulk:.4f}", flush=True)
     try:
         with open('surface_gap.dat', 'w') as fh:
@@ -402,26 +404,43 @@ def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
 
 def _reflection_index(fs):
     """For each FS point i, the index of its specular partner at a surface with
-    normal x_hat: the point with the same parallel momentum k_y and the opposite v_x
+    normal x_hat: the point with the same parallel momentum and the opposite v_x
     sign (k_parallel conserved, k_perp flipped).  Works for a general -- e.g. real
     Wannier -- Fermi surface (matched within the same band if 'band' is present), not
-    only an angle-parametrized model FS."""
-    ky, vx = fs['ky'], fs['vx']
-    band = fs.get('band')
-    sgn = np.sign(vx)
+    only an angle-parametrized model FS.
+
+    On a 3D Fermi surface (build_wannier_fs with nkz>1) k_z is a conserved parallel
+    momentum too, so the partner is searched WITHIN the same k_z slice; mixing slices
+    would reflect into a different trajectory altogether.  The search is grouped and
+    sorted rather than the naive O(N^2) scan, which matters once the k_z stacking
+    multiplies the number of FS points."""
+    ky, vx = np.asarray(fs['ky']), np.asarray(fs['vx'])
     N = len(ky)
     j = np.arange(N)
-    for i in range(N):
-        cand = sgn != sgn[i]                         # opposite v_x branch
-        if band is not None:
-            cand = cand & (band == band[i])
-        idx = np.where(cand)[0]
-        if idx.size:
-            j[i] = idx[np.argmin(np.abs(ky[idx] - ky[i]))]
+    band = fs.get('band')
+    kz = fs.get('kz')
+    gid = np.zeros(N, dtype=np.int64)                # group = (band, k_z slice)
+    if band is not None:
+        _, gid = np.unique(np.asarray(band), return_inverse=True)
+    if kz is not None:
+        _, iz = np.unique(np.asarray(kz), return_inverse=True)
+        gid = gid * (iz.max() + 1) + iz
+    for g in np.unique(gid):
+        idx = np.where(gid == g)[0]
+        pos, neg = idx[vx[idx] > 0], idx[vx[idx] <= 0]
+        if len(pos) == 0 or len(neg) == 0:
+            continue
+        for src, dst in ((pos, neg), (neg, pos)):    # nearest k_y on the opposite branch
+            order = np.argsort(ky[dst])
+            dk = ky[dst][order]
+            hi = np.clip(np.searchsorted(dk, ky[src]), 0, len(dk) - 1)
+            lo = np.clip(hi - 1, 0, len(dk) - 1)
+            pick = np.where(np.abs(dk[hi] - ky[src]) <= np.abs(dk[lo] - ky[src]), hi, lo)
+            j[src] = dst[order][pick]
     return j
 
 
-def surface_ldos_fs(fs, Damp, x, wlist, gap_sym, ix=0, delta=None, Dbulk=1.0, hvf=1.0,
+def surface_ldos_fs(fs, Damp, x, wlist, gap_sym, ix=0, delta=None, Dbulk=1.0,
                     vmin_frac=0.02):
     """
     @fn surface_ldos_fs
@@ -436,6 +455,10 @@ def surface_ldos_fs(fs, Damp, x, wlist, gap_sym, ix=0, delta=None, Dbulk=1.0, hv
     @param gap_sym: pairing symmetry (form factor evaluated on the FS k-direction)
     @param   ix: grid index for the LDOS (0 = surface)
     @return ldos: N(x_ix, w)/N0 [Nw]
+    @note  There is no ``hvf`` here on purpose: the chord step is dx/|v_x| with the REAL
+           velocity component, so the speed is already in the step and the chord kernel
+           must be called with unit velocity.  The Fermi speed enters this route only
+           through xi, i.e. through the grid ``x`` handed in (see fs_hvf).
     """
     from ._eilenberger import fs_form_factor
     if delta is None:
@@ -450,14 +473,14 @@ def surface_ldos_fs(fs, Damp, x, wlist, gap_sym, ix=0, delta=None, Dbulk=1.0, hv
     out = np.where(vx > vmin_frac * vmax)[0]            # outgoing FS points (v_x>0)
     jj = refl[out].astype(int)                          # incoming (reflected) partners
     vproj = np.abs(vx[out])                              # ds = dx/|v_x| (_surface_chords: dx/cosb)
-    g_out, _, g_in, _ = _surface_chords(Damp, phi[out], phi[jj], zomega, hvf, dx, vproj)
+    g_out, _, g_in, _ = _surface_chords(Damp, phi[out], phi[jj], zomega, 1.0, dx, vproj)
     gsum = (nf[out][:, None] * g_out[ix] + nf[jj][:, None] * g_in[ix]).sum(axis=0)  # [Nw]
     wsum = (nf[out] + nf[jj]).sum()
     return (gsum / wsum).real
 
 
 def solve_surface_fs(coupling, temp, omega, fs, gap_sym, Dbulk=None, Lxi=8.0, nper=16,
-                     hvf=1.0, vmin_frac=0.02, eps=1.0e-4, itemax=300, mix=0.3):
+                     hvf=None, vmin_frac=0.02, eps=1.0e-4, itemax=300, mix=0.3):
     """
     @fn solve_surface_fs
     @brief Self-consistent gap profile Delta_amp(x) at a specular surface on a model
@@ -466,31 +489,53 @@ def solve_surface_fs(coupling, temp, omega, fs, gap_sym, Dbulk=None, Lxi=8.0, np
     partner at (-kx,ky), nf-weighted gap kernel.  The surface orientation is set by
     gap_sym on the FS k-directions (n_hat || x): 'dxy' is sign-changing (suppressed,
     ZEBS), 'd'/'s' are not.
+
+    Dbulk (when not supplied) is solved on the SAME chord ensemble the kernel sums over,
+    so the profile heals to it by construction -- see the comment in the body.
+    @param hvf: Fermi speed setting xi = hvf/(pi*Dbulk), i.e. the physical size of the
+                domain.  None (default) takes the FS value <|v_par|>_nf (fs_hvf).  It
+                must NOT be fed to the chord kernel as well: the step is already
+                dx/|v_x| with the real velocity, so the chords run at unit velocity.
+                Fixing hvf=1 on a real Fermi surface (the old behaviour) shrinks the box
+                by a factor <|v_F|> and the gap never heals to Dbulk at the far edge.
     @return (x, Damp, Dbulk)
     """
-    from ._eilenberger import fs_form_factor, bulk_gap_fs
+    from ._eilenberger import fs_form_factor, solve_gap, fs_hvf
     phi = fs_form_factor(fs, gap_sym)
     vx, nf = fs['vx'], fs['nf']
     refl = _reflection_index(fs)
     vmax = np.abs(vx).max()
     out = np.where(vx > vmin_frac * vmax)[0]
+    jj = refl[out].astype(int)
+    # ONE ensemble for both the kernel and the bulk reference.  The chords are the
+    # outgoing points plus their specular partners: near-grazing points are dropped and
+    # the nearest-k_par partner map is not a bijection, so this set is not the full FS
+    # and its weights do not sum to 1.  Taking Dbulk from the full FS while the kernel
+    # sums over the chords mixes two different averages, and because the gap equation is
+    # exponential in the effective coupling a few per cent of missing weight moves the
+    # whole profile by several per cent -- it then sits at the wrong level everywhere
+    # instead of healing to Dbulk.  Normalizing the chord weights and taking Dbulk from
+    # the same (w, phi) makes the far field exactly the homogeneous fixed point.
+    wsum = (nf[out] + nf[jj]).sum()
+    w_ch = np.concatenate([nf[out], nf[jj]]) / wsum
+    p_ch = np.concatenate([phi[out], phi[jj]])
     if Dbulk is None:
-        Dbulk = bulk_gap_fs(coupling, temp, omega, fs, gap_sym)
+        Dbulk = solve_gap(temp, w_ch, p_ch, omega, 0.0, 1.0e8, coupling)
+    hvf_eff = fs_hvf(fs) if hvf is None else float(hvf)
     if Dbulk < 1.0e-6 * temp:
-        xi = hvf / (np.pi * max(temp, 1e-12))
+        xi = hvf_eff / (np.pi * max(temp, 1e-12))
         x = np.linspace(0.0, Lxi * xi, int(Lxi * nper))
         return x, np.zeros_like(x), 0.0
-    xi = hvf / (np.pi * Dbulk)
+    xi = hvf_eff / (np.pi * Dbulk)
     Ng = int(Lxi * nper)
     x = np.linspace(0.0, Lxi * xi, Ng)
     dx = x[1] - x[0]
     Damp = Dbulk * np.tanh(x / xi)
-    jj = refl[out].astype(int)
     vproj = np.abs(vx[out])                              # ds = dx/|v_x| (per chord)
-    co = (nf[out] * np.conj(phi[out]))[None, :]
-    ci = (nf[jj] * np.conj(phi[jj]))[None, :]
+    co = (nf[out] * np.conj(phi[out]))[None, :] / wsum
+    ci = (nf[jj] * np.conj(phi[jj]))[None, :] / wsum
     for it in range(itemax):
-        _, f_out, _, f_in = _surface_chords(Damp, phi[out], phi[jj], omega, hvf, dx, vproj)
+        _, f_out, _, f_in = _surface_chords(Damp, phi[out], phi[jj], omega, 1.0, dx, vproj)
         fo = f_out.sum(axis=2)                            # [Ng, Nchord], summed over freq
         fi = f_in.sum(axis=2)
         acc = (co * fo + ci * fi).sum(axis=1)             # nf-weighted FS average [Ng]
