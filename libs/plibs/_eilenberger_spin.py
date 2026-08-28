@@ -616,7 +616,7 @@ def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0
     # factor of each channel (evaluated at the k-direction); cylinder or a model/Wannier FS
     if fs is not None:                                  # real FS: v_hat directions, nf weights
         from ._eilenberger import fs_field_frame
-        frame = fs_field_frame(fs, (0.0, 0.0, 1.0) if bdir is None else bdir)
+        frame = fs_field_frame(fs, bdir)
         if field > 0.0 and abs(frame['aniso_ratio'] - 1.0) > 0.05:
             raise NotImplementedError(
                 f"solve_vortex2d_dvector: a finite field with an anisotropic vortex "

@@ -2,12 +2,22 @@ subroutine mkBdGhamk(hamBdGk,hamk,delta,Nk,Norb) bind(C)
   !> Build BdG Hamiltonian in Nambu basis Ψ_k = (c_{k,↑,1..N}, c†_{-k,↓,1..N})^T
   !>
   !>   H_BdG(k) = [  H(k)        Δ(k)    ]
-  !>              [  Δ†(k)     -H^T(-k)  ]
+  !>              [  Δ†(k)      -H(k)    ]
   !>
-  !> The lower-right block uses -conjg(H(k)) which equals -H^T(-k) ONLY when
-  !> H is inversion-symmetric (H(-k)=H(k)) combined with Hermiticity. This
-  !> implementation is therefore restricted to centrosymmetric systems
-  !> (no Rashba-type SOC with broken inversion).
+  !> The hole block is -H^T(-k) by construction (the Nambu doubling reorders
+  !> c_{-k} H(-k) c†_{-k}), and for a spin-round time-reversal-symmetric model that
+  !> IS -H(k), with no further assumption:
+  !>       [H^T(-k)]_lm = [H(-k)]_ml = [H_ml(k)]*  (TRS: H(-k) = H*(k))
+  !>                                  = H_lm(k)    (hermiticity: H_ml = H_lm*)
+  !> so H^T(-k) = H(k) exactly.  In particular NO inversion symmetry is needed and
+  !> -k is never referenced.  An earlier version used -conjg(H(k)) = -H*(k), which by
+  !> the same TRS relation is -H(-k): that differs from -H^T(-k) by a transpose and is
+  !> correct only when H(k) is real, i.e. H(-k)=H(k).  That excluded exactly the
+  !> multi-site cells this code targets -- with several sites per cell, inversion
+  !> EXCHANGES sites, so H(-k) = P^-1 H(k) P with a non-trivial signed permutation P
+  !> (see plibs.inversion_op) and H(-k) != H(k) even though the crystal is
+  !> centrosymmetric.  Measured on an SSH chain (t1=1.0, t2=0.6, |Δ|=0.25) the old
+  !> form moved the BdG eigenvalues by 0.064, i.e. 26% of the gap.
   !>
   !> The Nambu basis (c_↑, c†_↓) covers S_z=0 pairing only:
   !>   - singlet (Δ_↑↓ = -Δ_↓↑)
@@ -29,7 +39,7 @@ subroutine mkBdGhamk(hamBdGk,hamk,delta,Nk,Norb) bind(C)
      do l=1,Norb
         do m=1,Norb
            hamBdGk(l,m,k)=hamk(l,m,k)                          !  H(k)            (particle block)
-           hamBdGk(l+Norb,m+Norb,k)=-conjg(hamk(l,m,k))         ! -H*(k) = -H^T(-k) under inversion sym
+           hamBdGk(l+Norb,m+Norb,k)=-hamk(l,m,k)                ! -H(k) = -H^T(-k) by TRS + hermiticity
            hamBdGk(l,m+Norb,k)=delta(l,m,k)                    !  Δ_{lm}(k)        (anomalous, upper-right)
            hamBdGk(l+Norb,m,k)=conjg(delta(m,l,k))              !  (Δ†)_{lm}(k)     (anomalous, lower-left)
         end do

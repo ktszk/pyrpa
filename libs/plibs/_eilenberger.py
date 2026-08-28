@@ -1048,7 +1048,7 @@ def fs_hvf(fs, hvf: float = 1.0) -> float:
     return float((np.asarray(fs['nf']) * np.asarray(fs['vabs'])).sum())
 
 
-def fs_field_frame(fs, bdir=(0.0, 0.0, 1.0), gap_sym=None, aniso=True, vmin_frac=1.0e-3,
+def fs_field_frame(fs, bdir=None, gap_sym=None, aniso=True, vmin_frac=1.0e-3,
                    verbose=False):
     """
     @fn fs_field_frame
@@ -1080,7 +1080,10 @@ def fs_field_frame(fs, bdir=(0.0, 0.0, 1.0), gap_sym=None, aniso=True, vmin_frac
                     exact cylinder limit -- and then B in-plane has NO orbital effect at
                     all (v_perp -> |v_z| = 0), so it is rejected rather than silently
                     returning a zero-velocity trajectory set.
-    @param    bdir: field direction (need not be normalized)
+    @param    bdir: field direction (need not be normalized).  None = the c axis, or,
+                    for an FS already reduced by reduce_fs_trajectories, the direction
+                    it was reduced for -- so a solver can simply forward its own
+                    bdir=None and get the right thing either way.
     @param   aniso: rescale the two axes by their rms velocities (see above)
     @param vmin_frac: drop trajectories whose perpendicular speed is below this fraction of
            the mean, and renormalize the weights.  A Fermi-surface point whose velocity is
@@ -1094,7 +1097,24 @@ def fs_field_frame(fs, bdir=(0.0, 0.0, 1.0), gap_sym=None, aniso=True, vmin_frac
     @return dict(e1, e2, n, dirs, vabs, nf, phi, scale, hvf_eff, aniso_ratio); phi is None
             when neither gap_sym nor a baked-in fs['phi'] is available
     """
-    n = np.asarray(bdir, dtype=np.float64)
+    if 'bdir' in fs:            # already projected by reduce_fs_trajectories
+        prev = np.asarray(fs['bdir'], dtype=np.float64)
+        want = prev if bdir is None else np.asarray(bdir, dtype=np.float64)
+        want = want / np.sqrt((want ** 2).sum())
+        if abs(abs(prev @ want) - 1.0) > 1e-8:
+            raise ValueError(
+                f"fs_field_frame: this FS was already reduced for B along {prev}, which "
+                f"discarded v_z, so it cannot be re-projected onto the plane of {want}.  "
+                "Call reduce_fs_trajectories(..., bdir=...) with the direction you want "
+                "and then pass the solvers bdir=None.")
+        return dict(e1=np.array([1.0, 0.0, 0.0]), e2=np.array([0.0, 1.0, 0.0]), n=prev,
+                    dirs=np.asarray(fs['th']), vabs=np.asarray(fs['vabs']),
+                    nf=np.asarray(fs['nf']), phi=np.asarray(fs['phi']),
+                    scale=fs.get('scale', (1.0, 1.0)),
+                    aniso_ratio=fs.get('aniso_ratio', 1.0),
+                    keep=np.ones(len(fs['vabs']), dtype=bool),
+                    hvf_eff=float((np.asarray(fs['nf']) * np.asarray(fs['vabs'])).sum()))
+    n = np.asarray((0.0, 0.0, 1.0) if bdir is None else bdir, dtype=np.float64)
     nn = np.sqrt((n ** 2).sum())
     if nn <= 0:
         raise ValueError("fs_field_frame: bdir must be a non-zero vector")
@@ -1161,7 +1181,7 @@ def fs_field_frame(fs, bdir=(0.0, 0.0, 1.0), gap_sym=None, aniso=True, vmin_frac
 
 
 def reduce_fs_trajectories(fs, gap_sym=None, nbeta: int = 48, nv: int = 4, nphi: int = 8,
-                           wmin: float = 1.0e-5, verbose: bool = True):
+                           wmin: float = 1.0e-5, bdir=None, verbose: bool = True):
     """
     @fn reduce_fs_trajectories
     @brief Reduce a Fermi surface to a small set of WEIGHTED in-plane trajectories for
@@ -1203,10 +1223,17 @@ def reduce_fs_trajectories(fs, gap_sym=None, nbeta: int = 48, nv: int = 4, nphi:
     @param    wmin: drop cells below this fraction of the total weight
     @return a light FS dict (th,kx,ky,vx,vy,vabs,nf,phi,ntraj,nfs_full) for the solvers
     """
-    beta = np.arctan2(np.asarray(fs['vy']), np.asarray(fs['vx']))
-    v = np.asarray(fs['vabs'], dtype=np.float64)
-    w = np.asarray(fs['nf'], dtype=np.float64)
-    phi = np.asarray(fs_form_factor(fs, gap_sym), dtype=np.complex128)
+    # The reduction collapses the FS onto trajectories IN THE VORTEX PLANE, so it is
+    # specific to a field direction and must be done AFTER choosing one -- it discards v_z
+    # and the result can no longer be re-projected onto another plane.  Pass bdir here and
+    # then call the solvers WITHOUT bdir (the reduced vx, vy already are the field-frame,
+    # rescaled components); `bdir` is recorded in the output so fs_field_frame can refuse a
+    # second, inconsistent projection.
+    fr = fs_field_frame(fs, bdir, gap_sym)
+    beta = fr['dirs']
+    v = np.asarray(fr['vabs'], dtype=np.float64)
+    w = np.asarray(fr['nf'], dtype=np.float64)
+    phi = np.asarray(fr['phi'], dtype=np.complex128)
     n0 = len(v)
 
     def _bin(x, nb):                                   # uniform bins over the data range
@@ -1243,7 +1270,8 @@ def reduce_fs_trajectories(fs, gap_sym=None, nbeta: int = 48, nv: int = 4, nphi:
               f"{(w * v).sum():.4f} -> {(ws * vr).sum():.4f}", flush=True)
     out = dict(th=br, kx=np.cos(br), ky=np.sin(br), vx=vr * np.cos(br), vy=vr * np.sin(br),
                vabs=vr, vhx=np.cos(br), vhy=np.sin(br), nf=ws, phi=pr,
-               ntraj=len(ws), nfs_full=n0)
+               ntraj=len(ws), nfs_full=n0, scale=fr['scale'], aniso_ratio=fr['aniso_ratio'],
+               bdir=fr['n'])
     if 'nkz' in fs:
         out['nkz'] = fs['nkz']
     return out

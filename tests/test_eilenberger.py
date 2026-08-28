@@ -1457,14 +1457,20 @@ def test_vortex_in_plane_field():
         c1, c2 = core(xg, Psi, Db, xi, fr['scale'])
         assert lo < c1 / c2 < hi, (bd, c1 / c2)                        # core ellipticity
         assert abs(c1 / c2 / fr['aniso_ratio'] - 1.0) < 0.08           # ...tracks <v> ratio
-    # a finite field on an anisotropic plane is refused rather than silently wrong
-    try:
-        V.solve_vortex2d(lam, T, om, gap_sym=0, fs=fc, ngrid=15, Lxi=4.0, itemax=2,
-                         field=0.2, bdir=(1, 0, 0))
-    except NotImplementedError as e:
-        assert 'Doppler' in str(e)
-    else:
-        raise AssertionError('a finite field with an anisotropic vortex plane was accepted')
+    # A FINITE field needs no extra treatment off the c axis: the rescaling of the two
+    # axes is area preserving, so v.p_s is form invariant in the scaled plane (phase
+    # gradient: v.grad(phi) = v~.grad~(phi); vector potential: A~_i = A_i/c_i gives
+    # v.A = v~.A~ with the same curl B).  The check is that an ISOTROPIC Fermi surface
+    # gives a field-direction-independent answer at finite field.
+    sp = E.build_model_fs('sphere', Nth=90, nkz=32, kz_max=np.pi / 2)
+    prof = []
+    for bd in ((0, 0, 1), (1, 0, 0)):
+        xg, Psi, Db, xi = V.solve_vortex2d(lam, T, om, gap_sym=0, fs=sp, ngrid=25,
+                                           itemax=20, field=0.3, bdir=bd)
+        ic = len(xg) // 2
+        assert np.abs(Psi[ic, ic]) / Db < 0.02                     # node at the core
+        prof.append(np.abs(Psi[ic:, ic]) / Db)
+    assert np.abs(prof[0] - prof[1]).max() < 0.03
 
 
 # --------------------------------------------------------------------------- #

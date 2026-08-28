@@ -246,7 +246,7 @@ eil_vort_field=False     #True: also compute the self-consistent finite-kappa Ma
 eil_vort_chiral=False    #True: self-consistent isolated CHIRAL vortex (p+ip for eil_chiral_ell=1, d+id for 2) via the multi-component complex-amplitude spin-matrix solver -- the case the scalar vortex solver refuses, since the core induces the OPPOSITE chirality and the amplitude is genuinely complex. Both chiralities share one coupling (degenerate partners of the same irrep); the bulk is the single-channel isotropic gap, not the equal-amplitude (nematic) combination
 eil_chiral_ell=1         #chirality of eil_vort_chiral: 1=p+ip, 2=d+id
 eil_chiral_m=1           #winding of the DOMINANT chiral component (+1 parallel to the chirality, -1 antiparallel); the induced opposite component follows m_- = m_+ + 2*ell (chiral_windings)
-eil_field_dir=None       #field / vortex-line direction for the ISOLATED vortex (eil_field=0), e.g. (0,0,1)=c axis (default), (1,0,0)=in-plane. The vortex lines run along B, so the order parameter varies in the plane PERPENDICULAR to it and the problem stays 2D; that plane's two axes are rescaled by their rms Fermi velocities, so a square grid still fits the elliptical core (xi_1/xi_2 is reported). Needs a 3D Fermi surface (eil_fs_nkz>1 or a 3D eil_fs_kind) for anything but B||c. A finite eil_field with an anisotropic plane is NOT supported yet (the circular-cell Doppler assumes the unscaled plane) and raises
+eil_field_dir=None       #field / vortex-line direction (isolated vortex AND the finite-field lattice), e.g. (0,0,1)=c axis (default), (1,0,0)=in-plane. The vortex lines run along B, so the order parameter varies in the plane PERPENDICULAR to it and the problem stays 2D; that plane's two axes are rescaled by their rms Fermi velocities, so a square grid still fits the elliptical core (xi_1/xi_2 is reported). Needs a 3D Fermi surface (eil_fs_nkz>1 or a 3D eil_fs_kind) for anything but B||c. A finite eil_field with an anisotropic plane is NOT supported yet (the circular-cell Doppler assumes the unscaled plane) and raises
 eil_chiral_dvec='z'      #equal-spin direction of the chiral triplet: 'z' or 'x' ('y' is proportional to the identity and is not supported by the unitary matrix-Riccati seed)
 eil_vort_dvector=False   #True: self-consistent triplet d-vector TEXTURE around the vortex core (dominant p_x(e_x) winding + core-localized subdominant p_y(e_z), 2D spin-matrix Riccati; uses eil_dvec_subratio)
 eil_vort_current=False   #True: circulating charge supercurrent j_phi(rho) of an isolated vortex (writes vortex_current.dat)
@@ -1990,7 +1990,9 @@ def main():
         if eil_fs_obj is not None and eil_fs_traj is not None: #one chord integration per FS point
             tj=[eil_fs_traj] if np.isscalar(eil_fs_traj) else list(eil_fs_traj)
             nbeta=tj[0]; nv=tj[1] if len(tj)>1 else 4; nphi=tj[2] if len(tj)>2 else 8
-            eil_fs_obj=plibs.reduce_fs_trajectories(eil_fs_obj,gap_sym,nbeta,nv,nphi)
+            #the reduction collapses onto the vortex plane, so it needs the field direction
+            eil_fs_obj=plibs.reduce_fs_trajectories(eil_fs_obj,gap_sym,nbeta,nv,nphi,
+                                                   bdir=eil_field_dir)
         if eil_vort_maxwell: #self-consistent finite-kappa vector potential A(r) (Maxwell back-reaction)
             plibs.calc_vortex_maxwell(eil_coupling,temp,eil_wc,gap_sym=gap_sym,field=eil_field,
                                       kappa=eil_kappa,kb=kb,Lxi=eil_vort_lxi,ngrid=eil_vort_ngrid)
@@ -2015,11 +2017,12 @@ def main():
             plibs.calc_vortex_lattice_sc(eil_coupling,temp,eil_wc,gap_sym=gap_sym,
                                          field_list=eil_field_list,lattice=eil_lattice,kb=kb,fs=eil_fs_obj,
                                          kappa=(None if eil_kappa>=1e3 else eil_kappa),Vw=eil_nvortex,
-                                         self_consistent_A=eil_vort_scA)
+                                         self_consistent_A=eil_vort_scA,bdir=eil_field_dir)
         elif eil_field_list is not None: #sweep B/Hc2 on the TRUE periodic lattice -> <N(0)>(B) (d~sqrt(B) Volovik)
             plibs.calc_vortex_lattice_periodic(eil_coupling,temp,eil_wc,gap_sym=gap_sym,
                                                field_list=eil_field_list,kappa=eil_kappa,lattice=eil_lattice,kb=kb,
-                                               fs_kind=eil_fs_kw,fs_params=eil_fs_params,fs=eil_fs_obj,nflux=eil_nvortex)
+                                               fs_kind=eil_fs_kw,fs_params=eil_fs_params,fs=eil_fs_obj,
+                                               nflux=eil_nvortex,bdir=eil_field_dir)
         else: #single field (isolated vortex if eil_field=0, else circular-cell lattice)
             plibs.calc_vortex(eil_coupling,temp,eil_wc,gap_sym=gap_sym,kb=kb,sw_ldos=eil_ldos,
                               imp_gamma=eil_imp_gamma,imp_c=eil_imp_c,field=eil_field,h=eil_zeeman,

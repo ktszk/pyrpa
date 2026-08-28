@@ -280,16 +280,18 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
     use_fs = fs is not None
     # representative velocity scale (sets the coherence length xi); per-direction
     # |v_F| is used in each Riccati and Doppler so the field effect is consistent
-    frame = fs_field_frame(fs, (0.0, 0.0, 1.0) if bdir is None else bdir,
-                           gap_sym) if use_fs else None
-    if frame is not None and field > 0.0 and abs(frame['aniso_ratio'] - 1.0) > 0.05:
-        # the Doppler term needs the PHYSICAL position and velocity, which the
-        # area-preserving rescaling of the two axes no longer hands over directly
-        raise NotImplementedError(
-            f"solve_vortex2d: a finite field with an anisotropic vortex plane "
-            f"(xi_1/xi_2 = {frame['aniso_ratio']:.3f}) is not supported yet -- the "
-            "circular-cell Doppler shift assumes the unscaled plane.  Use field=0 "
-            "(isolated vortex) for a tilted / in-plane field.")
+    frame = fs_field_frame(fs, bdir, gap_sym) if use_fs else None
+    # A finite field needs no special treatment for a tilted B, because the Doppler term
+    # is FORM INVARIANT under the (area-preserving) rescaling of the two axes.  With
+    # u = c1 r1, w = c2 r2 and c1 c2 = 1:
+    #   phase gradient   v.grad(phi) = v1 c1 d_u phi + v2 c2 d_w phi = v~ . grad~(phi)
+    #   vector potential  put A~_i = A_i/c_i, then v.A = v~.A~ and
+    #                     d_u A~_2 - d_w A~_1 = (d_1 A_2 - d_2 A_1)/(c1 c2) = B,
+    # so the SAME circular cell, the SAME Rc from flux quantization (the map preserves
+    # area) and the SAME _doppler_chord apply, contracted with the SCALED velocity --
+    # which is what hvfarr already holds.  This is also why the equilibrium lattice is
+    # regular in the scaled plane: it is the standard anisotropic-GL statement, and the
+    # rms-velocity scaling used here IS the GL scaling (xi_i^2 ~ <v_i^2>).
     hvf_eff = frame['hvf_eff'] if use_fs else hvf
     bfull = np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False)
     if Dbulk is None:
@@ -386,7 +388,7 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
 def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
                   gap_sym: str, Dbulk: float, delta: float = None, nbeta: int = 36,
                   hvf: float = 1.0, imp_gamma: float = 0.0, imp_c: float = 1.0e8,
-                  field: float = 0.0, h: float = 0.0, fs: dict = None, qprof=None,
+                  field: float = 0.0, h: float = 0.0, fs: dict = None, qprof=None, bdir=None,
                   eps: float = 3.0e-3, itemax: int = 60, mix: float = 0.5):
     """
     @fn vortex_ldos2d
@@ -414,10 +416,16 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
     use_fs = fs is not None
     if use_fs:
         from ._eilenberger import fs_form_factor
-        dirs = np.arctan2(fs['vy'], fs['vx'])
-        phi = fs_form_factor(fs, gap_sym)
-        hvfarr = fs['vabs']
-        wt_dir = fs['nf']
+        # trajectories in the plane PERPENDICULAR to B (fs_field_frame; bdir=None is
+        # the c axis and reproduces the historical (x,y) set bit for bit).  The
+        # Doppler/supercurrent needs no change: the rescaling of the two axes is
+        # area preserving, so v.p_s is form invariant in the scaled plane -- see the
+        # derivation in solve_vortex2d.
+        _fr = fs_field_frame(fs, bdir, gap_sym)
+        dirs = _fr['dirs']
+        phi = _fr['phi']
+        hvfarr = _fr['vabs']
+        wt_dir = _fr['nf']
         nbeta = len(dirs)
     else:
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
@@ -900,7 +908,7 @@ def solve_lattice(coupling, temp, omega, gap_sym='d', field=0.2, kappa=5.0,
 
 
 def lattice_dos(state, gap_sym, wlist, coupling=None, temp=None, omega=None,
-                delta=None, nbeta=24, hvf=1.0, fs=None, Ls_cell=1.5, ds_xi=0.3):
+                delta=None, nbeta=24, hvf=1.0, fs=None, Ls_cell=1.5, ds_xi=0.3, bdir=None):
     """
     @fn lattice_dos
     @brief Spatially-averaged density of states N(w)/N0 of the vortex lattice from a
@@ -921,10 +929,16 @@ def lattice_dos(state, gap_sym, wlist, coupling=None, temp=None, omega=None,
     Nw = len(wlist)
     if fs is not None:                                # model FS: v_hat directions, nf weights
         from ._eilenberger import fs_form_factor
-        dirs = np.arctan2(fs['vy'], fs['vx'])
-        phi = fs_form_factor(fs, gap_sym)
-        hvfarr = fs['vabs']
-        wt_dir = fs['nf']
+        # trajectories in the plane PERPENDICULAR to B (fs_field_frame; bdir=None is
+        # the c axis and reproduces the historical (x,y) set bit for bit).  The
+        # Doppler/supercurrent needs no change: the rescaling of the two axes is
+        # area preserving, so v.p_s is form invariant in the scaled plane -- see the
+        # derivation in solve_vortex2d.
+        _fr = fs_field_frame(fs, bdir, gap_sym)
+        dirs = _fr['dirs']
+        phi = _fr['phi']
+        hvfarr = _fr['vabs']
+        wt_dir = _fr['nf']
         nbeta = len(dirs)
     else:                                             # isotropic cylinder (v_hat = k_hat, uniform)
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
@@ -965,7 +979,7 @@ def lattice_dos(state, gap_sym, wlist, coupling=None, temp=None, omega=None,
 
 def calc_vortex_lattice_periodic(coupling, temp, wc, gap_sym='d', field_list=None,
                                  kappa=5.0, lattice='square', kb=1.0, Ng=20, nbeta=16,
-                                 fs_kind=None, fs_params=None, fs=None, nflux=1):
+                                 fs_kind=None, fs_params=None, fs=None, nflux=1, bdir=None):
     """
     @fn calc_vortex_lattice_periodic
     @brief Driver: true periodic vortex lattice (Doppler/London, finite kappa).
@@ -995,7 +1009,7 @@ def calc_vortex_lattice_periodic(coupling, temp, wc, gap_sym='d', field_list=Non
             continue
         # the gap-node sampling needs a fine FS-angle grid for d-wave; small broadening
         n0 = float(lattice_dos(st, gap_sym, np.array([0.0]), nbeta=max(nbeta, 60),
-                               delta=0.012 * st['Dbulk'], fs=fs)[0])
+                               delta=0.012 * st['Dbulk'], fs=fs)[0], bdir=bdir)
         a_xi = st['acell'] / st['xi']
         bmin, bmax = st['Brel'].min(), st['Brel'].max()
         results.append((b, n0))
@@ -1326,7 +1340,7 @@ def _maxwell_A(jx, jy, g):
 
 
 def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='square',
-                     Ng=20, nbeta=16, hvf=1.0, fs=None, kappa=None, Vw=1, Lchord=6.0,
+                     Ng=20, nbeta=16, hvf=1.0, fs=None, kappa=None, Vw=1, Lchord=6.0, bdir=None,
                      ds_xi=0.3, itemax=60, mix=0.4, eps=3.0e-3, anderson=True, m_and=4,
                      seed_profile=None, self_consistent_A=False, mixA=0.3,
                      shape=None, theta0=0.0):
@@ -1348,6 +1362,14 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
     history vectors); falls back to linear ``mix`` for the first step / if disabled.
     @param seed_profile: optional [Ng,Ng] starting amplitude in units of the bulk gap
     (e.g. a converged absD/Dbulk from a nearby field) for a warm start.
+    @param bdir: field / vortex-line direction (default c axis).  The vortex plane is the
+           plane perpendicular to B, with its two axes rescaled by their rms velocities;
+           the Doppler/supercurrent is form invariant there (see the derivation in
+           solve_vortex2d), so nothing else changes.  CAVEAT: a finite ``kappa`` uses
+           ONE London length lambda = kappa*xi.  The real penetration depth is
+           anisotropic too, so a tilted field with finite kappa screens isotropically
+           here -- exact in the extreme type-II limit (large kappa, where A is
+           negligible) and approximate otherwise.
     @param self_consistent_A: finite kappa only -- replace the analytic London A by the
     FULLY self-consistent vector potential (je A_renew): each step the actual
     quasiclassical supercurrent j_s(r)=<v_F Im g> is computed and A(K)=j_{s,T}(K)/K^2
@@ -1358,7 +1380,9 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
     """
     _reject_chiral_ff(gap_sym, 'solve_lattice_sc')
     bfull = np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False)
-    hvf_eff = fs_hvf(fs, hvf)
+    # xi must use the speed IN THE VORTEX PLANE, which depends on the field direction
+    hvf_eff = (fs_field_frame(fs, bdir)['hvf_eff']
+               if fs is not None else hvf)
     if fs is not None:
         from ._eilenberger import bulk_gap_fs, fs_form_factor
         Dbulk = bulk_gap_fs(coupling, temp, omega, fs, gap_sym)
@@ -1375,9 +1399,15 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
     Y = F1 * g['a1'][1] + F2 * g['a2'][1]
     chi_grid = np.angle(_abrikosov_unit_phase(X, Y, g, Vw))
     if fs is not None:                                  # theta0 rotates crystal (FS+gap) vs lattice:
-        dirs = np.arctan2(fs['vy'], fs['vx']) + theta0  # rigidly rotate the v_F trajectory directions;
-        phi = fs_form_factor(fs, gap_sym)               # gap phi stays attached to each FS point
-        hvfarr = np.asarray(fs['vabs']); wt_dir = np.asarray(fs['nf']); nbd = len(dirs)
+        # trajectories in the plane PERPENDICULAR to B (fs_field_frame; bdir=None is
+        # the c axis and reproduces the historical (x,y) set bit for bit).  The
+        # Doppler/supercurrent needs no change: the rescaling of the two axes is
+        # area preserving, so v.p_s is form invariant in the scaled plane -- see the
+        # derivation in solve_vortex2d.
+        _fr = fs_field_frame(fs, bdir, gap_sym)
+        dirs = _fr['dirs'] + theta0                     # rigidly rotate the trajectories;
+        phi = _fr['phi']                                # gap phi stays attached to each FS point
+        hvfarr = np.asarray(_fr['vabs']); wt_dir = np.asarray(_fr['nf']); nbd = len(dirs)
     else:
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
         phi = form_factor(dirs - theta0, gap_sym); hvfarr = np.full(nbeta, hvf)
@@ -1482,7 +1512,7 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
                 Afield=((Axf, Ayf) if scA else None), iters=it + 1, err=err)
 
 
-def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None,
+def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None, bdir=None,
                    Lchord=6.0, ds_xi=0.3, theta0=None):
     """
     @fn lattice_dos_sc
@@ -1511,8 +1541,14 @@ def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None
     th0 = state.get('theta0', 0.0) if theta0 is None else theta0  # same rotation the gap was solved on
     if fs is not None:
         from ._eilenberger import fs_form_factor
-        dirs = np.arctan2(fs['vy'], fs['vx']) + th0; phi = fs_form_factor(fs, gap_sym)
-        hvfarr = np.asarray(fs['vabs']); wt_dir = np.asarray(fs['nf']); nbd = len(dirs)
+        # trajectories in the plane PERPENDICULAR to B (fs_field_frame; bdir=None is
+        # the c axis and reproduces the historical (x,y) set bit for bit).  The
+        # Doppler/supercurrent needs no change: the rescaling of the two axes is
+        # area preserving, so v.p_s is form invariant in the scaled plane -- see the
+        # derivation in solve_vortex2d.
+        _fr = fs_field_frame(fs, bdir, gap_sym)
+        dirs = _fr['dirs'] + th0; phi = _fr['phi']
+        hvfarr = np.asarray(_fr['vabs']); wt_dir = np.asarray(_fr['nf']); nbd = len(dirs)
     else:
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
         phi = form_factor(dirs - th0, gap_sym); hvfarr = np.full(nbeta, hvf)
@@ -1540,6 +1576,7 @@ def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None
 
 
 def lattice_free_energy(state, coupling, temp, omega, gap_sym, nbeta=24, hvf=1.0, fs=None,
+                        bdir=None,
                         Lchord=6.0, ds_xi=0.3, theta0=0.0):
     """
     @fn lattice_free_energy
@@ -1564,8 +1601,14 @@ def lattice_free_energy(state, coupling, temp, omega, gap_sym, nbeta=24, hvf=1.0
                 else (_london_A(g, lam, Vw) if lam is not None else (None, None)))
     if fs is not None:
         from ._eilenberger import fs_form_factor
-        dirs = np.arctan2(fs['vy'], fs['vx']); phi = fs_form_factor(fs, gap_sym)
-        hvfarr = np.asarray(fs['vabs']); wt_dir = np.asarray(fs['nf']); nbd = len(dirs)
+        # trajectories in the plane PERPENDICULAR to B (fs_field_frame; bdir=None is
+        # the c axis and reproduces the historical (x,y) set bit for bit).  The
+        # Doppler/supercurrent needs no change: the rescaling of the two axes is
+        # area preserving, so v.p_s is form invariant in the scaled plane -- see the
+        # derivation in solve_vortex2d.
+        _fr = fs_field_frame(fs, bdir, gap_sym)
+        dirs = _fr['dirs']; phi = _fr['phi']
+        hvfarr = np.asarray(_fr['vabs']); wt_dir = np.asarray(_fr['nf']); nbd = len(dirs)
     else:
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
         phi = form_factor(dirs - theta0, gap_sym); hvfarr = np.full(nbeta, hvf)
@@ -1659,7 +1702,7 @@ def calc_vortex_lattice_symmetry(coupling, temp, wc, gap_sym='d', field_list=Non
 
 def calc_vortex_lattice_sc(coupling, temp, wc, gap_sym='d', field_list=None,
                            lattice='square', kb=1.0, Ng=20, nbeta=16, fs=None,
-                           kappa=None, Vw=1, self_consistent_A=False):
+                           kappa=None, Vw=1, self_consistent_A=False, bdir=None):
     """
     @fn calc_vortex_lattice_sc
     @brief Driver: je-style self-consistent PERIODIC vortex lattice (formulation A).
@@ -1689,13 +1732,13 @@ def calc_vortex_lattice_sc(coupling, temp, wc, gap_sym='d', field_list=None,
     for b in field_list:
         st = solve_lattice_sc(coupling, temp, omega, gap_sym=gap_sym, field=b,
                               lattice=lattice, Ng=Ng, nbeta=nbeta, fs=fs, kappa=kappa,
-                              Vw=Vw, seed_profile=seed, self_consistent_A=self_consistent_A)
+                              Vw=Vw, seed_profile=seed, self_consistent_A=self_consistent_A, bdir=bdir)
         if st is None or st['Dbulk'] <= 0:
             print(f"  B/Hc2={b:.3f}: normal", flush=True)
             continue
         seed = st['absD'] / st['Dbulk']                # dimensionless profile (same Ng/grid)
         n0 = float(lattice_dos_sc(st, gap_sym, np.array([0.0]), nbeta=max(nbeta, 36),
-                                  delta=0.03 * st['Dbulk'], fs=fs)[0])
+                                  delta=0.03 * st['Dbulk'], fs=fs)[0], bdir=bdir)
         results.append((b, n0))
         D = st['absD']; Db = st['Dbulk']
         print(f"  B/Hc2={b:.3f}  a/xi={st['a']/st['xi']:.2f}  iters={st['iters']}  "
