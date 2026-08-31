@@ -369,11 +369,14 @@ def test_lattice_symmetry_wannier_fs_rotation():
     into the symmetry selection)."""
     wc, T = 0.5, 8e-4
     om = E.matsubara(T, wc)
-    fm = E.build_model_fs('tb', Nth=160, mu=-1.0, params=1.0)
+    # Cost-tuned: the C4 invariance is exact by symmetry, so it survives a coarse
+    # discretisation (dsym ~ 1e-15 against the 1e-10 threshold), and the pi/4 signal
+    # barely moves with it (dnon = 5.0e-3 / 1.3e-3 for s / d at Nth=48 as at Nth=160).
+    fm = E.build_model_fs('tb', Nth=48, mu=-1.0, params=1.0)
     def Fth(gs, th):
-        st = V.solve_lattice_sc(0.6, T, om, gap_sym=gs, field=0.2, Ng=16, nbeta=24,
-                                kappa=None, itemax=140, mix=0.4, eps=1e-3, theta0=th, fs=fm)
-        return V.lattice_free_energy(st, 0.6, T, om, gs, nbeta=48, theta0=th, fs=fm)
+        st = V.solve_lattice_sc(0.6, T, om, gap_sym=gs, field=0.2, Ng=12, nbeta=8,
+                                kappa=None, itemax=60, mix=0.4, eps=1e-3, theta0=th, fs=fm)
+        return V.lattice_free_energy(st, 0.6, T, om, gs, nbeta=16, theta0=th, fs=fm)
     for gs in ('s', 'd'):
         dsym = abs(Fth(gs, 0.0) - Fth(gs, np.pi / 2))    # C4 rotation: must be invariant
         dnon = abs(Fth(gs, 0.0) - Fth(gs, np.pi / 4))    # non-symmetry: must change
@@ -1435,7 +1438,9 @@ def test_vortex_in_plane_field():
     from libs.plibs import _eilenberger_vortex as V
     T, wc, lam = 4e-4, 0.5, 0.5
     om = E.matsubara(T, wc)
-    fc = E.build_model_fs('cyl', Nth=90, nkz=16, params=(1.0, 0.3))
+    # Cost-tuned FS/grid sizes: every check here is a ratio or a node depth, which
+    # converge long before the absolute profiles do (measured margins in the asserts).
+    fc = E.build_model_fs('cyl', Nth=36, nkz=8, params=(1.0, 0.3))
 
     def core(xg, amp, Db, xi, scale):
         ic = len(xg) // 2
@@ -1445,13 +1450,13 @@ def test_vortex_in_plane_field():
         return c1, c2
 
     # explicit B || c must be bit-identical to the default
-    a = V.solve_vortex2d(lam, T, om, gap_sym=0, fs=fc, ngrid=25, Lxi=6.0, itemax=12)
-    b = V.solve_vortex2d(lam, T, om, gap_sym=0, fs=fc, ngrid=25, Lxi=6.0, itemax=12,
+    a = V.solve_vortex2d(lam, T, om, gap_sym=0, fs=fc, ngrid=17, Lxi=6.0, itemax=12)
+    b = V.solve_vortex2d(lam, T, om, gap_sym=0, fs=fc, ngrid=17, Lxi=6.0, itemax=12,
                          bdir=(0, 0, 1))
     assert np.abs(a[1] - b[1]).max() == 0.0 and a[3] == b[3]
     for bd, lo, hi in (((0, 0, 1), 0.95, 1.05), ((1, 0, 0), 3.2, 4.4)):
         fr = E.fs_field_frame(fc, bd, gap_sym=0)
-        xg, Psi, Db, xi = V.solve_vortex2d(lam, T, om, gap_sym=0, fs=fc, ngrid=31,
+        xg, Psi, Db, xi = V.solve_vortex2d(lam, T, om, gap_sym=0, fs=fc, ngrid=21,
                                            Lxi=6.0, itemax=25, bdir=bd)
         assert np.abs(Psi[len(xg) // 2, len(xg) // 2]) / Db < 0.05     # node at the core
         c1, c2 = core(xg, Psi, Db, xi, fr['scale'])
@@ -1462,11 +1467,11 @@ def test_vortex_in_plane_field():
     # gradient: v.grad(phi) = v~.grad~(phi); vector potential: A~_i = A_i/c_i gives
     # v.A = v~.A~ with the same curl B).  The check is that an ISOTROPIC Fermi surface
     # gives a field-direction-independent answer at finite field.
-    sp = E.build_model_fs('sphere', Nth=90, nkz=32, kz_max=np.pi / 2)
+    sp = E.build_model_fs('sphere', Nth=32, nkz=16, kz_max=np.pi / 2)
     prof = []
     for bd in ((0, 0, 1), (1, 0, 0)):
-        xg, Psi, Db, xi = V.solve_vortex2d(lam, T, om, gap_sym=0, fs=sp, ngrid=25,
-                                           itemax=20, field=0.3, bdir=bd)
+        xg, Psi, Db, xi = V.solve_vortex2d(lam, T, om, gap_sym=0, fs=sp, ngrid=17,
+                                           itemax=16, field=0.3, bdir=bd)
         ic = len(xg) // 2
         assert np.abs(Psi[ic, ic]) / Db < 0.02                     # node at the core
         prof.append(np.abs(Psi[ic:, ic]) / Db)

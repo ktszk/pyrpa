@@ -798,14 +798,6 @@ def test_irr_wedge_matches_the_trs_note_for_every_parity():
         assert len(pts | neg) == Nx*Ny*Nz, f"{mesh}: does not cover the grid"
 
 
-# --------------------------------------------------------------------------- #
-#  standalone runner (no pytest required)
-# --------------------------------------------------------------------------- #
-if __name__ == '__main__':
-    import _tools
-    sys.exit(_tools.run_standalone(globals()))
-
-
 def _multiorbital_trs_model(Norb=3, Nx=4, Ny=4, Nz=1, Nw=4, temp=0.05, mu=0.13, seed=3):
     """Multi-orbital model with H(R) real (TRS) and H(-R)=H(R)^T (hermitian H(k)), but
     H(R) deliberately NOT symmetric.  A one-orbital model, or one with symmetric H(k),
@@ -901,3 +893,110 @@ def test_flex_filling_weights_irreducible_k_by_multiplicity():
         eig = -2 * (np.cos(2 * np.pi * klist[:, 0]) + np.cos(2 * np.pi * klist[:, 1]))
         occ = 0.5 * (1 - np.tanh(0.5 * (eig - 0.35) / temp))
         assert not np.isclose(occ.sum() / Nk, (mult * occ).sum() / Nkall, atol=1e-6)
+
+
+
+# --------------------------------------------------------------------------- #
+#  Cartesian (R-shell) gap harmonics
+# --------------------------------------------------------------------------- #
+_HARM_RVEC = np.array([[i, j, k] for i in (-2, -1, 0, 1, 2) for j in (-2, -1, 0, 1, 2)
+                       for k in (-2, -1, 0, 1, 2)], dtype=np.float64)
+_HARM_GAPS = (0, 1, 2, 3, 4, 5, -1, -2, 6, 7, -3)
+
+
+def _cart_rot(kfrac, bvec, M):
+    """Rotate k in CARTESIAN space by M and return the fractional coordinates."""
+    return ((kfrac @ bvec) @ M.T) @ np.linalg.inv(bvec)
+
+
+def test_cartesian_harmonic_reproduces_fractional_on_orthogonal_lattices():
+    """The Cartesian R-shell route must be a drop-in replacement wherever the fractional
+    formulas are already right: an orthogonal single-site lattice, every gap_sym
+    (chiral ones included) and every axis ratio (a=b<c, a=b>c, a!=b!=c, cubic).
+    Bit-level agreement is what makes switching it on by default safe for old inputs."""
+    rng = np.random.default_rng(3)
+    kf = rng.random((400, 3))
+    deg = np.array([90., 90., 90.])
+    for abc in ([4., 4., 6.], [4., 4., 3.], [3., 5., 7.], [4., 4., 4.]):
+        avec, _ = P.get_ptv(np.array(abc), deg, 0)
+        for gs in _HARM_GAPS:
+            old = P.gap_symms(kf, 1, gs)[0]
+            new = P.gap_symms(kf, 1, gs, avec=avec, rvec=_HARM_RVEC)[0]
+            assert np.abs(old - new).max() < 1e-12, (abc, gs)
+
+
+def test_cartesian_harmonic_is_periodic_and_carries_the_labelled_irrep():
+    """On a centred lattice the fractional harmonic is periodic but is NOT the symmetry
+    it is named after: cos(2 pi k_x) - cos(2 pi k_y) fails to change sign under the
+    Cartesian C4z of an fcc/bcc cell.  The R-shell harmonic does, because the symmetry
+    sits in the coefficients K(R_hat) while the phase 2 pi k.n stays basis independent
+    -- so no axis decomposition (sw_dec_axis) is needed and periodicity is untouched."""
+    rng = np.random.default_rng(7)
+    kf = rng.random((300, 3))
+    deg = np.array([90., 90., 90.])
+    C4 = np.array([[0., -1., 0.], [1., 0., 0.], [0., 0., 1.]])
+    for brav in (1, 2, 6, 7):
+        avec, _ = P.get_ptv(np.array([4., 4., 4.]), deg, brav)
+        bvec = P.get_bvec(avec)
+        kw = dict(avec=avec, rvec=_HARM_RVEC)
+        k4 = _cart_rot(kf, bvec, C4)
+        p0 = P.gap_symms(kf, 1, 1, **kw)[0].real
+        p4 = P.gap_symms(k4, 1, 1, **kw)[0].real
+        assert np.abs(p0).max() > 0.1
+        assert np.abs(p4 + p0).max() / np.abs(p0).max() < 1e-10, brav   # B1g: phi(C4k) = -phi(k)
+        for e in np.eye(3):                                             # periodic in every G
+            assert np.abs(p0 - P.gap_symms(kf + e, 1, 1, **kw)[0].real).max() < 1e-10
+        f0 = P.gap_symms(kf, 1, 1)[0].real                              # fractional: not B1g
+        f4 = P.gap_symms(k4, 1, 1)[0].real
+        assert np.abs(f4 + f0).max() / np.abs(f0).max() > 0.5, brav
+
+
+def test_cartesian_chiral_partners_share_a_shell_on_a_hexagonal_lattice():
+    """d+id is a 2D irrep (E2g) on a hexagonal lattice, so |phi| must be invariant under
+    C3z -- which holds only if BOTH partners are built on the same R set (hence the
+    common cutoff in _cart_gap_row).  The fractional harmonics miss this by O(1)."""
+    rng = np.random.default_rng(11)
+    kf = rng.random((300, 3))
+    avec, _ = P.get_ptv(np.array([4., 4., 6.]), np.array([90., 90., 90.]), 3)
+    bvec = P.get_bvec(avec)
+    th = 2 * np.pi / 3
+    C3 = np.array([[np.cos(th), -np.sin(th), 0.], [np.sin(th), np.cos(th), 0.], [0., 0., 1.]])
+    k3 = _cart_rot(kf, bvec, C3)
+    kw = dict(avec=avec, rvec=_HARM_RVEC)
+    a0 = np.abs(P.gap_symms(kf, 1, 6, **kw)[0])
+    a3 = np.abs(P.gap_symms(k3, 1, 6, **kw)[0])
+    assert np.abs(a3 - a0).max() / a0.max() < 1e-10
+    f0 = np.abs(P.gap_symms(kf, 1, 6)[0])
+    f3 = np.abs(P.gap_symms(k3, 1, 6)[0])
+    assert np.abs(f3 - f0).max() / f0.max() > 0.5
+
+
+def test_set_harmonic_lattice_switches_the_route_and_survives_a_tiny_r_set():
+    """The module default (what main.py registers) must reach gap_symms, be clearable,
+    and degrade to the fractional formula with a warning -- not raise -- when the R set
+    of the model cannot carry the requested symmetry."""
+    rng = np.random.default_rng(5)
+    kf = rng.random((64, 3))
+    avec, _ = P.get_ptv(np.array([4., 4., 4.]), np.array([90., 90., 90.]), 1)
+    frac = P.gap_symms(kf, 1, 1)[0]
+    try:
+        P.set_harmonic_lattice(avec, _HARM_RVEC)
+        assert np.abs(P.gap_symms(kf, 1, 1)[0]
+                      - P.gap_symms(kf, 1, 1, avec=avec, rvec=_HARM_RVEC)[0]).max() == 0.0
+        assert np.abs(P.gap_symms(kf, 1, 1)[0] - frac).max() > 0.1
+        P.set_harmonic_lattice(avec, np.zeros((1, 3)))          # only R = 0
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            fallback = P.gap_symms(kf, 1, 1)[0]
+        assert 'falling back' in out.getvalue()
+        assert np.abs(fallback - frac).max() == 0.0
+    finally:
+        P.set_harmonic_lattice(None, None)
+    assert np.abs(P.gap_symms(kf, 1, 1)[0] - frac).max() == 0.0
+
+
+# --------------------------------------------------------------------------- #
+#  standalone runner (no pytest required)
+# --------------------------------------------------------------------------- #
+if __name__ == '__main__':
+    import _tools
+    sys.exit(_tools.run_standalone(globals()))

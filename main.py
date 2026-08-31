@@ -14,7 +14,7 @@ brav: choose primitive translation vector S,FC,BC etc
 1: face center (for QE default)
 2: body center (for QE default)
 3: hexagonal
-4: trigonal    (for QE sbrav==5)
+4: trigonal    (for QE ibrav==5)
 5: base center
 6: face center (common)
 7: body center (common)
@@ -52,7 +52,7 @@ class CalcMode(IntEnum):
     GAP_FUNCTION       = (16, "gap_function")                              # post-process and output gap functions
     BAND_FILLING       = (17, "check band filling and electron/hole character")  # per-band filling & FS character
     CYCLOTRON_MASS     = (18, "calculate cyclotron mass")                  # cyclotron mass calculation
-    DHVA               = (19, "plot dHvA frequency")                       # dHvA frequency vs angle plot (not implemented)
+    DHVA               = (19, "plot dHvA frequency")
     ELECTRON_MASS      = (20, "calculate electron mass")                   # electron mass calculation (not implemented)
     SPECTRUM_IMPURITY  = (21, "spectrum with impurity")                    # spectral function with impurity (not implemented)
     SIGMA_CPA          = (22, "calculate sigma_cpa")                       # conductivity via CPA
@@ -99,6 +99,15 @@ MODES_SELF_MU       = frozenset({M.CONDUCTIVITY_BT,M.CONDUCTIVITY_PT,M.SPECTRUM_
 # k-mesh reporting groups
 MODES_KMESH_SYMLINE = frozenset({M.BAND,M.SPECTRUM})
 MODES_KMESH_SINGLE  = frozenset({M.FERMI_2D,M.FERMI_3D,M.CHIS_QMAP,M.PHI_QMAP,M.BAND_FILLING,M.CYCLOTRON_MASS,M.EILENBERGER})
+# modes that may run with sw_dec_axis: the axis decomposition is a Fermi-surface DRAWING
+# aid (unfolding a body-centred 122 cell into the conventional axes, so that the 10-orbital
+# 2-Fe FS can be laid over the 5-orbital 1-Fe one).  The half-integer R components it
+# leaves behind are exactly what that unfolding needs, but they also mean H(k) is no longer
+# periodic in the decomposed fractional k, so anything that sums over the BZ, FFT-convolves,
+# folds an irreducible wedge or divides by the cell volume is invalid -- see the guard in
+# main().  The band plot is allowed for the same comparison: it only evaluates E(k) on a
+# path, with no BZ sum (the DOS, option=1, IS a BZ sum and stays out).
+MODES_DEC_AXIS      = frozenset({M.BAND,M.FERMI_2D,M.FERMI_3D})
 MODES_MATSUBARA     = frozenset({M.FLEX,M.LIN_ELIASHBERG})
 # dispatch groups
 MODES_CHI_NORMAL    = frozenset({M.CHIS_SPECTRUM,M.CHIS_QPOINT,M.CHIS_QMAP,M.PHI_SPECTRUM,M.PHI_QMAP})
@@ -1129,7 +1138,7 @@ def get_mass(mesh,rvec,ham_r,S_r,avec,bvec,mu:float,de=3.e-6,meshkz=20):
     avec/bvec: primitive/reciprocal lattice vectors as rows, used for the slice area
                Jacobian and to report the field direction RotMat actually describes
     de: energy step for numerical derivative (eV)
-    meshkz: number of kz points for coarse scan of S(kz) in [0, pi/2]
+    meshkz: number of kz points for coarse scan of S(kz) in [0, 0.5] (reduced)
     """
     # Parameter validation
     if de <= 0:
@@ -1566,6 +1575,40 @@ def main():
     avec,Arot=plibs.get_ptv(alatt,deg,brav)
     #rotation axis
     if sw_dec_axis:
+        # Fermi-surface drawing only.  Re-expressing R in the conventional (orthogonal)
+        # axes is what lets a body-centred 122 Fermi surface be drawn in the familiar box
+        # and compared between the 10-orbital (2-Fe) and 5-orbital (1-Fe) models; E(k) at
+        # a given PHYSICAL k is preserved exactly (see the checks in the manual).  The
+        # half-integer R components this leaves for brav=1,2,6,7 are intrinsic to that
+        # unfolding -- and they are also why H(k) stops being periodic in the decomposed
+        # fractional k, so BZ sums, FFT convolutions, the irreducible wedge and det(avec)
+        # as a cell volume are all invalid here.  Hexagonal/trigonal cells cannot be put
+        # on an integer orthogonal lattice at all (irrational components).  Hence the
+        # whitelist: the transformation itself is left exactly as it was.
+        if option not in MODES_DEC_AXIS:
+            print(f"Error: sw_dec_axis=True is for the band and Fermi-surface plots only "
+                  f"(option={int(CalcMode.BAND)},{int(CalcMode.FERMI_2D)},"
+                  f"{int(CalcMode.FERMI_3D)}), not for "
+                  f"option={int(option)} ({option.description}). The decomposed axes leave "
+                  "H(k) non-periodic in the fractional k-mesh, which invalidates every BZ "
+                  "sum, FFT convolution, irreducible wedge and cell volume. Set "
+                  "sw_dec_axis=False; gap symmetries no longer need it either, since "
+                  "plibs.lattice_harmonic builds them from Cartesian R shells.",flush=True)
+            return
+        print("sw_dec_axis: drawing in the decomposed (conventional) axes",flush=True)
+        if option==CalcMode.BAND:
+            # The auto-generated path came from the centred-cell brav and means a different
+            # physical k in the decomposed axes.  Those axes ARE a simple orthogonal cell,
+            # so the simple-lattice path is the meaningful one here -- and it is the path
+            # the 1-Fe model is plotted along, which is the point of the comparison.
+            if globals().get("sw_gen_sym",False):
+                ks,xl=plibs.get_symm_line(0)
+                globals()["k_sets"],globals()["xlabel"]=ks,xl
+                print("sw_dec_axis: symmetry path regenerated for the decomposed "
+                      "(simple orthogonal) axes",flush=True)
+            else:
+                print("sw_dec_axis: k_sets is used as given -- it must be in the "
+                      "DECOMPOSED axes, not those of the centred cell",flush=True)
         rvec1=Arot.T.dot(rvec.T).T
         rvec=rvec1.copy()
         if brav in {1,2}:
@@ -1578,6 +1621,11 @@ def main():
         else:
             avec=alatt*np.eye(3)
     bvec=plibs.get_bvec(avec) #set recp. lattice
+    # Build the gap form factors from CARTESIAN harmonics on the R shells of this
+    # lattice (plibs.lattice_harmonic).  Identical to the old fractional formulas on
+    # an orthogonal single-site lattice, and correctly labelled on fcc/bcc/hexagonal
+    # ones, where cos(2 pi k_x) etc. do not transform as the harmonic they name.
+    plibs.set_harmonic_lattice(avec,rvec)
     if omp_check: #OMP properties
         print("OpenMP mode",flush=True)
         print(f"Number of OpenMP threads = {omp_num}",flush=True)

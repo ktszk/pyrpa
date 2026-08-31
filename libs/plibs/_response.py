@@ -416,7 +416,162 @@ def get_chi_orb_list(Norb: int, site_prof: np.ndarray) -> tuple[np.ndarray, np.n
             exit()
     return chiolist,site
 
-def gap_symms(klist: np.ndarray, Norb: int, gap_sym: int):
+# --- Cartesian (R-shell) lattice harmonics ------------------------------------
+# The fractional harmonics in gap_symms (cos(2*pi*k_x) etc.) carry their labelled
+# symmetry only on a tetragonal / orthogonal single-site lattice.  Fixing that does
+# NOT require the axes to be decomposed (sw_dec_axis, which would break the k-mesh
+# periodicity the BZ sums and FFT convolutions rely on): the phase
+# k.R = 2*pi*k_frac.n is basis independent, so it is enough to attach the CARTESIAN
+# symmetry to the shell COEFFICIENTS,
+#
+#     phi_G(k) = sum_R K_G(R_hat) exp(i k.R),        R_cart = n . avec,
+#
+# which is periodic in G by construction (R is a real lattice vector) and transforms
+# as the labelled irrep in any Bravais lattice.  On an orthogonal single-site lattice
+# it reproduces the fractional formulas EXACTLY (tests/test_rpa_flex.py).
+#
+# The R set is fixed by seed patterns rather than by a shell index: R_cut is the
+# longest of the seeds ((1,0,0)/(0,1,0) for the first-neighbour kinds, (1,+-1,0) for
+# d_xy and s+-, (1,0,+-1)/(0,1,+-1) for d_xz/d_yz), and every R within R_cut enters.
+# That keeps the two inequivalent stars of an orthorhombic cell (|a1| != |a2|) in the
+# same harmonic, while on a high-symmetry lattice it picks up the complete star (all
+# 12 nearest neighbours of an fcc cell, say) that the irrep needs.  K annihilates the
+# shells that do not belong; the A1g kind ('s'), which K cannot discriminate, uses the
+# single shell at R_cut instead.
+#
+# CAVEAT: for a multi-site cell the pairing bond is R + tau_j - tau_i, not R, so the
+# sublattice phase is still missing here -- use the orbital-basis route there
+# (eil_gap_orbital / eil_gap_file + the Nagai-Nakamura band projection).
+_CART_K = {'s':      lambda n: np.ones(len(n)),
+           'dx2-y2': lambda n: n[:, 0] ** 2 - n[:, 1] ** 2,
+           'dxy':    lambda n: n[:, 0] * n[:, 1],
+           'dxz':    lambda n: n[:, 0] * n[:, 2],
+           'dyz':    lambda n: n[:, 1] * n[:, 2],
+           'px':     lambda n: n[:, 0],
+           'py':     lambda n: n[:, 1]}
+_CART_ODD = {'px', 'py'}
+# kind -> (seed patterns fixing R_cut, single shell only?, in-plane only?)
+_CART_SEED = {'s':      ([(1, 1, 0), (1, -1, 0)], True, True),
+              'dx2-y2': ([(1, 0, 0), (0, 1, 0)], False, False),
+              'dxy':    ([(1, 1, 0), (1, -1, 0)], False, False),
+              'dxz':    ([(1, 0, 1), (1, 0, -1)], False, False),
+              'dyz':    ([(0, 1, 1), (0, 1, -1)], False, False),
+              'px':     ([(1, 0, 0), (0, 1, 0)], False, False),
+              'py':     ([(1, 0, 0), (0, 1, 0)], False, False)}
+# gap_sym -> (kind, sign, target rms over the BZ).  The rms fixes the amplitude to the
+# fractional convention (cos kx - cos ky and 2 sin kx sin ky have rms 1, 2 sin kx has
+# rms sqrt(2)), so per-band delta0 amplitudes keep their meaning; the sign keeps the
+# overall sign of the old formula.
+_CART_GAP = {1: ('dx2-y2', +1.0, 1.0), 2: ('s', +1.0, 1.0), 3: ('dxy', -1.0, 1.0),
+             4: ('dxz', -1.0, 1.0), 5: ('dyz', -1.0, 1.0),
+             -1: ('px', +1.0, np.sqrt(2.0)), -2: ('py', +1.0, np.sqrt(2.0))}
+_CART_CHIRAL = {6: (1, 3), 7: (4, 5), -3: (-1, -2)}   # chiral = partner_1 + i * partner_2
+
+_HARM_AVEC = None
+_HARM_RVEC = None
+
+
+def set_harmonic_lattice(avec=None, rvec=None) -> None:
+    """
+    @fn set_harmonic_lattice
+    @brief Register the lattice that gap_symms uses to build its harmonics in the
+    CARTESIAN basis (see lattice_harmonic).  main.py calls this once; with nothing
+    registered gap_symms falls back to the fractional-coordinate formulas, which carry
+    the labelled symmetry only for a tetragonal / orthogonal single-site lattice.
+    @param avec: primitive translation vectors as rows [3,3] in Angstrom (None clears)
+    @param rvec: R-vectors of the model [Nr,3] as integer fractional indices
+    """
+    global _HARM_AVEC, _HARM_RVEC
+    _HARM_AVEC = None if avec is None else np.asarray(avec, dtype=np.float64)
+    _HARM_RVEC = None if rvec is None else np.asarray(rvec, dtype=np.float64)
+
+
+def _seed_rcut(kind: str, avec: np.ndarray) -> float:
+    """|R| cutoff of the seed patterns of `kind` for this lattice (see _CART_SEED)."""
+    seeds = _CART_SEED[kind][0]
+    return max(np.linalg.norm(np.asarray(sd, dtype=np.float64)
+                              @ np.asarray(avec, dtype=np.float64)) for sd in seeds)
+
+
+def lattice_harmonic(klist: np.ndarray, avec: np.ndarray, rvec: np.ndarray, kind: str,
+                     rms: float = None, rcut: float = None) -> np.ndarray:
+    """
+    @fn lattice_harmonic
+    @brief Symmetrized plane-wave harmonic phi(k) = sum_R K(R_hat) exp(i k.R) with K a
+    CARTESIAN harmonic of the direction of R_cart = n . avec.  Periodic in the
+    reciprocal lattice by construction and correct in any Bravais lattice, so the gap
+    symmetry needs no axis decomposition.
+    @param klist: k-points in FRACTIONAL coordinates [Nk,3] (the phase 2*pi*k.n is basis
+                  independent, so they need no transformation)
+    @param  avec: primitive translation vectors as rows [3,3]
+    @param  rvec: R-vectors [Nr,3] as integer fractional indices
+    @param  kind: 's','dx2-y2','dxy','dxz','dyz','px','py'
+    @param   rms: rescale so that the BZ root-mean-square of phi is this (None: raw sum)
+    @param  rcut: |R| cutoff in Angstrom (None: from the seed patterns of this kind)
+    @return  phi: real array [Nk]  (cosine sum for even K, sine sum for odd K)
+    """
+    if kind not in _CART_K:
+        raise ValueError(f"lattice_harmonic: unknown kind {kind!r}")
+    rv = np.asarray(rvec, dtype=np.float64)
+    av = np.asarray(avec, dtype=np.float64)
+    Rc = rv @ av
+    d = np.linalg.norm(Rc, axis=1)
+    seeds, one_shell, in_plane = _CART_SEED[kind]
+    if rcut is None:
+        rcut = _seed_rcut(kind, av)
+    radii = np.unique(np.round(d[d > 1.0e-8], 6))
+    for rc in radii[radii >= rcut * (1.0 - 1.0e-6)] if len(radii) else []:
+        # The seed cutoff is the right shell on an orthogonal lattice.  Where the
+        # harmonic happens to vanish on it -- d_x2-y2 on the <111> neighbours of a bcc
+        # cell, say -- walk out to the next shell instead of returning zero.
+        sel = (d <= rc * (1.0 + 1.0e-6)) & (d > 1.0e-8)
+        if one_shell:
+            sel &= np.isclose(d, rc, rtol=1.0e-6)
+        if in_plane:
+            # s+- is A1g, which every shell carries, so K cannot pick the shell out: it
+            # is defined by the IN-PLANE nesting, hence the R_z = 0 restriction (this is
+            # what makes it 2 cos kx cos ky rather than the full cubic (110) sum).
+            sel &= np.abs(Rc[:, 2]) < 1.0e-8
+        if not sel.any():
+            continue
+        K = _CART_K[kind](Rc[sel] / d[sel][:, None])
+        if np.abs(K).max() > 1.0e-12:
+            break
+    else:
+        raise ValueError(f"lattice_harmonic: {kind} vanishes on every R shell of this "
+                         "model (or the R set is too small for this gap symmetry)")
+    ph = np.exp(2.0j * np.pi * (np.asarray(klist, dtype=np.float64) @ rv[sel].T))
+    v = (ph * K).sum(axis=1)
+    phi = v.imag if kind in _CART_ODD else v.real
+    if rms is not None:
+        # BZ rms is analytic: exp(i k.R) are orthonormal over the BZ and the R set is
+        # closed under inversion, so <phi^2> = sum_R K_R^2 for both parities.
+        cur = np.sqrt((K ** 2).sum())
+        phi = phi * (rms / cur) if cur > 0.0 else phi
+    return phi
+
+
+def _cart_gap_row(klist: np.ndarray, gap_sym: int, avec: np.ndarray,
+                  rvec: np.ndarray, rcut: float = None) -> np.ndarray:
+    """One k-row of the Cartesian harmonic for gap_sym, normalized to the amplitude
+    convention of the fractional formulas in gap_symms."""
+    if gap_sym in _CART_CHIRAL:
+        # A chiral form factor is only a proper 2D-irrep partner pair if BOTH members are
+        # built on the SAME R set -- otherwise |phi| is not invariant under the rotation
+        # that mixes them (hexagonal E2g fails by 77% with per-kind shells, 3e-15 with a
+        # common one).  The smaller of the two seed cutoffs is used, and the per-kind
+        # walk-out below restores the old shell where the partner vanishes on it (a
+        # tetragonal cell, where the two are separate 1D irreps anyway).
+        g1, g2 = _CART_CHIRAL[gap_sym]
+        rc = min(_seed_rcut(_CART_GAP[g][0], avec) for g in (g1, g2))
+        return (_cart_gap_row(klist, g1, avec, rvec, rcut=rc)
+                + 1.0j * _cart_gap_row(klist, g2, avec, rvec, rcut=rc))
+    kind, sgn, rms = _CART_GAP[gap_sym]
+    return sgn * lattice_harmonic(klist, avec, rvec, kind, rms=rms, rcut=rcut)
+
+
+def gap_symms(klist: np.ndarray, Norb: int, gap_sym: int,
+              avec: np.ndarray = None, rvec: np.ndarray = None):
     # The gap symmetry form factor depends only on k, so build one row and broadcast to all orbitals.
     # CAUTION: these harmonics are built from FRACTIONAL coordinates (cos(2*pi*k_x) etc.),
     # which represent the labeled symmetries (s, d_{x^2-y^2}, ...) only for a tetragonal /
@@ -424,6 +579,17 @@ def gap_symms(klist: np.ndarray, Norb: int, gap_sym: int):
     # (e.g. the 2-Fe cell of iron-based systems) the label and the actual irreducible
     # representation no longer correspond exactly; in such cases prefer the orbital-basis
     # gap route (gap_orbital + Nagai-Nakamura band projection, see project_gap_to_band).
+    av = _HARM_AVEC if avec is None else np.asarray(avec, dtype=np.float64)
+    rv = _HARM_RVEC if rvec is None else np.asarray(rvec, dtype=np.float64)
+    if av is not None and rv is not None and (gap_sym in _CART_GAP or gap_sym in _CART_CHIRAL):
+        try:
+            return np.tile(_cart_gap_row(klist, gap_sym, av, rv), (Norb, 1))
+        except ValueError as e:
+            # too small an R set for this symmetry: keep working on the fractional
+            # formula rather than aborting, but say so -- it is only labelled
+            # correctly on an orthogonal single-site lattice.
+            print(f'Warning: Cartesian gap harmonic unavailable ({e}); '
+                  'falling back to the fractional-coordinate form factor', flush=True)
     A=2*np.pi
     kx,ky,kz=klist[:,0],klist[:,1],klist[:,2]
     if gap_sym==0:        # s
@@ -454,7 +620,8 @@ def gap_symms(klist: np.ndarray, Norb: int, gap_sym: int):
         row=np.zeros(len(klist),dtype=np.float64)
     return np.tile(row,(Norb,1))
 
-def get_initial_gap(klist: np.ndarray, Norb: int, gap_sym: int) -> np.ndarray:
+def get_initial_gap(klist: np.ndarray, Norb: int, gap_sym: int,
+                    avec: np.ndarray = None, rvec: np.ndarray = None) -> np.ndarray:
     """
     @fn get_initial_gap
     @brief Generate an initial gap function with the specified pairing symmetry for gap equation iteration.
@@ -469,7 +636,7 @@ def get_initial_gap(klist: np.ndarray, Norb: int, gap_sym: int) -> np.ndarray:
     else:
         gapsym=['s','px','py','p+ip']
         print('gap symmetry is '+gapsym[-gap_sym])
-    row=gap_symms(klist,Norb,gap_sym)
+    row=gap_symms(klist,Norb,gap_sym,avec=avec,rvec=rvec)
     # The linearized Eliashberg seed is passed to Fortran as real(c_double) and the
     # kernel itself is real, so a CHIRAL harmonic cannot be used as a seed: the two
     # members of a degenerate pair (e.g. dxz and dyz) must be obtained from separate
