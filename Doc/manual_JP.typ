@@ -63,7 +63,44 @@ pyrpaはすべての設定を`main.py`の上部にある変数を書き換える
 - `matplotlib`
 - `skimage`（フェルミ面プロット option=2,3, サイクロトロン質量 option=18, dHvA 軌道 option=19 で使用）
 
-Fortran カーネル `libs/libfmod.so` をあらかじめコンパイルしておく必要があります（`libs` ディレクトリで `make FC=<compiler> SL=<library>`）。`libs/flibs`, `libs/plibs` はこれを呼び出す純 Python パッケージです。線形 / 非線形 Eliashberg・FLEX・SC chi 計算は OpenMP 並列の Fortran ルーチン経由で実行されます。
+Fortran カーネル `libs/libfmod.so` をあらかじめコンパイルしておく必要があります。`libs/flibs`, `libs/plibs` はこれを呼び出す純 Python パッケージです。線形 / 非線形 Eliashberg・FLEX・SC chi 計算は OpenMP 並列の Fortran ルーチン経由で実行されます。
+
+== Fortran カーネルのビルド
+
+`libs` ディレクトリで以下のいずれかを実行します。
+
+#table(
+  columns: (auto, 1fr),
+  [`make auto`], [*クラスタでの推奨.* ツールチェインはインストール／ロード状況から, CPU ターゲットは計算ノード自身から自動判定します。見つかった CPU の種類ごとに `libfmod_<target>.so` を 1 つずつビルドし, `libs/flibs/_loader.py` が実行ノードで使える最良のものを import 時に選びます。],
+  [`make`], [単一ターゲットのライブラリを 1 つ。`ARCH`（既定 `znver3` = 可搬な AVX2 ベースライン）, `FC`, `SL` は自動判定またはコマンドラインの指定に従います。],
+  [`make dispatch`], [`znver3` + `znver4` の固定ペア。すなわち検出を省いた `make auto` です。],
+)
+
+明示指定が常に優先されます: `make FC=ifx SL=MKL ARCH=znver4`, `make auto ARCH_LIST="znver3 znver4"` など。
+
+*何を, どこから判定するか.* `FC` は `PATH` 上の `ifx`, `ifort`, `flang`, `amdflang`, `gfortran` の最初に見つかったもの, `SL` は実際にロードされているモジュール（`MKLROOT` $arrow$ MKL, `AOCL_ROOT` $arrow$ AOCL, どちらも無ければ OpenBLAS）に従います。root が設定されていないライブラリを選ぶと, BLAS シンボルが未解決のまま import 時に初めて落ちる `libfmod.so` ができてしまうためです。一方 *CPU ターゲット* はビルドホストから取ってはいけません。Zen 4 のログインノードで `-march=native` を使うと, Zen 3 の計算ノードでは SIGILL で落ちる AVX-512 コードができます。そこで `libs/detect_arch.sh` は, スケジューラの台帳（Slurm の `sinfo`, PBS の `pbsnodes`, いずれも無ければ自機のみ）にある各ノードに対して `gcc -march=native` がその CPU を何と呼ぶかを問い合わせ, 重複を除いたターゲットを出力します。
+
+```
+$ sh libs/detect_arch.sh --table
+NODE         CPU                                      -march
+salmon       AMD Ryzen 7 5700G with Radeon Graphics   znver3
+unagi        AMD Ryzen 9 7900 12-Core Processor       znver4
+yakisoba     AMD Ryzen 9 7900X 12-Core Processor      znver4
+```
+
+結果は `libs/.arch_cache` にキャッシュされます。`sh libs/detect_arch.sh --refresh` で再取得, `--local` で自機のみに限定できます。応答しないノードは黙って無視されるのではなく, 可搬な既定値 `znver3` を寄与したうえで警告が出ます。`slurm.conf` に `Features=znver3` / `znver4` を設定しておけば, 検出はジョブ投入なしの `sinfo` 参照だけで済みます（クラスタを管理できる場合はこちらを推奨）。
+
+実行時に手で選ぶ必要はありません。`_loader.py` が CPU のフラグを読み, そのマシンで実際に実行できる最上位 ISA の `libfmod_*.so` を読み込みます（見つからなければ通常の `libfmod.so`）。AMD 上で MKL を使う場合は `MKL_ENABLE_INSTRUCTIONS=AVX512`（Zen 4）または `AVX2`（Zen 3）も export し, `OMP_NUM_THREADS` は決め打ちではなくスケジューラの値（`$SLURM_CPUS_PER_TASK`）から設定してください。
+
+*CMake.* `libs/CMakeLists.txt` でも同じ判定・同じ成果物が得られます（CMake を好む場合や IDE 連携が必要な場合）。
+
+```bash
+cmake -S libs -B build && cmake --build build -j     # = make auto
+cmake -S libs -B build -DARCH=znver4                 # = make ARCH=znver4（libfmod.so 単体）
+cmake -S libs -B build -DFC_COMPILER=gfortran -DSL=MKL -DARCH_LIST="znver3;znver4"
+```
+
+各変数は空なら自動判定です（`FC_COMPILER` は `PATH` から, `SL` は `MKLROOT`/`AOCL_ROOT` から, ターゲット一覧は `detect_arch.sh` から）。ライブラリはビルドツリーではなく `libs/` に出力します（`_loader.py` がそこを見るため）。C++ コンパイラが必要なのは pocketfft 経路のみで, MKL 経路では CXX 言語自体を有効にしないため, `ifx` はあるが `icpx` が無い oneAPI 環境でも configure できます。なお参照実装は makefile 側です。`flang` と AOCC モジュールを併用する場合, makefile は子プロセスの `CPATH` と `LIBRARY_PATH` の掃除も行いますが, CMake 側は行いません。
 
 = 入力ファイルについて
 

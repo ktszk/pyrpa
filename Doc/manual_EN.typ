@@ -62,7 +62,44 @@ The following Python packages are required:
 - `matplotlib`
 - `skimage` (used for Fermi surface plots option=2,3, cyclotron mass option=18, and dHvA orbits option=19)
 
-The Fortran kernel `libs/libfmod.so` must be compiled beforehand (run `make FC=<compiler> SL=<library>` in `libs`); `libs/flibs` and `libs/plibs` are pure-Python packages that wrap it. The FLEX, linear/nonlinear Eliashberg, and SC chi calculations are executed via OpenMP-parallel Fortran routines.
+The Fortran kernel `libs/libfmod.so` must be compiled beforehand; `libs/flibs` and `libs/plibs` are pure-Python packages that wrap it. The FLEX, linear/nonlinear Eliashberg, and SC chi calculations are executed via OpenMP-parallel Fortran routines.
+
+== Building the Fortran kernel
+
+Run one of these in `libs`:
+
+#table(
+  columns: (auto, 1fr),
+  [`make auto`], [*Recommended on a cluster.* Detects everything: the toolchain from what is installed and loaded, and the CPU targets from the compute nodes themselves. Builds one `libfmod_<target>.so` per distinct CPU type found, and `libs/flibs/_loader.py` picks the best one the running node supports at import.],
+  [`make`], [One library for one target: `ARCH` (default `znver3`, the portable AVX2 baseline), `FC` and `SL` as detected or as given on the command line.],
+  [`make dispatch`], [The fixed `znver3` + `znver4` pair, i.e. `make auto` without the detection step.],
+)
+
+Explicit settings always win: `make FC=ifx SL=MKL ARCH=znver4`, or `make auto ARCH_LIST="znver3 znver4"`.
+
+*What is detected, and where from.* `FC` is the first of `ifx`, `ifort`, `flang`, `amdflang`, `gfortran` on `PATH`; `SL` follows the modules actually loaded (`MKLROOT` $arrow$ MKL, `AOCL_ROOT` $arrow$ AOCL, otherwise OpenBLAS) — selecting a library whose root is not set is what used to yield a `libfmod.so` with unresolved BLAS symbols that failed only at import. The *CPU targets*, however, must not come from the build host: `-march=native` on a Zen 4 login node produces AVX-512 code that dies with SIGILL on a Zen 3 compute node. `libs/detect_arch.sh` therefore asks each node in the scheduler's inventory (Slurm `sinfo`, PBS `pbsnodes`, else just this machine) what `gcc -march=native` calls its CPU, and prints the distinct targets:
+
+```
+$ sh libs/detect_arch.sh --table
+NODE         CPU                                      -march
+salmon       AMD Ryzen 7 5700G with Radeon Graphics   znver3
+unagi        AMD Ryzen 9 7900 12-Core Processor       znver4
+yakisoba     AMD Ryzen 9 7900X 12-Core Processor      znver4
+```
+
+The result is cached in `libs/.arch_cache`; `sh libs/detect_arch.sh --refresh` re-probes, `--local` limits it to the current machine. A node that cannot be probed does not silently drop out: it contributes the portable `znver3` default and a warning. Setting `Features=znver3` / `znver4` in `slurm.conf` makes the probe a plain `sinfo` query with no job submission at all — worth doing if you administer the cluster.
+
+At run time nothing has to be selected by hand: `_loader.py` reads the CPU flags and loads the highest-ISA `libfmod_*.so` the machine can actually execute, falling back to a plain `libfmod.so`. For MKL on AMD also export `MKL_ENABLE_INSTRUCTIONS=AVX512` (Zen 4) or `AVX2` (Zen 3), and set `OMP_NUM_THREADS` from the scheduler (`$SLURM_CPUS_PER_TASK`) rather than hard-coding it.
+
+*CMake.* `libs/CMakeLists.txt` builds the same thing with the same detection, for people who prefer it or need it for an IDE:
+
+```bash
+cmake -S libs -B build && cmake --build build -j     # = make auto
+cmake -S libs -B build -DARCH=znver4                 # = make ARCH=znver4 (one libfmod.so)
+cmake -S libs -B build -DFC_COMPILER=gfortran -DSL=MKL -DARCH_LIST="znver3;znver4"
+```
+
+Empty knobs mean auto: `FC_COMPILER` from what is on `PATH`, `SL` from `MKLROOT`/`AOCL_ROOT`, and the target list from `detect_arch.sh`. The libraries are written into `libs/`, not the build tree, because that is where `_loader.py` looks. The C++ compiler is only required on the pocketfft path — the MKL path does not enable the CXX language at all, so an oneAPI install with `ifx` but no `icpx` still configures. The makefile remains the reference build: with `flang` plus AOCC modules loaded it also sanitises `CPATH` and `LIBRARY_PATH` for its child processes, which CMake does not do.
 
 = Input Files
 

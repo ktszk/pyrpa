@@ -144,5 +144,29 @@ def test_exact_chi0_two_pole_against_sharp_cutoff_extrapolation():
 # --------------------------------------------------------------------------- #
 #  standalone runner (no pytest required)
 # --------------------------------------------------------------------------- #
+
+def test_runtime_arch_dispatch_never_offers_an_illegal_library():
+    """`make auto` builds one libfmod_<-march>.so per CPU type in the cluster and
+    _loader.py picks at import.  The one failure that must not happen is offering an
+    AVX-512 build to a CPU without AVX-512: that is a SIGILL at the first vector
+    instruction, not an exception.  Check the ranking on both node classes of a mixed
+    Zen 3 / Zen 4 cluster, plus the plain-`make` fallback."""
+    from libs.flibs._loader import _select_library
+
+    zen3, zen4 = {'sse2', 'avx', 'avx2'}, {'sse2', 'avx', 'avx2', 'avx512f'}
+    built = ['libfmod', 'libfmod_znver3', 'libfmod_znver4']
+
+    assert 'libfmod_znver4' not in _select_library(built, zen3)   # the SIGILL case
+    assert _select_library(built, zen3)[0] == 'libfmod_znver3'
+    assert _select_library(built, zen4)[0] == 'libfmod_znver4'    # use AVX-512 where safe
+    # the generic build of a plain `make` is usable everywhere but always last,
+    # since its ARCH is whatever the person who built it happened to pick
+    assert _select_library(built, zen4)[-1] == 'libfmod'
+    assert _select_library(['libfmod'], zen3) == ['libfmod']
+    assert _select_library(['libfmod_znver4'], zen3) == []        # nothing usable
+    # an unknown -march is offered, but only behind everything recognised
+    mixed = _select_library(['libfmod_znver3', 'libfmod_futurearch'], zen3)
+    assert mixed[0] == 'libfmod_znver3' and 'libfmod_futurearch' in mixed
+
 if __name__ == '__main__':
     sys.exit(T.run_standalone(globals()))

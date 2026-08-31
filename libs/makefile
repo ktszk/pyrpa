@@ -23,13 +23,16 @@ ARCH ?= znver3
 # For MKL BLAS/FFT to also use wider kernels on these AMD CPUs, run with e.g.
 #   export MKL_ENABLE_INSTRUCTIONS=AVX512   (Zen 4)   or  AVX2 (Zen 3)
 #
-# Replace make's built-in default (FC=f77) with ifx, while still honouring an
-# explicit `make FC=...` on the command line or an exported FC in the env.
-# (`?=` alone does not override the built-in default, whose origin is 'default'.)
+# Auto-selection: take the first toolchain actually installed, in preference
+# order, instead of assuming ifx is there.  `make FC=...` and an exported FC
+# still win.  (`?=` alone does not override make's built-in default, whose
+# origin is 'default', hence the origin test.)
+_FC_AVAIL := $(strip $(foreach c,ifx ifort flang amdflang gfortran,\
+               $(if $(shell command -v $(c) 2>/dev/null),$(c))))
 ifeq ($(origin FC),default)
-  FC := ifx
+  FC := $(if $(_FC_AVAIL),$(firstword $(_FC_AVAIL)),ifx)
 endif
-FC ?= ifx
+FC ?= $(if $(_FC_AVAIL),$(firstword $(_FC_AVAIL)),ifx)
 # other examples:
 # FC = ifort
 # FC = ifx
@@ -83,12 +86,23 @@ endif
 CXXFLAGS := -O3 -march=$(ARCH) -mtune=$(ARCH) -funroll-loops -fPIC -std=c++17
 
 # Scalar libraries (MKL/AOCL/OpenBLAS); override via SL variable, e.g. SL=OpenBLAS.
-# Default is compiler-aware: flang/amdflang (AMD's compiler) pair with AMD's AOCL
-# (BLIS/libFLAME, provided via `module load AMD/AOCL`); everything else uses MKL.
+# Auto-selection follows the modules actually loaded: AMD's compiler pairs with
+# AOCL when AOCL_ROOT is exported (`module load AMD/AOCL`), everything else with
+# MKL when MKLROOT is exported, and OpenBLAS as the last resort.  `make SL=...`
+# overrides.  Selecting a library whose root is not set is what used to produce
+# a libfmod.so with unresolved BLAS symbols that only failed at import time.
 ifeq ($(FCFAM),flang)
+  ifneq ($(AOCL_ROOT),)
+    SL ?= AOCL
+  endif
+endif
+ifneq ($(MKLROOT),)
+  SL ?= MKL
+endif
+ifneq ($(AOCL_ROOT),)
   SL ?= AOCL
 endif
-SL ?= MKL
+SL ?= OpenBLAS
 # SL = AOCL
 # SL = OpenBLAS
 
@@ -279,7 +293,10 @@ ifeq ($(FCFAM),flang)
   endif
 endif
 
-.PHONY: all clean dispatch
+# Directory of this makefile, so `make -C libs auto` finds detect_arch.sh.
+THISDIR := $(dir $(lastword $(MAKEFILE_LIST)))
+
+.PHONY: all clean dispatch auto
 
 all: $(FLIBSO)
 
@@ -294,6 +311,21 @@ dispatch:
 	$(MAKE) ARCH=znver3 FLIBSO=libfmod_znver3.so
 	$(MAKE) ARCH=znver4 FLIBSO=libfmod_znver4.so
 	@echo "Built libfmod_znver3.so (AVX2) and libfmod_znver4.so (AVX-512); _loader.py selects at runtime."
+
+# Same idea, but with the target list DETECTED from the cluster's node inventory
+# instead of hard-coded: detect_arch.sh asks every compute node what gcc calls
+# its CPU and prints the distinct -march targets (cached in .arch_cache; pass
+# ARCH_LIST=... to override, `sh detect_arch.sh --refresh` to re-probe).  Never
+# uses -march=native: that would target the BUILD host and SIGILL on any older
+# node.  Recursive '=' so the probe only runs when this target is actually used.
+ARCH_LIST = $(shell sh $(THISDIR)detect_arch.sh 2>/dev/null || echo znver3)
+auto:
+	@sh $(THISDIR)detect_arch.sh --table
+	@for a in $(ARCH_LIST); do \
+	    echo "=== building libfmod_$$a.so ==="; \
+	    $(MAKE) ARCH=$$a FLIBSO=libfmod_$$a.so || exit 1; \
+	 done
+	@echo "Built: $(foreach a,$(ARCH_LIST),libfmod_$(a).so); _loader.py selects at runtime."
 
 $(OBJDIR):
 	mkdir -p $@
@@ -327,4 +359,4 @@ $(FLIBSO): $(OBJS) $(FFT_OBJ) $(FFT_DEP)
 -include $(DEPFILES)
 
 clean:
-	rm -rf obj $(FLIBSO) libfmod_znver3.so libfmod_znver4.so *.mod *.d
+	rm -rf obj $(FLIBSO) libfmod_*.so *.mod *.d .arch_cache
