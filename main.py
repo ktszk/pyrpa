@@ -144,6 +144,13 @@ Emin,Emax=0,25.         #energy window [eV] for DOS / spectral-function plots (o
 delta=2.72e-1           #spectral broadening eta [eV]: imaginary part added to G (Lorentzian width); too large smears, too small=noise
 Ecut=1.0e-2            #fixed energy omega_0 [eV] for the q-space susceptibility maps (option 9,11); ~0 probes the Fermi surface
 tau_const=100          #constant relaxation time tau [fs] for Boltzmann transport (option 5)
+#--- colour of the optical response (option 6) ---
+#The metallic lustre needs no parameter (it is R(w) itself). A non-metal is coloured by the
+#light that got THROUGH the material, so it needs a length: color_thick is the slab thickness
+#for the transmission colour, color_scatt the effective scattering length of the Kubelka-Munk
+#body colour of a powder/pigment (its single free parameter, ~ the particle size).
+color_thick=1.0e-3     #sample thickness d [m] for the transmission colour (1e-3 = 1 mm)
+color_scatt=1.0e-6     #effective scattering length l [m] for the Kubelka-Munk body colour
 #olist=[0,0,0]          #orbital indices mapped to R,G,B for orbital-weight coloring (color_option=1); nested lists group orbitals
 olist=[0,[1,2],3]
 #U,J=0.,0.
@@ -404,6 +411,65 @@ def plot_dielectric(w,eps,fname='dielectric',wp_scr=None):
         for ext in ('pdf','png'):
             fig.savefig(f'{fname}.{ext}',bbox_inches='tight')
     print(f"dielectric-function figure written to '{fname}.pdf' and '{fname}.png'",flush=True)
+
+def plot_reflectivity(w,refl,fname='reflectivity',wp_scr=None,swatch=None):
+    """Publication-quality figure of the normal-incidence reflectivity R(w).
+
+    Same journal conventions as plot_dielectric (single-column width, serif
+    mathtext, inward ticks, Okabe-Ito CVD-safe colours combined with distinct
+    line styles). The three principal (xx, yy, zz) components are drawn; the
+    yy/zz curves are omitted when they are numerically identical to xx (cubic
+    or otherwise isotropic response), keeping the panel uncluttered.
+
+    @param      w: photon-energy grid [eV] (real, 1-D)
+    @param   refl: reflectivity array [Nw, 3] (xx, yy, zz), values in [0, 1]
+    @param  fname: output basename; writes <fname>.pdf (vector) and <fname>.png
+    @param wp_scr: screened plasma frequency [eV]; if given, marked with a guide
+    @param swatch: optional [(label, rgb)] list; each is drawn as a colour patch
+                   so the perceived metallic colour is shown next to R(w)
+    Leaves the figure open so a later plt.show() displays it interactively.
+    """
+    blue,verm,green='#0072B2','#D55E00','#009E73'   # Okabe-Ito CVD-safe triple
+    sty=[(blue,'-',r'$R_{xx}$'),(verm,'--',r'$R_{yy}$'),(green,':',r'$R_{zz}$')]
+    rc={'font.family':'serif','mathtext.fontset':'dejavuserif','font.size':9,
+        'axes.linewidth':0.8,'lines.linewidth':1.3,
+        'xtick.direction':'in','ytick.direction':'in',
+        'xtick.top':True,'ytick.right':True,
+        'xtick.minor.visible':True,'ytick.minor.visible':True,
+        'legend.frameon':False,'savefig.dpi':600,'figure.dpi':600}
+    with plt.rc_context(rc):
+        fig,ax=plt.subplots(figsize=(3.4,2.6))   # PRB single-column width (~86 mm)
+        if wp_scr is not None:
+            # the reflectivity edge sits at the screened plasma frequency
+            ax.axvline(wp_scr,color='0.5',lw=0.8,ls=':',zorder=0)
+            ax.annotate(r'$\hbar\omega_{\mathrm{p}}$',xy=(wp_scr,1.0),
+                        xytext=(3,-9),textcoords='offset points',
+                        ha='left',va='top',fontsize=8,color='0.35')
+        for i,(col,ls,lab) in enumerate(sty):
+            # skip a component that duplicates xx (isotropic response)
+            if i>0 and np.allclose(refl[:,i],refl[:,0],rtol=1e-10,atol=1e-12):
+                continue
+            ax.plot(w,refl[:,i],color=col,ls=ls,label=lab)
+        ax.set_xlabel(r'$\hbar\omega$ (eV)')
+        ax.set_ylabel(r'Reflectivity $R(\omega)$')
+        ax.set_xlim(np.min(w),np.max(w))
+        ax.set_ylim(0.0,1.0)
+        if swatch:
+            # perceived colour patches (sRGB) as a small legend-like column in
+            # the bottom-right corner: square patch + label, stacked upwards
+            x0,y0,wsw,hsw,row=0.560,0.055,0.042,0.060,0.075
+            for j,(lab,rgb) in enumerate(reversed(swatch)):
+                y=y0+j*row
+                ax.add_patch(plt.Rectangle((x0,y),wsw,hsw,transform=ax.transAxes,
+                                           facecolor=tuple(np.clip(rgb,0,1)),
+                                           edgecolor='0.35',lw=0.5,zorder=5))
+                ax.text(x0+wsw+0.018,y+0.5*hsw,lab,transform=ax.transAxes,
+                        ha='left',va='center',fontsize=6,color='0.3',zorder=5)
+        ax.legend(loc='best',handlelength=1.8)
+        fig.tight_layout(pad=0.3)
+        for ext in ('pdf','png'):
+            fig.savefig(f'{fname}.{ext}',bbox_inches='tight')
+    print(f"reflectivity figure written to '{fname}.pdf' and '{fname}.png'",flush=True)
 
 def flatten_orbs(seq):
     """Flatten an olist (mix of ints and int-lists) into a flat list of orbital indices."""
@@ -992,6 +1058,69 @@ def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
     print(f'dielectric function at w = {wlist[1]:9.3e} eV',flush=True)
     print_matrix('Re[eps] matrix',epsilon[1].real)
     print_matrix('Im[eps] matrix',epsilon[1].imag)
+    # --- optical constants: N, R, alpha, and the non-metal spectra -----------
+    # N(w) = n + i*kappa = sqrt(eps(w)) on the passive branch (Im N >= 0), then
+    # the normal-incidence Fresnel reflectivity R = |(N-1)/(N+1)|^2 and the
+    # Beer-Lambert absorption coefficient alpha = 2*w*kappa/(hbar*c). Only the
+    # principal (diagonal) components are used, so these describe light
+    # polarized along a crystal axis; w=0 is skipped as for eps.
+    Nref=plibs.refractive_index(epsilon.diagonal(axis1=1,axis2=2))  # [Nw,3] xx,yy,zz
+    refl=plibs.reflectivity(Nref)
+    alpha=plibs.absorption_coefficient(wlist,Nref)                  # [1/m]
+    # what leaves a NON-metal: the slab transmittance at thickness color_thick
+    # and the Kubelka-Munk diffuse (body) reflectance at scattering length
+    # color_scatt. A metal is opaque, so both come out black -- correctly so.
+    trans=plibs.transmittance(refl,alpha,color_thick)
+    rinf=plibs.kubelka_munk(alpha,color_scatt)
+    absorp=np.clip(1.0-refl-trans,0.0,1.0)          # absorptance of the slab
+    print(f'reflectivity (normal incidence) at w = {wlist[1]:9.3e} eV',flush=True)
+    print(f'  R = ({refl[1,0]:.4f}, {refl[1,1]:.4f}, {refl[1,2]:.4f})  (xx, yy, zz)',flush=True)
+    print(f'absorption coefficient at w = {wlist[1]:9.3e} eV',flush=True)
+    print(f'  alpha = ({alpha[1,0]:9.3e}, {alpha[1,1]:9.3e}, {alpha[1,2]:9.3e}) 1/m',flush=True)
+    # --- perceived colour (metallic lustre) from R(w) ------------------------
+    # R(w) is folded with the CIE 1931 2-deg observer under illuminant D65 and
+    # converted to sRGB (see plibs._color), the standard route for first-
+    # principles metal colours (Prandini et al., npj Comput. Mater. 5, 129
+    # (2019)). The polycrystalline entry uses the directional average of R,
+    # which is what an unpolarised measurement on a polycrystal sees.
+    cols=[(lab,plibs.spectrum_color(wlist[1:],r))
+          for lab,r in [('xx',refl[1:,0]),('yy',refl[1:,1]),('zz',refl[1:,2]),
+                        ('poly',refl[1:].mean(axis=1))]]
+    # --- non-metal colours: the light that got through the material ----------
+    # A dielectric reflects almost nothing, so its colour is carried by the
+    # transmitted (or diffusely back-scattered) light, both computed from the
+    # directional average. The absorptance entry is the complement of what
+    # leaves the sample, so it is reported as its photographic negative.
+    ncols=[('T(d)',plibs.spectrum_color(wlist[1:],trans[1:].mean(axis=1)),'hex'),
+           ('KM',  plibs.spectrum_color(wlist[1:],rinf[1:].mean(axis=1)),'hex'),
+           ('A neg',plibs.spectrum_color(wlist[1:],absorp[1:].mean(axis=1)),'hex_neg')]
+    print('perceived colour (CIE 1931 2-deg observer, D65, sRGB):',flush=True)
+    # show the colour itself as a 24-bit ANSI block, but only on a real terminal
+    # so redirected logs stay free of escape sequences
+    tty=os.isatty(1)
+    for lab,c in cols:
+        r,g,b=(int(v) for v in c['rgb255'])
+        sq=f'\x1b[48;2;{r};{g};{b}m    \x1b[0m ' if tty else ''
+        print(f'  {lab:4s} {sq}{c["hex"]}  RGB = ({r:3d},{g:3d},{b:3d})'
+              f'  xy = ({c["xy"][0]:.4f}, {c["xy"][1]:.4f})  Y = {c["Y"]:.4f}'
+              +('  [out of sRGB gamut, clipped]' if c['clipped'] else ''),flush=True)
+    print(f'non-metal colour (d = {1e3*color_thick:.4g} mm, '
+          f'l_scatt = {1e6*color_scatt:.4g} um, directional average):',flush=True)
+    for lab,c,key in ncols:
+        r,g,b=(int(v) for v in (c['rgb255_neg'] if key=='hex_neg' else c['rgb255']))
+        sq=f'\x1b[48;2;{r};{g};{b}m    \x1b[0m ' if tty else ''
+        note=(' (opaque at this thickness)' if lab=='T(d)' and c['Y']<1.e-4 else
+              ' (negated: A is the complement of the transmitted light)'
+              if key=='hex_neg' else '')
+        # Y belongs to the spectrum that was integrated, so on the negated row
+        # it is labelled Y(A): the luminance of the absorptance, not of the swatch
+        print(f'  {lab:5s} {sq}{c[key]}  RGB = ({r:3d},{g:3d},{b:3d})'
+              f'  {"Y(A)" if key=="hex_neg" else "Y"} = {c["Y"]:.4f}{note}',flush=True)
+    if not cols[0][1]['full_range']:
+        print(f'  Warning: the spectrum does not cover the visible window '
+              f'(380-780 nm = 1.59-3.26 eV); R was held constant outside '
+              f'[{plibs.EV_NM/wlist[-1]:.0f}, {plibs.EV_NM/wlist[1]:.0f}] nm, so the colour is '
+              f'only indicative. Increase Emax (and Nw) to fix this.',flush=True)
     # --- plasma frequency ----------------------------------------------------
     # (1) effective (unscreened) plasma frequency from the optical f-sum rule
     #     (hbar*wp_a)^2 = (2*hbar/(pi*eps0)) * int_0^Emax Re sigma_aa(w) dw
@@ -1017,23 +1146,49 @@ def calc_conductivity_lrt(rvec,ham_r,S_r,avec,Nx:int,Ny:int,Nz:int,fill:float,
         print('  screened plasma freq (Re eps_xx=0): no upward zero crossing in [0, Emax]',flush=True)
     # write sigma(w) and eps(w) (diagonal components) to a data file
     try:
-        header=(f'plasma frequency (f-sum rule) hbar*wp [eV] = '
+        header=('perceived colour (CIE1931 2-deg, D65, sRGB) '
+                +'  '.join(f'{lab}: {c["hex"]} RGB({c["rgb255"][0]},{c["rgb255"][1]},'
+                           f'{c["rgb255"][2]})' for lab,c in cols)+'\n'
+                +f'non-metal colour (d = {color_thick:.4g} m, l_scatt = {color_scatt:.4g} m) '
+                +'  '.join(f'{lab}: {c[key]}' for lab,c,key in ncols)+'\n'
+                +f'plasma frequency (f-sum rule) hbar*wp [eV] = '
                 f'{hwp[0]:.6f} {hwp[1]:.6f} {hwp[2]:.6f}  (xx yy zz)\n'
                 +(f'screened plasma frequency (Re eps_xx=0) hbar*wp_scr [eV] = {wp_scr:.6f}\n'
                   if wp_scr is not None else 'screened plasma frequency (Re eps_xx=0): none in window\n')
                 +'w[eV] '
                 'Re_sigma_xx Im_sigma_xx Re_sigma_yy Im_sigma_yy Re_sigma_zz Im_sigma_zz '
-                'Re_eps_xx Im_eps_xx Re_eps_yy Im_eps_yy Re_eps_zz Im_eps_zz')
+                'Re_eps_xx Im_eps_xx Re_eps_yy Im_eps_yy Re_eps_zz Im_eps_zz '
+                'R_xx R_yy R_zz alpha_xx alpha_yy alpha_zz[1/m] '
+                'T_xx T_yy T_zz Rinf_xx Rinf_yy Rinf_zz')
         d=np.arange(3)
         data=np.column_stack([wlist[1:],
                               *[f(sigma[1:,i,i]) for i in d for f in (np.real,np.imag)],
-                              *[f(epsilon[1:,i,i]) for i in d for f in (np.real,np.imag)]])
+                              *[f(epsilon[1:,i,i]) for i in d for f in (np.real,np.imag)],
+                              refl[1:],alpha[1:],trans[1:],rinf[1:]])
         np.savetxt('optical.dat',data,header=header)
-        print("optical conductivity and dielectric function written to 'optical.dat'",flush=True)
+        print("optical conductivity, dielectric function and reflectivity written to 'optical.dat'",flush=True)
     except OSError as e:
         print(f"Error: Failed to write 'optical.dat': {e}",flush=True)
     # publication-quality dielectric-function figure (xx component), saved to file
     plot_dielectric(wlist[1:],epsilon[1:,0,0],fname='dielectric',wp_scr=wp_scr)
+    # publication-quality reflectivity figure (principal components)
+    # one patch per distinct colour (a cubic metal collapses to a single swatch)
+    sw=[]
+    for lab,c in cols:
+        for e in sw:
+            if e[0]==c['hex']:
+                e[1].append(lab)
+                break
+        else:
+            sw.append([c['hex'],[lab],c['rgb']])
+    swatch=[(f'{",".join(labs)}  {hx}',rgb) for hx,labs,rgb in sw]
+    # add the non-metal colours only when the sample actually lets light through
+    # at this thickness; a metal is opaque, so they would all be black clutter
+    if ncols[0][1]['Y']>0.05:
+        swatch+=[(f'{lab}  {c[key]}',c['rgb_neg'] if key=='hex_neg' else c['rgb'])
+                 for lab,c,key in ncols]
+    plot_reflectivity(wlist[1:],refl[1:],fname='reflectivity',wp_scr=wp_scr,
+                      swatch=swatch)
     # quick interactive view of the optical conductivity
     fig=plt.figure()
     ax=fig.add_subplot(111)

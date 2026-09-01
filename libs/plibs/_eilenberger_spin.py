@@ -564,7 +564,6 @@ def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0
            every subcritical channel.
     @return (xg, A [Ncomp, ngrid, ngrid] complex, Dbulk [Ncomp], xi)
     """
-    from scipy.interpolate import RegularGridInterpolator
     from ._eilenberger_vortex import _eval_field, _doppler_chord
     if channels is None:
         channels = _default_dvector_channels()
@@ -697,8 +696,6 @@ def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0
         A = np.array(A_init, dtype=np.complex128).reshape(nc, ngrid, ngrid).copy()
     ewind = np.exp(1j * theta)
     for it in range(itemax):
-        Ai = [RegularGridInterpolator((xg, xg), A[a], bounds_error=False,
-                                      fill_value=complex(Dbulk[a])) for a in range(nc)]
         accf = np.zeros((nc, ngrid, ngrid), dtype=np.complex128)
         for ib in range(nbeta):
             cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
@@ -709,7 +706,8 @@ def solve_vortex2d_dvector(couplings, temp, omega, channels=None, windings=(1, 0
             bxy = -X * sb + Y * cb
             Dpath = np.zeros((ngrid, ngrid, 2, 2), dtype=np.complex128)
             for a in range(nc):
-                amp = phid[a, ib] * Ai[a]((Lx, Ly)) * thr ** mwind[a]   # [ns,nb]
+                amp = (phid[a, ib] * _eval_field(A[a], xg, Lx, Ly, fill=complex(Dbulk[a]))
+                       * thr ** mwind[a])                               # [ns,nb]
                 Dpath += amp[:, :, None, None] * Smats[a]
             if field > 0.0:           # supercurrent Doppler om -> om + i v_F.Q (position dependent)
                 dop = hvfarr[ib] * _doppler_chord(Lx, Ly, Rc, cb, sb, rho_min)

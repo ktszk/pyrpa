@@ -31,7 +31,8 @@ import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 from ._eilenberger import matsubara, form_factor, fs_hvf, fs_field_frame
 from ._eilenberger_surface import _bulk_gap, _bulk_gap_imp
-from ..flibs import riccati_chords
+from ..flibs import (riccati_chords, riccati_chords_bc, bilinear_eval,
+                     bilinear_cell_eval, abrikosov_z)
 
 
 def _chords_batch(om3: np.ndarray, dd3: np.ndarray, hvf: float, ds):
@@ -43,15 +44,14 @@ def _chords_batch(om3: np.ndarray, dd3: np.ndarray, hvf: float, ds):
 
 def _eval_field(field: np.ndarray, xg: np.ndarray, px: np.ndarray, py: np.ndarray,
                 fill=0.0) -> np.ndarray:
-    """Evaluate a complex grid field at scattered points (px, py).  ``field`` is
-    [ng, ng] or [ng, ng, Nw]; returns px.shape (+ (Nw,)).  Real and imaginary
-    parts are interpolated separately (bilinear)."""
-    pts = np.stack([px.ravel(), py.ravel()], axis=1)
-    re = RegularGridInterpolator((xg, xg), field.real, bounds_error=False, fill_value=fill)(pts)
-    im = RegularGridInterpolator((xg, xg), field.imag, bounds_error=False, fill_value=fill)(pts)
-    out = re + 1j * im
-    shape = px.shape + ((field.shape[-1],) if field.ndim == 3 else ())
-    return out.reshape(shape)
+    """Evaluate a grid field at scattered points (px, py).  ``field`` is
+    [ng, ng] or [ng, ng, Nw] on the uniform axis ``xg``; returns px.shape
+    (+ (Nw,)).  Bilinear, ``fill`` outside the grid -- the Fortran kernel
+    (flibs.bilinear_eval), which is this solver's innermost operation.  A real
+    field stays real (that is how the gap amplitude is sampled, fill=Dbulk); a
+    complex field gets ``fill`` itself outside, not fill*(1+1j) as interpolating
+    the real and imaginary parts with two scipy interpolators would."""
+    return bilinear_eval(field, xg, px, py, fill)
 
 
 def _delta_grid(Dr: np.ndarray, rgrid: np.ndarray, Rg: np.ndarray, phase: np.ndarray,
@@ -81,15 +81,11 @@ def _azimuthal(field: np.ndarray, xg: np.ndarray, rgrid: np.ndarray,
     vortex winding); otherwise plain average (LDOS).
     @return averaged array [Nr, Nw]
     """
-    fre = RegularGridInterpolator((xg, xg), field.real, bounds_error=False, fill_value=0.0)
-    fim = RegularGridInterpolator((xg, xg), field.imag, bounds_error=False, fill_value=0.0)
-    out = np.empty((len(rgrid), field.shape[-1]), dtype=np.complex128)
-    emit = np.exp(-1j * theta)[:, None] if weight_phase else 1.0
-    for k, rho in enumerate(rgrid):
-        pts = np.stack([rho * np.cos(theta), rho * np.sin(theta)], axis=1)
-        fc = fre(pts) + 1j * fim(pts)                 # [ntheta, Nw]
-        out[k] = (fc * emit).mean(axis=0)
-    return out
+    px = rgrid[:, None] * np.cos(theta)[None, :]      # [Nr, ntheta]
+    py = rgrid[:, None] * np.sin(theta)[None, :]
+    fc = _eval_field(field, xg, px, py, fill=0.0)      # [Nr, ntheta, Nw], one Fortran pass
+    emit = np.exp(-1j * theta)[None, :, None] if weight_phase else 1.0
+    return (fc * emit).mean(axis=1)
 
 
 def solve_vortex(coupling: float, temp: float, omega: np.ndarray, Dbulk: float = None,
@@ -333,7 +329,6 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
     wt = np.broadcast_to(omega, (ngrid, ngrid, Nw)).copy()   # impurity-renormalized w (no Doppler)
     sigf = np.zeros((ngrid, ngrid, Nw), dtype=np.complex128)
     for it in range(itemax):
-        Ai = RegularGridInterpolator((xg, xg), A, bounds_error=False, fill_value=Dbulk)
         accf = np.zeros((ngrid, ngrid), dtype=np.complex128)        # sum_beta conj(phi) sum_n f
         gacc = np.zeros((ngrid, ngrid, Nw), dtype=np.complex128)    # sum_beta g (for <g>)
         facc = np.zeros((ngrid, ngrid, Nw), dtype=np.complex128)
@@ -343,26 +338,31 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
             hvf_i = hvfarr[ib]
             Lx = SS * cb - BB * sb
             Ly = SS * sb + BB * cb
-            base = phi[ib] * Ai((Lx, Ly)) * np.exp(1j * np.arctan2(Ly, Lx))   # phi*Psi [ns,nb]
+            base = (phi[ib] * _eval_field(A, xg, Lx, Ly, fill=Dbulk)
+                    * np.exp(1j * np.arctan2(Ly, Lx)))                    # phi*Psi [ns,nb]
             sxy = X * cb + Y * sb
             bxy = -X * sb + Y * cb
+            dch = None
+            if field > 0.0:                              # Doppler shift v_F.Q (scales with |v_F|)
+                dch = (_doppler_aphi(Lx, Ly, Rc, cb, sb, rho_min, qprof[0], qprof[1])
+                       if qprof is not None else _doppler_chord(Lx, Ly, Rc, cb, sb, rho_min))
+            if no_imp:
+                # gap and Doppler are frequency independent: the broadcast-aware
+                # kernel takes them as [ns,nb] instead of two [ns,nb,Nw] arrays
+                dom = None if dch is None else 1j * hvf_i * dch
+                g_rot, f_rot = riccati_chords_bc(omega, base, hvf_i, dx, dom=dom)
             if not use_pos:
-                om3 = np.broadcast_to(omega, (ngrid, ngrid, Nw)).astype(np.complex128)
-                dd3 = np.broadcast_to(base[:, :, None], (ngrid, ngrid, Nw))
-                _, f3 = _chords_batch(om3, np.ascontiguousarray(dd3), hvf_i, dx)
-                sumf = f3.sum(axis=2)
+                sumf = f_rot.sum(axis=2)
                 accf += wt_dir[ib] * np.conj(phi[ib]) * _eval_field(sumf, xg, sxy, bxy, fill=0.0)
             else:
-                om_rot = np.broadcast_to(omega, (ngrid, ngrid, Nw)).astype(np.complex128).copy()
-                if field > 0.0:                          # Doppler shift v_F.Q (scales with |v_F|)
-                    dch = (_doppler_aphi(Lx, Ly, Rc, cb, sb, rho_min, qprof[0], qprof[1])
-                           if qprof is not None else _doppler_chord(Lx, Ly, Rc, cb, sb, rho_min))
-                    om_rot = om_rot + 1j * hvf_i * dch[:, :, None]
-                Dtraj = np.broadcast_to(base[:, :, None], (ngrid, ngrid, Nw)).copy()
-                if not no_imp:
+                if not no_imp:                           # w and Delta both depend on w
+                    om_rot = np.broadcast_to(omega, (ngrid, ngrid, Nw)).astype(np.complex128).copy()
+                    if dch is not None:
+                        om_rot = om_rot + 1j * hvf_i * dch[:, :, None]
+                    Dtraj = np.broadcast_to(base[:, :, None], (ngrid, ngrid, Nw)).copy()
                     om_rot = om_rot + _eval_field(dwt, xg, Lx, Ly, fill=0.0)
                     Dtraj = Dtraj + _eval_field(sigf, xg, Lx, Ly, fill=0.0)
-                g_rot, f_rot = _chords_batch(om_rot, Dtraj, hvf_i, dx)
+                    g_rot, f_rot = _chords_batch(om_rot, Dtraj, hvf_i, dx)
                 g_xy = _eval_field(g_rot, xg, sxy, bxy, fill=0.0)
                 f_xy = _eval_field(f_rot, xg, sxy, bxy, fill=0.0)
                 gacc += wt_dir[ib] * g_xy
@@ -434,13 +434,14 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
         wt_dir = np.full(nbeta, 1.0 / nbeta)
     gpref = imp_gamma * (imp_c ** 2 + 1.0)
     SS, BB = np.meshgrid(xg, xg, indexing='ij')
-    Ai = RegularGridInterpolator((xg, xg), np.abs(Psi), bounds_error=False, fill_value=Dbulk)
+    Amp = np.abs(Psi)
     base, sxyb, dopp = [], [], []
     for ib in range(nbeta):
         cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
         Lx = SS * cb - BB * sb
         Ly = SS * sb + BB * cb
-        base.append(phi[ib] * Ai((Lx, Ly)) * np.exp(1j * np.arctan2(Ly, Lx)))
+        base.append(phi[ib] * _eval_field(Amp, xg, Lx, Ly, fill=Dbulk)
+                    * np.exp(1j * np.arctan2(Ly, Lx)))
         sxyb.append((X * cb + Y * sb, -X * sb + Y * cb, Lx, Ly))
         if field <= 0.0:
             dopp.append(None)
@@ -459,23 +460,20 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
             dwt = wt - zomega
             for ib in range(nbeta):
                 sxy, bxy, Lx, Ly = sxyb[ib]
-                if not use_pos:
-                    om3 = np.broadcast_to(zomega, (ngrid, ngrid, Nw)).astype(np.complex128)
-                    dd3 = np.broadcast_to(base[ib][:, :, None], (ngrid, ngrid, Nw))
-                    g_rot, _ = _chords_batch(om3, np.ascontiguousarray(dd3), hvfarr[ib], dx)
+                if no_imp:      # frequency-independent gap/Doppler -> broadcast kernel
+                    dom = None if dopp[ib] is None else 1j * hvfarr[ib] * dopp[ib]
+                    g_rot, _ = riccati_chords_bc(zomega, base[ib], hvfarr[ib], dx, dom=dom)
                     gacc += wt_dir[ib] * _eval_field(g_rot, xg, sxy, bxy, fill=0.0)
                 else:
                     om_rot = np.broadcast_to(zomega, (ngrid, ngrid, Nw)).astype(np.complex128).copy()
                     if field > 0.0:
                         om_rot = om_rot + 1j * hvfarr[ib] * dopp[ib][:, :, None]
                     Dtraj = np.broadcast_to(base[ib][:, :, None], (ngrid, ngrid, Nw)).copy()
-                    if not no_imp:
-                        om_rot = om_rot + _eval_field(dwt, xg, Lx, Ly, fill=0.0)
-                        Dtraj = Dtraj + _eval_field(sigf, xg, Lx, Ly, fill=0.0)
+                    om_rot = om_rot + _eval_field(dwt, xg, Lx, Ly, fill=0.0)
+                    Dtraj = Dtraj + _eval_field(sigf, xg, Lx, Ly, fill=0.0)
                     g_rot, f_rot = _chords_batch(om_rot, Dtraj, hvfarr[ib], dx)
                     gacc += wt_dir[ib] * _eval_field(g_rot, xg, sxy, bxy, fill=0.0)
-                    if not no_imp:
-                        facc += wt_dir[ib] * _eval_field(f_rot, xg, sxy, bxy, fill=0.0)
+                    facc += wt_dir[ib] * _eval_field(f_rot, xg, sxy, bxy, fill=0.0)
             if no_imp:
                 return gacc.real
             avg_g = gacc
@@ -1253,16 +1251,8 @@ def _abrikosov_z(x, y, g, np_sum=6):
     cell ``g`` (je's Sabrikosov; Dr=Dly/Dlx, obliqueness zeta, one zero per primitive
     cell at Dx0=-0.5(1+zeta), Dy0=-0.5).  Its phase is the vortex winding, its modulus
     ~1 between vortices and 0 at each core; works for square and triangular cells."""
-    Dlx, Dly, zeta = g['Dlx'], g['Dly'], g['zeta']
-    Dr = Dly / Dlx
-    Dx0, Dy0 = -0.5 * (1.0 + zeta), -0.5
-    xl, yl = x / Dlx, y / Dly
-    Z = np.zeros(np.broadcast(x, y).shape, dtype=np.complex128)
-    for p in range(-np_sum, np_sum + 1):
-        Z += (np.exp(-np.pi * Dr * (yl + Dy0 + p) ** 2)
-              * np.exp(-2j * np.pi * (p * (Dx0 + p * zeta * 0.5) + (Dy0 + p) * xl)))
-    Z *= np.sqrt(np.sqrt(2.0 * Dr))
-    return Z * np.exp(-1j * np.pi * xl * yl)
+    x, y = np.broadcast_arrays(np.asarray(x, dtype=float), np.asarray(y, dtype=float))
+    return abrikosov_z(x, y, g['Dlx'], g['Dly'], g['zeta'], np_sum)
 
 
 def _abrikosov_unit_phase(x, y, g, Vw=1):
@@ -1278,16 +1268,7 @@ def _periodic_eval(field, g, px, py):
     """Bilinear interpolation of a cell-centred field [Ng,Ng] (grid points at fractional
     (k+0.5)/Ng-0.5) at scattered Cartesian points (px,py), with periodic wrap on the
     (oblique) cell.  Real field only (the amplitude)."""
-    Ng = field.shape[0]
-    f1, f2 = _to_frac(px, py, g)
-    u = ((f1 + 0.5) % 1.0) * Ng - 0.5                  # grid point k sits at u=k
-    v = ((f2 + 0.5) % 1.0) * Ng - 0.5
-    i0 = np.floor(u).astype(int); j0 = np.floor(v).astype(int)
-    wu = u - i0; wv = v - j0
-    i0m = i0 % Ng; i1 = (i0 + 1) % Ng
-    j0m = j0 % Ng; j1 = (j0 + 1) % Ng
-    return ((1 - wu) * (1 - wv) * field[i0m, j0m] + wu * (1 - wv) * field[i1, j0m]
-            + (1 - wu) * wv * field[i0m, j1] + wu * wv * field[i1, j1])
+    return bilinear_cell_eval(field, px, py, g['Dlx'], g['Dly'], g['zeta'])
 
 
 def _london_A(g, lam, Vw=1, nfft=64):
@@ -1436,7 +1417,6 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
     else:
         A = Dbulk * np.tanh(np.abs(_abrikosov_z(X, Y, g)) / 0.5)   # node at each core
     Nw = len(omega)
-    om0 = np.broadcast_to(omega, (ns, Nanch, Nw)).astype(np.complex128)
     scA = bool(self_consistent_A and lam is not None)
     if scA:                                            # bulk superfluid density (London calibration)
         q0 = 0.05 * Dbulk / max(hvf_eff, 1e-12)
@@ -1451,22 +1431,24 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
         Axf, Ayf = _london_A(g, lam, Vw, nfft=Ng)      # seed A from the London solution (Ng grid)
         AuX, AuY = Axf.mean(), Ayf.mean()              # uniform (K=0) part: cancels the chi gauge term
                                                        # (gauge invariance); _maxwell_A gives only K!=0
-    # iteration-independent per-direction frequency arrays (fixed Doppler; recomputed if scA)
-    om_dir = [om0 if dch is None
-              else np.ascontiguousarray(omega[None, None, :] + 1j * hvfarr[ib] * dch[:, :, None])
-              for ib, (_, _, _, _, dch) in enumerate(chord)]
+    # iteration-independent per-direction frequency SHIFT [ns,Nanch] (fixed Doppler;
+    # recomputed if scA).  Only the shift is stored: the frequency axis is added
+    # inside riccati_chords_bc, so no [ns,Nanch,Nw] array is ever built.
+    dom_dir = [None if dch is None else 1j * hvfarr[ib] * dch
+               for ib, (_, _, _, _, dch) in enumerate(chord)]
 
-    def gap_map(Af, om_use):                            # one pass: returns A_new (+ current grids if scA)
+    def gap_map(Af, dom_use):                           # one pass: returns A_new (+ current grids if scA)
         accf = np.zeros(Nanch, dtype=np.complex128)
         curx = np.zeros(Nanch); cury = np.zeros(Nanch)
         for ib in range(nbd):
             px, py, eichi, proj, _ = chord[ib]
             base = phi[ib] * _periodic_eval(Af, g, px, py) * eichi
-            dd3 = np.broadcast_to(base[:, :, None], (ns, Nanch, Nw))
-            gch, f = riccati_chords(om_use[ib], np.ascontiguousarray(dd3), hvfarr[ib], ds)
-            accf += proj * f[ic].sum(axis=1)
+            # only the anchor row is needed, so ask the kernel for that row alone
+            gch, f = riccati_chords_bc(omega, base, hvfarr[ib], ds,
+                                       dom=dom_use[ib], row=ic)
+            accf += proj * f.sum(axis=1)
             if scA:                                    # supercurrent <v_F Im g> at the anchor
-                img = gch[ic].imag.sum(axis=1)
+                img = gch.imag.sum(axis=1)
                 cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
                 curx += wt_dir[ib] * hvfarr[ib] * cb * img
                 cury += wt_dir[ib] * hvfarr[ib] * sb * img
@@ -1478,9 +1460,9 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
     xs, fs = [], []                                    # Anderson/Pulay history (Walker-Ni) on Delta
     for it in range(itemax):
         if scA:                                        # Doppler from the current self-consistent A
-            omd = [np.ascontiguousarray(omega[None, None, :] - 1j * hvfarr[ib]
+            omd = [-1j * hvfarr[ib]
                    * (np.cos(dirs[ib]) * _periodic_eval(Axf, g, chord[ib][0], chord[ib][1])
-                      + np.sin(dirs[ib]) * _periodic_eval(Ayf, g, chord[ib][0], chord[ib][1]))[:, :, None])
+                      + np.sin(dirs[ib]) * _periodic_eval(Ayf, g, chord[ib][0], chord[ib][1]))
                    for ib in range(nbd)]
             Anew, curx, cury = gap_map(A, omd)
             Axn, Ayn = _maxwell_A(Cj * curx, Cj * cury, g)   # K!=0 screening part
@@ -1489,7 +1471,7 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
             Axf = (1.0 - mixA) * Axf + mixA * Axn
             Ayf = (1.0 - mixA) * Ayf + mixA * Ayn
         else:
-            Anew = gap_map(A, om_dir); errA = 0.0
+            Anew = gap_map(A, dom_dir); errA = 0.0
         res = Anew - A                                  # residual f_k = G(x_k) - x_k
         err = max(np.abs(res).max() / Dbulk, errA)
         if err < eps:
@@ -1557,7 +1539,6 @@ def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None
     ns = int(2 * L / ds) | 1; ic = ns // 2
     s = np.linspace(-L, L, ns)
     ax = X.ravel(); ay = Y.ravel(); Nanch = ax.size
-    om0 = np.broadcast_to(zomega, (ns, Nanch, Nw)).astype(np.complex128)
     gsum = np.zeros(Nw)
     for ib in range(nbd):
         cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
@@ -1565,13 +1546,11 @@ def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None
         py = ay[None, :] + s[:, None] * sb
         eichi = _abrikosov_unit_phase(px, py, g, Vw)
         base = phi[ib] * _periodic_eval(A, g, px, py) * eichi
-        dd3 = np.broadcast_to(base[:, :, None], (ns, Nanch, Nw))
-        om3 = (om0 if lam is None else
-               zomega[None, None, :] - 1j * hvfarr[ib]
-               * (cb * _periodic_eval(Axg, g, px, py)
-                  + sb * _periodic_eval(Ayg, g, px, py))[:, :, None])
-        gg, _ = riccati_chords(np.ascontiguousarray(om3), np.ascontiguousarray(dd3), hvfarr[ib], ds)
-        gsum += wt_dir[ib] * gg[ic].real.mean(axis=0)   # <Re g> over anchors
+        dom = (None if lam is None else
+               -1j * hvfarr[ib] * (cb * _periodic_eval(Axg, g, px, py)
+                                   + sb * _periodic_eval(Ayg, g, px, py)))
+        gg, _ = riccati_chords_bc(zomega, base, hvfarr[ib], ds, dom=dom, row=ic)
+        gsum += wt_dir[ib] * gg.real.mean(axis=0)       # <Re g> over anchors
     return gsum
 
 
@@ -1618,21 +1597,18 @@ def lattice_free_energy(state, coupling, temp, omega, gap_sym, nbeta=24, hvf=1.0
     s = np.linspace(-L, L, ns)
     ax = X.ravel(); ay = Y.ravel(); Nanch = ax.size
     Nw = len(omega)
-    om0 = np.broadcast_to(omega, (ns, Nanch, Nw)).astype(np.complex128)
     Isum = 0.0                                          # sum_n <I>_{r,FS}
     for ib in range(nbd):
         cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
         px = ax[None, :] + s[:, None] * cb; py = ay[None, :] + s[:, None] * sb
         eichi = _abrikosov_unit_phase(px, py, g, Vw)
         Dl = phi[ib] * _periodic_eval(A, g, px, py) * eichi          # Delta(theta,r) on chord
-        dd3 = np.broadcast_to(Dl[:, :, None], (ns, Nanch, Nw))
-        om3 = (om0 if lam is None else
-               omega[None, None, :] - 1j * hvfarr[ib]
-               * (cb * _periodic_eval(Axg, g, px, py)
-                  + sb * _periodic_eval(Ayg, g, px, py))[:, :, None])
-        gc, fc = riccati_chords(np.ascontiguousarray(om3), np.ascontiguousarray(dd3), hvfarr[ib], ds)
+        dom = (None if lam is None else
+               -1j * hvfarr[ib] * (cb * _periodic_eval(Axg, g, px, py)
+                                   + sb * _periodic_eval(Ayg, g, px, py)))
+        gc, fc = riccati_chords_bc(omega, Dl, hvfarr[ib], ds, dom=dom, row=ic)
         Dia = Dl[ic]                                                # Delta at the anchor [Nanch]
-        Ii = 2.0 * np.real(np.conj(Dia)[:, None] * fc[ic]) / (1.0 + gc[ic]).real   # [Nanch, Nw]
+        Ii = 2.0 * np.real(np.conj(Dia)[:, None] * fc) / (1.0 + gc).real           # [Nanch, Nw]
         Isum += wt_dir[ib] * Ii.sum(axis=1).mean()                  # sum_n, FS-weight, <>_r
     cond = (np.abs(A) ** 2).mean() / (coupling * Dbulk ** 2)        # condensation cost
     return cond - 2.0 * temp * Isum / Dbulk ** 2

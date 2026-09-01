@@ -237,6 +237,24 @@ $sigma$ and $sigma^((1))$ are both plain band sums, so each Fermi-surface sheet 
 
 Calculates electrical conductivity and related quantities based on the Kubo formula (linear response theory). The parameter `delta` corresponds to an effective relaxation time $tau approx hbar / delta$.
 
+The optical conductivity $sigma(omega)$ is further post-processed into (diagonal components $x x, y y, z z$):
+
+- the dielectric function $epsilon(omega) = 1 + i sigma(omega) \/ (epsilon_0 omega)$,
+- the plasma frequency (unscreened, from the $f$-sum rule, and screened, from $"Re" epsilon_(x x) = 0$),
+- the normal-incidence reflectivity $R(omega) = |(N - 1) \/ (N + 1)|^2$ with the complex refractive index $N = sqrt(epsilon)$,
+- the perceived metallic colour: $R(omega)$ folded with the CIE 1931 2° standard observer under illuminant D65 gives the XYZ tristimulus values, converted to sRGB (hex, 8-bit RGB, chromaticity $x y$, luminance $Y$). This is the standard route for first-principles metal colours (Prandini _et al._, npj Comput. Mater. *5*, 129 (2019)); the `poly` entry uses the directional average of $R$, i.e. the polycrystalline colour.
+
+A non-metal reflects almost nothing ($R approx 0.04$ for $n approx 1.5$) and its specular colour is nearly neutral, so its colour is carried by the light that travelled *through* the material. From the absorption coefficient $alpha = 2 omega kappa \/ (planck.reduce c)$ two further routes are reported:
+
+- the *transmission colour* of a slab of thickness $d$, $T = (1-R)^2 e^(-alpha d) \/ (1 - R^2 e^(-2 alpha d))$ (both surfaces, incoherent multiple reflections; it reduces to $T = (1-R)\/(1+R)$ for $alpha = 0$). Note that this colour is *not* an intrinsic material property: it depends on $d$.
+- the *body colour* of a powder or pigment, from the Kubelka--Munk two-flux diffuse reflectance $R_infinity = 1 + K\/S - sqrt((K\/S)^2 + 2 K\/S)$ with $K\/S = alpha l$, where the effective scattering length $l$ is the single free parameter (it absorbs the convention factor between $alpha$ and the Kubelka--Munk $K$, and the particle size).
+
+A colour computed from the absorptance $A = 1 - R - T$ is also printed, but since $A$ is the complement of what leaves the sample it is reported as its *negative* (`hex_neg`, i.e. $1 - "rgb"$ in encoded sRGB). The two lengths are set by the parameters `color_thick` ($d$) and `color_scatt` ($l$). A metal is opaque, so its $T$ and $R_infinity$ colours come out black -- correctly so, and they are then dropped from the figure's swatches automatically.
+
+Outputs are `optical.dat` ($sigma$, $epsilon$, $R$, $alpha$, $T$, $R_infinity$ spectra, with the colours recorded in the header), `dielectric.pdf/png` and `reflectivity.pdf/png` (with colour swatches). Set `Emax` above 3.3 eV so that the visible window 380--780 nm (1.59--3.26 eV) is covered; a warning is printed otherwise.
+
+On accuracy: a metal's colour is dominated by the smooth Drude response, so moderate errors barely move the hue, whereas a non-metal's hue *is* the position of the absorption edge. An error in the model band gap translates directly into a hue shift, and excitonic effects and phonon-assisted indirect transitions are absent from this Kubo-bubble calculation; the `delta` broadening also blurs the edge. Check convergence, and the model itself, before quoting these colours.
+
 == option=7: Spin Susceptibility Spectrum (`CHIS_SPECTRUM`)
 
 Calculates the RPA spin susceptibility

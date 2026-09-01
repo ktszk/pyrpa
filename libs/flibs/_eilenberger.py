@@ -106,3 +106,54 @@ def riccati_chords(om: np.ndarray, dd: np.ndarray, hvf: float, ds):
     _lib.riccati_chords(g, f, om, dd, dbl(hvf), ds_arr,
                         i64(Ns), i64(Nchord), i64(Nw))
     return g, f
+
+
+_lib.riccati_chords_bc.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),   # g   (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),   # f   (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),   # om  (in)  [Nw]
+    np.ctypeslib.ndpointer(dtype=np.complex128),   # dom (in)  [Ns,Nchord]
+    np.ctypeslib.ndpointer(dtype=np.complex128),   # dd  (in)  [Ns,Nchord]
+    POINTER(c_double),                             # hvf
+    np.ctypeslib.ndpointer(dtype=np.float64),      # ds  (in)  [Nchord]
+    POINTER(c_int64),                              # irow
+    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),   # Ns, Nchord, Nw
+]
+_lib.riccati_chords_bc.restype = None
+
+
+def riccati_chords_bc(om: np.ndarray, dd: np.ndarray, hvf: float, ds, dom=None, row=None):
+    """
+    @fn riccati_chords_bc
+    @brief Scalar Riccati chord integration with the frequency and the space
+    dependence kept separate (Fortran): om_local = om[w] + dom[i,c] and a
+    frequency-independent gap dd[i,c].  That is the structure of the clean vortex
+    and vortex-lattice problem, so the caller avoids building two [Ns,Nchord,Nw]
+    arrays per direction per iteration (tens of MB) only to hand them over --
+    which is what dominated the solvers.  Use riccati_chords when the gap itself
+    is frequency dependent (impurity self-energy Sigma_f).
+    @param   om: frequency [Nw] complex128
+    @param   dd: order parameter along each chord [Ns, Nchord] complex128
+    @param  hvf: hbar |v_F|
+    @param   ds: arc-length step, scalar or per-chord [Nchord]
+    @param  dom: per-point frequency shift [Ns, Nchord] (Doppler / gauge), or None
+    @param  row: None = return the full [Ns, Nchord, Nw] propagators;
+                 an int i = return only that point of each chord, [Nchord, Nw]
+                 (the anchor the gap equation and the lattice DOS need)
+    @return (g, f)
+    """
+    om = np.ascontiguousarray(om, dtype=np.complex128).ravel()
+    dd = np.ascontiguousarray(dd, dtype=np.complex128)
+    Ns, Nchord = dd.shape
+    Nw = om.size
+    dom = (np.zeros((Ns, Nchord), dtype=np.complex128) if dom is None
+           else np.ascontiguousarray(dom, dtype=np.complex128))
+    ds_arr = (np.full(Nchord, float(ds)) if np.isscalar(ds)
+              else np.ascontiguousarray(ds, dtype=np.float64))
+    irow = 0 if row is None else int(row) + 1          # Fortran is 1-based
+    shape = (Nchord, Nw) if row is not None else (Ns, Nchord, Nw)
+    g = np.empty(shape, dtype=np.complex128)
+    f = np.empty(shape, dtype=np.complex128)
+    _lib.riccati_chords_bc(g, f, om, dom, dd, dbl(hvf), ds_arr, i64(irow),
+                           i64(Ns), i64(Nchord), i64(Nw))
+    return g, f

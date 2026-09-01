@@ -364,3 +364,112 @@ subroutine matrix_riccati_chords(g,f,om,Dpath,hvf,ds,h,Ns,Nchord,Nw) bind(C)
   end do
   deallocate(Dmat)
 end subroutine matrix_riccati_chords
+
+
+subroutine riccati_chords_bc(g,f,om,dom,dd,hvf,ds,irow,Ns,Nchord,Nw) bind(C)
+!> riccati_chords_bc
+!> Same scalar Riccati chord integration as riccati_chords, but with the
+!> frequency and space dependences kept SEPARATE:
+!>   om_local(i,c,w) = om(w) + dom(i,c),   dd_local(i,c,w) = dd(i,c).
+!> That is the actual structure of the clean vortex / vortex-lattice problem --
+!> a frequency-independent order parameter along the chord and a frequency-
+!> independent Doppler (or gauge) shift of the frequency -- so the caller no
+!> longer has to materialize two [Ns,Nchord,Nw] arrays (tens of MB per
+!> direction, rebuilt every iteration) just to feed them in.
+!> With irow>0 only that one row of the output is written, which is all the gap
+!> equation and the lattice DOS need (the anchor point of each chord) and avoids
+!> writing the full [Ns,Nchord,Nw] propagators as well.
+!!@param   g,out: normal propagator [Ns,Nchord,Nw] (irow=0) or [Nchord,Nw] (irow>0)
+!!@param   f,out: anomalous propagator, same shape as g
+!!@param   om, in: frequency [Nw] complex128
+!!@param  dom, in: per-point additive frequency shift [Ns,Nchord] complex128
+!!@param   dd, in: order parameter along each chord [Ns,Nchord] complex128
+!!@param  hvf, in: hbar |v_F|
+!!@param   ds, in: arc-length step per chord [Nchord]
+!!@param irow, in: 0 = write every point; 1..Ns = write only that point (1-based)
+!!@param   Ns, in: points per chord
+!!@param Nchord,in: number of chords
+!!@param   Nw, in: number of frequencies
+  use,intrinsic:: iso_c_binding, only: c_int64_t,c_double
+  implicit none
+  integer(c_int64_t),intent(in):: Ns,Nchord,Nw,irow
+  real(c_double),intent(in):: hvf
+  real(c_double),intent(in),dimension(Nchord):: ds
+  complex(c_double),intent(in),dimension(Nw):: om
+  complex(c_double),intent(in),dimension(Nchord,Ns):: dom,dd
+  complex(c_double),intent(out),dimension(*):: g,f
+  integer(c_int64_t) c,i,w,base
+  real(c_double) t
+  complex(c_double) D1,om1,R,Tt,gm,gt,Dmid,ommid,den
+  complex(c_double),allocatable:: gamf(:,:),gamt(:,:)
+  !$omp parallel do default(none) &
+  !$omp   shared(g,f,om,dom,dd,hvf,ds,irow,Ns,Nchord,Nw) &
+  !$omp   private(i,w,c,t,base,D1,om1,R,Tt,gm,gt,Dmid,ommid,den,gamf,gamt)
+  do c=1,Nchord
+     t=ds(c)/hvf
+     allocate(gamf(Nw,Ns),gamt(Nw,Ns))
+     ! forward gamma: upstream bulk root at i=1
+     D1=dd(c,1)
+     do w=1,Nw
+        om1=om(w)+dom(c,1)
+        R=sqrt(om1*om1+D1*conjg(D1))
+        if(abs(D1)>0d0)then
+           gamf(w,1)=(R-om1)/conjg(D1)
+        else
+           gamf(w,1)=(0d0,0d0)
+        end if
+     end do
+     do i=1,Ns-1
+        Dmid=0.5d0*(dd(c,i)+dd(c,i+1))
+        do w=1,Nw
+           ommid=om(w)+0.5d0*(dom(c,i)+dom(c,i+1))
+           R=sqrt(ommid*ommid+Dmid*conjg(Dmid))
+           Tt=tanh(R*t)/R
+           gm=gamf(w,i)
+           gamf(w,i+1)=(gm+Tt*(Dmid-ommid*gm))/(1d0+Tt*(ommid+conjg(Dmid)*gm))
+        end do
+     end do
+     ! backward gamma-tilde: downstream bulk root at i=Ns
+     D1=dd(c,Ns)
+     do w=1,Nw
+        om1=om(w)+dom(c,Ns)
+        R=sqrt(om1*om1+D1*conjg(D1))
+        if(abs(D1)>0d0)then
+           gamt(w,Ns)=(R-om1)/D1
+        else
+           gamt(w,Ns)=(0d0,0d0)
+        end if
+     end do
+     do i=Ns,2,-1
+        Dmid=0.5d0*(conjg(dd(c,i))+conjg(dd(c,i-1)))
+        do w=1,Nw
+           ommid=om(w)+0.5d0*(dom(c,i)+dom(c,i-1))
+           R=sqrt(ommid*ommid+Dmid*conjg(Dmid))
+           Tt=tanh(R*t)/R
+           gt=gamt(w,i)
+           gamt(w,i-1)=(gt+Tt*(Dmid-ommid*gt))/(1d0+Tt*(ommid+conjg(Dmid)*gt))
+        end do
+     end do
+     ! combine (all rows, or just the requested one)
+     if(irow>0)then
+        base=(c-1)*Nw
+        do w=1,Nw
+           gm=gamf(w,irow); gt=gamt(w,irow)
+           den=1d0+gm*gt
+           g(base+w)=(1d0-gm*gt)/den
+           f(base+w)=2d0*gm/den
+        end do
+     else
+        do i=1,Ns
+           base=((i-1)*Nchord+(c-1))*Nw
+           do w=1,Nw
+              gm=gamf(w,i); gt=gamt(w,i)
+              den=1d0+gm*gt
+              g(base+w)=(1d0-gm*gt)/den
+              f(base+w)=2d0*gm/den
+           end do
+        end do
+     end if
+     deallocate(gamf,gamt)
+  end do
+end subroutine riccati_chords_bc

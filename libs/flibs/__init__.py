@@ -11,6 +11,7 @@ Functions are organized in submodules by physical topic:
   _transport    : Boltzmann transport, conductivity, TDF
   _impurity     : Impurity Hamiltonian, CPA
   _eilenberger  : Quasiclassical Eilenberger / Riccati trajectory hot loops
+  _grid         : Bilinear grid sampling and the Abrikosov LLL order parameter (vortex lattice)
 """
 from ._hamiltonian   import *
 from ._green         import *
@@ -21,3 +22,4 @@ from ._eliashberg    import *
 from ._transport     import *
 from ._impurity      import *
 from ._eilenberger    import *
+from ._grid           import *
