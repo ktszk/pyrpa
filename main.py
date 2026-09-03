@@ -204,8 +204,17 @@ nmr_spsym=None        #None: take the singlet/triplet channel from the sign of g
 #m_diis_num=2
 at_point=[ 0., .5, 0.]  #reduced q-point [0..1] for the single-q susceptibility (option 8)
 orb_dep=False  #use orbital dependence U,J (True: use Umat/Jmat matrices below; False: constant U,J)
-Umat=None      #orbital-dependent U matrix (Norb x Norb); set when orb_dep=True
-Jmat=None      #orbital-dependent J matrix (Norb x Norb); set when orb_dep=True
+UJ_material=None #with orb_dep=True, name of a stored cRPA parameter set loaded from UJ_dir instead of
+                 #writing Umat/Jmat out below, e.g. 'FeSe','FeTe','LiFeAs','BaFe2As2','LaFeAsO',
+                 #'LaFeAsOnakamura'. None: use the Umat/Jmat given here
+UJ_dir='UJ'    #directory of per-material U/J files ({UJ_dir}/{UJ_material}.json), or a single
+               #multi-material json file; the orbital order must match that of the hamiltonian.
+               #The stored sets hold one site (5 Fe-d orbitals) and are copied onto every site
+               #of a multi-site model (2-Fe, 10 orbitals) following site_prof
+Umat=None      #orbital-dependent U matrix (Norb x Norb, or one site worth of orbitals when
+               #site_prof has several equal sites: it is then copied onto every site);
+               #set when orb_dep=True and UJ_material=None
+Jmat=None      #orbital-dependent J matrix, same shape as Umat
 sw_unit=True    #True: use physical constants (SI/eV units), False: set all constants to 1 (dimensionless test mode)
 sw_tdf=False   #True: compute the transport distribution function first, then energy-integrate (energy-dependent tau)
 tau_mode='const' #relaxation time model for the Boltzmann transport modes (option 5).
@@ -1708,22 +1717,30 @@ def main():
         return
 
     if orb_dep:
-        # Orbital-dependent interaction mode requires full Norb x Norb U/J matrices.
-        if 'Umat' not in globals() or 'Jmat' not in globals():
-            print("Error: orb_dep=True requires Umat and Jmat to be defined",flush=True)
+        # Orbital-dependent interaction mode needs the U/J matrices, either written out in
+        # the header (Umat/Jmat) or loaded from a stored set (UJ_material).
+        if UJ_material is None:
+            if globals().get('Umat') is None or globals().get('Jmat') is None:
+                print("Error: orb_dep=True requires Umat and Jmat to be defined (or UJ_material to be set)",flush=True)
+                return
+            Umat_arr,Jmat_arr=Umat,Jmat
+        else:
+            try:
+                Umat_arr,Jmat_arr=plibs.read_UJ(UJ_material,UJ_dir)
+            except (OSError,KeyError,ValueError) as err:
+                print(f"Error: {err}",flush=True)
+                return
+        # A stored set covers ONE site (e.g. the 5 Fe-d orbitals), so it is replicated on
+        # every site of a multi-site hamiltonian (a 2-Fe, 10-orbital model); the checks on
+        # shape/dtype live in expand_UJ_sites, which also returns contiguous float64 arrays
+        # for stable ctypes calls to the Fortran wrappers.
+        try:
+            Umat_arr,Jmat_arr=plibs.expand_UJ_sites(Umat_arr,Jmat_arr,Norb,
+                                                    globals().get('site_prof',[1]))
+        except ValueError as err:
+            print(f"Error: {err}",flush=True)
             return
-        Umat_arr=np.asarray(Umat)
-        Jmat_arr=np.asarray(Jmat)
-        exp_shape=(Norb,Norb)
-        if Umat_arr.shape != exp_shape or Jmat_arr.shape != exp_shape:
-            print(f"Error: Umat/Jmat shape must be {exp_shape}, got {Umat_arr.shape}/{Jmat_arr.shape}",flush=True)
-            return
-        if np.iscomplexobj(Umat_arr) or np.iscomplexobj(Jmat_arr):
-            print("Error: Umat/Jmat must be real-valued matrices",flush=True)
-            return
-        # Use contiguous float64 arrays for stable ctypes calls to Fortran wrappers.
-        globals()['Umat']=np.ascontiguousarray(Umat_arr,dtype=np.float64)
-        globals()['Jmat']=np.ascontiguousarray(Jmat_arr,dtype=np.float64)
+        globals()['Umat'],globals()['Jmat']=Umat_arr,Jmat_arr
     # =============================================
 
     #set lattice vector
@@ -1808,8 +1825,19 @@ def main():
         print("color mode: "+color_option.description,flush=True)
     print("Hamiltonian name is "+fname,flush=True)
     print(f"Number of orbital = {Norb}",flush=True)
-    if (orb_dep==False) and option in MODES_PRINT_UJ: #write constant U,J
-        print(f'U= {U:5.2f} and J= {J:5.3f}')
+    if option in MODES_PRINT_UJ:
+        if orb_dep: #orbital-dependent matrices: report their range instead of single numbers
+            # Only the pairs sitting on one site enter the vertices; the inter-site blocks
+            # are zeros that would otherwise be reported as the minimum of U' and J.
+            offdiag=plibs.site_block_mask(Norb,globals().get('site_prof',[1])) & ~np.eye(Norb,dtype=bool)
+            msg=(f'orbital dependent U,J'+(f' ({UJ_material} in {UJ_dir})' if UJ_material else '')+
+                 f': U_ii= {np.diag(Umat).min():5.2f}-{np.diag(Umat).max():5.2f}')
+            if offdiag.any(): #a one-orbital site has no inter-orbital U',J
+                msg+=(f", U'_ij= {Umat[offdiag].min():5.2f}-{Umat[offdiag].max():5.2f}, "
+                      f'J_ij= {Jmat[offdiag].min():5.3f}-{Jmat[offdiag].max():5.3f}')
+            print(msg)
+        else: #write constant U,J
+            print(f'U= {U:5.2f} and J= {J:5.3f}')
     if option in MODES_NEED_CHI:
         """ chiolist is the list of orbital properties of index on chi """
         try:

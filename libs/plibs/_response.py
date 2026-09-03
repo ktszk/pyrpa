@@ -389,7 +389,9 @@ def get_chi_orb_list(Norb: int, site_prof: np.ndarray) -> tuple[np.ndarray, np.n
     @brief Generate the orbital index pair list for susceptibility calculation from site profile.
     @param    Norb: Total number of orbitals in the Hamiltonian
     @param site_prof: Array of orbital counts per site (e.g. [3, 3] for two 3-orbital sites)
-    @retval chiolist: Array of orbital index pairs (1-based) [Npairs, 2]
+    @retval chiolist: Array of orbital index pairs (1-based) [Npairs, 2] int64, FORTRAN-contiguous:
+                      the Fortran vertex/chi routines declare it as ol(Nchi,2) and read it in
+                      column-major order, so a C-contiguous list would be silently transposed
     @retval    site: Array of site indices corresponding to each orbital pair [Npairs]
     """
     if(len(site_prof)==1):
@@ -414,7 +416,79 @@ def get_chi_orb_list(Norb: int, site_prof: np.ndarray) -> tuple[np.ndarray, np.n
         else:
             print("site_prof doesn't correspond to Hamiltonian")
             exit()
-    return chiolist,site
+    # Fortran memory order: the single-site branch gets it from the .T view above, the
+    # multi-site one is built row by row and has to be converted.
+    return np.asfortranarray(chiolist,dtype=np.int64),site
+
+
+def expand_UJ_sites(Umat, Jmat, Norb: int, site_prof) -> tuple[np.ndarray, np.ndarray]:
+    """
+    @fn expand_UJ_sites
+    @brief Bring an orbital-dependent U/J pair into the Norb x Norb form the vertex
+    routines index with the GLOBAL orbital number, replicating a per-site matrix on
+    every site when one site worth of orbitals is given.
+    The vertices only read pairs sitting on one site (site(i)==site(j) in get_scmat_orb),
+    so the inter-site blocks are never used and are left at zero.
+    @param      Umat: [Norb,Norb], or [Norb/Nsite, Norb/Nsite] when every site carries the
+                      same number of orbitals (then replicated on each site)
+    @param      Jmat: same shape as Umat
+    @param      Norb: total number of orbitals of the hamiltonian
+    @param site_prof: orbital counts per site, e.g. [5,5]; [Norb] or [1] for a single site
+    @retval Umat,Jmat: [Norb,Norb] float64, FORTRAN-contiguous, i.e. Umat[a,b] is the
+                      Umat(a+1,b+1) the Fortran vertex routines read (immaterial for the
+                      symmetric U/J of a Kanamori interaction, but the declared convention)
+    """
+    mats=[]
+    for name,mat in (('Umat',Umat),('Jmat',Jmat)):
+        arr=np.asarray(mat)
+        if np.iscomplexobj(arr):
+            raise ValueError(f'{name} must be a real-valued matrix')
+        if arr.ndim != 2 or arr.shape[0] != arr.shape[1]:
+            raise ValueError(f'{name} must be a square matrix, got shape {arr.shape}')
+        mats.append(np.asfortranarray(arr,dtype=np.float64))
+    Umat,Jmat=mats
+    if Umat.shape != Jmat.shape:
+        raise ValueError(f'Umat and Jmat shapes differ: {Umat.shape} vs {Jmat.shape}')
+    Nsite=len(site_prof)
+    if Umat.shape[0] == Norb:      # already indexed by the global orbital number
+        return Umat,Jmat
+    Nsorb=Umat.shape[0]
+    if Nsite < 2:
+        raise ValueError(f'Umat/Jmat shape must be ({Norb}, {Norb}), got {Umat.shape}')
+    if sum(site_prof) != Norb:
+        raise ValueError(f'site_prof={list(site_prof)} does not add up to Norb={Norb}')
+    if any(ns != Nsorb for ns in site_prof):
+        raise ValueError(f'Umat/Jmat shape must be ({Norb}, {Norb}), got {Umat.shape}: a per-site '
+                         f'matrix is replicated only when every site has the same number of '
+                         f'orbitals, but site_prof={list(site_prof)}')
+    # one site worth of orbitals: put the same matrix on every site (block diagonal)
+    Uout=np.zeros((Norb,Norb),dtype=np.float64,order='F')
+    Jout=np.zeros((Norb,Norb),dtype=np.float64,order='F')
+    for i_site in range(Nsite):
+        n0=i_site*Nsorb
+        Uout[n0:n0+Nsorb,n0:n0+Nsorb]=Umat
+        Jout[n0:n0+Nsorb,n0:n0+Nsorb]=Jmat
+    return Uout,Jout
+
+
+def site_block_mask(Norb: int, site_prof) -> np.ndarray:
+    """
+    @fn site_block_mask
+    @brief Boolean [Norb,Norb] mask of the orbital pairs living on one site, i.e. exactly
+    the elements of Umat/Jmat the on-site interaction vertices read.
+    @param      Norb: total number of orbitals
+    @param site_prof: orbital counts per site
+    @retval     mask: [Norb,Norb] bool
+    """
+    mask=np.zeros((Norb,Norb),dtype=bool)
+    if len(site_prof) < 2:
+        mask[:,:]=True
+        return mask
+    n0=0
+    for ns in site_prof:
+        mask[n0:n0+ns,n0:n0+ns]=True
+        n0+=ns
+    return mask
 
 # --- Cartesian (R-shell) lattice harmonics ------------------------------------
 # The fractional harmonics in gap_symms (cos(2*pi*k_x) etc.) carry their labelled

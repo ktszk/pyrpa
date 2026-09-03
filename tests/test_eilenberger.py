@@ -625,7 +625,11 @@ def test_gap_orbital_from_wannier_round_trips_the_exporter(tmp_path):
     The d-wave fixture above cannot do this: its Delta(R) is real and inversion
     symmetric, so exp(+2 pi i k.R) and exp(-2 pi i k.R) give the same answer and a flipped
     sign (which would return Delta(-k)) passes unnoticed.  Export a RANDOM gap through
-    output_gap_wannier, read it back, and require the exact Delta(k) that went in."""
+    output_gap_wannier and require the exact Delta(k) that went in -- transposed, because
+    the exporter is handed the reversed ctypes view (gap[a,b] = Delta_ba) and stores the
+    physical Delta_ab, which is what the reader must hand to project_gap.  The fixture is
+    neither symmetric nor Hermitian in the orbital indices, so that transpose is pinned
+    here too, not just the Fourier sign."""
     import libs.plibs as p
     import libs.flibs as F
     from libs.plibs._wannier_io import _irr_to_full_kgrid
@@ -645,16 +649,25 @@ def test_gap_orbital_from_wannier_round_trips_the_exporter(tmp_path):
     g0 = p.gap_orbital_from_wannier(str(tmp_path / 'gap_wannier'))
     full = _irr_to_full_kgrid(gap, invk, kmap, Nx, Ny, Nz)      # what the exporter saw
     kfull = kmap / np.array([Nx, Ny, Nz], dtype=np.float64)
-    err = wrong = 0.0
+    err = wrong = flipped = 0.0
     for i, kf in enumerate(kfull):
-        want = full[:, :, 0, kmap[i, 0], kmap[i, 1], kmap[i, 2]]
+        want = full[:, :, 0, kmap[i, 0], kmap[i, 1], kmap[i, 2]].T    # Delta_ab
         got = g0(kf)
         err = max(err, np.abs(got - want).max())
-        # what the flipped sign would have produced at this k: Delta(-k)
+        # what the flipped Fourier sign would have produced at this k: Delta(-k)
         j = np.argmin(np.abs(kfull - (-kf) % 1.0).sum(axis=1))
-        wrong = max(wrong, np.abs(full[:, :, 0, kmap[j, 0], kmap[j, 1], kmap[j, 2]] - want).max())
+        wrong = max(wrong, np.abs(full[:, :, 0, kmap[j, 0], kmap[j, 1], kmap[j, 2]].T - want).max())
+        flipped = max(flipped, np.abs(want.T - want).max())           # ... and Delta^T(k)
     assert err < 1.0e-12, f'inverse FT does not round-trip the exporter (max err {err:.3e})'
     assert wrong > 1.0e-3, 'fixture too symmetric to distinguish Delta(k) from Delta(-k)'
+    assert flipped > 1.0e-3, 'fixture too symmetric to distinguish Delta(k) from Delta^T(k)'
+    # an export written before the orbital order was stamped (pair transposed, no
+    # 'orb_conv' key) must still read back as the same physical Delta_ab
+    z = np.load(str(tmp_path / 'gap_wannier.npz'))
+    np.savez(str(tmp_path / 'legacy'), gap=z['gap'].swapaxes(0, 1), rvec=z['rvec'],
+             iw=z['iw'], temp=z['temp'])
+    g_leg = p.gap_orbital_from_wannier(str(tmp_path / 'legacy'))
+    assert max(np.abs(g_leg(kf) - g0(kf)).max() for kf in kfull) < 1.0e-14
 
 
 def test_gap_color_3d():

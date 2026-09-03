@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 #-*- coding:utf-8 -*-
 """
-EPA output reading and Wannier-R space file I/O for self-energy and gap functions.
+EPA output reading, orbital-dependent U/J parameter sets, and Wannier-R space file I/O
+for self-energy and gap functions.
 """
 import numpy as np
 
@@ -150,6 +151,12 @@ def output_self_wannier(sigmak: np.ndarray, mu_self: float, kmap: np.ndarray, in
     @brief Convert self-energy Sigma(k, iw_n) -> Sigma(R, iw_n) in Wannier-real-space format.
     R-vectors are all grid points with at least one non-zero (orbital, Matsubara) component
     after zero_tol zeroing. Writes fname.npz (binary) and fname.dat (text).
+    Orbital order.  Unlike output_gap_wannier this writes the array as it comes, i.e. in
+    the reversed ctypes view of the Fortran sigma(Nk,Nw,Norb,Norb) (sigma[a,b] = Sigma_ba).
+    Its only consumer, the spectral-function interpolation in main.py's plot_spectrum,
+    hands the interpolated Sigma straight back to Fortran (gen_green), where the reversal
+    undoes itself -- it is never read as a matrix on the python side, so transposing here
+    would break it.
     @param   sigmak: [Norb, Norb, Nw, Nk_irr] complex128 — output of mkself/mkself_soc
     @param  mu_self: chemical potential with self-energy correction (eV)
     @param     kmap: [Nkall, 3] int64 — FFT grid indices from gen_irr_k_TRS
@@ -175,6 +182,30 @@ def output_self_wannier(sigmak: np.ndarray, mu_self: float, kmap: np.ndarray, in
     _write_wannier_dat(fname, data_out, rvec_kept, iw_grid, Nw,
                        'Self-energy', mu=mu_self, temp=temp)
 
+GAP_ORB_CONV = 'Delta_ab'   # orbital-order stamp written into gap_wannier.npz (see output_gap_wannier)
+
+
+def gap_orb_ab(gap_R: np.ndarray, npz, fname: str = '') -> np.ndarray:
+    """
+    @fn gap_orb_ab
+    @brief Return a stored Delta(R) with its orbital pair in the PHYSICAL order,
+    gap[a, b] = Delta_ab, whichever convention the file was written in.
+    Exports carrying the 'orb_conv' stamp are already in that order (output_gap_wannier
+    transposes on write); older files hold the raw ctypes view of the Fortran
+    delta(Nk,Nw,Norb,Norb), i.e. the transpose, and are converted here.
+    @param gap_R: [Norb, Norb, ...] complex128 as read from the npz
+    @param   npz: the open NpzFile it came from (carries the stamp)
+    @param fname: file name, for the message printed when the legacy order is assumed
+    @return the same array with gap[a, b] = Delta_ab
+    """
+    if 'orb_conv' in npz.files:
+        return gap_R
+    print(f'{fname or "gap file"}: no orbital-order stamp, assuming the pre-{GAP_ORB_CONV} '
+          'export convention (orbital pair transposed); re-export to remove this notice',
+          flush=True)
+    return np.ascontiguousarray(gap_R.swapaxes(0, 1))
+
+
 def output_gap_wannier(gap: np.ndarray, kmap: np.ndarray, invk: np.ndarray, Nx: int, Ny: int, Nz: int,
                        Nw: int, temp: float, N_cut: int = 64, zero_tol: float = 1e-5, fname: str = 'gap_wannier') -> None:
     """
@@ -184,13 +215,21 @@ def output_gap_wannier(gap: np.ndarray, kmap: np.ndarray, invk: np.ndarray, Nx: 
     after zero_tol zeroing. Writes fname.npz (binary) and fname.dat (text).
     Without SOC: gap is on irreducible k-points [Norb, Norb, Nw, Nk_irr]; expanded via invk+TRS.
     With SOC:    gap is on full BZ              [Norb, Norb, Nw, Nkall];   mapped directly via kmap.
-    @param      gap: [Norb, Norb, Nw, Nk_irr or Nkall] complex128
+
+    Orbital order.  The solvers hand this routine the numpy view of the Fortran array
+    delta(Nk,Nw,Norb,Norb), whose reversed indices make gap[a,b] = Delta_ba -- so the
+    pair is transposed HERE, once, and the file (both the npz and the io/jo columns of
+    the .dat) holds the physical Delta_ab.  The npz records that with orb_conv=
+    'Delta_ab'; readers restore whatever layout they need from that stamp through
+    gap_orb_ab, and a file written before the stamp existed still reads correctly.
+    @param      gap: [Norb, Norb, Nw, Nk_irr or Nkall] complex128, gap[a,b] = Delta_ba
     @param     kmap: [Nkall, 3] int64 — FFT grid indices from gen_irr_k_TRS
     @param     invk: [Nkall, 3] int64 — irr-k mapping with TRS flag from gen_irr_k_TRS
     @param    N_cut: number of leading Matsubara frequencies to keep (default 64)
     @param  zero_tol: Re/Im components below zero_tol * max|Delta| are set to 0 (default 1e-5)
     @param    fname: output file base name
     """
+    gap = gap.swapaxes(0, 1)     # -> Delta_ab, the order stored in the file
     Nkall = Nx * Ny * Nz
     if gap.shape[-1] == Nkall:   # SOC: already on full BZ
         Norb = gap.shape[0]
@@ -209,8 +248,67 @@ def output_gap_wannier(gap: np.ndarray, kmap: np.ndarray, invk: np.ndarray, Nx: 
     N_cut_used = data_out.shape[2]
     iw_grid    = (2 * np.arange(N_cut_used) + 1) * np.pi * temp
     try:
-        np.savez(fname, gap=data_out, rvec=rvec_kept, iw=iw_grid, temp=temp)
+        np.savez(fname, gap=data_out, rvec=rvec_kept, iw=iw_grid, temp=temp,
+                 orb_conv=np.array(GAP_ORB_CONV))
     except IOError as e:
         print(f'Error: Failed to write {fname}.npz: {e}', flush=True)
     _write_wannier_dat(fname, data_out, rvec_kept, iw_grid, Nw,
-                       'Gap function', temp=temp)
+                       'Gap function (io jo = Delta_{io,jo})', temp=temp)
+
+
+def _UJ_to_matrix(vals, label: str, fname: str) -> np.ndarray:
+    """Cast one stored U or J entry to a square float64 matrix (flat Norb^2 list or nested rows)."""
+    mat = np.asarray(vals, dtype=np.float64)
+    if mat.ndim == 1:
+        Norb = int(round(np.sqrt(mat.size)))
+        if Norb * Norb != mat.size:
+            raise ValueError(f'{fname}: "{label}" has {mat.size} elements, not a square Norb x Norb matrix')
+        mat = mat.reshape(Norb, Norb)
+    elif mat.ndim != 2 or mat.shape[0] != mat.shape[1]:
+        raise ValueError(f'{fname}: "{label}" has shape {mat.shape}, expected a square Norb x Norb matrix')
+    # Fortran order: the vertex routines declare Umat(Norb,Norb) and read it column-major
+    return np.asfortranarray(mat)
+
+
+def read_UJ(material: str, dirname: str = 'UJ') -> tuple[np.ndarray, np.ndarray]:
+    """
+    @fn read_UJ
+    @brief Read an orbital-dependent Coulomb parameter set (e.g. cRPA U/J of the Fe-based
+    superconductors) and return it as the Umat/Jmat matrices used when orb_dep=True.
+    Looked up in this order: material given as a .json path; {dirname}/{material}.json
+    (one material per file); {dirname}.json (or dirname itself, when it names a .json file)
+    holding several materials keyed by name.
+    Each U/J is stored either flat (Norb^2 values, row-major) or as nested rows.
+    @param material: material name, e.g. 'FeSe', or a path to a .json file
+    @param  dirname: directory holding the per-material files, or a multi-material
+                     .json file (default 'UJ')
+    @retval    Umat: intra-/inter-orbital Coulomb matrix [Norb, Norb] float64 (eV), Fortran-contiguous
+    @retval    Jmat: Hund coupling matrix [Norb, Norb] float64 (eV), Fortran-contiguous
+    """
+    import glob
+    import json
+    import os
+
+    name = os.path.basename(material)[:-5] if material.endswith('.json') else material
+    if material.endswith('.json') and os.path.isfile(material):
+        fname = material
+    elif os.path.isfile(os.path.join(dirname, name + '.json')):
+        fname = os.path.join(dirname, name + '.json')
+    elif os.path.isfile(dirname if dirname.endswith('.json') else dirname + '.json'):
+        fname = dirname if dirname.endswith('.json') else dirname + '.json'  # combined multi-material file
+    else:
+        raise FileNotFoundError(f'read_UJ: no U/J file for "{material}" in {dirname}/ or {dirname}.json')
+    with open(fname) as f:
+        data = json.load(f)
+    if 'U' not in data or 'J' not in data:     # multi-material file: pick the requested entry
+        if name not in data:
+            avail = sorted(set(data) | {os.path.basename(p)[:-5] for p in glob.glob(os.path.join(dirname, '*.json'))})
+            raise KeyError(f'read_UJ: "{name}" not found in {fname}. Available: {", ".join(avail)}')
+        data = data[name]
+        if 'U' not in data or 'J' not in data:
+            raise KeyError(f'read_UJ: entry "{name}" in {fname} has no "U"/"J" keys')
+    Umat = _UJ_to_matrix(data['U'], 'U', fname)
+    Jmat = _UJ_to_matrix(data['J'], 'J', fname)
+    if Umat.shape != Jmat.shape:
+        raise ValueError(f'read_UJ: U and J shapes differ in {fname}: {Umat.shape} vs {Jmat.shape}')
+    return Umat, Jmat

@@ -8,6 +8,7 @@ Runs standalone (no pytest needed):  python tests/test_rpa_flex.py
 Also works under pytest if installed:  pytest tests/test_rpa_flex.py
 Requires the Fortran library libfmod.so (cd libs && make FC=ifx SL=MKL).
 """
+import json
 import os
 import sys
 import contextlib
@@ -66,6 +67,37 @@ def test_chi_orb_list_multisite_site_length():
     assert chiolist.min() == 1 and chiolist.max() == 4
 
 
+def test_chi_orb_list_is_fortran_contiguous_for_the_vertex_routines():
+    """ol is declared ol(Nchi,2) in Fortran: a C-contiguous pair list would be read transposed."""
+    def ref_scmat(ol, site, U, J):  # get_scmat in python, indexing ol the way we read it here
+        Nchi, Up = len(ol), U - 2 * J
+        Smat, Cmat = np.zeros((Nchi, Nchi)), np.zeros((Nchi, Nchi))
+        for i in range(Nchi):
+            for j in range(Nchi):
+                if site[i] != site[j]:
+                    continue
+                (a, b), (c, d) = ol[i], ol[j]
+                if a == b and c == d:
+                    Smat[j, i], Cmat[j, i] = (U, U) if a == c else (J, 2 * Up - J)
+                elif a == c and b == d:
+                    Smat[j, i], Cmat[j, i] = Up, -Up + 2 * J
+                elif a == d and b == c:
+                    Smat[j, i], Cmat[j, i] = J, J
+        return Smat, Cmat
+
+    for Norb, site_prof in ((4, [4]), (4, [2, 2]), (6, [3, 3]), (5, [3, 2])):
+        olist, site = P.get_chi_orb_list(Norb, site_prof)
+        assert olist.flags['F_CONTIGUOUS'] and olist.dtype == np.int64
+        Sref, Cref = ref_scmat(olist, site, 1.0, 0.2)
+        Smat, Cmat = F.gen_SCmatrix(olist, site, 1.0, 0.2)
+        assert np.allclose(Smat, Sref) and np.allclose(Cmat, Cref), f'site_prof={site_prof}'
+        # same vertex through the orbital-resolved route (off-diagonal U entries are U'=U-2J)
+        Umat = np.full((Norb, Norb), 0.6) + 0.4 * np.eye(Norb)
+        Jmat = np.full((Norb, Norb), 0.2)
+        So, Co = F.gen_SCmatrix_orb(olist, site, Umat, Jmat)
+        assert np.allclose(So, Sref) and np.allclose(Co, Cref), f'site_prof={site_prof}'
+
+
 def test_uniform_sc_matrix_two_orbital_reference_values():
     """For a two-orbital single-site model, lock the U/J spin/charge vertices."""
     olist, site = P.get_chi_orb_list(2, [2])
@@ -110,6 +142,73 @@ def test_orbital_dependent_vertices_reference_values():
     )
     assert np.allclose(Smat_orb, expected_s)
     assert np.allclose(Cmat_orb, expected_c)
+
+
+def test_read_UJ_stored_sets_feed_the_orbital_dependent_vertex(tmp_path):
+    """read_UJ returns Norb x Norb matrices in the get_scmat_orb convention (diag U, off-diag U')."""
+    root = Path(__file__).resolve().parents[1]
+    Umat, Jmat = P.read_UJ('FeSe', str(root / 'UJ'))
+    assert Umat.shape == Jmat.shape == (5, 5)
+    assert Umat.dtype == np.float64 and Umat.flags['F_CONTIGUOUS']
+    # yz/zx (orbitals 1,2) are degenerate, and both matrices are symmetric
+    assert np.allclose(Umat, Umat.T) and np.allclose(Jmat, Jmat.T)
+    assert Umat[1, 1] == Umat[2, 2]
+    # the same set is reachable through a combined multi-material file
+    combined_all = tmp_path / 'sets.json'
+    combined_all.write_text(json.dumps({'FeSe': {'U': Umat.tolist(), 'J': Jmat.tolist()},
+                                        'FeTe': {'U': [[0.0]], 'J': [[0.0]]}}))
+    assert np.array_equal(Umat, P.read_UJ('FeSe', str(combined_all))[0])
+    # a flat Norb^2 list and nested rows describe the same matrix
+    flat = tmp_path / 'Flat.json'
+    flat.write_text('{"U": [1.0, 0.6, 0.6, 1.0], "J": [0.0, 0.2, 0.2, 0.0]}')
+    nest = tmp_path / 'Nest.json'
+    nest.write_text('{"U": [[1.0, 0.6], [0.6, 1.0]], "J": [[0.0, 0.2], [0.2, 0.0]]}')
+    Uf, Jf = P.read_UJ('Flat', str(tmp_path))
+    assert np.array_equal(Uf, P.read_UJ('Nest', str(tmp_path))[0])
+    # with U'=U-2J the orbital-resolved vertex must reproduce the scalar Kanamori one
+    olist, site = P.get_chi_orb_list(2, [2])
+    assert all(np.allclose(a, b) for a, b in
+               zip(F.gen_SCmatrix_orb(olist, site, Uf, Jf), F.gen_SCmatrix(olist, site, 1.0, 0.2)))
+    # an unknown name is an error, not a silent fallback to some other material
+    combined = tmp_path / 'all.json'
+    combined.write_text('{"A": {"U": [1.0], "J": [0.0]}}')
+    for where, err in ((str(combined), KeyError), (str(tmp_path / 'missing'), FileNotFoundError)):
+        try:
+            P.read_UJ('Nonexistent', where)
+        except err:
+            continue
+        raise AssertionError(f'read_UJ("Nonexistent", {where!r}) should raise {err.__name__}')
+
+
+def test_expand_UJ_sites_replicates_one_site_on_every_site():
+    """A stored one-site U/J set fills the on-site blocks of a multi-site hamiltonian."""
+    root = Path(__file__).resolve().parents[1]
+    Umat, Jmat = P.read_UJ('FeSe', str(root / 'UJ'))
+    # 2-Fe (10-orbital) model: the 5-orbital set goes on both sites, inter-site blocks stay 0
+    Uex, Jex = P.expand_UJ_sites(Umat, Jmat, 10, [5, 5])
+    assert Uex.shape == Jex.shape == (10, 10)
+    assert Uex.dtype == np.float64 and Uex.flags['F_CONTIGUOUS']
+    for n0 in (0, 5):
+        assert np.array_equal(Uex[n0:n0 + 5, n0:n0 + 5], Umat)
+        assert np.array_equal(Jex[n0:n0 + 5, n0:n0 + 5], Jmat)
+    mask = P.site_block_mask(10, [5, 5])
+    assert not Uex[~mask].any() and not Jex[~mask].any()
+    assert np.array_equal(mask, np.array([[i // 5 == j // 5 for j in range(10)] for i in range(10)]))
+    # the vertex only reads the on-site pairs, so it is the 5-orbital one repeated per site
+    olist, site = P.get_chi_orb_list(10, [5, 5])
+    Smat, Cmat = F.gen_SCmatrix_orb(olist, site, Uex, Jex)
+    olist1, site1 = P.get_chi_orb_list(5, [5])
+    Smat1, Cmat1 = F.gen_SCmatrix_orb(olist1, site1, Umat, Jmat)
+    assert np.allclose(Smat[:25, :25], Smat1) and np.allclose(Smat[25:, 25:], Smat1)
+    assert np.allclose(Cmat[:25, :25], Cmat1) and np.allclose(Cmat[25:, 25:], Cmat1)
+    # an already global-sized matrix is passed through, a mismatching one is an error
+    assert np.array_equal(P.expand_UJ_sites(Uex, Jex, 10, [5, 5])[0], Uex)
+    for args in (((Umat, Jmat, 10, [1]), ), ((Umat, Jmat, 11, [6, 5]), ), ((Umat[:, :4], Jmat[:, :4], 10, [5, 5]), )):
+        try:
+            P.expand_UJ_sites(*args[0])
+        except ValueError:
+            continue
+        raise AssertionError(f'expand_UJ_sites{args[0][2:]} should raise ValueError')
 
 
 # --------------------------------------------------------------------------- #

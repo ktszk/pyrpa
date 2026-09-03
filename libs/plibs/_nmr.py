@@ -185,8 +185,10 @@ def gap_from_eliashberg(klist: np.ndarray, fname: str = 'gap_wannier',
                      exactly like the deltak built by the gap_sym path in main.py
     """
     from ._calc import gap_extrapolate_w0
+    from ._wannier_io import gap_orb_ab
     d = np.load(f'{fname}.npz')
     gap_R, rvec = d['gap'], d['rvec']                 # (Norb,Norb,N_iw,Nr), (Nr,3)
+    gap_R = gap_orb_ab(gap_R, d, f'{fname}.npz')      # -> gap_R[a,b] = Delta_ab
     temp_gap = float(d['temp']) if 'temp' in d else None
     Norb, N_iw, Nr = gap_R.shape[0], gap_R.shape[2], gap_R.shape[3]
 
@@ -221,8 +223,11 @@ def gap_from_eliashberg(klist: np.ndarray, fname: str = 'gap_wannier',
     chunk = max(1, int(4e6 // max(Nr, 1)))
     for i0 in range(0, Nk, chunk):
         ph = np.exp(-2j * np.pi * (kl[i0:i0 + chunk] @ rv.T))            # [nk, Nr]
-        # [k,a,b] = Delta_ab(k): the same layout as the gap_sym path's deltaini_static
-        delta_k[i0:i0 + chunk] = np.einsum('kr,abr->kab', ph, gR0, optimize=True)
+        # 'abr->kba': the stored Delta(R) is the physical Delta_ab, while everything
+        # downstream (mkBdGhamk via the reversed ctypes view, and the gap_sym path's
+        # deltaini_static) indexes the k-space matrices as [k,a,b] = M_ba.  Same layout
+        # as hamk, which is what the BdG assembly pairs it with.
+        delta_k[i0:i0 + chunk] = np.einsum('kr,abr->kba', ph, gR0, optimize=True)
 
     raw_max = float(np.abs(delta_k).max())
     if verbose:

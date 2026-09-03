@@ -1695,12 +1695,22 @@ def gap_orbital_from_wannier(fname='gap_wannier', iw_index=0, n_avg=1):
     @param n_avg: number of consecutive Matsubara slices to average (1 = single slice)
     @return callable kfrac(3,) -> Delta_orb(k) [Norb, Norb] complex
     """
+    from ._wannier_io import gap_orb_ab
     d = np.load(f'{fname}.npz')
     gap, rvec = d['gap'], d['rvec']                  # (Norb,Norb,N_cut,Nr), (Nr,3)
+    # Orbital index order.  project_gap contracts u^dag Delta u, so it needs the PHYSICAL
+    # Delta_ab -- which is exactly what output_gap_wannier stores (it transposes the
+    # reversed ctypes view of the Fortran delta(Nk,Nw,Norb,Norb) on write); gap_orb_ab
+    # only has to convert an export written before that convention was stamped.  This is
+    # not a harmless relabelling: the gap is Hermitian but NOT symmetric (Delta = S + A
+    # with S real/symmetric/even in k and A purely imaginary/antisymmetric/odd), and the
+    # transpose flips the sign of A -- 63% of max|Delta| for the 000AsP RPA solution,
+    # enough to turn the fully gapped s+- electron pocket into a spuriously nodal one.
+    gap = gap_orb_ab(gap, d, f'{fname}.npz')
     n0, n1 = iw_index, min(iw_index + n_avg, gap.shape[2])
     if n0 >= gap.shape[2]:
         raise ValueError(f"iw_index={iw_index} out of range (N_iw={gap.shape[2]})")
-    gR = gap[:, :, n0:n1, :].mean(axis=2)            # (Norb,Norb,Nr) over chosen slices
+    gR = np.ascontiguousarray(gap[:, :, n0:n1, :].mean(axis=2))   # (Norb,Norb,Nr)
     rg = np.ascontiguousarray(rvec, dtype=np.float64)
 
     No, Nr = gR.shape[0], gR.shape[2]
