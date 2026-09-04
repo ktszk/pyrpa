@@ -1007,7 +1007,7 @@ def calc_vortex_lattice_periodic(coupling, temp, wc, gap_sym='d', field_list=Non
             continue
         # the gap-node sampling needs a fine FS-angle grid for d-wave; small broadening
         n0 = float(lattice_dos(st, gap_sym, np.array([0.0]), nbeta=max(nbeta, 60),
-                               delta=0.012 * st['Dbulk'], fs=fs)[0], bdir=bdir)
+                               delta=0.012 * st['Dbulk'], fs=fs, bdir=bdir)[0])
         a_xi = st['acell'] / st['xi']
         bmin, bmax = st['Brel'].min(), st['Brel'].max()
         results.append((b, n0))
@@ -1714,7 +1714,7 @@ def calc_vortex_lattice_sc(coupling, temp, wc, gap_sym='d', field_list=None,
             continue
         seed = st['absD'] / st['Dbulk']                # dimensionless profile (same Ng/grid)
         n0 = float(lattice_dos_sc(st, gap_sym, np.array([0.0]), nbeta=max(nbeta, 36),
-                                  delta=0.03 * st['Dbulk'], fs=fs)[0], bdir=bdir)
+                                  delta=0.03 * st['Dbulk'], fs=fs, bdir=bdir)[0])
         results.append((b, n0))
         D = st['absD']; Db = st['Dbulk']
         print(f"  B/Hc2={b:.3f}  a/xi={st['a']/st['xi']:.2f}  iters={st['iters']}  "

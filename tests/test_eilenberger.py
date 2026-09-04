@@ -696,6 +696,20 @@ def test_gap_color_3d():
     gorb = lambda kfrac: np.array([[np.cos(2 * np.pi * kfrac[0]) - np.cos(2 * np.pi * kfrac[1])]])
     c_orb = p.gap_color_3d(centers, blist, rv, ham_r, [], gap_orbital=gorb)
     assert np.allclose(c_orb[0], expect, atol=1e-12)
+    # a REAL gap carrying the small imaginary residue of a fitted/projected Delta (an
+    # RPA gap loaded by gap_orbital_from_wannier is Hermitian only to ~1e-3) must keep
+    # its SIGN: the |phi| fallback is for a chiral phi, and an absolute epsilon on
+    # Im[phi] used to trip on that residue and erase the s+- sign structure
+    gnoisy = lambda kfrac: (1.0 + 1.0e-4j) * gorb(kfrac)
+    c_noisy = p.gap_color_3d(centers, blist, rv, ham_r, [], gap_orbital=gnoisy)
+    assert np.allclose(c_noisy[0], expect, atol=1e-6)
+    assert c_noisy[0].min() < 0.0                      # the negative lobe survives
+    # a genuinely chiral phi (O(1) phase winding) still falls back to |phi|
+    gchiral = lambda kfrac: np.array([[np.exp(2j * np.pi * kfrac[0])
+                                       * (np.cos(2 * np.pi * kfrac[0])
+                                          - np.cos(2 * np.pi * kfrac[1]))]])
+    c_chi = p.gap_color_3d(centers, blist, rv, ham_r, [], gap_orbital=gchiral)
+    assert np.allclose(c_chi[0], np.abs(expect), atol=1e-12)
 
 
 def test_gap_sym_index_and_delta0():

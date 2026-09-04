@@ -1875,7 +1875,14 @@ def gap_color_3d(centers, blist, rvec, ham_r, S_r, gap_sym=None, delta0=None, ga
             if delta0 is not None:
                 phi = phi * np.asarray(delta0, dtype=np.float64)[b]
         # A chiral phi has no meaningful sign: Re[phi] would draw spurious nodes where
-        # only the phase winds, so colour such sheets by |phi| instead.
-        use_abs = (np.abs(phi.imag).max() > 1e-12) if sw_abs is None else bool(sw_abs)
+        # only the phase winds, so colour such sheets by |phi| instead.  The test has to
+        # be RELATIVE: a projected Wannier/Eliashberg gap (gap_orbital_from_wannier)
+        # carries a small non-Hermitian residue of the fitted Delta(R), which leaves
+        # Im[phi]/|phi| ~ 1e-4 -- far above any absolute epsilon, yet nowhere near the
+        # O(1) ratio of a genuinely chiral order parameter.  With an absolute cut-off
+        # every real gap fell back to |phi| and its s+- sign structure was erased.
+        scale = float(np.abs(phi).max()) if len(phi) else 0.0
+        use_abs = (np.abs(phi.imag).max() > 1.0e-2 * scale if scale > 0.0 else False) \
+                  if sw_abs is None else bool(sw_abs)
         clist.append(np.abs(phi) if use_abs else phi.real)
     return clist
