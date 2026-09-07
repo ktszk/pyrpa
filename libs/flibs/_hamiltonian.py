@@ -1,170 +1,183 @@
-from ctypes import *
+import ctypes
 import numpy as np
-from ._loader import _lib, i64, dbl
+import libs.flibs._loader as _loader
+
+# Public API of this submodule; keeps `from ._x import *` in __init__.py from
+# re-exporting numpy, scipy, ctypes and the sibling packages imported above.
+__all__ = [
+    'omp_params', 'gen_ham', 'get_eig', 'get_ffermi', 'get_vlm0', 'get_vk', 'get_vnm', 'get_vnmk', 'get_veloc',
+    'get_imass0', 'get_imassk', 'get_mass', 'get_qshift', 'get_iqshift', 'gen_irr_k_TRS', 'gen_kpoint_weight',
+    'mkBdGhamk', 'get_plist'
+]
 
 # --- ctypes signatures: set once at import.
 # All Fortran entry points are subroutines, so restype is always None.
-_lib.openmp_params.argtypes = [POINTER(c_int64),POINTER(c_bool)]
-_lib.openmp_params.restype = None
-_lib.gen_ham.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
+_loader._lib.openmp_params.argtypes = [
+    ctypes.POINTER(ctypes.c_int64),                 # omp_num (out)
+    ctypes.POINTER(ctypes.c_bool),                  # omp_check (out)
 ]
-_lib.gen_ham.restype = None
-_lib.get_eig.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    POINTER(c_int64), POINTER(c_int64)
+_loader._lib.openmp_params.restype = None
+_loader._lib.gen_ham.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # ham_k (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),             # klist
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # ham_r
+    np.ctypeslib.ndpointer(dtype=np.float64),             # rvec
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nr, Norb
 ]
-_lib.get_eig.restype = None
-_lib.get_eig_mlo.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    POINTER(c_int64), POINTER(c_int64)
+_loader._lib.gen_ham.restype = None
+_loader._lib.get_eig.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),     # eig (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # ham_k
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nk, Norb
 ]
-_lib.get_eig_mlo.restype = None
-_lib.get_ffermi.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    POINTER(c_double), POINTER(c_double),
-    POINTER(c_int64), POINTER(c_int64)
+_loader._lib.get_eig.restype = None
+_loader._lib.get_eig_mlo.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),     # eig (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # ham_k
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # Ovlk
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nk, Norb
 ]
-_lib.get_ffermi.restype = None
-_lib.get_vlm0.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
+_loader._lib.get_eig_mlo.restype = None
+_loader._lib.get_ffermi.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),  # ffermi (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),  # eig
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),      # mu, temp
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)         # Nk, Norb
 ]
-_lib.get_vlm0.restype = None
-_lib.get_veloc.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    POINTER(c_int64), POINTER(c_int64)
+_loader._lib.get_ffermi.restype = None
+_loader._lib.get_vlm0.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # vk (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),             # klist
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # ham_r
+    np.ctypeslib.ndpointer(dtype=np.float64),             # rvec
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nr, Norb
 ]
-_lib.get_veloc.restype = None
-_lib.get_vnm.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    POINTER(c_int64), POINTER(c_int64)
+_loader._lib.get_vlm0.restype = None
+_loader._lib.get_veloc.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),     # vk (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # vk0
+    np.ctypeslib.ndpointer(dtype=np.float64),     # mrot
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nk, Norb
 ]
-_lib.get_vnm.restype = None
-_lib.get_veloc_mlo.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    POINTER(c_int64), POINTER(c_int64)
+_loader._lib.get_veloc.restype = None
+_loader._lib.get_vnm.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # vk (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # vk0
+    np.ctypeslib.ndpointer(dtype=np.float64),     # mrot
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nk, Norb
 ]
-_lib.get_veloc_mlo.restype = None
-_lib.get_vnm_mlo.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # vk (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # vk0 = dH/dk
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # sk0 = dS/dk
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # Ovlk = S(k)
-    np.ctypeslib.ndpointer(dtype=np.float64),      # eig
-    np.ctypeslib.ndpointer(dtype=np.float64),      # mrot
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # uni
-    POINTER(c_int64), POINTER(c_int64)
+_loader._lib.get_vnm.restype = None
+_loader._lib.get_veloc_mlo.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),     # vk (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # vk0
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # sk0
+    np.ctypeslib.ndpointer(dtype=np.float64),     # eig
+    np.ctypeslib.ndpointer(dtype=np.float64),     # mrot
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nk, Norb
 ]
-_lib.get_vnm_mlo.restype = None
-_lib.get_imass0.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
+_loader._lib.get_veloc_mlo.restype = None
+_loader._lib.get_vnm_mlo.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # vk (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # vk0 = dH/dk
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # sk0 = dS/dk
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # Ovlk = S(k)
+    np.ctypeslib.ndpointer(dtype=np.float64),     # eig
+    np.ctypeslib.ndpointer(dtype=np.float64),     # mrot
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nk, Norb
 ]
-_lib.get_imass0.restype = None
-_lib.get_imassk.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    POINTER(c_int64), POINTER(c_int64)
+_loader._lib.get_vnm_mlo.restype = None
+_loader._lib.get_imass0.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # imk (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),             # klist
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # ham_r
+    np.ctypeslib.ndpointer(dtype=np.float64),             # rvec
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nr, Norb
 ]
-_lib.get_imassk.restype = None
-_lib.get_imassk_mlo.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    POINTER(c_int64), POINTER(c_int64)
+_loader._lib.get_imass0.restype = None
+_loader._lib.get_imassk.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),     # imk (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # imk0
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # vk0
+    np.ctypeslib.ndpointer(dtype=np.float64),     # eig
+    np.ctypeslib.ndpointer(dtype=np.float64),     # mrot
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nk, Norb
 ]
-_lib.get_imassk_mlo.restype = None
-_lib.get_qshift_.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    POINTER(c_int64),
+_loader._lib.get_imassk.restype = None
+_loader._lib.get_imassk_mlo.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),     # imk (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # imk0
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # smk0
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # vk0
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # sk0
+    np.ctypeslib.ndpointer(dtype=np.float64),     # eig
+    np.ctypeslib.ndpointer(dtype=np.float64),     # mrot
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nk, Norb
 ]
-_lib.get_qshift_.restype = None
-_lib.get_iqshift_.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    POINTER(c_int64),
+_loader._lib.get_imassk_mlo.restype = None
+_loader._lib.get_qshift_.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),  # qpoint
+    np.ctypeslib.ndpointer(dtype=np.float64),  # klist
+    np.ctypeslib.ndpointer(dtype=np.int64),    # qshift (out)
+    ctypes.POINTER(ctypes.c_int64),                          # Nk
 ]
-_lib.get_iqshift_.restype = None
-_lib.generate_irr_kpoint_inv.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64)
+_loader._lib.get_qshift_.restype = None
+_loader._lib.get_iqshift_.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),  # qpoint
+    np.ctypeslib.ndpointer(dtype=np.float64),  # klist
+    np.ctypeslib.ndpointer(dtype=np.int64),    # qshift (out)
+    ctypes.POINTER(ctypes.c_int64),                          # Nk
 ]
-_lib.generate_irr_kpoint_inv.restype = None
-_lib.get_kweight.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    POINTER(c_int64), POINTER(c_int64)
+_loader._lib.get_iqshift_.restype = None
+_loader._lib.generate_irr_kpoint_inv.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),  # klist (out)
+    np.ctypeslib.ndpointer(dtype=np.int64),    # kmap (out)
+    np.ctypeslib.ndpointer(dtype=np.int64),    # invk_ft_list (out)
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),        # Nk, Nx
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)         # Ny, Nz
 ]
-_lib.get_kweight.restype = None
-_lib.mkbdghamk.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    POINTER(c_int64), POINTER(c_int64),
+_loader._lib.generate_irr_kpoint_inv.restype = None
+_loader._lib.get_kweight.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),  # weight (out)
+    np.ctypeslib.ndpointer(dtype=np.int64),    # invk
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)         # Nk, Nkall
 ]
-_lib.mkbdghamk.restype = None
-_lib.get_parity_prop.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    POINTER(c_int64), POINTER(c_int64)
+_loader._lib.get_kweight.restype = None
+_loader._lib.mkbdghamk.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # hamBdGk (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # hamk
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # delta
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nk, Norb
 ]
-_lib.get_parity_prop.restype = None
+_loader._lib.mkbdghamk.restype = None
+_loader._lib.get_parity_prop.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),     # Pmn (inout)
+    np.ctypeslib.ndpointer(dtype=np.float64),     # rvec
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # ham_r
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Norb, Nr
+]
+_loader._lib.get_parity_prop.restype = None
 
-def omp_params() ->tuple[int,bool]:
+
+def omp_params() -> tuple[int, bool]:
     """
     @fn omp_params
     @brief Query the underlying Fortran library for OpenMP configuration.
     @retval num_threads: Maximum number of OpenMP threads the Fortran code will use
     @retval  valid_flag: True if OpenMP was initialized correctly
     """
-    omp_num=c_int64()
-    omp_check=c_bool()
-    _lib.openmp_params(byref(omp_num),byref(omp_check))
-    return omp_num.value,omp_check.value
+    omp_num = ctypes.c_int64()
+    omp_check = ctypes.c_bool()
+    _loader._lib.openmp_params(ctypes.byref(omp_num), ctypes.byref(omp_check))
+    return omp_num.value, omp_check.value
+
 
 def gen_ham(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
             Ovl_r: np.ndarray | None = None) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
@@ -182,15 +195,16 @@ def gen_ham(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
     assert ham_r.ndim == 3, "ham_r must be a 3‑D array"
     Norb = ham_r.shape[1]
     hamk = np.zeros((Nk, Norb, Norb), dtype=np.complex128)
-    _lib.gen_ham(hamk, klist, ham_r, rvec,
-                 i64(Nk), i64(Nr), i64(Norb))
+    _loader._lib.gen_ham(hamk, klist, ham_r, rvec,
+                         _loader.i64(Nk), _loader.i64(Nr), _loader.i64(Norb))
     if Ovl_r is not None:
         Ovlk = np.zeros((Nk, Norb, Norb), dtype=np.complex128)
-        _lib.gen_ham(Ovlk, klist, Ovl_r, rvec,
-                     i64(Nk), i64(Nr), i64(Norb))
+        _loader._lib.gen_ham(Ovlk, klist, Ovl_r, rvec,
+                             _loader.i64(Nk), _loader.i64(Nr), _loader.i64(Norb))
         return hamk, Ovlk
     else:
         return hamk
+
 
 def get_eig(hamk: np.ndarray, Ovlk: np.ndarray | None = None,
             sw: bool = True) -> tuple[np.ndarray, np.ndarray] | np.ndarray:
@@ -209,14 +223,15 @@ def get_eig(hamk: np.ndarray, Ovlk: np.ndarray | None = None,
     uni = np.zeros((Nk, Norb, Norb), dtype=np.complex128)
 
     if Ovlk is None:
-        _lib.get_eig(eig, uni, hamk, i64(Nk), i64(Norb))
+        _loader._lib.get_eig(eig, uni, hamk, _loader.i64(Nk), _loader.i64(Norb))
     else:
-        _lib.get_eig_mlo(eig, uni, hamk, Ovlk, i64(Nk), i64(Norb))
+        _loader._lib.get_eig_mlo(eig, uni, hamk, Ovlk, _loader.i64(Nk), _loader.i64(Norb))
 
     if sw:
         return eig, uni
     else:
         return eig
+
 
 def get_ffermi(eig: np.ndarray, mu: float, temp: float) -> np.ndarray:
     """
@@ -230,9 +245,10 @@ def get_ffermi(eig: np.ndarray, mu: float, temp: float) -> np.ndarray:
     Nk = len(eig)
     Norb = eig.shape[1]
     ffermi = np.zeros((Nk, Norb), dtype=np.float64)
-    _lib.get_ffermi(ffermi, eig, dbl(mu), dbl(temp),
-                    i64(Nk), i64(Norb))
+    _loader._lib.get_ffermi(ffermi, eig, _loader.dbl(mu), _loader.dbl(temp),
+                            _loader.i64(Nk), _loader.i64(Norb))
     return ffermi
+
 
 def get_vlm0(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray) -> np.ndarray:
     """
@@ -246,9 +262,10 @@ def get_vlm0(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray) -> np.ndarr
     Nk, Nr = len(klist), len(rvec)
     Norb = ham_r.shape[1]
     vk = np.zeros((Nk, Norb, Norb, 3), dtype=np.complex128)
-    _lib.get_vlm0(vk, klist, ham_r, rvec,
-                  i64(Nk), i64(Nr), i64(Norb))
+    _loader._lib.get_vlm0(vk, klist, ham_r, rvec,
+                          _loader.i64(Nk), _loader.i64(Nr), _loader.i64(Norb))
     return vk
+
 
 def get_vk(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray,
            sk0: np.ndarray | None = None, eig: np.ndarray | None = None) -> np.ndarray:
@@ -267,12 +284,13 @@ def get_vk(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray,
     Norb = uni.shape[1]
     vk = np.zeros((Nk, Norb, 3), dtype=np.float64)
     if sk0 is None:
-        _lib.get_veloc(vk, vk0, mrot, uni, i64(Nk), i64(Norb))
+        _loader._lib.get_veloc(vk, vk0, mrot, uni, _loader.i64(Nk), _loader.i64(Norb))
     else:
         if eig is None:
             raise ValueError("get_vk: eig is required when sk0 (non-orthogonal basis) is given")
-        _lib.get_veloc_mlo(vk, vk0, sk0, eig, mrot, uni, i64(Nk), i64(Norb))
+        _loader._lib.get_veloc_mlo(vk, vk0, sk0, eig, mrot, uni, _loader.i64(Nk), _loader.i64(Norb))
     return vk
+
 
 def get_vnm(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray,
             sk0: np.ndarray | None = None, eig: np.ndarray | None = None,
@@ -294,24 +312,26 @@ def get_vnm(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray,
     Norb = uni.shape[1]
     vk = np.zeros((Nk, Norb, Norb, 3), dtype=np.complex128)
     if sk0 is None:
-        _lib.get_vnm(vk, vk0, mrot, uni, i64(Nk), i64(Norb))
+        _loader._lib.get_vnm(vk, vk0, mrot, uni, _loader.i64(Nk), _loader.i64(Norb))
     else:
         if eig is None:
             raise ValueError("get_vnm: eig is required when sk0 (non-orthogonal basis) is given")
         if Ovlk is None:
             raise ValueError("get_vnm: Ovlk (S(k)) is required when sk0 (non-orthogonal basis) is given")
-        _lib.get_vnm_mlo(vk, vk0, sk0, Ovlk, eig, mrot, uni, i64(Nk), i64(Norb))
+        _loader._lib.get_vnm_mlo(vk, vk0, sk0, Ovlk, eig, mrot, uni, _loader.i64(Nk), _loader.i64(Norb))
     return vk
 
-def _get_sk0(klist: np.ndarray, S_r, rvec: np.ndarray) -> np.ndarray | None:
+
+def _get_sk0(klist: np.ndarray, S_r: np.ndarray, rvec: np.ndarray) -> np.ndarray | None:
     """dS/dk in the orbital basis, or None for an orthogonal basis (S_r empty/None).
     S(k) is built by the same Fourier sum as H(k), so get_vlm0 differentiates it too."""
     if S_r is None or len(S_r) == 0:
         return None
     return get_vlm0(klist, S_r, rvec)
 
+
 def get_vnmk(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
-             mrot: np.ndarray, uni: np.ndarray, S_r=None,
+             mrot: np.ndarray, uni: np.ndarray, S_r: np.ndarray | None = None,
              eig: np.ndarray | None = None) -> np.ndarray:
     """
     @fn get_vnmk
@@ -331,8 +351,9 @@ def get_vnmk(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
     Ovlk = None if sk0 is None else gen_ham(klist, S_r, rvec)
     return get_vnm(vk0, mrot, uni, sk0, eig, Ovlk)
 
+
 def get_veloc(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
-              mrot: np.ndarray, uni: np.ndarray, S_r=None,
+              mrot: np.ndarray, uni: np.ndarray, S_r: np.ndarray | None = None,
               eig: np.ndarray | None = None) -> np.ndarray:
     """
     @fn get_veloc
@@ -350,6 +371,7 @@ def get_veloc(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
     vk0 = get_vlm0(klist, ham_r, rvec)
     return get_vk(vk0, mrot, uni, _get_sk0(klist, S_r, rvec), eig)
 
+
 def get_imass0(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray) -> np.ndarray:
     """
     @fn get_imass0
@@ -362,9 +384,10 @@ def get_imass0(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray) -> np.nda
     Nk, Nr = len(klist), len(rvec)
     Norb = ham_r.shape[1]
     imass0 = np.zeros((Nk, Norb, Norb, 3, 3), dtype=np.complex128)
-    _lib.get_imass0(imass0, klist, ham_r, rvec,
-                    i64(Nk), i64(Nr), i64(Norb))
+    _loader._lib.get_imass0(imass0, klist, ham_r, rvec,
+                            _loader.i64(Nk), _loader.i64(Nr), _loader.i64(Norb))
     return imass0
+
 
 def get_imassk(imass0: np.ndarray, mrot: np.ndarray, uni: np.ndarray,
                vk0: np.ndarray, eig: np.ndarray,
@@ -388,15 +411,16 @@ def get_imassk(imass0: np.ndarray, mrot: np.ndarray, uni: np.ndarray,
     Norb = uni.shape[1]
     imass = np.zeros((Nk, Norb, 3, 3), dtype=np.float64)
     if smass0 is None and sk0 is None:
-        _lib.get_imassk(imass, imass0, vk0, eig, mrot, uni, i64(Nk), i64(Norb))
+        _loader._lib.get_imassk(imass, imass0, vk0, eig, mrot, uni, _loader.i64(Nk), _loader.i64(Norb))
     else:
         if smass0 is None or sk0 is None:
             raise ValueError("get_imassk: smass0 and sk0 must be given together (non-orthogonal basis)")
-        _lib.get_imassk_mlo(imass, imass0, smass0, vk0, sk0, eig, mrot, uni, i64(Nk), i64(Norb))
+        _loader._lib.get_imassk_mlo(imass, imass0, smass0, vk0, sk0, eig, mrot, uni, _loader.i64(Nk), _loader.i64(Norb))
     return imass
 
+
 def get_mass(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray, mrot: np.ndarray,
-             uni: np.ndarray, sw_imass: bool = False, S_r=None,
+             uni: np.ndarray, sw_imass: bool = False, S_r: np.ndarray | None = None,
              eig: np.ndarray | None = None) -> np.ndarray:
     """
     @fn get_mass
@@ -427,6 +451,7 @@ def get_mass(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray, mrot: np.nd
     else:
         return np.array([[sclin.inv(im) for im in imas] for imas in imass])
 
+
 def get_qshift(klist: np.ndarray, qpoint: np.ndarray) -> np.ndarray:
     """
     @fn get_qshift
@@ -437,8 +462,9 @@ def get_qshift(klist: np.ndarray, qpoint: np.ndarray) -> np.ndarray:
     """
     Nk = len(klist)
     qshift = np.zeros(Nk, dtype=np.int64)
-    _lib.get_qshift_(qpoint, klist, qshift, i64(Nk))
+    _loader._lib.get_qshift_(qpoint, klist, qshift, _loader.i64(Nk))
     return qshift
+
 
 def get_iqshift(klist: np.ndarray, qpoint: np.ndarray) -> np.ndarray:
     """
@@ -450,8 +476,9 @@ def get_iqshift(klist: np.ndarray, qpoint: np.ndarray) -> np.ndarray:
     """
     Nk = len(klist)
     qshift = np.zeros(Nk, dtype=np.int64)
-    _lib.get_iqshift_(qpoint, klist, qshift, i64(Nk))
+    _loader._lib.get_iqshift_(qpoint, klist, qshift, _loader.i64(Nk))
     return qshift
+
 
 def gen_irr_k_TRS(Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -477,11 +504,12 @@ def gen_irr_k_TRS(Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, np.ndarray, np
     klist = np.zeros((Nk, 3), dtype=np.float64)
     kmap = np.zeros((Nkall, 3), dtype=np.int64)
     invk_ft_list = np.zeros((Nkall, 3), dtype=np.int64)
-    _lib.generate_irr_kpoint_inv(klist, kmap, invk_ft_list, i64(Nk),
-                                 i64(Nx), i64(Ny), i64(Nz))
+    _loader._lib.generate_irr_kpoint_inv(klist, kmap, invk_ft_list, _loader.i64(Nk),
+                                         _loader.i64(Nx), _loader.i64(Ny), _loader.i64(Nz))
     return klist, kmap, invk_ft_list
 
-def gen_kpoint_weight(invk, Nk):
+
+def gen_kpoint_weight(invk: np.ndarray, Nk: int) -> np.ndarray:
     """
     @fn gen_kpoint_weight
     @brief Compute k-point weights for the irreducible BZ by counting degeneracy from the full k-grid mapping.
@@ -491,8 +519,9 @@ def gen_kpoint_weight(invk, Nk):
     """
     Nkall = len(invk)
     weight = np.zeros(Nk, dtype=np.float64)
-    _lib.get_kweight(weight, invk, i64(Nk), i64(Nkall))
+    _loader._lib.get_kweight(weight, invk, _loader.i64(Nk), _loader.i64(Nkall))
     return weight
+
 
 def mkBdGhamk(hamk: np.ndarray, delta: np.ndarray) -> np.ndarray:
     """
@@ -505,10 +534,11 @@ def mkBdGhamk(hamk: np.ndarray, delta: np.ndarray) -> np.ndarray:
     Nk = len(hamk)
     Norb = hamk.shape[1]
     hamBdGk = np.zeros((Nk, 2 * Norb, 2 * Norb), dtype=np.complex128)
-    _lib.mkbdghamk(hamBdGk, hamk, delta, i64(Nk), i64(Norb))
+    _loader._lib.mkbdghamk(hamBdGk, hamk, delta, _loader.i64(Nk), _loader.i64(Norb))
     return hamBdGk
 
-def get_plist(rvec, ham_r):
+
+def get_plist(rvec: np.ndarray, ham_r: np.ndarray) -> np.ndarray:
     """
     @fn get_plist
     @brief Determine the parity eigenvalues of each orbital from the Hamiltonian's inversion symmetry properties.
@@ -519,5 +549,5 @@ def get_plist(rvec, ham_r):
     Nr = len(rvec)
     Norb = ham_r.shape[1]
     Pmn = np.zeros((Norb, Norb), dtype=np.float64)
-    _lib.get_parity_prop(Pmn, rvec, ham_r, i64(Norb), i64(Nr))
+    _loader._lib.get_parity_prop(Pmn, rvec, ham_r, _loader.i64(Norb), _loader.i64(Nr))
     return np.sign(Pmn[0, :])

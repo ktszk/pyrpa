@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#-*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
 """
 Physics / reference tests for the reflectivity -> colour conversion
 (libs/plibs/_color.py).
@@ -29,8 +29,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
-from libs.plibs._color import (CIE_LAM, CIE_CMF, CIE_D65, EV_NM, XYZ_WHITE,
-                               srgb_gamma, reflectivity_color, xyz_to_srgb)
+import libs.plibs._color as _color
 
 # a dense grid covering the whole visible window with room to spare
 WGRID = np.linspace(0.4, 6.5, 2000)
@@ -54,17 +53,17 @@ def _reflectivity(eps):
 def test_tables_are_intact():
     """The embedded CIE tables must be the 5 nm / 380-780 nm window and
     reproduce the tabulated D65 white point (0.95047, 1, 1.08883)."""
-    assert CIE_LAM[0] == 380. and CIE_LAM[-1] == 780. and len(CIE_LAM) == 81
-    assert np.allclose(np.diff(CIE_LAM), 5.)
-    assert CIE_CMF.shape == (81, 3) and CIE_D65.shape == (81,)
-    assert np.allclose(XYZ_WHITE, [0.95047, 1.0, 1.08883], atol=5e-4)
-    x, y = XYZ_WHITE[:2]/XYZ_WHITE.sum()
+    assert _color.CIE_LAM[0] == 380. and _color.CIE_LAM[-1] == 780. and len(_color.CIE_LAM) == 81
+    assert np.allclose(np.diff(_color.CIE_LAM), 5.)
+    assert _color.CIE_CMF.shape == (81, 3) and _color.CIE_D65.shape == (81,)
+    assert np.allclose(_color.XYZ_WHITE, [0.95047, 1.0, 1.08883], atol=5e-4)
+    x, y = _color.XYZ_WHITE[:2]/_color.XYZ_WHITE.sum()
     assert abs(x - 0.31272) < 1e-4 and abs(y - 0.32903) < 1e-4
 
 
 def test_perfect_mirror_is_white():
     """R == 1 defines the white point: pure white, unit luminance, no clipping."""
-    c = reflectivity_color(WGRID, np.ones_like(WGRID))
+    c = _color.reflectivity_color(WGRID, np.ones_like(WGRID))
     assert c['hex'] == '#ffffff'
     assert abs(c['Y'] - 1.0) < 1e-9
     assert abs(c['xy'][0] - 0.31272) < 1e-4 and abs(c['xy'][1] - 0.32903) < 1e-4
@@ -74,18 +73,18 @@ def test_perfect_mirror_is_white():
 def test_grey_reflector_keeps_chromaticity():
     """A flat R = c is neutral: white chromaticity, Y = c, sRGB = gamma(c)."""
     for c0 in (0.2, 0.5, 0.85):
-        c = reflectivity_color(WGRID, c0*np.ones_like(WGRID))
+        c = _color.reflectivity_color(WGRID, c0*np.ones_like(WGRID))
         assert abs(c['Y'] - c0) < 1e-9
-        assert np.allclose(c['xy'], XYZ_WHITE[:2]/XYZ_WHITE.sum(), atol=1e-9)
-        assert np.allclose(c['rgb'], srgb_gamma(np.full(3, c0)), atol=1e-9)
+        assert np.allclose(c['xy'], _color.XYZ_WHITE[:2]/_color.XYZ_WHITE.sum(), atol=1e-9)
+        assert np.allclose(c['rgb'], _color.srgb_gamma(np.full(3, c0)), atol=1e-9)
 
 
 def test_selective_reflectors_have_the_right_hue():
     """Narrow-band and step reflectors must map onto the expected hues."""
-    lam = EV_NM/WGRID
-    green = reflectivity_color(WGRID, np.exp(-((lam - 550.)/12.)**2))
-    red = reflectivity_color(WGRID, (lam > 600.).astype(float))
-    blue = reflectivity_color(WGRID, (lam < 500.).astype(float))
+    lam = _color.ev_nm/WGRID
+    green = _color.reflectivity_color(WGRID, np.exp(-((lam - 550.)/12.)**2))
+    red = _color.reflectivity_color(WGRID, (lam > 600.).astype(float))
+    blue = _color.reflectivity_color(WGRID, (lam < 500.).astype(float))
     g, r, b = green['rgb255'], red['rgb255'], blue['rgb255']
     assert g[1] > g[0] and g[1] > g[2]        # 550 nm band -> green channel wins
     assert r[0] > r[1] and r[0] > r[2]        # long-pass    -> red channel wins
@@ -98,9 +97,9 @@ def test_out_of_range_spectrum_is_flagged():
     """A spectrum that stops inside the visible window is edge-clamped and the
     'full_range' flag must say so (the colour is then only indicative)."""
     w = np.linspace(0.5, 2.0, 200)            # 620 nm and redder only
-    c = reflectivity_color(w, np.ones_like(w))
+    c = _color.reflectivity_color(w, np.ones_like(w))
     assert not c['full_range']
-    assert reflectivity_color(WGRID, np.ones_like(WGRID))['full_range']
+    assert _color.reflectivity_color(WGRID, np.ones_like(WGRID))['full_range']
 
 
 def test_real_metals_come_out_in_the_right_order():
@@ -121,9 +120,9 @@ def test_real_metals_come_out_in_the_right_order():
                        (0.050, 0.312, 1.544), (0.166, 1.351, 1.808),
                        (0.030, 3.382, 3.473)]),
     }
-    col = {m: reflectivity_color(WGRID, _reflectivity(_lorentz_drude(WGRID, wp, osc)))
+    col = {m: _color.reflectivity_color(WGRID, _reflectivity(_lorentz_drude(WGRID, wp, osc)))
            for m, (wp, osc) in models.items()}
-    xw = XYZ_WHITE[0]/XYZ_WHITE.sum()
+    xw = _color.XYZ_WHITE[0]/_color.XYZ_WHITE.sum()
     for m, c in col.items():
         assert c['Y'] > 0.5, f'{m} came out too dark: Y={c["Y"]}'
     for m in ('Au', 'Cu'):                       # red channel above the blue one
@@ -138,15 +137,15 @@ def test_real_metals_come_out_in_the_right_order():
     assert abs(col['Al']['xy'][0] - xw) < 0.02
     # gold is the most saturated of the four (largest blue deficit)
     assert col['Au']['rgb255'][0] - col['Au']['rgb255'][2] > \
-           col['Ag']['rgb255'][0] - col['Ag']['rgb255'][2]
+        col['Ag']['rgb255'][0] - col['Ag']['rgb255'][2]
 
 
 def test_gamut_clipping_is_reported():
     """XYZ outside the sRGB gamut (or brighter than white) must be clipped and
     flagged rather than silently wrapped."""
-    rgb, clipped = xyz_to_srgb(2.0*XYZ_WHITE)
+    rgb, clipped = _color.xyz_to_srgb(2.0*_color.XYZ_WHITE)
     assert clipped and np.allclose(rgb, 1.0)
-    rgb, clipped = xyz_to_srgb(XYZ_WHITE)
+    rgb, clipped = _color.xyz_to_srgb(_color.XYZ_WHITE)
     assert not clipped and np.allclose(rgb, 1.0, atol=1e-6)
 
 

@@ -1,81 +1,89 @@
-from ctypes import *
+import ctypes
 import numpy as np
-from ._loader import _lib, i64, dbl
+import libs.flibs._loader as _loader
+
+# Public API of this submodule; keeps `from ._x import *` in __init__.py from
+# re-exporting numpy, scipy, ctypes and the sibling packages imported above.
+__all__ = [
+    'gen_Green0', 'gen_green', 'gen_green_from_eig', 'gen_tr_Greenw_0', 'gen_dos', 'get_a', 'get_QP',
+    'pade_with_trace'
+]
 
 # --- ctypes signatures: set once at import.
 # All Fortran entry points are subroutines, so restype is always None.
-_lib.gen_green0_.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    POINTER(c_double), POINTER(c_double),
-    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
+_loader._lib.gen_green0_.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # Gk (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),             # eig
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # uni
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),                 # mu, temp
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nw, Norb
 ]
-_lib.gen_green0_.restype = None
-_lib.gen_green_inv_.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    POINTER(c_double), POINTER(c_double),
-    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
+_loader._lib.gen_green0_.restype = None
+_loader._lib.gen_green_inv_.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # Gk (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # self
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # hamk
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),                 # mu, temp
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nw, Norb
 ]
-_lib.gen_green_inv_.restype = None
-_lib.getinv_.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
+_loader._lib.gen_green_inv_.restype = None
+_loader._lib.getinv_.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # Gk (inout)
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nw, Norb
 ]
-_lib.getinv_.restype = None
-_lib.gen_green_inv_from_eig.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    POINTER(c_double), POINTER(c_double),
-    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
+_loader._lib.getinv_.restype = None
+_loader._lib.gen_green_inv_from_eig.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # Gk (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # self
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # uni
+    np.ctypeslib.ndpointer(dtype=np.float64),             # eig
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),                 # mu, temp
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nw, Norb
 ]
-_lib.gen_green_inv_from_eig.restype = None
-_lib.gen_tr_greenw_0.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    POINTER(c_double), POINTER(c_double),
-    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
+_loader._lib.gen_green_inv_from_eig.restype = None
+_loader._lib.gen_tr_greenw_0.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # trGk (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),             # wl
+    np.ctypeslib.ndpointer(dtype=np.float64),             # eig
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),                 # mu, delta
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nw, Norb
 ]
-_lib.gen_tr_greenw_0.restype = None
-_lib.gen_dos.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    POINTER(c_double), POINTER(c_double),
-    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
+_loader._lib.gen_tr_greenw_0.restype = None
+_loader._lib.gen_dos.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # Dos (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),             # wl
+    np.ctypeslib.ndpointer(dtype=np.float64),             # eig
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # uni
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),                 # mu, delta
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nw, Norb
 ]
-_lib.gen_dos.restype = None
-_lib.get_a_.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    POINTER(c_int64)
+_loader._lib.gen_dos.restype = None
+_loader._lib.get_a_.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # a (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # xn
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # inp_data
+    ctypes.POINTER(ctypes.c_int64)                              # Np
 ]
-_lib.get_a_.restype = None
-_lib.get_qp_.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    POINTER(c_int64), POINTER(c_int64)
+_loader._lib.get_a_.restype = None
+_loader._lib.get_qp_.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # P (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # Q (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # a
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # xn
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # wlist
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nw, Np
 ]
-_lib.get_qp_.restype = None
-_lib.pade_with_trace.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64)
+_loader._lib.get_qp_.restype = None
+_loader._lib.pade_with_trace.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # arrayin
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # arrayout (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # iwlist
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # wlist
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nk, Niw
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nw, Norb
 ]
-_lib.pade_with_trace.restype = None
+_loader._lib.pade_with_trace.restype = None
+
 
 def gen_Green0(eig: np.ndarray, uni: np.ndarray,
                mu: float, temp: float, Nw: int) -> np.ndarray:
@@ -92,9 +100,10 @@ def gen_Green0(eig: np.ndarray, uni: np.ndarray,
     Nk = len(eig)
     Norb = eig.shape[1]
     Gk = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
-    _lib.gen_green0_(Gk, eig, uni, dbl(mu), dbl(temp),
-                     i64(Nk), i64(Nw), i64(Norb))
+    _loader._lib.gen_green0_(Gk, eig, uni, _loader.dbl(mu), _loader.dbl(temp),
+                             _loader.i64(Nk), _loader.i64(Nw), _loader.i64(Norb))
     return Gk
+
 
 def gen_green(selfen: np.ndarray, hamk: np.ndarray,
               mu: float, temp: float) -> np.ndarray:
@@ -111,10 +120,11 @@ def gen_green(selfen: np.ndarray, hamk: np.ndarray,
     Norb = hamk.shape[1]
     Nw = selfen.shape[2]
     Gk = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
-    _lib.gen_green_inv_(Gk, selfen, hamk, dbl(mu), dbl(temp),
-                        i64(Nk), i64(Nw), i64(Norb))
-    _lib.getinv_(Gk, i64(Nk), i64(Nw), i64(Norb))
+    _loader._lib.gen_green_inv_(Gk, selfen, hamk, _loader.dbl(mu), _loader.dbl(temp),
+                                _loader.i64(Nk), _loader.i64(Nw), _loader.i64(Norb))
+    _loader._lib.getinv_(Gk, _loader.i64(Nk), _loader.i64(Nw), _loader.i64(Norb))
     return Gk
+
 
 def gen_green_from_eig(selfen: np.ndarray, eig: np.ndarray,
                        uni: np.ndarray, mu: float, temp: float) -> np.ndarray:
@@ -132,10 +142,11 @@ def gen_green_from_eig(selfen: np.ndarray, eig: np.ndarray,
     Norb = eig.shape[1]
     Nw = selfen.shape[2]
     Gk = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
-    _lib.gen_green_inv_from_eig(Gk, selfen, uni, eig, dbl(mu), dbl(temp),
-                                i64(Nk), i64(Nw), i64(Norb))
-    _lib.getinv_(Gk, i64(Nk), i64(Nw), i64(Norb))
+    _loader._lib.gen_green_inv_from_eig(Gk, selfen, uni, eig, _loader.dbl(mu), _loader.dbl(temp),
+                                        _loader.i64(Nk), _loader.i64(Nw), _loader.i64(Norb))
+    _loader._lib.getinv_(Gk, _loader.i64(Nk), _loader.i64(Nw), _loader.i64(Norb))
     return Gk
+
 
 def gen_tr_Greenw_0(eig: np.ndarray, mu: float,
                     wlist: np.ndarray, delta: float) -> np.ndarray:
@@ -151,9 +162,10 @@ def gen_tr_Greenw_0(eig: np.ndarray, mu: float,
     Nk, Nw = len(eig), len(wlist)
     Norb = eig.shape[1]
     trGk = np.zeros((Nk, Nw), dtype=np.complex128)
-    _lib.gen_tr_greenw_0(trGk, wlist, eig, dbl(mu), dbl(delta),
-                         i64(Nk), i64(Nw), i64(Norb))
+    _loader._lib.gen_tr_greenw_0(trGk, wlist, eig, _loader.dbl(mu), _loader.dbl(delta),
+                                 _loader.i64(Nk), _loader.i64(Nw), _loader.i64(Norb))
     return -trGk.imag
+
 
 def gen_dos(eig: np.ndarray, uni: np.ndarray, mu: float,
             wlist: np.ndarray, delta: float) -> np.ndarray:
@@ -170,9 +182,10 @@ def gen_dos(eig: np.ndarray, uni: np.ndarray, mu: float,
     Nk, Nw = len(eig), len(wlist)
     Norb = eig.shape[1]
     pDos = np.zeros((Norb, Nw), dtype=np.complex128)
-    _lib.gen_dos(pDos, wlist, eig, uni, dbl(mu), dbl(delta),
-                 i64(Nk), i64(Nw), i64(Norb))
+    _loader._lib.gen_dos(pDos, wlist, eig, uni, _loader.dbl(mu), _loader.dbl(delta),
+                         _loader.i64(Nk), _loader.i64(Nw), _loader.i64(Norb))
     return -pDos.imag
+
 
 def get_a(inp_data: np.ndarray, xlist: np.ndarray) -> np.ndarray:
     """
@@ -184,8 +197,9 @@ def get_a(inp_data: np.ndarray, xlist: np.ndarray) -> np.ndarray:
     """
     Np = len(inp_data)
     a = np.zeros(Np, dtype=np.complex128)
-    _lib.get_a_(a, xlist, inp_data, i64(Np))
+    _loader._lib.get_a_(a, xlist, inp_data, _loader.i64(Np))
     return a
+
 
 def get_QP(a: np.ndarray, xlist: np.ndarray, wlist: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -200,8 +214,9 @@ def get_QP(a: np.ndarray, xlist: np.ndarray, wlist: np.ndarray) -> tuple[np.ndar
     Nw, Np = len(wlist), len(a)
     Q = np.zeros(Nw, dtype=np.complex128)
     P = np.zeros(Nw, dtype=np.complex128)
-    _lib.get_qp_(P, Q, a, xlist, wlist, i64(Nw), i64(Np))
+    _loader._lib.get_qp_(P, Q, a, xlist, wlist, _loader.i64(Nw), _loader.i64(Np))
     return Q, P
+
 
 def pade_with_trace(A: np.ndarray, iwlist: np.ndarray, wlist: np.ndarray) -> np.ndarray:
     """
@@ -215,6 +230,6 @@ def pade_with_trace(A: np.ndarray, iwlist: np.ndarray, wlist: np.ndarray) -> np.
     Nk, Nw, Niw = len(A.T), len(wlist), len(iwlist)
     Norb = A.shape[0]
     B = np.zeros((Nk, Nw), dtype=np.complex128)
-    _lib.pade_with_trace(A, B, iwlist, wlist, i64(Nk), i64(Niw),
-                         i64(Nw), i64(Norb))
+    _loader._lib.pade_with_trace(A, B, iwlist, wlist, _loader.i64(Nk), _loader.i64(Niw),
+                                 _loader.i64(Nw), _loader.i64(Norb))
     return B

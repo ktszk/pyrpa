@@ -12,16 +12,16 @@ Functions are organized in submodules by physical topic:
   _wannier_io : EPA output reading, U/J parameter sets, Wannier-R space file I/O
   _maxent     : MaxEnt analytic continuation (optional 'ana_cont' dependency)
 """
-from ._symmetry   import *
-from ._lattice    import *
-from ._bands      import *
-from ._response   import *
-from ._optical    import *
-from ._color      import *
-from ._nmr        import *
+from ._symmetry import *
+from ._lattice import *
+from ._bands import *
+from ._response import *
+from ._optical import *
+from ._color import *
+from ._nmr import *
 from ._wannier_io import *
-from ._maxent     import *
-from ._calc     import *
+from ._maxent import *
+from ._calc import *
 from ._eilenberger import *          # homogeneous solver + model Fermi surface (build_model_fs, ...)
 from ._eilenberger_surface import *  # specular surface (gap profile, LDOS)
 from ._eilenberger_vortex import *   # isolated vortex + periodic vortex lattice

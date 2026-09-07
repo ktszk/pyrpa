@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#-*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
 """
 Run the whole test-suite without pytest (e.g. on a cluster node): executes
 every tests/test_*.py through its own standalone runner in a subprocess and

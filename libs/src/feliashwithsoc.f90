@@ -1,6 +1,7 @@
 subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,olist,slist,kmap,invk,invs,invschi,&
-     temp,eps,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,arnoldi_m) bind(C)
+     temp,eps,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,arnoldi_m,lambda_out) bind(C)
   !> calculate linearized eliashberg equations with soc and TRS
+  !!@param   lambda_out,out: physical (largest) Eliashberg eigenvalue
   !!@param     delta,out: gap function
   !!@param         Gk,in: normal green function
   !!@param        uni,in: unitary matrix
@@ -27,6 +28,7 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,ol
   implicit none
   integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym
   integer(c_int64_t),intent(in):: arnoldi_m  !! Krylov subspace dimension (0=power method, >0=Arnoldi)
+  real(c_double),intent(out):: lambda_out
   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
   integer(c_int64_t),intent(in),dimension(Norb):: slist,invs
   integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
@@ -47,6 +49,7 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,ol
   real(c_double) norm,inorm,norm2,weight,lambda_rq,vec_err
   complex(c_double),dimension(Nkall,Nw,Norb,Norb):: newdelta,fk
 
+  lambda_out=0.0d0
   weight=temp/dble(Nkall)
   ! norm2 is the shift used in the power iteration: newdelta = -weight*K*delta + norm2*delta
   ! converges to (λ + norm2)*delta, so true eigenvalue λ = Rayleigh quotient - norm2.
@@ -68,6 +71,10 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,ol
         newdelta(:,:,:,:)=-newdelta(:,:,:,:)*weight+delta(:,:,:,:)*norm2
         !$omp end parallel workshare
         call get_norm(norm,newdelta)
+        if(norm <= 0.0d0)then
+           print*,'Error: norm <= 0 in iter_loop'
+           stop
+        end if
         inorm=1.0d0/norm
         ! Rayleigh quotient: lambda_rq = Re(<delta, newdelta>) assuming ||delta||=1
         ! shift is +norm2, so true eigenvalue = lambda_rq - norm2
@@ -96,6 +103,7 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,ol
         !$omp end parallel workshare
      end do iter_loop
      print*,'eliash=',lambda_rq-norm2
+     lambda_out=lambda_rq-norm2
      if(i_eig==1 .and. (lambda_rq-norm2)>0.0d0)then
         print*,'1st eigenvalue is positive: skipping 2nd loop'
         exit
@@ -267,6 +275,7 @@ contains
     if(maxval(dble(eigenvals(1:m_act)))>=0.1d0)then
        idx=maxloc(dble(eigenvals(1:m_act)),1)
        print'(A,F12.6)','  eliash   =',dble(eigenvals(idx))
+       lambda_out=dble(eigenvals(idx))
        ! reconstruct Ritz vector x = sum_ii VR(ii,idx) * v_{ii-1}
        !$omp parallel workshare
        delta(:,:,:,:)=(0.0d0,0.0d0)
@@ -369,6 +378,7 @@ contains
     end do
     idx=maxloc(dble(eigenvals(1:m_act)),1)                ! largest Ritz value -> lambda_+ + shift
     print'(A,F12.6)','  eliash   =',dble(eigenvals(idx))-shift
+    lambda_out=dble(eigenvals(idx))-shift
     ! reconstruct Ritz vector for lambda_+: delta = V_m * y_+
     !$omp parallel workshare
     delta(:,:,:,:)=(0.0d0,0.0d0)

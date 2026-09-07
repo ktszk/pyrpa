@@ -24,6 +24,13 @@ x = 0.31272, y = 0.32903 to five decimals.
 import numpy as np
 import scipy.constants as scconst
 
+# Public API of this submodule; keeps `from ._x import *` in __init__.py from
+# re-exporting numpy, scipy, ctypes and the sibling packages imported above.
+__all__ = [
+    'CIE_LAM', 'CIE_CMF', 'CIE_D65', 'ev_nm', 'XYZ2RGB', 'XYZ_WHITE', 'srgb_gamma', 'reflectivity_to_xyz',
+    'xyz_to_srgb', 'spectrum_color', 'reflectivity_color'
+]
+
 # lambda [nm], xbar, ybar, zbar (CIE 1931 2-deg), S_D65 (relative SPD)
 _CIE = np.array([
     [380, 0.00136800, 0.00003900, 0.00645000,   49.9755],
@@ -114,12 +121,12 @@ CIE_CMF   = _CIE[:, 1:4]        # [81, 3] colour matching functions
 CIE_D65   = _CIE[:, 4]          # [81] D65 relative spectral power
 
 # eV <-> nm: lambda[nm] = (h/e)*c / E[eV]; h and e are exact SI definitions
-EV_NM = scconst.h/scconst.e*scconst.c*1.e9
+ev_nm = scconst.h/scconst.e*scconst.c*1.e9
 
 # XYZ -> linear sRGB (IEC 61966-2-1 primaries, D65 white point)
-XYZ2RGB = np.array([[ 3.2404542, -1.5371385, -0.4985314],
+XYZ2RGB = np.array([[3.2404542, -1.5371385, -0.4985314],
                     [-0.9692660,  1.8760108,  0.0415560],
-                    [ 0.0556434, -0.2040259,  1.0572252]])
+                    [0.0556434, -0.2040259,  1.0572252]])
 
 # White point of the tabulated illuminant (i.e. the XYZ of a perfect mirror,
 # R == 1) and its linear-RGB image. The 5 nm / 380-780 nm truncation shifts the
@@ -155,7 +162,7 @@ def reflectivity_to_xyz(w: np.ndarray, refl: np.ndarray) -> tuple[np.ndarray, bo
     w = np.asarray(w, dtype=float)
     refl = np.asarray(refl, dtype=float)
     pos = w > 0.0
-    lam = EV_NM/w[pos]                       # eV -> nm (descending in w)
+    lam = ev_nm/w[pos]                       # eV -> nm (descending in w)
     o = np.argsort(lam)                      # np.interp needs ascending x
     lam, r = lam[o], refl[pos][o]
     full = bool(lam[0] <= CIE_LAM[0] and lam[-1] >= CIE_LAM[-1])

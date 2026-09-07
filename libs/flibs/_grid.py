@@ -7,48 +7,54 @@ RegularGridInterpolator / numpy fancy-indexing versions that dominated the
 runtime of the 2D vortex and periodic-lattice solvers, and are numerically
 identical to them (same bilinear weights, same out-of-range fill).
 """
-from ctypes import POINTER, c_int64, c_double
+import ctypes
 import numpy as np
-from ._loader import _lib, i64, dbl
+import libs.flibs._loader as _loader
+
+# Public API of this submodule; keeps `from ._x import *` in __init__.py from
+# re-exporting numpy, scipy, ctypes and the sibling packages imported above.
+__all__ = [
+    'bilinear_eval', 'bilinear_cell_eval', 'abrikosov_z'
+]
 
 _c128 = np.ctypeslib.ndpointer(dtype=np.complex128)
 _f64 = np.ctypeslib.ndpointer(dtype=np.float64)
 
-_lib.bilinear_eval.argtypes = [
-    _c128,                                   # out  [npt,nw]
-    _c128,                                   # fld  [ng,ng,nw]
-    POINTER(c_double), POINTER(c_double), POINTER(c_double),   # x0, dx, xhi
-    POINTER(c_int64),                        # ng
-    _f64, _f64,                              # px, py [npt]
-    POINTER(c_int64), POINTER(c_int64),      # npt, nw
-    _c128,                                   # fill (1-element array: Fortran takes it by reference)
+_loader._lib.bilinear_eval.argtypes = [
+    _c128,                                                    # out  [npt,nw]
+    _c128,                                                    # fld  [ng,ng,nw]
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),  # x0, dx, xhi
+    ctypes.POINTER(ctypes.c_int64),                                         # ng
+    _f64, _f64,                                               # px, py [npt]
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),                       # npt, nw
+    _c128,                                                    # fill (1-element array: Fortran takes it by reference)
 ]
-_lib.bilinear_eval.restype = None
+_loader._lib.bilinear_eval.restype = None
 
-_lib.bilinear_cell_eval.argtypes = [
-    _c128, _c128,                            # out [npt], fld [ng,ng]
-    POINTER(c_int64),                        # ng
-    _f64, _f64, POINTER(c_int64),            # px, py, npt
-    POINTER(c_double), POINTER(c_double), POINTER(c_double),   # Dlx, Dly, zeta
+_loader._lib.bilinear_cell_eval.argtypes = [
+    _c128, _c128,                                             # out [npt], fld [ng,ng]
+    ctypes.POINTER(ctypes.c_int64),                                         # ng
+    _f64, _f64, ctypes.POINTER(ctypes.c_int64),                             # px, py, npt
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),  # Dlx, Dly, zeta
 ]
-_lib.bilinear_cell_eval.restype = None
+_loader._lib.bilinear_cell_eval.restype = None
 
-_lib.abrikosov_z.argtypes = [
-    _c128, _f64, _f64, POINTER(c_int64),     # out, px, py, npt
-    POINTER(c_double), POINTER(c_double), POINTER(c_double),   # Dlx, Dly, zeta
-    POINTER(c_int64),                        # nsum
+_loader._lib.abrikosov_z.argtypes = [
+    _c128, _f64, _f64, ctypes.POINTER(ctypes.c_int64),                      # out, px, py, npt
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),  # Dlx, Dly, zeta
+    ctypes.POINTER(ctypes.c_int64),                                         # nsum
 ]
-_lib.abrikosov_z.restype = None
+_loader._lib.abrikosov_z.restype = None
 
 
-def _cplx(value):
+def _cplx(value: int) -> np.ndarray:
     """complex128 scalar as a 1-element array (ctypes has no complex scalar; a
     Fortran scalar dummy takes the same by-reference pointer)."""
     return np.array([value], dtype=np.complex128)
 
 
 def bilinear_eval(field: np.ndarray, xg: np.ndarray, px: np.ndarray, py: np.ndarray,
-                  fill=0.0) -> np.ndarray:
+                  fill: float = 0.0) -> np.ndarray:
     """
     @fn bilinear_eval
     @brief Bilinear interpolation of a field on a uniform square grid at scattered
@@ -75,8 +81,8 @@ def bilinear_eval(field: np.ndarray, xg: np.ndarray, px: np.ndarray, py: np.ndar
     npt = px.size
     out = np.empty((npt, nw), dtype=np.complex128)
     xg = np.asarray(xg, dtype=np.float64)
-    _lib.bilinear_eval(out, fld, dbl(xg[0]), dbl(xg[1] - xg[0]), dbl(xg[-1]), i64(ng),
-                       px.ravel(), py.ravel(), i64(npt), i64(nw), _cplx(fill))
+    _loader._lib.bilinear_eval(out, fld, _loader.dbl(xg[0]), _loader.dbl(xg[1] - xg[0]), _loader.dbl(xg[-1]),
+                               _loader.i64(ng), px.ravel(), py.ravel(), _loader.i64(npt), _loader.i64(nw), _cplx(fill))
     out = out.reshape(shape + ((nw,) if field.ndim == 3 else ()))
     return out.real.copy() if real_in else out
 
@@ -101,8 +107,8 @@ def bilinear_cell_eval(field: np.ndarray, px: np.ndarray, py: np.ndarray,
     px = np.ascontiguousarray(px, dtype=np.float64)
     py = np.ascontiguousarray(py, dtype=np.float64)
     out = np.empty(px.size, dtype=np.complex128)
-    _lib.bilinear_cell_eval(out, fld, i64(ng), px.ravel(), py.ravel(), i64(px.size),
-                            dbl(Dlx), dbl(Dly), dbl(zeta))
+    _loader._lib.bilinear_cell_eval(out, fld, _loader.i64(ng), px.ravel(), py.ravel(), _loader.i64(px.size),
+                                    _loader.dbl(Dlx), _loader.dbl(Dly), _loader.dbl(zeta))
     out = out.reshape(px.shape)
     return out.real.copy() if real_in else out
 
@@ -122,6 +128,6 @@ def abrikosov_z(px: np.ndarray, py: np.ndarray, Dlx: float, Dly: float, zeta: fl
     px = np.ascontiguousarray(px, dtype=np.float64)
     py = np.ascontiguousarray(py, dtype=np.float64)
     out = np.empty(px.size, dtype=np.complex128)
-    _lib.abrikosov_z(out, px.ravel(), py.ravel(), i64(px.size),
-                     dbl(Dlx), dbl(Dly), dbl(zeta), i64(nsum))
+    _loader._lib.abrikosov_z(out, px.ravel(), py.ravel(), _loader.i64(px.size),
+                             _loader.dbl(Dlx), _loader.dbl(Dly), _loader.dbl(zeta), _loader.i64(nsum))
     return out.reshape(px.shape)

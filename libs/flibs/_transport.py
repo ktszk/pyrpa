@@ -1,103 +1,110 @@
-from ctypes import *
+import ctypes
 import numpy as np
-from ._loader import _lib, i64, dbl
+import libs.flibs._loader as _loader
+
+# Public API of this submodule; keeps `from ._x import *` in __init__.py from
+# re-exporting numpy, scipy, ctypes and the sibling packages imported above.
+__all__ = [
+    'calc_Lij', 'calc_Lij_wl', 'calc_Kn', 'calc_sigma_hall', 'calc_k0_band', 'calc_tdf', 'get_tau', 'calc_tau_epa'
+]
 
 # --- ctypes signatures: set once at import.
 # All Fortran entry points are subroutines, so restype is always None.
-_lib.calc_lij.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_double),
-    POINTER(c_double), POINTER(c_double),
-    POINTER(c_double), POINTER(c_double),
+_loader._lib.calc_lij.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # L11 (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # L22 (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # L12 (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # vk
+    np.ctypeslib.ndpointer(dtype=np.float64),     # eig
+    np.ctypeslib.ndpointer(dtype=np.float64),     # ffermi
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Norb, Nk
+    ctypes.POINTER(ctypes.c_double),                            # mu
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),         # w, idelta
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),         # eps, temp
 ]
-_lib.calc_lij.restype = None
-_lib.calc_lij_wl.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_double),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    POINTER(c_double), POINTER(c_double),
-    POINTER(c_double),
+_loader._lib.calc_lij.restype = None
+_loader._lib.calc_lij_wl.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),           # L11 (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),           # L22 (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),           # L12 (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),           # vk
+    np.ctypeslib.ndpointer(dtype=np.float64),              # eig
+    np.ctypeslib.ndpointer(dtype=np.float64),              # ffermi
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),  # Norb, Nk, Nw
+    ctypes.POINTER(ctypes.c_double),                                     # mu
+    np.ctypeslib.ndpointer(dtype=np.float64),              # wl
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),                  # idelta, eps
+    ctypes.POINTER(ctypes.c_double),                                     # temp
 ]
-_lib.calc_lij_wl.restype = None
-_lib.calc_kn.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    POINTER(c_double), POINTER(c_double),
-    POINTER(c_int64), POINTER(c_int64)
+_loader._lib.calc_lij_wl.restype = None
+_loader._lib.calc_kn.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),  # K0 (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),  # K1 (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),  # K2 (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),  # eig
+    np.ctypeslib.ndpointer(dtype=np.float64),  # veloc
+    np.ctypeslib.ndpointer(dtype=np.float64),  # kweight
+    np.ctypeslib.ndpointer(dtype=np.float64),  # tau
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),      # temp, mu
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)         # Nk, Norb
 ]
-_lib.calc_kn.restype = None
-_lib.calc_sigma_hall.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    POINTER(c_double), POINTER(c_double),
-    POINTER(c_int64), POINTER(c_int64)
+_loader._lib.calc_kn.restype = None
+_loader._lib.calc_sigma_hall.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),  # shall (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),  # sabs (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),  # eig
+    np.ctypeslib.ndpointer(dtype=np.float64),  # veloc
+    np.ctypeslib.ndpointer(dtype=np.float64),  # imass
+    np.ctypeslib.ndpointer(dtype=np.float64),  # kweight
+    np.ctypeslib.ndpointer(dtype=np.float64),  # tau
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),      # temp, mu
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)         # Nk, Norb
 ]
-_lib.calc_sigma_hall.restype = None
-_lib.calc_k0_band.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    POINTER(c_double), POINTER(c_double),
-    POINTER(c_int64), POINTER(c_int64)
+_loader._lib.calc_sigma_hall.restype = None
+_loader._lib.calc_k0_band.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),  # K0n (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),  # eig
+    np.ctypeslib.ndpointer(dtype=np.float64),  # veloc
+    np.ctypeslib.ndpointer(dtype=np.float64),  # kweight
+    np.ctypeslib.ndpointer(dtype=np.float64),  # tau
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),      # temp, mu
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)         # Nk, Norb
 ]
-_lib.calc_k0_band.restype = None
-_lib.calc_tdf.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64)
+_loader._lib.calc_k0_band.restype = None
+_loader._lib.calc_tdf.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),  # tdf (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),  # eig
+    np.ctypeslib.ndpointer(dtype=np.float64),  # veloc
+    np.ctypeslib.ndpointer(dtype=np.float64),  # kweight
+    np.ctypeslib.ndpointer(dtype=np.float64),  # tau
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),        # Nw, Nk
+    ctypes.POINTER(ctypes.c_int64)                           # Norb
 ]
-_lib.calc_tdf.restype = None
-_lib.get_tau.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    POINTER(c_double), POINTER(c_double),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64)
+_loader._lib.calc_tdf.restype = None
+_loader._lib.get_tau.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),  # tau (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),  # tauw
+    np.ctypeslib.ndpointer(dtype=np.float64),  # eig
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),      # tau_max, eps
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),        # tau_mode, Nk
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)         # Nw, Norb
 ]
-_lib.get_tau.restype = None
-_lib.calc_tau_epa.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    POINTER(c_double), POINTER(c_double),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    POINTER(c_int64), POINTER(c_int64)
+_loader._lib.get_tau.restype = None
+_loader._lib.calc_tau_epa.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.float64),  # tau (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),  # gavg
+    np.ctypeslib.ndpointer(dtype=np.float64),  # wavg
+    np.ctypeslib.ndpointer(dtype=np.float64),  # eig
+    np.ctypeslib.ndpointer(dtype=np.float64),  # edge
+    np.ctypeslib.ndpointer(dtype=np.float64),  # step
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),      # mu, temp
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),        # Nk, Norb
+    ctypes.POINTER(ctypes.c_int64),                          # nmodes
+    np.ctypeslib.ndpointer(dtype=np.int64),    # nbin
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)         # ngrid, nbin_max
 ]
-_lib.calc_tau_epa.restype = None
+_loader._lib.calc_tau_epa.restype = None
+
 
 def calc_Lij(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float, w: float,
              idelta: float, temp: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -121,10 +128,11 @@ def calc_Lij(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float, w: 
     L12 = np.zeros((3, 3), dtype=np.complex128)
     L22 = np.zeros((3, 3), dtype=np.complex128)
     eps = idelta * 1e-3
-    _lib.calc_lij(L11, L22, L12, vk, eig, ffermi, i64(Norb), i64(Nk),
-                  dbl(mu), dbl(w), dbl(idelta),
-                  dbl(eps), dbl(temp))
+    _loader._lib.calc_lij(L11, L22, L12, vk, eig, ffermi, _loader.i64(Norb), _loader.i64(Nk),
+                          _loader.dbl(mu), _loader.dbl(w), _loader.dbl(idelta),
+                          _loader.dbl(eps), _loader.dbl(temp))
     return L11, L12, L22
+
 
 def calc_Lij_wl(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float,
                 wl: np.ndarray, idelta: float, temp: float
@@ -151,11 +159,12 @@ def calc_Lij_wl(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float,
     L11 = np.zeros((Nw, 3, 3), dtype=np.complex128, order='F')
     L12 = np.zeros((Nw, 3, 3), dtype=np.complex128, order='F')
     L22 = np.zeros((Nw, 3, 3), dtype=np.complex128, order='F')
-    _lib.calc_lij_wl(L11, L22, L12, vk, eig, ffermi,
-                     i64(Norb), i64(Nk), i64(Nw),
-                     dbl(mu), wl,
-                     dbl(idelta), dbl(eps), dbl(temp))
+    _loader._lib.calc_lij_wl(L11, L22, L12, vk, eig, ffermi,
+                             _loader.i64(Norb), _loader.i64(Nk), _loader.i64(Nw),
+                             _loader.dbl(mu), wl,
+                             _loader.dbl(idelta), _loader.dbl(eps), _loader.dbl(temp))
     return L11, L12, L22
+
 
 def calc_Kn(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray, temp: float,
             mu: float, tau: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -177,13 +186,14 @@ def calc_Kn(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray, temp: float
     K0 = np.zeros((3, 3), dtype=np.float64)
     K1 = np.zeros((3, 3), dtype=np.float64)
     K2 = np.zeros((3, 3), dtype=np.float64)
-    _lib.calc_kn(K0, K1, K2, eig, veloc, kweight, tau, dbl(temp),
-                 dbl(mu), i64(Nk), i64(Norb))
+    _loader._lib.calc_kn(K0, K1, K2, eig, veloc, kweight, tau, _loader.dbl(temp),
+                         _loader.dbl(mu), _loader.i64(Nk), _loader.i64(Norb))
     return K0, K1, K2
 
+
 def calc_sigma_hall(eig: np.ndarray, veloc: np.ndarray, imass: np.ndarray,
-                     kweight: np.ndarray, tau: np.ndarray, temp: float,
-                     mu: float) -> tuple[np.ndarray, np.ndarray]:
+                    kweight: np.ndarray, tau: np.ndarray, temp: float,
+                    mu: float) -> tuple[np.ndarray, np.ndarray]:
     """
     @fn calc_sigma_hall
     @brief Weak-field Boltzmann Hall kernel for all three field directions, band
@@ -218,9 +228,10 @@ def calc_sigma_hall(eig: np.ndarray, veloc: np.ndarray, imass: np.ndarray,
     Norb = eig.shape[1]
     Shall = np.zeros((Norb, 3, 3, 3), dtype=np.float64)
     Sabs = np.zeros((Norb, 3, 3, 3), dtype=np.float64)
-    _lib.calc_sigma_hall(Shall, Sabs, eig, veloc, imass, kweight, tau,
-                         dbl(temp), dbl(mu), i64(Nk), i64(Norb))
+    _loader._lib.calc_sigma_hall(Shall, Sabs, eig, veloc, imass, kweight, tau,
+                                 _loader.dbl(temp), _loader.dbl(mu), _loader.i64(Nk), _loader.i64(Norb))
     return Shall, Sabs
+
 
 def calc_k0_band(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray,
                  temp: float, mu: float, tau: np.ndarray) -> np.ndarray:
@@ -242,9 +253,10 @@ def calc_k0_band(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray,
     Nk = len(eig)
     Norb = eig.shape[1]
     K0n = np.zeros((Norb, 3, 3), dtype=np.float64)
-    _lib.calc_k0_band(K0n, eig, veloc, kweight, tau, dbl(temp), dbl(mu),
-                      i64(Nk), i64(Norb))
+    _loader._lib.calc_k0_band(K0n, eig, veloc, kweight, tau, _loader.dbl(temp), _loader.dbl(mu),
+                              _loader.i64(Nk), _loader.i64(Norb))
     return K0n
+
 
 def calc_tdf(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray,
              tau: np.ndarray, Nw: int) -> np.ndarray:
@@ -266,9 +278,10 @@ def calc_tdf(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray,
     Nk = len(eig)
     Norb = eig.shape[1]
     tdf = np.zeros((Nw, 3, 3), dtype=np.float64)
-    _lib.calc_tdf(tdf, eig, veloc, kweight, tau, i64(Nw),
-                  i64(Nk), i64(Norb))
+    _loader._lib.calc_tdf(tdf, eig, veloc, kweight, tau, _loader.i64(Nw),
+                          _loader.i64(Nk), _loader.i64(Norb))
     return tdf
+
 
 def get_tau(tauw: np.ndarray, eig: np.ndarray, tau_max: float, tau_mode: int, eps: float = 1.0e-4) -> np.ndarray:
     """
@@ -284,10 +297,11 @@ def get_tau(tauw: np.ndarray, eig: np.ndarray, tau_max: float, tau_mode: int, ep
     Nk, Nw = len(eig), len(tauw)
     Norb = eig.shape[1]
     tau = np.zeros((Nk, Norb), dtype=np.float64)
-    _lib.get_tau(tau, tauw, eig, dbl(tau_max), dbl(eps),
-                 i64(tau_mode), i64(Nk), i64(Nw),
-                 i64(Norb))
+    _loader._lib.get_tau(tau, tauw, eig, _loader.dbl(tau_max), _loader.dbl(eps),
+                         _loader.i64(tau_mode), _loader.i64(Nk), _loader.i64(Nw),
+                         _loader.i64(Norb))
     return tau
+
 
 def calc_tau_epa(eig: np.ndarray, gavg: np.ndarray, wavg: np.ndarray,
                  edge: np.ndarray, step: np.ndarray, nbin: np.ndarray,
@@ -316,9 +330,9 @@ def calc_tau_epa(eig: np.ndarray, gavg: np.ndarray, wavg: np.ndarray,
     nbin_max = int(np.max(nbin))
     tau = np.zeros((Nk, Norb), dtype=np.float64)
     nbin_i64 = np.ascontiguousarray(nbin, dtype=np.int64)
-    _lib.calc_tau_epa(tau, gavg, wavg, eig, edge, step,
-                      dbl(mu), dbl(temp),
-                      i64(Nk), i64(Norb),
-                      i64(nmodes), nbin_i64,
-                      i64(ngrid), i64(nbin_max))
+    _loader._lib.calc_tau_epa(tau, gavg, wavg, eig, edge, step,
+                              _loader.dbl(mu), _loader.dbl(temp),
+                              _loader.i64(Nk), _loader.i64(Norb),
+                              _loader.i64(nmodes), nbin_i64,
+                              _loader.i64(ngrid), _loader.i64(nbin_max))
     return tau

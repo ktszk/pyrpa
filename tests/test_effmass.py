@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#-*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
 """
 Regression / physics tests for the band-basis inverse effective mass tensor
 (get_imassk / get_imassk_mlo in libs/src/fmod.f90, wrapped by
@@ -421,12 +421,12 @@ def test_plane_slice_is_isotropic_for_a_spherical_pocket():
 
 def test_corrugated_cylinder_gives_belly_and_neck():
     """Both extremal orbits of a warped cylinder, against a 1D quadrature reference."""
-    from scipy.integrate import quad
+    import scipy.integrate as scint
 
     def exact(mu_eff):
         xm = np.arccos(np.clip(mu_eff - 1.0, -1.0, 1.0)) / (2 * np.pi)
         y0 = lambda x: np.arccos(np.clip(mu_eff - np.cos(2 * np.pi * x), -1.0, 1.0)) / (2 * np.pi)
-        return 4 * quad(y0, 0.0, xm, limit=400)[0] * 4 * np.pi**2
+        return 4 * scint.quad(y0, 0.0, xm, limit=400)[0] * 4 * np.pi**2
 
     tz, mu = 0.1, -3.0
     rvec, ham_r = _cubic_tb(tz=tz)

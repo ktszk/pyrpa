@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#-*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
 """
 Tests for the Fortran grid kernels used by the vortex / vortex-lattice solvers
 (libs/src/fgrid.f90 via libs/flibs/_grid.py) and for the broadcast-aware Riccati
@@ -29,7 +29,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
-from scipy.interpolate import RegularGridInterpolator as RGI
+import scipy.interpolate as scinterp
 
 import libs.flibs as F
 import libs.plibs._eilenberger_vortex as V
@@ -38,8 +38,8 @@ import libs.plibs._eilenberger_vortex as V
 def _rgi(field, xg, px, py, fill):
     """The scipy reference the Fortran kernel replaces."""
     pts = np.stack([px.ravel(), py.ravel()], axis=1)
-    out = (RGI((xg, xg), field.real, bounds_error=False, fill_value=fill)(pts)
-           + 1j*RGI((xg, xg), field.imag, bounds_error=False, fill_value=fill)(pts))
+    out = (scinterp.RegularGridInterpolator((xg, xg), field.real, bounds_error=False, fill_value=fill)(pts)
+           + 1j*scinterp.RegularGridInterpolator((xg, xg), field.imag, bounds_error=False, fill_value=fill)(pts))
     return out.reshape(px.shape + ((field.shape[-1],) if field.ndim == 3 else ()))
 
 
@@ -62,8 +62,8 @@ def test_bilinear_eval_matches_scipy():
     # sample the gap amplitude (fill = Dbulk outside the cell)
     out = F.bilinear_eval(F2.real, xg, px, py, 0.3)
     assert out.dtype == np.float64
-    ref = RGI((xg, xg), F2.real, bounds_error=False,
-              fill_value=0.3)(np.stack([px.ravel(), py.ravel()], axis=1)).reshape(px.shape)
+    ref = scinterp.RegularGridInterpolator((xg, xg), F2.real, bounds_error=False,
+                                           fill_value=0.3)(np.stack([px.ravel(), py.ravel()], axis=1)).reshape(px.shape)
     assert np.allclose(out, ref, atol=1e-12)
     # the fill is returned verbatim (the scipy pair-of-interpolators idiom used
     # to fill re and im with the SAME number, i.e. fill*(1+1j) -- never used with

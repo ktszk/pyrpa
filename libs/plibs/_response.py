@@ -1,17 +1,26 @@
 #!/usr/bin/env python
-#-*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
 """
 Response functions: spin susceptibility, pairing susceptibility, conductivity, and gap symmetries.
 """
 import numpy as np
 import libs.flibs as flibs
+import collections.abc
+
+# Public API of this submodule; keeps `from ._x import *` in __init__.py from
+# re-exporting numpy, scipy, ctypes and the sibling packages imported above.
+__all__ = [
+    'get_conductivity', 'chis_spectrum', 'chis_q_point', 'chis_q_point_sc', 'chis_spectrum_sc', 'chis_qmap',
+    'phi_spectrum', 'phi_q_point', 'phi_qmap', 'get_chi_orb_list', 'expand_UJ_sites', 'site_block_mask',
+    'set_harmonic_lattice', 'lattice_harmonic', 'gap_symms', 'get_initial_gap'
+]
 
 
 class _NullPathWriter:
-    def __enter__(self):
+    def __enter__(self) -> '_NullPathWriter':
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, exc_type: type | None, exc: BaseException | None, tb: object) -> bool:
         return False
 
     def begin_q(self, i: int, q: np.ndarray) -> None:
@@ -23,7 +32,7 @@ class _NullPathWriter:
 
 class _PathWriter:
     def __init__(self, q_path: str = 'writeq.dat', trace_path: str | None = None,
-                 trace_formatter=None):
+                 trace_formatter: collections.abc.Callable | None = None) -> None:
         self.q_path = q_path
         self.trace_path = trace_path
         self.trace_formatter = trace_formatter or self._default_trace_formatter
@@ -34,13 +43,13 @@ class _PathWriter:
     def _default_trace_formatter(i: int, w: float, trval: complex) -> str:
         return f'{i:8.4f} {w:8.4f} {trval.imag:9.4f} {trval.real:9.4f}\n'
 
-    def __enter__(self):
+    def __enter__(self) -> '_PathWriter':
         self._qfile = open(self.q_path, 'w')
         if self.trace_path is not None:
             self._trace_file = open(self.trace_path, 'w')
         return self
 
-    def __exit__(self, exc_type, exc, tb):
+    def __exit__(self, exc_type: type | None, exc: BaseException | None, tb: object) -> bool:
         if self._trace_file is not None:
             self._trace_file.close()
         if self._qfile is not None:
@@ -61,53 +70,54 @@ class _PathWriter:
 
 
 def _solve_chis_path(qlist: np.ndarray, wlist: np.ndarray, olist: np.ndarray, Smat: np.ndarray,
-                     chi0_builder, writer=None) -> tuple[np.ndarray, np.ndarray]:
-    chisq=[]
-    chis_orbq=[]
+                     chi0_builder: collections.abc.Callable,
+                     writer: _PathWriter | _NullPathWriter | None = None) -> tuple[np.ndarray, np.ndarray]:
+    chisq = []
+    chis_orbq = []
     writer = _NullPathWriter() if writer is None else writer
     with writer:
-        for i,q in enumerate(qlist):
+        for i, q in enumerate(qlist):
             writer.begin_q(i, q)
-            chi0=chi0_builder(q)
-            chis=flibs.get_chis(chi0,Smat)
-            trchis,trchi0,chis_orb=flibs.get_tr_chi(chis,chi0,olist)
+            chi0 = chi0_builder(q)
+            chis = flibs.get_chis(chi0, Smat)
+            trchis, trchi0, chis_orb = flibs.get_tr_chi(chis, chi0, olist)
             chisq.append(trchis)
             chis_orbq.append(chis_orb)
             writer.write_trace(i, wlist, trchi0)
-    return np.array(chisq),np.array(chis_orbq)
+    return np.array(chisq), np.array(chis_orbq)
 
 
 def _prepare_sc_chi0_builder(hamk: np.ndarray, delta_k: np.ndarray, mu: float, temp: float,
                              klist: np.ndarray, olist: np.ndarray, wlist: np.ndarray,
-                             idelta: float, sw_spsym: bool):
-    Norb=hamk.shape[1]
-    eig_BdG,uni_BdG=flibs.get_eig(flibs.mkBdGhamk(hamk - mu * np.eye(Norb), delta_k))
+                             idelta: float, sw_spsym: bool) -> collections.abc.Callable:
+    Norb = hamk.shape[1]
+    eig_BdG, uni_BdG = flibs.get_eig(flibs.mkBdGhamk(hamk - mu * np.eye(Norb), delta_k))
     # mu=0: chemical potential is already absorbed into hamBdGk (hamk - mu*I), so BdG
     # quasi-particle energies are measured from zero and the Fermi level is at 0.
-    ffermi_BdG=flibs.get_ffermi(eig_BdG,0.,temp)
+    ffermi_BdG = flibs.get_ffermi(eig_BdG, 0., temp)
 
     def chi0_builder(q: np.ndarray) -> np.ndarray:
-        qshift=flibs.get_qshift(klist,q)
-        chi0sc=flibs.get_chi_irr_sc(uni_BdG,eig_BdG,ffermi_BdG,qshift,olist,wlist,idelta,temp,sw_spsym)
-        return chi0sc[:,:,:,0]+chi0sc[:,:,:,1]
+        qshift = flibs.get_qshift(klist, q)
+        chi0sc = flibs.get_chi_irr_sc(uni_BdG, eig_BdG, ffermi_BdG, qshift, olist, wlist, idelta, temp, sw_spsym)
+        return chi0sc[:, :, :, 0]+chi0sc[:, :, :, 1]
 
     return chi0_builder
 
 
-def _solve_phi_path(qlist: np.ndarray, wlist: np.ndarray, olist: np.ndarray, phi_builder,
-                    writer=None) -> tuple[np.ndarray, np.ndarray]:
-    phiq=[]
-    phi_orbq=[]
+def _solve_phi_path(qlist: np.ndarray, wlist: np.ndarray, olist: np.ndarray, phi_builder: collections.abc.Callable,
+                    writer: _PathWriter | _NullPathWriter | None = None) -> tuple[np.ndarray, np.ndarray]:
+    phiq = []
+    phi_orbq = []
     writer = _NullPathWriter() if writer is None else writer
     with writer:
-        for i,q in enumerate(qlist):
+        for i, q in enumerate(qlist):
             writer.begin_q(i, q)
-            phi=phi_builder(q)
-            trphi,phi_orb=flibs.get_tr_phi(phi,olist)
+            phi = phi_builder(q)
+            trphi, phi_orb = flibs.get_tr_phi(phi, olist)
             phiq.append(trphi)
             phi_orbq.append(phi_orb)
             writer.write_trace(i, wlist, trphi)
-    return np.array(phiq),np.array(phi_orbq)
+    return np.array(phiq), np.array(phi_orbq)
 
 
 def get_conductivity(mu: float, temp: float, eig: np.ndarray, vk: np.ndarray, Nw: int, Emax: float,
@@ -127,10 +137,11 @@ def get_conductivity(mu: float, temp: float, eig: np.ndarray, vk: np.ndarray, Nw
     @retval    L22: Thermal conductivity spectrum array [Nw, 3, 3]
     @retval  wlist: Frequency mesh array [Nw]
     """
-    wlist=np.linspace(0,Emax,Nw)
-    ffermi=flibs.get_ffermi(eig,mu,temp)
-    L11,L12,L22=flibs.calc_Lij_wl(eig,vk,ffermi,mu,wlist,idelta,temp)
-    return L11,L12,L22,wlist
+    wlist = np.linspace(0, Emax, Nw)
+    ffermi = flibs.get_ffermi(eig, mu, temp)
+    L11, L12, L22 = flibs.calc_Lij_wl(eig, vk, ffermi, mu, wlist, idelta, temp)
+    return L11, L12, L22, wlist
+
 
 def chis_spectrum(mu: float, temp: float, Smat: np.ndarray, klist: np.ndarray, qlist: np.ndarray,
                   olist: np.ndarray, eig: np.ndarray, uni: np.ndarray, Nw: int, Emax: float,
@@ -153,15 +164,16 @@ def chis_spectrum(mu: float, temp: float, Smat: np.ndarray, klist: np.ndarray, q
     @retval chis_orbq: Orbital-resolved spin susceptibility [Nq, ...]
     @retval   wlist: Frequency mesh array [Nw]
     """
-    ffermi=flibs.get_ffermi(eig,mu,temp)
-    wlist=np.linspace(0,Emax,Nw)
+    ffermi = flibs.get_ffermi(eig, mu, temp)
+    wlist = np.linspace(0, Emax, Nw)
 
     def chi0_builder(q: np.ndarray) -> np.ndarray:
-        qshift=flibs.get_qshift(klist,q)
-        return flibs.get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp)
+        qshift = flibs.get_qshift(klist, q)
+        return flibs.get_chi_irr(uni, eig, ffermi, qshift, olist, wlist, idelta, temp)
 
-    chisq,chis_orbq=_solve_chis_path(qlist,wlist,olist,Smat,chi0_builder,_PathWriter(trace_path='chi0.dat'))
-    return chisq,chis_orbq,wlist
+    chisq, chis_orbq = _solve_chis_path(qlist, wlist, olist, Smat, chi0_builder, _PathWriter(trace_path='chi0.dat'))
+    return chisq, chis_orbq, wlist
+
 
 def chis_q_point(q: np.ndarray, eig: np.ndarray, uni: np.ndarray, Emax: float,
                  Nw: int, mu: float, temp: float, Smat: np.ndarray, klist: np.ndarray,
@@ -184,16 +196,17 @@ def chis_q_point(q: np.ndarray, eig: np.ndarray, uni: np.ndarray, Emax: float,
     @retval chis_orb: Orbital-resolved spin susceptibility
     @retval   wlist: Frequency mesh array [Nw]
     """
-    qlist=np.asarray([q],dtype=np.float64)
-    ffermi=flibs.get_ffermi(eig,mu,temp)
-    wlist=np.linspace(0,Emax,Nw)
+    qlist = np.asarray([q], dtype=np.float64)
+    ffermi = flibs.get_ffermi(eig, mu, temp)
+    wlist = np.linspace(0, Emax, Nw)
 
     def chi0_builder(qvec: np.ndarray) -> np.ndarray:
-        qshift=flibs.get_qshift(klist,qvec)
-        return flibs.get_chi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,temp)
+        qshift = flibs.get_qshift(klist, qvec)
+        return flibs.get_chi_irr(uni, eig, ffermi, qshift, olist, wlist, idelta, temp)
 
-    chisq,chis_orbq=_solve_chis_path(qlist,wlist,olist,Smat,chi0_builder)
-    return chisq[0],chis_orbq[0],wlist
+    chisq, chis_orbq = _solve_chis_path(qlist, wlist, olist, Smat, chi0_builder)
+    return chisq[0], chis_orbq[0], wlist
+
 
 def chis_q_point_sc(q: np.ndarray, hamk: np.ndarray, delta_k: np.ndarray, mu: float,
                     Emax: float, Nw: int, temp: float, Smat: np.ndarray,
@@ -222,11 +235,12 @@ def chis_q_point_sc(q: np.ndarray, hamk: np.ndarray, delta_k: np.ndarray, mu: fl
     @retval chis_orb: Orbital-resolved spin susceptibility
     @retval   wlist: Frequency mesh [Nw] float64
     """
-    qlist=np.asarray([q],dtype=np.float64)
-    wlist=np.linspace(0,Emax,Nw)
-    chi0_builder=_prepare_sc_chi0_builder(hamk,delta_k,mu,temp,klist,olist,wlist,idelta,sw_spsym)
-    chisq,chis_orbq=_solve_chis_path(qlist,wlist,olist,Smat,chi0_builder)
-    return chisq[0],chis_orbq[0],wlist
+    qlist = np.asarray([q], dtype=np.float64)
+    wlist = np.linspace(0, Emax, Nw)
+    chi0_builder = _prepare_sc_chi0_builder(hamk, delta_k, mu, temp, klist, olist, wlist, idelta, sw_spsym)
+    chisq, chis_orbq = _solve_chis_path(qlist, wlist, olist, Smat, chi0_builder)
+    return chisq[0], chis_orbq[0], wlist
+
 
 def chis_spectrum_sc(mu: float, temp: float, Smat: np.ndarray, hamk: np.ndarray,
                      delta_k: np.ndarray, klist: np.ndarray, qlist: np.ndarray,
@@ -255,10 +269,11 @@ def chis_spectrum_sc(mu: float, temp: float, Smat: np.ndarray, hamk: np.ndarray,
     @retval chis_orbq: Orbital-resolved spin susceptibility [Nq, ...]
     @retval   wlist: Frequency mesh [Nw] float64
     """
-    wlist=np.linspace(0,Emax,Nw)
-    chi0_builder=_prepare_sc_chi0_builder(hamk,delta_k,mu,temp,klist,olist,wlist,idelta,sw_spsym)
-    chisq,chis_orbq=_solve_chis_path(qlist,wlist,olist,Smat,chi0_builder,_PathWriter(trace_path='chi0_sc.dat'))
-    return chisq,chis_orbq,wlist
+    wlist = np.linspace(0, Emax, Nw)
+    chi0_builder = _prepare_sc_chi0_builder(hamk, delta_k, mu, temp, klist, olist, wlist, idelta, sw_spsym)
+    chisq, chis_orbq = _solve_chis_path(qlist, wlist, olist, Smat, chi0_builder, _PathWriter(trace_path='chi0_sc.dat'))
+    return chisq, chis_orbq, wlist
+
 
 def chis_qmap(Nx: int, Ny: int, Ecut: float, mu: float, temp: float, Smat: np.ndarray,
               klist: np.ndarray, olist: np.ndarray, eig: np.ndarray, uni: np.ndarray,
@@ -282,13 +297,14 @@ def chis_qmap(Nx: int, Ny: int, Ecut: float, mu: float, temp: float, Smat: np.nd
     @retval    qx: qx coordinate mesh [Nx, Ny]
     @retval    qy: qy coordinate mesh [Nx, Ny]
     """
-    ffermi=flibs.get_ffermi(eig,mu,temp)
-    chis,chi0=flibs.chis_qmap(uni,eig,ffermi,klist,Smat,olist,Nx,Ny,temp,Ecut,idelta)
-    x0=np.linspace(0,1,Nx,False)
-    y0=np.linspace(0,1,Ny,False)
+    ffermi = flibs.get_ffermi(eig, mu, temp)
+    chis, chi0 = flibs.chis_qmap(uni, eig, ffermi, klist, Smat, olist, Nx, Ny, temp, Ecut, idelta)
+    x0 = np.linspace(0, 1, Nx, False)
+    y0 = np.linspace(0, 1, Ny, False)
     # indexing='ij' so qx,qy have shape [Nx,Ny] matching the chi maps (chi[ix,iy])
-    qx,qy=np.meshgrid(x0,y0,indexing='ij')
-    return chis,chi0,qx,qy
+    qx, qy = np.meshgrid(x0, y0, indexing='ij')
+    return chis, chi0, qx, qy
+
 
 def phi_spectrum(mu: float, temp: float, klist: np.ndarray, qlist: np.ndarray, olist: np.ndarray,
                  eig: np.ndarray,   uni: np.ndarray, Nw: int, Emax: float,
@@ -311,16 +327,16 @@ def phi_spectrum(mu: float, temp: float, klist: np.ndarray, qlist: np.ndarray, o
     @retval phi_orbq: Orbital-resolved pairing susceptibility [Nq, ...]
     @retval   wlist: Frequency mesh array [Nw]
     """
-    ffermi=flibs.get_ffermi(eig,mu,temp)
-    wlist=np.linspace(0,Emax,Nw)
+    ffermi = flibs.get_ffermi(eig, mu, temp)
+    wlist = np.linspace(0, Emax, Nw)
 
     def phi_builder(q: np.ndarray) -> np.ndarray:
-        qshift=flibs.get_iqshift(klist,q)
-        return flibs.get_phi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,mu,temp)
+        qshift = flibs.get_iqshift(klist, q)
+        return flibs.get_phi_irr(uni, eig, ffermi, qshift, olist, wlist, idelta, mu, temp)
 
-    phiq,phi_orbq=_solve_phi_path(qlist,wlist,olist,phi_builder,
-                                  _PathWriter(trace_path='phi0.dat'))
-    return phiq,phi_orbq,wlist
+    phiq, phi_orbq = _solve_phi_path(qlist, wlist, olist, phi_builder,
+                                     _PathWriter(trace_path='phi0.dat'))
+    return phiq, phi_orbq, wlist
 
 
 def phi_q_point(q: np.ndarray, eig: np.ndarray, uni: np.ndarray, Emax: float,
@@ -343,16 +359,17 @@ def phi_q_point(q: np.ndarray, eig: np.ndarray, uni: np.ndarray, Emax: float,
     @retval phi_orb: Orbital-resolved pairing susceptibility
     @retval   wlist: Frequency mesh array [Nw]
     """
-    qlist=np.asarray([q],dtype=np.float64)
-    ffermi=flibs.get_ffermi(eig,mu,temp)
-    wlist=np.linspace(0,Emax,Nw)
+    qlist = np.asarray([q], dtype=np.float64)
+    ffermi = flibs.get_ffermi(eig, mu, temp)
+    wlist = np.linspace(0, Emax, Nw)
 
     def phi_builder(qvec: np.ndarray) -> np.ndarray:
-        qshift=flibs.get_iqshift(klist,qvec)
-        return flibs.get_phi_irr(uni,eig,ffermi,qshift,olist,wlist,idelta,mu,temp)
+        qshift = flibs.get_iqshift(klist, qvec)
+        return flibs.get_phi_irr(uni, eig, ffermi, qshift, olist, wlist, idelta, mu, temp)
 
-    phiq,phi_orbq=_solve_phi_path(qlist,wlist,olist,phi_builder)
-    return phiq[0],phi_orbq[0],wlist
+    phiq, phi_orbq = _solve_phi_path(qlist, wlist, olist, phi_builder)
+    return phiq[0], phi_orbq[0], wlist
+
 
 def phi_qmap(Nx: int, Ny: int, Ecut: float, mu: float, temp: float, klist: np.ndarray,
              olist: np.ndarray, eig: np.ndarray, uni: np.ndarray, idelta: float = 1.e-3,
@@ -375,13 +392,14 @@ def phi_qmap(Nx: int, Ny: int, Ecut: float, mu: float, temp: float, klist: np.nd
     @retval     qx: qx coordinate mesh [Nx, Ny]
     @retval     qy: qy coordinate mesh [Nx, Ny]
     """
-    ffermi=flibs.get_ffermi(eig,mu,temp)
-    phi=flibs.phi_qmap(uni,eig,ffermi,klist,olist,Nx,Ny,mu,temp,Ecut,idelta,sw_omega)
-    x0=np.linspace(0,1,Nx,False)
-    y0=np.linspace(0,1,Ny,False)
+    ffermi = flibs.get_ffermi(eig, mu, temp)
+    phi = flibs.phi_qmap(uni, eig, ffermi, klist, olist, Nx, Ny, mu, temp, Ecut, idelta, sw_omega)
+    x0 = np.linspace(0, 1, Nx, False)
+    y0 = np.linspace(0, 1, Ny, False)
     # indexing='ij' so qx,qy have shape [Nx,Ny] matching the phi map (phi[ix,iy])
-    qx,qy=np.meshgrid(x0,y0,indexing='ij')
-    return phi,qx,qy
+    qx, qy = np.meshgrid(x0, y0, indexing='ij')
+    return phi, qx, qy
+
 
 def get_chi_orb_list(Norb: int, site_prof: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -394,34 +412,35 @@ def get_chi_orb_list(Norb: int, site_prof: np.ndarray) -> tuple[np.ndarray, np.n
                       column-major order, so a C-contiguous list would be silently transposed
     @retval    site: Array of site indices corresponding to each orbital pair [Npairs]
     """
-    if(len(site_prof)==1):
-        tmp=np.arange(Norb)+1
-        o1,o2=np.meshgrid(tmp,tmp)
-        chiolist=np.array([o1.flatten(),o2.flatten()]).T
-        site=np.ones(len(chiolist),dtype=np.int64)
+    if (len(site_prof) == 1):
+        tmp = np.arange(Norb)+1
+        o1, o2 = np.meshgrid(tmp, tmp)
+        chiolist = np.array([o1.flatten(), o2.flatten()]).T
+        site = np.ones(len(chiolist), dtype=np.int64)
     else:
-        if(Norb==sum(site_prof)):
-            chiolist=[]
-            site=[]
-            N0=1
+        if (Norb == sum(site_prof)):
+            chiolist = []
+            site = []
+            N0 = 1
             for i_site in site_prof:
-                tmp=np.arange(i_site)+N0
-                o1,o2=np.meshgrid(tmp,tmp)
-                chiolist+=list(np.array([o1.flatten(),o2.flatten()]).T)
+                tmp = np.arange(i_site)+N0
+                o1, o2 = np.meshgrid(tmp, tmp)
+                chiolist += list(np.array([o1.flatten(), o2.flatten()]).T)
                 # One site label per orbital pair (i_site^2 entries), not per row (i_site).
-                site+=[N0]*o1.size
-                N0+=i_site
-            chiolist=np.array(chiolist)
-            site=np.array(site,dtype=np.int64)
+                site += [N0]*o1.size
+                N0 += i_site
+            chiolist = np.array(chiolist)
+            site = np.array(site, dtype=np.int64)
         else:
-            print("site_prof doesn't correspond to Hamiltonian")
+            print("site_prof doesn't correspond to Hamiltonian", flush=True)
             exit()
     # Fortran memory order: the single-site branch gets it from the .T view above, the
     # multi-site one is built row by row and has to be converted.
-    return np.asfortranarray(chiolist,dtype=np.int64),site
+    return np.asfortranarray(chiolist, dtype=np.int64), site
 
 
-def expand_UJ_sites(Umat, Jmat, Norb: int, site_prof) -> tuple[np.ndarray, np.ndarray]:
+def expand_UJ_sites(Umat: np.ndarray, Jmat: np.ndarray, Norb: int,
+                    site_prof: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
     @fn expand_UJ_sites
     @brief Bring an orbital-dependent U/J pair into the Norb x Norb form the vertex
@@ -438,21 +457,21 @@ def expand_UJ_sites(Umat, Jmat, Norb: int, site_prof) -> tuple[np.ndarray, np.nd
                       Umat(a+1,b+1) the Fortran vertex routines read (immaterial for the
                       symmetric U/J of a Kanamori interaction, but the declared convention)
     """
-    mats=[]
-    for name,mat in (('Umat',Umat),('Jmat',Jmat)):
-        arr=np.asarray(mat)
+    mats = []
+    for name, mat in (('Umat', Umat), ('Jmat', Jmat)):
+        arr = np.asarray(mat)
         if np.iscomplexobj(arr):
             raise ValueError(f'{name} must be a real-valued matrix')
         if arr.ndim != 2 or arr.shape[0] != arr.shape[1]:
             raise ValueError(f'{name} must be a square matrix, got shape {arr.shape}')
-        mats.append(np.asfortranarray(arr,dtype=np.float64))
-    Umat,Jmat=mats
+        mats.append(np.asfortranarray(arr, dtype=np.float64))
+    Umat, Jmat = mats
     if Umat.shape != Jmat.shape:
         raise ValueError(f'Umat and Jmat shapes differ: {Umat.shape} vs {Jmat.shape}')
-    Nsite=len(site_prof)
+    Nsite = len(site_prof)
     if Umat.shape[0] == Norb:      # already indexed by the global orbital number
-        return Umat,Jmat
-    Nsorb=Umat.shape[0]
+        return Umat, Jmat
+    Nsorb = Umat.shape[0]
     if Nsite < 2:
         raise ValueError(f'Umat/Jmat shape must be ({Norb}, {Norb}), got {Umat.shape}')
     if sum(site_prof) != Norb:
@@ -462,16 +481,16 @@ def expand_UJ_sites(Umat, Jmat, Norb: int, site_prof) -> tuple[np.ndarray, np.nd
                          f'matrix is replicated only when every site has the same number of '
                          f'orbitals, but site_prof={list(site_prof)}')
     # one site worth of orbitals: put the same matrix on every site (block diagonal)
-    Uout=np.zeros((Norb,Norb),dtype=np.float64,order='F')
-    Jout=np.zeros((Norb,Norb),dtype=np.float64,order='F')
+    Uout = np.zeros((Norb, Norb), dtype=np.float64, order='F')
+    Jout = np.zeros((Norb, Norb), dtype=np.float64, order='F')
     for i_site in range(Nsite):
-        n0=i_site*Nsorb
-        Uout[n0:n0+Nsorb,n0:n0+Nsorb]=Umat
-        Jout[n0:n0+Nsorb,n0:n0+Nsorb]=Jmat
-    return Uout,Jout
+        n0 = i_site*Nsorb
+        Uout[n0:n0+Nsorb, n0:n0+Nsorb] = Umat
+        Jout[n0:n0+Nsorb, n0:n0+Nsorb] = Jmat
+    return Uout, Jout
 
 
-def site_block_mask(Norb: int, site_prof) -> np.ndarray:
+def site_block_mask(Norb: int, site_prof: np.ndarray) -> np.ndarray:
     """
     @fn site_block_mask
     @brief Boolean [Norb,Norb] mask of the orbital pairs living on one site, i.e. exactly
@@ -480,15 +499,16 @@ def site_block_mask(Norb: int, site_prof) -> np.ndarray:
     @param site_prof: orbital counts per site
     @retval     mask: [Norb,Norb] bool
     """
-    mask=np.zeros((Norb,Norb),dtype=bool)
+    mask = np.zeros((Norb, Norb), dtype=bool)
     if len(site_prof) < 2:
-        mask[:,:]=True
+        mask[:, :] = True
         return mask
-    n0=0
+    n0 = 0
     for ns in site_prof:
-        mask[n0:n0+ns,n0:n0+ns]=True
-        n0+=ns
+        mask[n0:n0+ns, n0:n0+ns] = True
+        n0 += ns
     return mask
+
 
 # --- Cartesian (R-shell) lattice harmonics ------------------------------------
 # The fractional harmonics in gap_symms (cos(2*pi*k_x) etc.) carry their labelled
@@ -516,13 +536,13 @@ def site_block_mask(Norb: int, site_prof) -> np.ndarray:
 # CAVEAT: for a multi-site cell the pairing bond is R + tau_j - tau_i, not R, so the
 # sublattice phase is still missing here -- use the orbital-basis route there
 # (eil_gap_orbital / eil_gap_file + the Nagai-Nakamura band projection).
-_CART_K = {'s':      lambda n: np.ones(len(n)),
+_CART_K = {'s': lambda n: np.ones(len(n)),
            'dx2-y2': lambda n: n[:, 0] ** 2 - n[:, 1] ** 2,
-           'dxy':    lambda n: n[:, 0] * n[:, 1],
-           'dxz':    lambda n: n[:, 0] * n[:, 2],
-           'dyz':    lambda n: n[:, 1] * n[:, 2],
-           'px':     lambda n: n[:, 0],
-           'py':     lambda n: n[:, 1]}
+           'dxy': lambda n: n[:, 0] * n[:, 1],
+           'dxz': lambda n: n[:, 0] * n[:, 2],
+           'dyz': lambda n: n[:, 1] * n[:, 2],
+           'px': lambda n: n[:, 0],
+           'py': lambda n: n[:, 1]}
 _CART_ODD = {'px', 'py'}
 # kind -> (seed patterns fixing R_cut, single shell only?, in-plane only?)
 _CART_SEED = {'s':      ([(1, 1, 0), (1, -1, 0)], True, True),
@@ -545,7 +565,7 @@ _HARM_AVEC = None
 _HARM_RVEC = None
 
 
-def set_harmonic_lattice(avec=None, rvec=None) -> None:
+def set_harmonic_lattice(avec: np.ndarray | None = None, rvec: np.ndarray | None = None) -> None:
     """
     @fn set_harmonic_lattice
     @brief Register the lattice that gap_symms uses to build its harmonics in the
@@ -645,7 +665,41 @@ def _cart_gap_row(klist: np.ndarray, gap_sym: int, avec: np.ndarray,
 
 
 def gap_symms(klist: np.ndarray, Norb: int, gap_sym: int,
-              avec: np.ndarray = None, rvec: np.ndarray = None):
+              avec: np.ndarray = None, rvec: np.ndarray = None) -> np.ndarray:
+    """
+    @fn gap_symms
+    @brief Pairing form factor phi(k) for one gap symmetry index, tiled over orbitals.
+
+    The form factor depends only on k, so a single row is built and broadcast to
+    every orbital; the caller supplies the orbital structure separately.  Two
+    routes exist and the Cartesian one is preferred when it is available:
+
+      * CARTESIAN (avec and rvec given, or set once via set_harmonic_lattice) --
+        the harmonic is summed over the real R-shell of the model, so it carries
+        the actual point-group content of the lattice.  Used for every gap_sym
+        listed in _CART_GAP / _CART_CHIRAL.  If the R set is too small for the
+        requested symmetry a warning is printed and the fractional form is used.
+      * FRACTIONAL (fallback) -- the textbook cos(2*pi*k_x) - cos(2*pi*k_y) style
+        expressions.  CAUTION: these carry the labelled symmetry only for a
+        tetragonal / orthogonal SINGLE-SITE cell.  On a non-orthogonal lattice or
+        a multi-site cell (the 2-Fe cell of the iron-based systems, say) the label
+        and the true irreducible representation no longer coincide; prefer the
+        orbital-basis route there (gap_orbital + project_gap_to_band).
+
+    Indices 6, 7 and -3 are chiral and return a COMPLEX row; an unknown index
+    returns zeros rather than raising, so a mistyped gap_sym shows up as a
+    vanishing gap rather than a crash.
+
+    @param   klist: k-points in fractional coordinates [Nk, 3] float64
+    @param    Norb: number of orbitals; the row is tiled to [Norb, Nk]
+    @param gap_sym: 0=s, 1=dx2-y2, 2=s+-, 3=dxy, 4=dxz, 5=dyz, 6=d+id, 7=dxz+idyz,
+                    -1=px, -2=py, -3=p+ip (negative = triplet)
+    @param    avec: primitive translation vectors as rows [3, 3] in Angstrom
+                    (None = the value stored by set_harmonic_lattice)
+    @param    rvec: R-vectors of the model [Nr, 3] as integer fractional indices
+                    (None = the value stored by set_harmonic_lattice)
+    @return phi: form factor [Norb, Nk], complex for the chiral indices
+    """
     # The gap symmetry form factor depends only on k, so build one row and broadcast to all orbitals.
     # CAUTION: these harmonics are built from FRACTIONAL coordinates (cos(2*pi*k_x) etc.),
     # which represent the labeled symmetries (s, d_{x^2-y^2}, ...) only for a tetragonal /
@@ -664,35 +718,36 @@ def gap_symms(klist: np.ndarray, Norb: int, gap_sym: int,
             # correctly on an orthogonal single-site lattice.
             print(f'Warning: Cartesian gap harmonic unavailable ({e}); '
                   'falling back to the fractional-coordinate form factor', flush=True)
-    A=2*np.pi
-    kx,ky,kz=klist[:,0],klist[:,1],klist[:,2]
-    if gap_sym==0:        # s
-        row=np.ones(len(klist),dtype=np.float64)
-    elif gap_sym==1:      # dx2-y2
-        row=np.cos(A*kx)-np.cos(A*ky)
-    elif gap_sym==2:      # spm
-        row=2*np.cos(A*kx)*np.cos(A*ky)
-    elif gap_sym==3:      # dxy
-        row=2*np.sin(A*kx)*np.sin(A*ky)
-    elif gap_sym==4:      # dxz
-        row=2*np.sin(A*kx)*np.sin(A*kz)
-    elif gap_sym==5:      # dyz
-        row=2*np.sin(A*ky)*np.sin(A*kz)
-    elif gap_sym==-1:     # px
-        row=2*np.sin(A*kx)
-    elif gap_sym==-2:     # py
-        row=2*np.sin(A*ky)
-    elif gap_sym==-3:     # p+ip (chiral, complex): px + i py
-        row=2*np.sin(A*kx)+2j*np.sin(A*ky)
-    elif gap_sym==6:      # d+id (chiral, complex): dx2-y2 + i dxy  (indices 1 + i*3)
-        row=(np.cos(A*kx)-np.cos(A*ky))+2j*np.sin(A*kx)*np.sin(A*ky)
-    elif gap_sym==7:      # dxz+idyz (chiral, complex, kz dependent): indices 4 + i*5.
+    A = 2*np.pi
+    kx, ky, kz = klist[:, 0], klist[:, 1], klist[:, 2]
+    if gap_sym == 0:        # s
+        row = np.ones(len(klist), dtype=np.float64)
+    elif gap_sym == 1:      # dx2-y2
+        row = np.cos(A*kx)-np.cos(A*ky)
+    elif gap_sym == 2:      # spm
+        row = 2*np.cos(A*kx)*np.cos(A*ky)
+    elif gap_sym == 3:      # dxy
+        row = 2*np.sin(A*kx)*np.sin(A*ky)
+    elif gap_sym == 4:      # dxz
+        row = 2*np.sin(A*kx)*np.sin(A*kz)
+    elif gap_sym == 5:      # dyz
+        row = 2*np.sin(A*ky)*np.sin(A*kz)
+    elif gap_sym == -1:     # px
+        row = 2*np.sin(A*kx)
+    elif gap_sym == -2:     # py
+        row = 2*np.sin(A*ky)
+    elif gap_sym == -3:     # p+ip (chiral, complex): px + i py
+        row = 2*np.sin(A*kx)+2j*np.sin(A*ky)
+    elif gap_sym == 6:      # d+id (chiral, complex): dx2-y2 + i dxy  (indices 1 + i*3)
+        row = (np.cos(A*kx)-np.cos(A*ky))+2j*np.sin(A*kx)*np.sin(A*ky)
+    elif gap_sym == 7:      # dxz+idyz (chiral, complex, kz dependent): indices 4 + i*5.
         # |phi| vanishes on the whole kz=0 (and zone-boundary) plane -> HORIZONTAL line
         # node, unlike the vertical nodes of the in-plane harmonics.
-        row=2*np.sin(A*kx)*np.sin(A*kz)+2j*np.sin(A*ky)*np.sin(A*kz)
+        row = 2*np.sin(A*kx)*np.sin(A*kz)+2j*np.sin(A*ky)*np.sin(A*kz)
     else:
-        row=np.zeros(len(klist),dtype=np.float64)
-    return np.tile(row,(Norb,1))
+        row = np.zeros(len(klist), dtype=np.float64)
+    return np.tile(row, (Norb, 1))
+
 
 def get_initial_gap(klist: np.ndarray, Norb: int, gap_sym: int,
                     avec: np.ndarray = None, rvec: np.ndarray = None) -> np.ndarray:
@@ -704,19 +759,19 @@ def get_initial_gap(klist: np.ndarray, Norb: int, gap_sym: int,
     @param gap_sym: Symmetry index: 0=s, 1=dx2-y2, 2=s+-, 3=dxy, 4=dxz, 5=dyz, -1=px, -2=py, -3=p+ip
     @return init_gap: Initial gap function array [Norb, Nk]
     """
-    if gap_sym>=0:
-        gapsym=['s','dx2-y2','spm','dxy','dxz','dyz','d+id','dxz+idyz']
-        print('gap symmetry is '+gapsym[gap_sym])
+    if gap_sym >= 0:
+        gapsym = ['s', 'dx2-y2', 'spm', 'dxy', 'dxz', 'dyz', 'd+id', 'dxz+idyz']
+        print('gap symmetry is '+gapsym[gap_sym], flush=True)
     else:
-        gapsym=['s','px','py','p+ip']
-        print('gap symmetry is '+gapsym[-gap_sym])
-    row=gap_symms(klist,Norb,gap_sym,avec=avec,rvec=rvec)
+        gapsym = ['s', 'px', 'py', 'p+ip']
+        print('gap symmetry is '+gapsym[-gap_sym], flush=True)
+    row = gap_symms(klist, Norb, gap_sym, avec=avec, rvec=rvec)
     # The linearized Eliashberg seed is passed to Fortran as real(c_double) and the
     # kernel itself is real, so a CHIRAL harmonic cannot be used as a seed: the two
     # members of a degenerate pair (e.g. dxz and dyz) must be obtained from separate
     # real runs and combined as Delta_1 +- i Delta_2 afterwards, with the chirality
     # selected below Tc by the condensation energy (linear theory cannot select it).
-    if np.iscomplexobj(row) and np.abs(row.imag).max()>0.0:
+    if np.iscomplexobj(row) and np.abs(row.imag).max() > 0.0:
         raise ValueError(
             f'gap_sym={gap_sym} is a chiral (complex) harmonic and cannot seed the '
             'linearized Eliashberg equation (real kernel, real seed). Run the two real '

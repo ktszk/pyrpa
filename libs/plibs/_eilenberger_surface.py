@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#-*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
 """
 Specular surface (1D) quasiclassical Eilenberger solver via the Riccati equation.
 
@@ -29,11 +29,18 @@ the new inhomogeneous physics for validation against known results
 surface bound state).
 """
 import numpy as np
-from ..flibs import riccati_chords
-from ._eilenberger import form_factor, BCS_RATIO
+import libs.flibs as flibs
+import libs.plibs._eilenberger as _eilenberger
+
+# Public API of this submodule; keeps `from ._x import *` in __init__.py from
+# re-exporting numpy, scipy, ctypes and the sibling packages imported above.
+__all__ = [
+    'solve_surface', 'surface_ldos', 'calc_surface', 'surface_ldos_fs', 'solve_surface_fs'
+]
 
 
-def _surface_chords(Damp, phi_out, phi_in, om, hvf, dx, cosb, sigf=None):
+def _surface_chords(Damp: np.ndarray, phi_out: np.ndarray, phi_in: np.ndarray, om: np.ndarray, hvf: float, dx: float,
+                    cosb: np.ndarray, sigf: np.ndarray | None = None) -> tuple:
     """
     @fn _surface_chords
     @brief Solve g, f on ALL unfolded surface trajectories at once (one batched
@@ -71,12 +78,12 @@ def _surface_chords(Damp, phi_out, phi_in, om, hvf, dx, cosb, sigf=None):
         om3 = np.broadcast_to(om_path[:, None, :], (2 * Ng, Nc, Nw))
     else:
         om3 = np.broadcast_to(om[None, None, :], (2 * Ng, Nc, Nw))
-    g, f = riccati_chords(np.ascontiguousarray(om3), np.ascontiguousarray(dd3),
-                          hvf, dx / cosb)
+    g, f = flibs.riccati_chords(np.ascontiguousarray(om3), np.ascontiguousarray(dd3),
+                                hvf, dx / cosb)
     return g[Ng:], f[Ng:], g[:Ng][::-1], f[:Ng][::-1]      # out, in branches [Ng,Nchord,Nw]
 
 
-def _beta_grid(Nbeta: int, cos_min: float = 0.02):
+def _beta_grid(Nbeta: int, cos_min: float = 0.02) -> np.ndarray:
     """Outgoing FS angles beta in (-pi/2, pi/2), excluding only a thin grazing
     sliver (|cos beta| < cos_min); the incoming partners are pi - beta.
 
@@ -92,13 +99,13 @@ def _beta_grid(Nbeta: int, cos_min: float = 0.02):
     return beta
 
 
-def _surface_form_factors(beta: np.ndarray, gap_sym: str, beta_surf: float):
+def _surface_form_factors(beta: np.ndarray, gap_sym: str, beta_surf: float) -> tuple:
     """Outgoing/incoming form factors on the trajectory direction set, normalized
     so that the mean of |phi|^2 over the full set {beta} U {pi-beta} is 1.  This ties
     the surface kernel and the bulk reference to the *same* angular average, making
     the profile heal to Dbulk and the result independent of surface orientation."""
-    phi_out = form_factor(beta, gap_sym, beta_surf)
-    phi_in = form_factor(np.pi - beta, gap_sym, beta_surf)
+    phi_out = _eilenberger.form_factor(beta, gap_sym, beta_surf)
+    phi_in = _eilenberger.form_factor(np.pi - beta, gap_sym, beta_surf)
     norm = np.sqrt(np.mean(np.abs(np.concatenate([phi_out, phi_in])) ** 2))
     if norm > 0:
         phi_out = phi_out / norm
@@ -110,7 +117,7 @@ def solve_surface(coupling: float, temp: float, omega: np.ndarray, gap_sym: str,
                   beta_surf: float = 0.0, Dbulk: float = None, Nbeta: int = 30,
                   Lxi: float = 8.0, nper: int = 16, hvf: float = 1.0,
                   imp_gamma: float = 0.0, imp_c: float = 1.0e8,
-                  eps: float = 1.0e-4, itemax: int = 300, mix: float = 0.3):
+                  eps: float = 1.0e-4, itemax: int = 300, mix: float = 0.3) -> tuple[np.ndarray, np.ndarray, float]:
     """
     @fn solve_surface
     @brief Self-consistently solve the gap profile Delta_amp(x) near a specular
@@ -199,7 +206,7 @@ def _bulk_gap(coupling: float, temp: float, omega: np.ndarray, phi: np.ndarray,
               eps: float = 1.0e-8, itemax: int = 500, mix: float = 0.5) -> float:
     """Homogeneous gap amplitude for the cylindrical FS (angle average over phi),
     consistent with the surface solver's normalization."""
-    damp = BCS_RATIO * temp
+    damp = _eilenberger.BCS_RATIO * temp
     Dk = phi[:, None]
     absphi2 = (phi * np.conj(phi)).real[:, None]            # |phi|^2
     for _ in range(itemax):
@@ -222,7 +229,7 @@ def _bulk_gap_imp(coupling: float, temp: float, omega: np.ndarray, phi: np.ndarr
     T-matrix impurity self-energy (the bulk reference for the surface solver).
     Nested loop: inner impurity self-consistency at fixed gap, outer gap update."""
     gpref = gamma * (cimp ** 2 + 1.0)
-    damp = BCS_RATIO * temp
+    damp = _eilenberger.BCS_RATIO * temp
     wt = omega.astype(np.complex128).copy()
     sigf = np.zeros(len(omega), dtype=np.complex128)
     for _ in range(itemax):
@@ -254,7 +261,7 @@ def surface_ldos(Damp: np.ndarray, x: np.ndarray, wlist: np.ndarray, gap_sym: st
                  beta_surf: float = 0.0, ix: int = 0, delta: float = None,
                  Dbulk: float = 1.0, Nbeta: int = 60, hvf: float = 1.0,
                  imp_gamma: float = 0.0, imp_c: float = 1.0e8, h: float = 0.0,
-                 eps: float = 1.0e-4, itemax: int = 200, mix: float = 0.5):
+                 eps: float = 1.0e-4, itemax: int = 200, mix: float = 0.5) -> np.ndarray:
     """
     @fn surface_ldos
     @brief Local density of states N(x,w)/N0 = Re<g(x,w)> at grid index ix (default
@@ -295,7 +302,7 @@ def surface_ldos(Damp: np.ndarray, x: np.ndarray, wlist: np.ndarray, gap_sym: st
     clean = (imp_gamma == 0.0)
     gpref = imp_gamma * (imp_c ** 2 + 1.0)
 
-    def _sector(zomega):
+    def _sector(zomega: complex) -> np.ndarray:
         """LDOS N(ix) for a given (possibly spin-shifted) retarded frequency [Nw]."""
         wt = np.tile(zomega, (Ng, 1))
         sigf = np.zeros((Ng, Nw), dtype=np.complex128)
@@ -329,8 +336,8 @@ def surface_ldos(Damp: np.ndarray, x: np.ndarray, wlist: np.ndarray, gap_sym: st
 def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
                  beta_surf: float = 0.0, kb: float = 1.0, sw_ldos: bool = True,
                  imp_gamma: float = 0.0, imp_c: float = 1.0e8, h: float = 0.0,
-                 fs_kind: str = None, fs_params=None, fs=None,
-                 Nbeta: int = 30, Lxi: float = 8.0, nper: int = 16):
+                 fs_kind: str = None, fs_params: tuple | None = None, fs: dict | None = None,
+                 Nbeta: int = 30, Lxi: float = 8.0, nper: int = 16) -> tuple:
     """
     @fn calc_surface
     @brief Driver: solve the self-consistent gap profile Delta(x) at a specular
@@ -346,8 +353,7 @@ def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
     @param imp_gamma,imp_c: non-magnetic impurity scattering rate [eV] and T-matrix
                             c (0=clean, large=Born, 0=unitary)
     """
-    from ._eilenberger import matsubara
-    omega = matsubara(temp, wc)
+    omega = _eilenberger.matsubara(temp, wc)
     print("specular-surface quasiclassical Eilenberger (Riccati)", flush=True)
     print(f"gap_sym={gap_sym}, beta_surf={beta_surf:.4f} rad, "
           f"T={temp/kb:.2f} K, lambda={coupling:.3f}, {len(omega)} Matsubara freqs", flush=True)
@@ -355,8 +361,7 @@ def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
           f"({'clean' if imp_gamma == 0 else 'Born' if imp_c > 10 else 'unitary'})", flush=True)
     fsobj = fs                # prebuilt FS (e.g. build_wannier_fs) overrides fs_kind
     if fsobj is None and fs_kind is not None:   # model FS from a name
-        from ._eilenberger import build_model_fs
-        fsobj = build_model_fs(fs_kind, 240, params=fs_params)
+        fsobj = _eilenberger.build_model_fs(fs_kind, 240, params=fs_params)
     if fsobj is not None:     # FS-consistent gap self-consistency (clean, model or Wannier FS)
         x, Damp, Dbulk = solve_surface_fs(coupling, temp, omega, fsobj, gap_sym, Lxi=Lxi, nper=nper)
     else:
@@ -365,8 +370,7 @@ def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
     if Dbulk <= 0.0:
         print("normal state (Dbulk=0); nothing to profile", flush=True)
         return x, Damp
-    from ._eilenberger import fs_hvf
-    hvf_eff = fs_hvf(fsobj)      # <|v_par|> on a real FS, 1 for the cylinder
+    hvf_eff = _eilenberger.fs_hvf(fsobj)      # <|v_par|> on a real FS, 1 for the cylinder
     xi = hvf_eff / (np.pi * Dbulk)
     print(f"Dbulk = {Dbulk:.6e} eV,  xi = {xi:.4g}  (hvf = {hvf_eff:.4g})", flush=True)
     print(f"Delta(0)/Dbulk = {Damp[0]/Dbulk:.4f}   Delta(L)/Dbulk = {Damp[-1]/Dbulk:.4f}", flush=True)
@@ -375,7 +379,7 @@ def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
             fh.write("# x/xi   Delta(x)/Dbulk   Delta(x)[eV]\n")
             for xj, dj in zip(x, Damp):
                 fh.write(f"{xj/xi:12.5e} {dj/Dbulk:12.5e} {dj:14.6e}\n")
-    except IOError as e:
+    except OSError as e:
         print(f"Error: failed to write 'surface_gap.dat': {e}", flush=True)
 
     if sw_ldos:
@@ -397,12 +401,12 @@ def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
                 fh.write("# w/Dbulk   N(x=0,w)/N0\n")
                 for wj, nj in zip(wlist, ldos):
                     fh.write(f"{wj/Dbulk:12.5e} {nj:12.5e}\n")
-        except IOError as e:
+        except OSError as e:
             print(f"Error: failed to write 'surface_ldos.dat': {e}", flush=True)
     return x, Damp
 
 
-def _reflection_index(fs):
+def _reflection_index(fs: dict) -> np.ndarray:
     """For each FS point i, the index of its specular partner at a surface with
     normal x_hat: the point with the same parallel momentum and the opposite v_x
     sign (k_parallel conserved, k_perp flipped).  Works for a general -- e.g. real
@@ -440,8 +444,8 @@ def _reflection_index(fs):
     return j
 
 
-def surface_ldos_fs(fs, Damp, x, wlist, gap_sym, ix=0, delta=None, Dbulk=1.0,
-                    vmin_frac=0.02):
+def surface_ldos_fs(fs: dict, Damp: np.ndarray, x: np.ndarray, wlist: np.ndarray, gap_sym: int | str | None,
+                    ix: int = 0, delta: float | None = None, Dbulk: float = 1.0, vmin_frac: float = 0.02) -> np.ndarray:
     """
     @fn surface_ldos_fs
     @brief Specular-surface LDOS N(x,w)/N0 on a model Fermi surface with real Fermi
@@ -460,10 +464,9 @@ def surface_ldos_fs(fs, Damp, x, wlist, gap_sym, ix=0, delta=None, Dbulk=1.0,
            must be called with unit velocity.  The Fermi speed enters this route only
            through xi, i.e. through the grid ``x`` handed in (see fs_hvf).
     """
-    from ._eilenberger import fs_form_factor
     if delta is None:
         delta = 0.02 * Dbulk
-    phi = fs_form_factor(fs, gap_sym)
+    phi = _eilenberger.fs_form_factor(fs, gap_sym)
     vx, nf = fs['vx'], fs['nf']
     refl = _reflection_index(fs)
     Ng, Nw = len(Damp), len(wlist)
@@ -479,8 +482,10 @@ def surface_ldos_fs(fs, Damp, x, wlist, gap_sym, ix=0, delta=None, Dbulk=1.0,
     return (gsum / wsum).real
 
 
-def solve_surface_fs(coupling, temp, omega, fs, gap_sym, Dbulk=None, Lxi=8.0, nper=16,
-                     hvf=None, vmin_frac=0.02, eps=1.0e-4, itemax=300, mix=0.3):
+def solve_surface_fs(coupling: float, temp: float, omega: np.ndarray, fs: dict, gap_sym: int | str | None,
+                     Dbulk: float | None = None, Lxi: float = 8.0, nper: int = 16, hvf: float | None = None,
+                     vmin_frac: float = 0.02, eps: float = 1.0e-4, itemax: int = 300,
+                     mix: float = 0.3) -> tuple[np.ndarray, np.ndarray, float]:
     """
     @fn solve_surface_fs
     @brief Self-consistent gap profile Delta_amp(x) at a specular surface on a model
@@ -500,8 +505,7 @@ def solve_surface_fs(coupling, temp, omega, fs, gap_sym, Dbulk=None, Lxi=8.0, np
                 by a factor <|v_F|> and the gap never heals to Dbulk at the far edge.
     @return (x, Damp, Dbulk)
     """
-    from ._eilenberger import fs_form_factor, solve_gap, fs_hvf
-    phi = fs_form_factor(fs, gap_sym)
+    phi = _eilenberger.fs_form_factor(fs, gap_sym)
     vx, nf = fs['vx'], fs['nf']
     refl = _reflection_index(fs)
     vmax = np.abs(vx).max()
@@ -520,8 +524,8 @@ def solve_surface_fs(coupling, temp, omega, fs, gap_sym, Dbulk=None, Lxi=8.0, np
     w_ch = np.concatenate([nf[out], nf[jj]]) / wsum
     p_ch = np.concatenate([phi[out], phi[jj]])
     if Dbulk is None:
-        Dbulk = solve_gap(temp, w_ch, p_ch, omega, 0.0, 1.0e8, coupling)
-    hvf_eff = fs_hvf(fs) if hvf is None else float(hvf)
+        Dbulk = _eilenberger.solve_gap(temp, w_ch, p_ch, omega, 0.0, 1.0e8, coupling)
+    hvf_eff = _eilenberger.fs_hvf(fs) if hvf is None else float(hvf)
     if Dbulk < 1.0e-6 * temp:
         xi = hvf_eff / (np.pi * max(temp, 1e-12))
         x = np.linspace(0.0, Lxi * xi, int(Lxi * nper))

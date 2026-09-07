@@ -1,10 +1,18 @@
-from ctypes import *
+import ctypes
 import numpy as np
-from ._loader import _lib, i64, dbl
+import libs.flibs._loader as _loader
+
+# Public API of this submodule; keeps `from ._x import *` in __init__.py from
+# re-exporting numpy, scipy, ctypes and the sibling packages imported above.
+__all__ = [
+    'get_chi0_conv', 'get_chi_irr', 'chis_qmap', 'get_tr_chi', 'get_phi_irr', 'phi_qmap', 'get_tr_phi', 'get_chis',
+    'get_chi0', 'get_chi0_tail', 'get_chi0_soc', 'get_chis_chic_soc', 'get_chis_chic', 'get_chi_irr_sc',
+    'get_eig_or_tr_chi'
+]
 
 # --- ctypes signatures: set once at import.
 # All Fortran entry points are subroutines, so restype is always None.
-_lib.get_chi0_conv_.argtypes = [
+_loader._lib.get_chi0_conv_.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.complex128),  # chi
     np.ctypeslib.ndpointer(dtype=np.complex128),  # Gk
     np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
@@ -12,115 +20,115 @@ _lib.get_chi0_conv_.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.int32),       # irr_chi
     np.ctypeslib.ndpointer(dtype=np.int32),       # chi_map
     np.ctypeslib.ndpointer(dtype=np.int64),       # olist
-    POINTER(c_double), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64)
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int64),          # temp, Nx
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Ny, Nz
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, Nk
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nkall, Norb
+    ctypes.POINTER(ctypes.c_int64)                              # Nchi
 ]
-_lib.get_chi0_conv_.restype = None
-_lib.get_chi_irr.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_double),
-    POINTER(c_double), POINTER(c_double),
+_loader._lib.get_chi0_conv_.restype = None
+_loader._lib.get_chi_irr.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
+    np.ctypeslib.ndpointer(dtype=np.float64),     # eig
+    np.ctypeslib.ndpointer(dtype=np.float64),     # ffermi
+    np.ctypeslib.ndpointer(dtype=np.int64),       # qshift
+    np.ctypeslib.ndpointer(dtype=np.int64),       # ol
+    np.ctypeslib.ndpointer(dtype=np.float64),     # wl
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nchi, Norb
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nk, Nw
+    ctypes.POINTER(ctypes.c_double),                            # idelta
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),         # eps, temp
 ]
-_lib.get_chi_irr.restype = None
-_lib.chiq_map.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    POINTER(c_double), POINTER(c_double),
-    POINTER(c_double), POINTER(c_double),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
+_loader._lib.get_chi_irr.restype = None
+_loader._lib.chiq_map.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # trchis (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # trchi (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # uni
+    np.ctypeslib.ndpointer(dtype=np.float64),             # eig
+    np.ctypeslib.ndpointer(dtype=np.float64),             # ffermi
+    np.ctypeslib.ndpointer(dtype=np.float64),             # klist
+    np.ctypeslib.ndpointer(dtype=np.float64),             # Smat
+    np.ctypeslib.ndpointer(dtype=np.int64),               # ol
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),                 # temp, ecut
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),                 # idelta, eps
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),                   # Nx, Ny
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Norb, Nchi
 ]
-_lib.chiq_map.restype = None
-_lib.get_tr_chi.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64)
+_loader._lib.chiq_map.restype = None
+_loader._lib.get_tr_chi.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # trchis (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # trchi0 (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # chis_orb (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # chis
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi0
+    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, Nchi
+    ctypes.POINTER(ctypes.c_int64)                              # Norb
 ]
-_lib.get_tr_chi.restype = None
-_lib.get_phi_irr.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_double), POINTER(c_double),
-    POINTER(c_double), POINTER(c_double),
+_loader._lib.get_tr_chi.restype = None
+_loader._lib.get_phi_irr.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # phi (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
+    np.ctypeslib.ndpointer(dtype=np.float64),     # eig
+    np.ctypeslib.ndpointer(dtype=np.float64),     # ffermi
+    np.ctypeslib.ndpointer(dtype=np.int64),       # qshift
+    np.ctypeslib.ndpointer(dtype=np.int64),       # ol
+    np.ctypeslib.ndpointer(dtype=np.float64),     # wl
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nchi, Norb
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nk, Nw
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),         # idelta, eps
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),         # mu, temp
 ]
-_lib.get_phi_irr.restype = None
-_lib.phiq_map.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    POINTER(c_double), POINTER(c_double),
-    POINTER(c_double), POINTER(c_double),
-    POINTER(c_double),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_bool)
+_loader._lib.get_phi_irr.restype = None
+_loader._lib.phiq_map.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # trphi (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
+    np.ctypeslib.ndpointer(dtype=np.float64),     # eig
+    np.ctypeslib.ndpointer(dtype=np.float64),     # ffermi
+    np.ctypeslib.ndpointer(dtype=np.float64),     # klist
+    np.ctypeslib.ndpointer(dtype=np.int64),       # ol
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),         # mu, temp
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),         # ecut, idelta
+    ctypes.POINTER(ctypes.c_double),                            # eps
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nx, Ny
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nk, Norb
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_bool)             # Nchi, sw_omega
 ]
-_lib.phiq_map.restype = None
-_lib.get_tr_phi.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64)
+_loader._lib.phiq_map.restype = None
+_loader._lib.get_tr_phi.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # trphi (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # phi_orb (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # phi
+    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, Nchi
+    ctypes.POINTER(ctypes.c_int64)                              # Norb
 ]
-_lib.get_tr_phi.restype = None
-_lib.get_chis.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    POINTER(c_int64), POINTER(c_int64),
+_loader._lib.get_tr_phi.restype = None
+_loader._lib.get_chis.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # chis (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi0
+    np.ctypeslib.ndpointer(dtype=np.float64),     # Smat
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nchi, Nw
 ]
-_lib.get_chis.restype = None
-_lib.get_chi0.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    POINTER(c_double), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64),
-    POINTER(c_double)  # maxchi0s_out (Stoner factor)
+_loader._lib.get_chis.restype = None
+_loader._lib.get_chi0.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),     # Smat
+    np.ctypeslib.ndpointer(dtype=np.float64),     # Cmat
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # Gk
+    np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
+    np.ctypeslib.ndpointer(dtype=np.int64),       # invk
+    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int64),          # temp, Nx
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Ny, Nz
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, Nk
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nkall, Norb
+    ctypes.POINTER(ctypes.c_int64),                             # Nchi
+    ctypes.POINTER(ctypes.c_double)                             # maxchi0s_out (Stoner factor)
 ]
-_lib.get_chi0.restype = None
-_lib.get_chi0_tail.argtypes = [
+_loader._lib.get_chi0.restype = None
+_loader._lib.get_chi0_tail.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.complex128),  # chi
     np.ctypeslib.ndpointer(dtype=np.float64),     # Smat
     np.ctypeslib.ndpointer(dtype=np.float64),     # Cmat
@@ -130,78 +138,79 @@ _lib.get_chi0_tail.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
     np.ctypeslib.ndpointer(dtype=np.int64),       # invk
     np.ctypeslib.ndpointer(dtype=np.int64),       # olist
-    POINTER(c_double), POINTER(c_double),         # mu, temp
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_double)  # maxchi0s_out (Stoner factor)
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),         # mu, temp
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nx, Ny
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nz, Nw
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nk, Nkall
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Norb, Nchi
+    ctypes.POINTER(ctypes.c_double)                             # maxchi0s_out (Stoner factor)
 ]
-_lib.get_chi0_tail.restype = None
-_lib.get_chi0_soc.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    POINTER(c_double), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64)
+_loader._lib.get_chi0_tail.restype = None
+_loader._lib.get_chi0_soc.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),     # sgnsig (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),     # sgnsig2 (out)
+    np.ctypeslib.ndpointer(dtype=np.int64),       # invschi (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),     # Vmat
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # Gk
+    np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
+    np.ctypeslib.ndpointer(dtype=np.int64),       # invk
+    np.ctypeslib.ndpointer(dtype=np.int64),       # invs
+    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
+    np.ctypeslib.ndpointer(dtype=np.int64),       # slist
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int64),          # temp, Nx
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Ny, Nz
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, Nk
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nkall, Nchi
+    ctypes.POINTER(ctypes.c_int64)                              # Norb
 ]
-_lib.get_chi0_soc.restype = None
-_lib.get_chis_chic_soc.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64)
+_loader._lib.get_chi0_soc.restype = None
+_loader._lib.get_chis_chic_soc.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # chic (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # chiszz (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # chispm (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi
+    np.ctypeslib.ndpointer(dtype=np.float64),     # Vmat
+    np.ctypeslib.ndpointer(dtype=np.int64),       # orb_list
+    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
+    np.ctypeslib.ndpointer(dtype=np.int64),       # slist
+    np.ctypeslib.ndpointer(dtype=np.int64),       # invs
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nk, Nw
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nchi, Norb
 ]
-_lib.get_chis_chic_soc.restype = None
-_lib.get_chis_chic.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
+_loader._lib.get_chis_chic_soc.restype = None
+_loader._lib.get_chis_chic.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # chis (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # chic (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # chi
+    np.ctypeslib.ndpointer(dtype=np.float64),             # Smat
+    np.ctypeslib.ndpointer(dtype=np.float64),             # Cmat
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nw, Nchi
 ]
-_lib.get_chis_chic.restype = None
-_lib.get_chi_irr_sc.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_double), POINTER(c_double),
-    POINTER(c_double), POINTER(c_bool),
+_loader._lib.get_chis_chic.restype = None
+_loader._lib.get_chi_irr_sc.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
+    np.ctypeslib.ndpointer(dtype=np.float64),     # eig
+    np.ctypeslib.ndpointer(dtype=np.float64),     # ffermi
+    np.ctypeslib.ndpointer(dtype=np.int64),       # qshift
+    np.ctypeslib.ndpointer(dtype=np.int64),       # ol
+    np.ctypeslib.ndpointer(dtype=np.float64),     # wl
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nchi, Norb
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nk, Nw
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),         # idelta, eps
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_bool),           # temp, sw_spsym
 ]
-_lib.get_chi_irr_sc.restype = None
-_lib.get_eig_or_tr_chi.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_bool)
+_loader._lib.get_chi_irr_sc.restype = None
+_loader._lib.get_eig_or_tr_chi.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # chiqout (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi
+    np.ctypeslib.ndpointer(dtype=np.int64),       # invk
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nkall, Nk
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_bool)             # Nchi, sw_eig
 ]
-_lib.get_eig_or_tr_chi.restype = None
+_loader._lib.get_eig_or_tr_chi.restype = None
+
 
 def _get_chi_map(olist: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -241,6 +250,7 @@ def _get_chi_map(olist: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
                 it += 1
     return chi_map, irr_chi
 
+
 def get_chi0_conv(Gk: np.ndarray, kmap: np.ndarray, invk: np.ndarray, olist: np.ndarray,
                   temp: float, Nx: int, Ny: int, Nz: int) -> np.ndarray:
     """
@@ -262,11 +272,12 @@ def get_chi0_conv(Gk: np.ndarray, kmap: np.ndarray, invk: np.ndarray, olist: np.
     Nw = Gk.shape[2]
     chi = np.zeros((Nchi, Nchi, Nw, Nk), dtype=np.complex128)
     chi_map, irr_chi = _get_chi_map(olist)
-    _lib.get_chi0_conv_(chi, Gk, kmap, invk, irr_chi, chi_map, olist,
-                        dbl(temp), i64(Nx),
-                        i64(Ny), i64(Nz), i64(Nw), i64(Nk),
-                        i64(Nkall), i64(Norb), i64(Nchi))
+    _loader._lib.get_chi0_conv_(chi, Gk, kmap, invk, irr_chi, chi_map, olist,
+                                _loader.dbl(temp), _loader.i64(Nx),
+                                _loader.i64(Ny), _loader.i64(Nz), _loader.i64(Nw), _loader.i64(Nk),
+                                _loader.i64(Nkall), _loader.i64(Norb), _loader.i64(Nchi))
     return chi
+
 
 def get_chi_irr(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, qshift: np.ndarray,
                 olist: np.ndarray, wlist: np.ndarray, idelta: float, temp: float) -> np.ndarray:
@@ -287,10 +298,11 @@ def get_chi_irr(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, qshift: np
     Norb, Nchi = eig.shape[1], len(olist)
     chi = np.zeros((Nw, Nchi, Nchi), dtype=np.complex128)
     eps = idelta * 1e-3
-    _lib.get_chi_irr(chi, uni, eig, ffermi, qshift, olist, wlist, i64(Nchi),
-                     i64(Norb), i64(Nk), i64(Nw),
-                     dbl(idelta), dbl(eps), dbl(temp))
+    _loader._lib.get_chi_irr(chi, uni, eig, ffermi, qshift, olist, wlist, _loader.i64(Nchi),
+                             _loader.i64(Norb), _loader.i64(Nk), _loader.i64(Nw),
+                             _loader.dbl(idelta), _loader.dbl(eps), _loader.dbl(temp))
     return chi
+
 
 def chis_qmap(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, klist: np.ndarray,
               Smat: np.ndarray, olist: np.ndarray, Nx: int, Ny: int, temp: float,
@@ -317,11 +329,12 @@ def chis_qmap(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, klist: np.nd
     chi = np.zeros((Nx, Ny), dtype=np.complex128)
     chis = np.zeros((Nx, Ny), dtype=np.complex128)
     eps = idelta * 1e-3
-    _lib.chiq_map(chis, chi, uni, eig, ffermi, klist, Smat, olist, dbl(temp),
-                  dbl(ecut), dbl(idelta), dbl(eps),
-                  i64(Nx), i64(Ny), i64(Nk),
-                  i64(Norb), i64(Nchi))
+    _loader._lib.chiq_map(chis, chi, uni, eig, ffermi, klist, Smat, olist, _loader.dbl(temp),
+                          _loader.dbl(ecut), _loader.dbl(idelta), _loader.dbl(eps),
+                          _loader.i64(Nx), _loader.i64(Ny), _loader.i64(Nk),
+                          _loader.i64(Norb), _loader.i64(Nchi))
     return chis, chi
+
 
 def get_tr_chi(chis: np.ndarray, chi0: np.ndarray,
                olist: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -339,9 +352,10 @@ def get_tr_chi(chis: np.ndarray, chi0: np.ndarray,
     trchis = np.zeros(Nw, dtype=np.complex128)
     trchi0 = np.zeros(Nw, dtype=np.complex128)
     chis_orb = np.zeros((Nw, Norb + 2), dtype=np.complex128)
-    _lib.get_tr_chi(trchis, trchi0, chis_orb, chis, chi0, olist,
-                    i64(Nw), i64(Nchi), i64(Norb))
+    _loader._lib.get_tr_chi(trchis, trchi0, chis_orb, chis, chi0, olist,
+                            _loader.i64(Nw), _loader.i64(Nchi), _loader.i64(Norb))
     return trchis, trchi0, chis_orb
+
 
 def get_phi_irr(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, qshift: np.ndarray,
                 olist: np.ndarray, wlist: np.ndarray, idelta: float, mu: float,
@@ -364,11 +378,12 @@ def get_phi_irr(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, qshift: np
     Norb, Nchi = eig.shape[1], len(olist)
     phi = np.zeros((Nw, Nchi, Nchi), dtype=np.complex128)
     eps = idelta * 1e-3
-    _lib.get_phi_irr(phi, uni, eig, ffermi, qshift, olist, wlist, i64(Nchi),
-                     i64(Norb), i64(Nk), i64(Nw),
-                     dbl(idelta), dbl(eps),
-                     dbl(mu), dbl(temp))
+    _loader._lib.get_phi_irr(phi, uni, eig, ffermi, qshift, olist, wlist, _loader.i64(Nchi),
+                             _loader.i64(Norb), _loader.i64(Nk), _loader.i64(Nw),
+                             _loader.dbl(idelta), _loader.dbl(eps),
+                             _loader.dbl(mu), _loader.dbl(temp))
     return phi
+
 
 def phi_qmap(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, klist: np.ndarray,
              olist: np.ndarray, Nx: int, Ny: int, mu: float, temp: float, ecut: float,
@@ -394,11 +409,12 @@ def phi_qmap(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, klist: np.nda
     Norb, Nchi = eig.shape[1], len(olist)
     phi = np.zeros((Nx, Ny), dtype=np.complex128)
     eps = idelta * 1e-3
-    _lib.phiq_map(phi, uni, eig, ffermi, klist, olist, dbl(mu), dbl(temp),
-                  dbl(ecut), dbl(idelta), dbl(eps),
-                  i64(Nx), i64(Ny), i64(Nk),
-                  i64(Norb), i64(Nchi), byref(c_bool(sw_omega)))
+    _loader._lib.phiq_map(phi, uni, eig, ffermi, klist, olist, _loader.dbl(mu), _loader.dbl(temp),
+                          _loader.dbl(ecut), _loader.dbl(idelta), _loader.dbl(eps),
+                          _loader.i64(Nx), _loader.i64(Ny), _loader.i64(Nk),
+                          _loader.i64(Norb), _loader.i64(Nchi), ctypes.byref(ctypes.c_bool(sw_omega)))
     return phi
+
 
 def get_tr_phi(phi: np.ndarray, olist: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -412,9 +428,10 @@ def get_tr_phi(phi: np.ndarray, olist: np.ndarray) -> tuple[np.ndarray, np.ndarr
     Nchi, Nw, Norb = len(olist), len(phi), olist.max()
     trphi = np.zeros(Nw, dtype=np.complex128)
     phi_orb = np.zeros((Nw, Norb + 2), dtype=np.complex128)
-    _lib.get_tr_phi(trphi, phi_orb, phi, olist, i64(Nw),
-                    i64(Nchi), i64(Norb))
+    _loader._lib.get_tr_phi(trphi, phi_orb, phi, olist, _loader.i64(Nw),
+                            _loader.i64(Nchi), _loader.i64(Norb))
     return trphi, phi_orb
+
 
 def get_chis(chi0: np.ndarray, Smat: np.ndarray) -> np.ndarray:
     """
@@ -426,8 +443,9 @@ def get_chis(chi0: np.ndarray, Smat: np.ndarray) -> np.ndarray:
     """
     Nchi, Nw = len(Smat), len(chi0)
     chis = np.zeros((Nw, Nchi, Nchi), dtype=np.complex128)
-    _lib.get_chis(chis, chi0, Smat, i64(Nchi), i64(Nw))
+    _loader._lib.get_chis(chis, chi0, Smat, _loader.i64(Nchi), _loader.i64(Nw))
     return chis
+
 
 def get_chi0(Smat: np.ndarray, Cmat: np.ndarray, Gk: np.ndarray, olist: np.ndarray,
              kmap: np.ndarray, invk: np.ndarray, temp: float, Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, float]:
@@ -450,12 +468,13 @@ def get_chi0(Smat: np.ndarray, Cmat: np.ndarray, Gk: np.ndarray, olist: np.ndarr
     Norb, Nchi = len(Gk), len(olist)
     Nkall, Nk, Nw = len(kmap), len(Gk[0, 0, 0]), len(Gk[0, 0])
     chi = np.zeros((Nchi, Nchi, Nw, Nk), dtype=np.complex128)
-    stoner = c_double(0.0)
-    _lib.get_chi0(chi, Smat, Cmat, Gk, kmap, invk, olist, dbl(temp),
-                  i64(Nx), i64(Ny), i64(Nz),
-                  i64(Nw), i64(Nk), i64(Nkall),
-                  i64(Norb), i64(Nchi), byref(stoner))
+    stoner = ctypes.c_double(0.0)
+    _loader._lib.get_chi0(chi, Smat, Cmat, Gk, kmap, invk, olist, _loader.dbl(temp),
+                          _loader.i64(Nx), _loader.i64(Ny), _loader.i64(Nz),
+                          _loader.i64(Nw), _loader.i64(Nk), _loader.i64(Nkall),
+                          _loader.i64(Norb), _loader.i64(Nchi), ctypes.byref(stoner))
     return chi, stoner.value
+
 
 def get_chi0_tail(Smat: np.ndarray, Cmat: np.ndarray, Gk: np.ndarray, eig: np.ndarray,
                   uni: np.ndarray, olist: np.ndarray, kmap: np.ndarray, invk: np.ndarray,
@@ -485,13 +504,14 @@ def get_chi0_tail(Smat: np.ndarray, Cmat: np.ndarray, Gk: np.ndarray, eig: np.nd
     Norb, Nchi = len(Gk), len(olist)
     Nkall, Nk, Nw = len(kmap), len(Gk[0, 0, 0]), len(Gk[0, 0])
     chi = np.zeros((Nchi, Nchi, Nw, Nk), dtype=np.complex128)
-    stoner = c_double(0.0)
-    _lib.get_chi0_tail(chi, Smat, Cmat, Gk, eig, uni, kmap, invk, olist,
-                       dbl(mu), dbl(temp),
-                       i64(Nx), i64(Ny), i64(Nz),
-                       i64(Nw), i64(Nk), i64(Nkall),
-                       i64(Norb), i64(Nchi), byref(stoner))
+    stoner = ctypes.c_double(0.0)
+    _loader._lib.get_chi0_tail(chi, Smat, Cmat, Gk, eig, uni, kmap, invk, olist,
+                               _loader.dbl(mu), _loader.dbl(temp),
+                               _loader.i64(Nx), _loader.i64(Ny), _loader.i64(Nz),
+                               _loader.i64(Nw), _loader.i64(Nk), _loader.i64(Nkall),
+                               _loader.i64(Norb), _loader.i64(Nchi), ctypes.byref(stoner))
     return chi, stoner.value
+
 
 def get_chi0_soc(Vmat: np.ndarray, Gk: np.ndarray, olist: np.ndarray, slist: np.ndarray,
                  kmap: np.ndarray, invk: np.ndarray, invs: np.ndarray, temp: float,
@@ -521,17 +541,19 @@ def get_chi0_soc(Vmat: np.ndarray, Gk: np.ndarray, olist: np.ndarray, slist: np.
     sgnsig = np.zeros((Norb, Norb), dtype=np.float64)
     sgnsig2 = np.zeros((Nchi, Nchi), dtype=np.float64)
     invschi = np.zeros(Nchi, dtype=np.int64)
-    _lib.get_chi0_soc(chi, sgnsig, sgnsig2, invschi, Vmat, Gk, kmap, invk, invs, olist, slist,
-                      dbl(temp), i64(Nx), i64(Ny),
-                      i64(Nz), i64(Nw), i64(Nk),
-                      i64(Nkall), i64(Nchi), i64(Norb))
+    _loader._lib.get_chi0_soc(chi, sgnsig, sgnsig2, invschi, Vmat, Gk, kmap, invk, invs, olist, slist,
+                              _loader.dbl(temp), _loader.i64(Nx), _loader.i64(Ny),
+                              _loader.i64(Nz), _loader.i64(Nw), _loader.i64(Nk),
+                              _loader.i64(Nkall), _loader.i64(Nchi), _loader.i64(Norb))
     return chi, sgnsig, sgnsig2, invschi
+
 
 def get_chis_chic_soc(chi: np.ndarray, Vmat: np.ndarray, olist: np.ndarray, slist: np.ndarray,
                       invs: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     @fn get_chis_chic_soc
-    @brief Decompose the SOC susceptibility into charge (chic), longitudinal spin (chiszz), and transverse (chispm) channels.
+    @brief Decompose the SOC susceptibility into charge (chic), longitudinal
+    spin (chiszz) and transverse (chispm) channels.
     @param    chi: Full susceptibility [Nchi, Nchi, Nk, Nw] complex128
     @param   Vmat: SOC interaction matrix [Nchi, Nchi] float64
     @param  olist: Orbital index list [Nchi] int64
@@ -541,7 +563,7 @@ def get_chis_chic_soc(chi: np.ndarray, Vmat: np.ndarray, olist: np.ndarray, slis
     @retval chiszz: Longitudinal spin susceptibility [Nchi/4, Nchi/4, Nk] complex128
     @retval chispm: Transverse spin susceptibility [Nchi/4, Nchi/4, Nk] complex128
     """
-    def get_orb_list(olist, slist, invs):
+    def get_orb_list(olist: np.ndarray, slist: np.ndarray, invs: np.ndarray) -> np.ndarray:
         orb_list = np.zeros(Nchi, dtype=np.int64)
         orbs = np.where(slist == 1)
         o1, o2 = np.meshgrid(orbs, orbs)
@@ -560,10 +582,11 @@ def get_chis_chic_soc(chi: np.ndarray, Vmat: np.ndarray, olist: np.ndarray, slis
     chic = np.zeros((int(Nchi / 4), int(Nchi / 4), Nk), dtype=np.complex128)
     chiszz = np.zeros((int(Nchi / 4), int(Nchi / 4), Nk), dtype=np.complex128)
     chispm = np.zeros((int(Nchi / 4), int(Nchi / 4), Nk), dtype=np.complex128)
-    _lib.get_chis_chic_soc(chic, chiszz, chispm, chi, Vmat, orb_list, olist, slist, invs,
-                           i64(Nk), i64(Nw),
-                           i64(Nchi), i64(Norb))
+    _loader._lib.get_chis_chic_soc(chic, chiszz, chispm, chi, Vmat, orb_list, olist, slist, invs,
+                                   _loader.i64(Nk), _loader.i64(Nw),
+                                   _loader.i64(Nchi), _loader.i64(Norb))
     return chic, chiszz, chispm
+
 
 def get_chis_chic(chi: np.ndarray, Smat: np.ndarray, Cmat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -578,9 +601,10 @@ def get_chis_chic(chi: np.ndarray, Smat: np.ndarray, Cmat: np.ndarray) -> tuple[
     Nk, Nw, Nchi = len(chi[0, 0, 0]), len(chi[0, 0]), len(Smat)
     chis = np.zeros((Nchi, Nchi, Nk), dtype=np.complex128)
     chic = np.zeros((Nchi, Nchi, Nk), dtype=np.complex128)
-    _lib.get_chis_chic(chis, chic, chi, Smat, Cmat, i64(Nk),
-                       i64(Nw), i64(Nchi))
+    _loader._lib.get_chis_chic(chis, chic, chi, Smat, Cmat, _loader.i64(Nk),
+                               _loader.i64(Nw), _loader.i64(Nchi))
     return chis, chic
+
 
 def get_chi_irr_sc(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray,
                    qshift: np.ndarray, ol: np.ndarray, wlist: np.ndarray,
@@ -605,14 +629,15 @@ def get_chi_irr_sc(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray,
     Norb = eig.shape[1] // 2
     Nchi = len(ol)
     eps = idelta * 1e-3
-    chi = np.zeros((Nw, Nchi, Nchi,2), dtype=np.complex128)
+    chi = np.zeros((Nw, Nchi, Nchi, 2), dtype=np.complex128)
     ol_f = np.asfortranarray(ol)
-    _lib.get_chi_irr_sc(chi, uni, eig, ffermi, qshift, ol_f, wlist,
-                        i64(Nchi), i64(Norb),
-                        i64(Nk), i64(Nw),
-                        dbl(idelta), dbl(eps),
-                        dbl(temp), byref(c_bool(sw_spsym)))
+    _loader._lib.get_chi_irr_sc(chi, uni, eig, ffermi, qshift, ol_f, wlist,
+                                _loader.i64(Nchi), _loader.i64(Norb),
+                                _loader.i64(Nk), _loader.i64(Nw),
+                                _loader.dbl(idelta), _loader.dbl(eps),
+                                _loader.dbl(temp), ctypes.byref(ctypes.c_bool(sw_spsym)))
     return chi
+
 
 def get_eig_or_tr_chi(chi: np.ndarray, invk: np.ndarray, sw_eig: bool) -> np.ndarray:
     """
@@ -626,6 +651,6 @@ def get_eig_or_tr_chi(chi: np.ndarray, invk: np.ndarray, sw_eig: bool) -> np.nda
     Nkall, Nk = len(invk), len(chi.T)
     Nchi = chi.shape[0]
     chiq = np.zeros(Nkall, dtype=np.complex128)
-    _lib.get_eig_or_tr_chi(chiq, chi, invk, i64(Nkall), i64(Nk),
-                            i64(Nchi), byref(c_bool(sw_eig)))
+    _loader._lib.get_eig_or_tr_chi(chiq, chi, invk, _loader.i64(Nkall), _loader.i64(Nk),
+                                   _loader.i64(Nchi), ctypes.byref(ctypes.c_bool(sw_eig)))
     return chiq

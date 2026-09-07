@@ -792,7 +792,7 @@ subroutine conv_delta_orb_to_band(deltab,delta,uni,prt,iprm,invk,Norb,Nkall,Nk,N
   !$omp end parallel do
 end subroutine conv_delta_orb_to_band
 
-subroutine remap_delta(delta,delta0,prt,iprm,invk,Nkall,Nk,Nw,Norb,gap_sym)
+subroutine remap_delta(delta,delta0,prt,iprm,invk,Nkall,Nk,Nw,Norb,gap_sym) bind(C)
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Norb,gap_sym

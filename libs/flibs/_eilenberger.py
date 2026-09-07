@@ -1,32 +1,39 @@
-from ctypes import POINTER, c_int64, c_double
+import ctypes
 import numpy as np
-from ._loader import _lib, i64, dbl
+import libs.flibs._loader as _loader
+
+# Public API of this submodule; keeps `from ._x import *` in __init__.py from
+# re-exporting numpy, scipy, ctypes and the sibling packages imported above.
+__all__ = [
+    'matrix_riccati_batch', 'matrix_riccati_chords', 'riccati_chords', 'riccati_chords_bc'
+]
 
 # --- ctypes signature (set once at import); the Fortran entry is a subroutine.
-_lib.riccati_chords.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # g   (out) [Ns,Nchord,Nw]
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # f   (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # om  (in)
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # dd  (in)
-    POINTER(c_double),                             # hvf
-    np.ctypeslib.ndpointer(dtype=np.float64),      # ds  (in) [Nchord]
-    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),   # Ns, Nchord, Nw
+_loader._lib.riccati_chords.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),           # g   (out) [Ns,Nchord,Nw]
+    np.ctypeslib.ndpointer(dtype=np.complex128),           # f   (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),           # om  (in)
+    np.ctypeslib.ndpointer(dtype=np.complex128),           # dd  (in)
+    ctypes.POINTER(ctypes.c_double),                                     # hvf
+    np.ctypeslib.ndpointer(dtype=np.float64),              # ds  (in) [Nchord]
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),  # Ns, Nchord, Nw
 ]
-_lib.riccati_chords.restype = None
+_loader._lib.riccati_chords.restype = None
 
 
-_lib.matrix_riccati_batch.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # g   (out) [Ns,Nw,2,2]
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # f   (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # om  (in)  [Nw]
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # Dpath (in) [Ns,2,2]
-    POINTER(c_double), POINTER(c_double), POINTER(c_double),   # hvf, ds, h
-    POINTER(c_int64), POINTER(c_int64),            # Ns, Nw
+_loader._lib.matrix_riccati_batch.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),              # g   (out) [Ns,Nw,2,2]
+    np.ctypeslib.ndpointer(dtype=np.complex128),              # f   (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),              # om  (in)  [Nw]
+    np.ctypeslib.ndpointer(dtype=np.complex128),              # Dpath (in) [Ns,2,2]
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),  # hvf, ds, h
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),                       # Ns, Nw
 ]
-_lib.matrix_riccati_batch.restype = None
+_loader._lib.matrix_riccati_batch.restype = None
 
 
-def matrix_riccati_batch(om: np.ndarray, Dpath: np.ndarray, hvf: float, ds: float, h: float = 0.0):
+def matrix_riccati_batch(om: np.ndarray, Dpath: np.ndarray, hvf: float, ds: float,
+                         h: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
     """
     @fn matrix_riccati_batch
     @brief 2x2 spin-matrix quasiclassical g, f along one inhomogeneous trajectory,
@@ -43,23 +50,24 @@ def matrix_riccati_batch(om: np.ndarray, Dpath: np.ndarray, hvf: float, ds: floa
     Nw = om.shape[0]
     g = np.empty((Ns, Nw, 2, 2), dtype=np.complex128)
     f = np.empty((Ns, Nw, 2, 2), dtype=np.complex128)
-    _lib.matrix_riccati_batch(g, f, om, Dpath, dbl(hvf), dbl(ds), dbl(h),
-                              i64(Ns), i64(Nw))
+    _loader._lib.matrix_riccati_batch(g, f, om, Dpath, _loader.dbl(hvf), _loader.dbl(ds), _loader.dbl(h),
+                                      _loader.i64(Ns), _loader.i64(Nw))
     return g, f
 
 
-_lib.matrix_riccati_chords.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # g   (out) [Ns,Nchord,Nw,2,2]
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # f   (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # om  (in)  [Nw]
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # Dpath (in) [Ns,Nchord,2,2]
-    POINTER(c_double), POINTER(c_double), POINTER(c_double),   # hvf, ds, h
-    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),      # Ns, Nchord, Nw
+_loader._lib.matrix_riccati_chords.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),              # g   (out) [Ns,Nchord,Nw,2,2]
+    np.ctypeslib.ndpointer(dtype=np.complex128),              # f   (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),              # om  (in)  [Nw]
+    np.ctypeslib.ndpointer(dtype=np.complex128),              # Dpath (in) [Ns,Nchord,2,2]
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),  # hvf, ds, h
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),     # Ns, Nchord, Nw
 ]
-_lib.matrix_riccati_chords.restype = None
+_loader._lib.matrix_riccati_chords.restype = None
 
 
-def matrix_riccati_chords(om: np.ndarray, Dpath: np.ndarray, hvf: float, ds: float, h: float = 0.0):
+def matrix_riccati_chords(om: np.ndarray, Dpath: np.ndarray, hvf: float, ds: float,
+                          h: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
     """
     @fn matrix_riccati_chords
     @brief 2x2 spin-matrix g, f along many chords, batched over frequencies (Fortran,
@@ -79,12 +87,12 @@ def matrix_riccati_chords(om: np.ndarray, Dpath: np.ndarray, hvf: float, ds: flo
     om = np.ascontiguousarray(om)
     g = np.empty((Ns, Nchord, Nw, 2, 2), dtype=np.complex128)
     f = np.empty((Ns, Nchord, Nw, 2, 2), dtype=np.complex128)
-    _lib.matrix_riccati_chords(g, f, om, Dpath, dbl(hvf), dbl(ds), dbl(h),
-                               i64(Ns), i64(Nchord), i64(Nw))
+    _loader._lib.matrix_riccati_chords(g, f, om, Dpath, _loader.dbl(hvf), _loader.dbl(ds), _loader.dbl(h),
+                                       _loader.i64(Ns), _loader.i64(Nchord), _loader.i64(Nw))
     return g, f
 
 
-def riccati_chords(om: np.ndarray, dd: np.ndarray, hvf: float, ds):
+def riccati_chords(om: np.ndarray, dd: np.ndarray, hvf: float, ds: float) -> tuple[np.ndarray, np.ndarray]:
     """
     @fn riccati_chords
     @brief Scalar quasiclassical g, f along many chords via the stable tanh-step
@@ -103,26 +111,27 @@ def riccati_chords(om: np.ndarray, dd: np.ndarray, hvf: float, ds):
               else np.ascontiguousarray(ds, dtype=np.float64))
     g = np.empty((Ns, Nchord, Nw), dtype=np.complex128)
     f = np.empty((Ns, Nchord, Nw), dtype=np.complex128)
-    _lib.riccati_chords(g, f, om, dd, dbl(hvf), ds_arr,
-                        i64(Ns), i64(Nchord), i64(Nw))
+    _loader._lib.riccati_chords(g, f, om, dd, _loader.dbl(hvf), ds_arr,
+                                _loader.i64(Ns), _loader.i64(Nchord), _loader.i64(Nw))
     return g, f
 
 
-_lib.riccati_chords_bc.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # g   (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # f   (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # om  (in)  [Nw]
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # dom (in)  [Ns,Nchord]
-    np.ctypeslib.ndpointer(dtype=np.complex128),   # dd  (in)  [Ns,Nchord]
-    POINTER(c_double),                             # hvf
-    np.ctypeslib.ndpointer(dtype=np.float64),      # ds  (in)  [Nchord]
-    POINTER(c_int64),                              # irow
-    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),   # Ns, Nchord, Nw
+_loader._lib.riccati_chords_bc.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),           # g   (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),           # f   (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),           # om  (in)  [Nw]
+    np.ctypeslib.ndpointer(dtype=np.complex128),           # dom (in)  [Ns,Nchord]
+    np.ctypeslib.ndpointer(dtype=np.complex128),           # dd  (in)  [Ns,Nchord]
+    ctypes.POINTER(ctypes.c_double),                                     # hvf
+    np.ctypeslib.ndpointer(dtype=np.float64),              # ds  (in)  [Nchord]
+    ctypes.POINTER(ctypes.c_int64),                                      # irow
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),  # Ns, Nchord, Nw
 ]
-_lib.riccati_chords_bc.restype = None
+_loader._lib.riccati_chords_bc.restype = None
 
 
-def riccati_chords_bc(om: np.ndarray, dd: np.ndarray, hvf: float, ds, dom=None, row=None):
+def riccati_chords_bc(om: np.ndarray, dd: np.ndarray, hvf: float, ds: float, dom: np.ndarray | None = None,
+                      row: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
     """
     @fn riccati_chords_bc
     @brief Scalar Riccati chord integration with the frequency and the space
@@ -154,6 +163,6 @@ def riccati_chords_bc(om: np.ndarray, dd: np.ndarray, hvf: float, ds, dom=None, 
     shape = (Nchord, Nw) if row is not None else (Ns, Nchord, Nw)
     g = np.empty(shape, dtype=np.complex128)
     f = np.empty(shape, dtype=np.complex128)
-    _lib.riccati_chords_bc(g, f, om, dom, dd, dbl(hvf), ds_arr, i64(irow),
-                           i64(Ns), i64(Nchord), i64(Nw))
+    _loader._lib.riccati_chords_bc(g, f, om, dom, dd, _loader.dbl(hvf), ds_arr, _loader.i64(irow),
+                                   _loader.i64(Ns), _loader.i64(Nchord), _loader.i64(Nw))
     return g, f

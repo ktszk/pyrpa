@@ -1,9 +1,15 @@
-from ctypes import byref, c_int64, c_double
-from pathlib import Path
+import ctypes
+import pathlib
 import numpy as np
 
+# Public API of this submodule; keeps `from ._x import *` in __init__.py from
+# re-exporting numpy, scipy, ctypes and the sibling packages imported above.
+__all__ = [
+    'i64', 'dbl'
+]
+
 # Resolve lib path relative to this file so import works from any current working directory.
-_LIB_DIR = Path(__file__).resolve().parents[1]
+_LIB_DIR = pathlib.Path(__file__).resolve().parents[1]
 
 
 # -march target -> (rank, CPU flag it requires).  Higher rank = newer ISA, so the
@@ -26,7 +32,7 @@ _ARCH_REQUIREMENTS = {
 }
 
 
-def _cpu_flags():
+def _cpu_flags() -> set:
     """The flag set of the running CPU (empty if /proc/cpuinfo is unreadable)."""
     try:
         with open("/proc/cpuinfo") as f:
@@ -38,7 +44,7 @@ def _cpu_flags():
     return set()
 
 
-def _select_library(names, flags):
+def _select_library(names: list, flags: set) -> list:
     """Rank the available libfmod variants for a CPU with `flags`.
 
     `names` are library stems found on disk (libfmod_znver4, libfmod, ...).  A
@@ -60,7 +66,7 @@ def _select_library(names, flags):
     return [name for _, name in sorted(ranked, key=lambda t: -t[0])]
 
 
-def _load_library():
+def _load_library() -> np.ndarray:
     """Pick the fastest libfmod the current CPU can run.
 
     `make auto` builds one libfmod_<target>.so per distinct CPU type found in the
@@ -80,11 +86,11 @@ def _load_library():
 _lib = _load_library()
 
 
-def i64(value):
+def i64(value: int) -> object:
     """byref-wrapped 64-bit integer scalar for ctypes Fortran calls."""
-    return byref(c_int64(value))
+    return ctypes.byref(ctypes.c_int64(value))
 
 
-def dbl(value):
+def dbl(value: int) -> object:
     """byref-wrapped double scalar for ctypes Fortran calls."""
-    return byref(c_double(value))
+    return ctypes.byref(ctypes.c_double(value))

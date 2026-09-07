@@ -24,8 +24,14 @@ negated (see plibs._color, key 'hex_neg').
 import numpy as np
 import scipy.constants as scconst
 
-HBAR_EVS = scconst.physical_constants['reduced Planck constant in eV s'][0]
-C_LIGHT = scconst.c             # speed of light [m/s]
+# Public API of this submodule; keeps `from ._x import *` in __init__.py from
+# re-exporting numpy, scipy, ctypes and the sibling packages imported above.
+__all__ = [
+    'hbar', 'c_light', 'refractive_index', 'reflectivity', 'absorption_coefficient', 'transmittance', 'kubelka_munk'
+]
+
+hbar = scconst.physical_constants['reduced Planck constant in eV s'][0]  # hbar [eV s]
+c_light = scconst.c             # speed of light [m/s]
 
 
 def refractive_index(eps: np.ndarray) -> np.ndarray:
@@ -61,7 +67,7 @@ def absorption_coefficient(w: np.ndarray, N: np.ndarray) -> np.ndarray:
     w = np.asarray(w, dtype=float)
     while w.ndim < N.ndim:
         w = w[..., None]
-    return 2.0*w*N.imag/(HBAR_EVS*C_LIGHT)
+    return 2.0*w*N.imag/(hbar*c_light)
 
 
 def transmittance(R: np.ndarray, alpha: np.ndarray, d: float) -> np.ndarray:

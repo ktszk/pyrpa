@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#-*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
 """
 Band structure, eigenvalues, chemical potential, and Fermi surface utilities.
 """
@@ -7,7 +7,20 @@ import numpy as np
 import scipy.optimize as scopt
 import scipy.linalg as sclin
 import libs.flibs as flibs
-from ._lattice import gen_klist, get_bvec
+import libs.plibs._lattice as _lattice
+import collections.abc
+
+# Public API of this submodule; keeps `from ._x import *` in __init__.py from
+# re-exporting numpy, scipy, ctypes and the sibling packages imported above.
+__all__ = [
+    'get_eigs', 'calc_mu', 'calc_mu_imp', 'get_kf_points', 'get_eigs_2d', 'shoelace_area', 'open_contour_report',
+    'get_band_area', 'slice_area_factor', 'field_direction', 'make_rotmat', 'make_rotmat_bfield',
+    'build_fs_energy_grid', 'bfield_hat', 'plane_frame', 'get_eigs_plane', 'encloses_origin', 'get_plane_orbits',
+    'find_plane_orbits', 'fs_cartesian_points', 'fs_extent_along', 'scan_plane_area', 'plane_area_at',
+    'find_extremal_d', 'slice_period', 'track_orbit_branches', 'branch_extrema', 'follow_orbit',
+    'verify_orbits_window', 'nearest_lattice_offset', 'orbit_key', 'dedup_extremal_orbits', 'scan_fs_area',
+    'find_extremal_kz', 'gen_3d_surf_points', 'get_colors', 'get_emesh'
+]
 
 
 def get_eigs(klist: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray,
@@ -24,30 +37,31 @@ def get_eigs(klist: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.nda
     @retval   eig: eigenvalues of Hamiltonian
     @retval   uni: unitary matrix of eigenfunctions
     """
-    if len(S_r)==0:
-        ham_k=flibs.gen_ham(klist,ham_r,rvec)
-        eig,uni=flibs.get_eig(ham_k)
+    if len(S_r) == 0:
+        ham_k = flibs.gen_ham(klist, ham_r, rvec)
+        eig, uni = flibs.get_eig(ham_k)
         if sw_uni:
             return uni
         else:
-            return eig,uni
+            return eig, uni
     else:
-        ham_k,S_k=flibs.gen_ham(klist,ham_r,rvec,Ovl_r=S_r)
-        eig,uni=flibs.get_eig(ham_k,S_k)
+        ham_k, S_k = flibs.gen_ham(klist, ham_r, rvec, Ovl_r=S_r)
+        eig, uni = flibs.get_eig(ham_k, S_k)
         if sw_std:
             # Normalize each eigenvector column so orbital weights sum to 1 (MLO basis is non-orthogonal)
-            norm=np.sqrt((abs(uni)**2).sum(axis=2))
+            norm = np.sqrt((abs(uni)**2).sum(axis=2))
             if sw_uni:
-                return np.array([[u/nm for u,nm in zip(un,nor)] for un,nor in zip(uni,norm)])
+                return np.array([[u/nm for u, nm in zip(un, nor)] for un, nor in zip(uni, norm)])
             else:
-                return eig,np.array([[u/nm for u,nm in zip(un,nor)] for un,nor in zip(uni,norm)])
+                return eig, np.array([[u/nm for u, nm in zip(un, nor)] for un, nor in zip(uni, norm)])
         else:
             if sw_uni:
                 return uni
             else:
-                return eig,uni
+                return eig, uni
 
-def _solve_mu(func, emin: float, emax: float, label: str) -> float:
+
+def _solve_mu(func: collections.abc.Callable, emin: float, emax: float, label: str) -> float:
     """Bracket the chemical potential with brentq; if filling lies outside the band
     range, clamp to the closer boundary (shared by calc_mu and calc_mu_imp)."""
     try:
@@ -60,7 +74,8 @@ def _solve_mu(func, emin: float, emax: float, label: str) -> float:
             return mu
         raise
 
-def calc_mu(eig,Nk,fill:float,temp:float)-> float:
+
+def calc_mu(eig: np.ndarray, Nk: int, fill: float, temp: float) -> float:
     """
     @fn calc_mu()
     @brief This function obtains chemical potential mu
@@ -72,12 +87,14 @@ def calc_mu(eig,Nk,fill:float,temp:float)-> float:
     """
     if temp <= 0:
         raise ValueError(f"calc_mu requires temp > 0, got {temp}")
-    def func(mu):
-        sum_fermi=flibs.get_ffermi(eig,mu,temp).sum()
-        return(fill*Nk-sum_fermi)  # zero when total electrons equals target filling * Nk
+
+    def func(mu: float) -> np.ndarray:
+        sum_fermi = flibs.get_ffermi(eig, mu, temp).sum()
+        return (fill*Nk-sum_fermi)  # zero when total electrons equals target filling * Nk
     return _solve_mu(func, eig.min(), eig.max(), 'calc_mu')
 
-def calc_mu_imp(eigs,Nsite,fill:float,temp:float)-> float:
+
+def calc_mu_imp(eigs: np.ndarray, Nsite: int, fill: float, temp: float) -> float:
     """
     @fn calc_mu_imp
     @brief Calculate the chemical potential for an impurity system using the bisection method (brentq).
@@ -89,10 +106,12 @@ def calc_mu_imp(eigs,Nsite,fill:float,temp:float)-> float:
     """
     if temp <= 0:
         raise ValueError(f"calc_mu_imp requires temp > 0, got {temp}")
-    itemp=1./temp
-    def func(mu):
-        return(fill*Nsite-0.5*(1.0-np.tanh(0.5*(eigs-mu)*itemp)).sum())
+    itemp = 1./temp
+
+    def func(mu: float) -> np.ndarray:
+        return (fill*Nsite-0.5*(1.0-np.tanh(0.5*(eigs-mu)*itemp)).sum())
     return _solve_mu(func, eigs.min(), eigs.max(), 'calc_mu_imp')
+
 
 def get_kf_points(eig: np.ndarray, mesh: int, mu: float, kz: float) -> tuple[list, list]:
     """
@@ -104,16 +123,17 @@ def get_kf_points(eig: np.ndarray, mesh: int, mu: float, kz: float) -> tuple[lis
     @param    kz: kz value (used to tag contour coordinates)
     """
     import skimage.measure as sk
-    kf_points=[]
-    fsband=[]
-    for i,e in enumerate(eig.T-mu):
-        if(e.max()*e.min() < 0. ):  # band crosses the Fermi level → has a Fermi surface sheet
-            cont=sk.find_contours(e.reshape(mesh+1,mesh+1),0)
+    kf_points = []
+    fsband = []
+    for i, e in enumerate(eig.T-mu):
+        if (e.max()*e.min() < 0.):  # band crosses the Fermi level → has a Fermi surface sheet
+            cont = sk.find_contours(e.reshape(mesh+1, mesh+1), 0)
             # Rescale contour indices from [0, mesh] pixel space to [-0.5, 0.5] fractional BZ coords
-            ct=[np.array([list(c)+[kz] for c in (cc-mesh/2)/mesh]) for cc in cont]
+            ct = [np.array([list(c)+[kz] for c in (cc-mesh/2)/mesh]) for cc in cont]
             kf_points.append(ct)
             fsband.append(i)
-    return kf_points,fsband
+    return kf_points, fsband
+
 
 def get_eigs_2d(mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray,
                 RotMat: np.ndarray, kz: float) -> np.ndarray:
@@ -128,11 +148,12 @@ def get_eigs_2d(mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray,
     @param     kz: kz value
     @return   eig: eigenvalues shape (Nk, Norb)
     """
-    Nk,klist=gen_klist(mesh+1,mesh+1,kz=kz)
+    Nk, klist = _lattice.gen_klist(mesh+1, mesh+1, kz=kz)
     # Rotate real-space vectors so that kz-slices are perpendicular to the magnetic field direction
-    rvec1=RotMat.dot(rvec.T).T.copy()
-    eig,_=get_eigs(klist,ham_r,S_r,rvec1)
+    rvec1 = RotMat.dot(rvec.T).T.copy()
+    eig, _ = get_eigs(klist, ham_r, S_r, rvec1)
     return eig
+
 
 def shoelace_area(ct: np.ndarray) -> float:
     """
@@ -141,13 +162,15 @@ def shoelace_area(ct: np.ndarray) -> float:
     @param    ct: contour point array shape (N, 3), columns [kx, ky, kz] in normalized coords
     @return     : contour area in normalized BZ units
     """
-    x,y=ct[:,0],ct[:,1]
-    return 0.5*np.abs(np.dot(x,np.roll(y,-1))-np.dot(y,np.roll(x,-1)))
+    x, y = ct[:, 0], ct[:, 1]
+    return 0.5*np.abs(np.dot(x, np.roll(y, -1))-np.dot(y, np.roll(x, -1)))
+
 
 # Orbits discarded because their contour ran into the edge of the 2D slice box.
 # The rotated fractional box is not a Brillouin zone for a tilted field, so such a
 # contour is a truncated piece of the real orbit and its shoelace area is meaningless.
-_open_contour_state={'n':0}
+_open_contour_state = {'n': 0}
+
 
 def open_contour_report(reset: bool = True) -> int:
     """
@@ -156,10 +179,11 @@ def open_contour_report(reset: bool = True) -> int:
     @param reset: clear the counter after reading (default True)
     @return     : count since the last reset
     """
-    n=_open_contour_state['n']
+    n = _open_contour_state['n']
     if reset:
-        _open_contour_state['n']=0
+        _open_contour_state['n'] = 0
     return n
+
 
 def get_band_area(v2: list, blist: list, band_idx: int, ABZ: float,
                   sw_strict: bool = True) -> float | None:
@@ -177,15 +201,16 @@ def get_band_area(v2: list, blist: list, band_idx: int, ABZ: float,
     """
     if band_idx not in blist:
         return None
-    j=blist.index(band_idx)
+    j = blist.index(band_idx)
     if sw_strict:
         for ct in v2[j]:
             # skimage repeats the first vertex on a closed contour; an open one ends
             # on the box edge, so the enclosed area is not the orbit area.
-            if not np.allclose(ct[0],ct[-1]):
-                _open_contour_state['n']+=1
+            if not np.allclose(ct[0], ct[-1]):
+                _open_contour_state['n'] += 1
                 return None
     return sum(shoelace_area(ct) for ct in v2[j])*ABZ
+
 
 def slice_area_factor(rotmat: np.ndarray, bvec: np.ndarray) -> float:
     """
@@ -202,11 +227,12 @@ def slice_area_factor(rotmat: np.ndarray, bvec: np.ndarray) -> float:
     @param   bvec: reciprocal lattice vectors as rows [AA^-1]
     @return      : |v1 x v2| in AA^-2
     """
-    v=np.asarray(rotmat,dtype=float)@np.asarray(bvec,dtype=float)
-    fac=float(np.linalg.norm(np.cross(v[0],v[1])))
-    if fac<=0.:
+    v = np.asarray(rotmat, dtype=float)@np.asarray(bvec, dtype=float)
+    fac = float(np.linalg.norm(np.cross(v[0], v[1])))
+    if fac <= 0.:
         raise ValueError('slice_area_factor: degenerate slice (rotmat rows 1,2 are collinear)')
     return fac
+
 
 def field_direction(rotmat: np.ndarray, avec: np.ndarray) -> np.ndarray:
     """
@@ -218,8 +244,9 @@ def field_direction(rotmat: np.ndarray, avec: np.ndarray) -> np.ndarray:
     @param   avec: primitive translation vectors as rows [AA]
     @return      : unit vector B_hat in Cartesian coordinates
     """
-    n=np.asarray(rotmat,dtype=float)[2].dot(np.asarray(avec,dtype=float))
+    n = np.asarray(rotmat, dtype=float)[2].dot(np.asarray(avec, dtype=float))
     return n/np.linalg.norm(n)
+
 
 def make_rotmat(theta_deg: float, phi_deg: float) -> np.ndarray:
     """
@@ -233,14 +260,15 @@ def make_rotmat(theta_deg: float, phi_deg: float) -> np.ndarray:
     @param  phi_deg: azimuthal angle of B [deg]
     @return  rotmat: 3x3 rotation matrix
     """
-    th,ph=np.deg2rad(theta_deg),np.deg2rad(phi_deg)
-    cp,sp=np.cos(ph),np.sin(ph)
-    ct,st=np.cos(th),np.sin(th)
+    th, ph = np.deg2rad(theta_deg), np.deg2rad(phi_deg)
+    cp, sp = np.cos(ph), np.sin(ph)
+    ct, st = np.cos(th), np.sin(th)
     # First rotate about z by -phi (align azimuth), then about y by -theta (align polar)
     # Result: R @ B_hat = z_hat, so dHvA cross-sections are perpendicular to B
-    Rz=np.array([[ cp, sp, 0.],[-sp, cp, 0.],[0., 0., 1.]])   # Rz(-phi)
-    Ry=np.array([[ ct, 0.,-st],[ 0., 1.,  0.],[ st, 0., ct]]) # Ry(-theta)
+    Rz = np.array([[cp, sp, 0.], [-sp, cp, 0.], [0., 0., 1.]])   # Rz(-phi)
+    Ry = np.array([[ct, 0., -st], [0., 1.,  0.], [st, 0., ct]])  # Ry(-theta)
     return Ry@Rz
+
 
 def make_rotmat_bfield(theta_deg: float, phi_deg: float, bvec: np.ndarray) -> np.ndarray:
     """
@@ -258,16 +286,16 @@ def make_rotmat_bfield(theta_deg: float, phi_deg: float, bvec: np.ndarray) -> np
     @param      bvec: reciprocal lattice vectors as rows [AA^-1]
     @return   rotmat: 3x3 matrix to hand to get_eigs_2d/scan_fs_area
     """
-    th,ph=np.deg2rad(theta_deg),np.deg2rad(phi_deg)
-    bhat=np.array([np.sin(th)*np.cos(ph),np.sin(th)*np.sin(ph),np.cos(th)])
-    w=np.asarray(bvec,dtype=float).dot(bhat)   # w_k = b_k . B_hat
-    n=w/np.linalg.norm(w)
+    th, ph = np.deg2rad(theta_deg), np.deg2rad(phi_deg)
+    bhat = np.array([np.sin(th)*np.cos(ph), np.sin(th)*np.sin(ph), np.cos(th)])
+    w = np.asarray(bvec, dtype=float).dot(bhat)   # w_k = b_k . B_hat
+    n = w/np.linalg.norm(w)
     # complete {u1,u2,n} into a right-handed orthonormal triad; the in-plane choice is
     # arbitrary because |v1 x v2| is invariant under a rotation of u1,u2 within the plane
-    t=np.array([1.,0.,0.]) if abs(n[0])<0.9 else np.array([0.,1.,0.])
-    u1=np.cross(t,n); u1/=np.linalg.norm(u1)
-    u2=np.cross(n,u1)
-    return np.array([u1,u2,n])
+    t = np.array([1., 0., 0.]) if abs(n[0]) < 0.9 else np.array([0., 1., 0.])
+    u1 = np.cross(t, n); u1 /= np.linalg.norm(u1)
+    u2 = np.cross(n, u1)
+    return np.array([u1, u2, n])
 
 # --------------------------------------------------------------------------- #
 #  Cartesian-plane slicing (arbitrary real field direction)
@@ -281,6 +309,7 @@ def make_rotmat_bfield(theta_deg: float, phi_deg: float, bvec: np.ndarray) -> np
 #  and no wrapping is needed -- which is what removes the commensurability
 #  restriction on B_hat.
 # --------------------------------------------------------------------------- #
+
 
 def build_fs_energy_grid(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, mu: float,
                          mesh: int = 120, ewin: float = 0.0,
@@ -298,20 +327,21 @@ def build_fs_energy_grid(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, m
     @return       : dict with 'interp' (callable on fractional k) and 'bands'
                     (original band indices), or None if no band reaches mu
     """
-    from scipy.interpolate import RegularGridInterpolator
-    Nk,klist=gen_klist(mesh,mesh,mesh,sw_pp=False)     # [0,1) grid, periodic
-    eig,_=get_eigs(klist,ham_r,S_r,rvec)
-    eig=eig.reshape(mesh,mesh,mesh,-1)
-    lo,hi=eig.min(axis=(0,1,2)),eig.max(axis=(0,1,2))
-    bands=[i for i in range(eig.shape[-1]) if lo[i]-ewin<=mu<=hi[i]+ewin]
+    import scipy.interpolate as scinterp
+    Nk, klist = _lattice.gen_klist(mesh, mesh, mesh, sw_pp=False)     # [0,1) grid, periodic
+    eig, _ = get_eigs(klist, ham_r, S_r, rvec)
+    eig = eig.reshape(mesh, mesh, mesh, -1)
+    lo, hi = eig.min(axis=(0, 1, 2)), eig.max(axis=(0, 1, 2))
+    bands = [i for i in range(eig.shape[-1]) if lo[i]-ewin <= mu <= hi[i]+ewin]
     if not bands:
         return None
-    npad=2 if method=='cubic' else 1
-    grid=np.pad(eig[...,bands],((npad,npad),(npad,npad),(npad,npad),(0,0)),mode='wrap')
-    ax=(np.arange(-npad,mesh+npad))/mesh
-    interp=RegularGridInterpolator((ax,ax,ax),grid,method=method,
-                                   bounds_error=False,fill_value=None)
-    return {'interp':interp,'bands':bands,'mesh':mesh,'method':method}
+    npad = 2 if method == 'cubic' else 1
+    grid = np.pad(eig[..., bands], ((npad, npad), (npad, npad), (npad, npad), (0, 0)), mode='wrap')
+    ax = (np.arange(-npad, mesh+npad))/mesh
+    interp = scinterp.RegularGridInterpolator((ax, ax, ax), grid, method=method,
+                                              bounds_error=False, fill_value=None)
+    return {'interp': interp, 'bands': bands, 'mesh': mesh, 'method': method}
+
 
 def bfield_hat(theta_deg: float, phi_deg: float) -> np.ndarray:
     """
@@ -321,8 +351,9 @@ def bfield_hat(theta_deg: float, phi_deg: float) -> np.ndarray:
     @param   phi_deg: azimuthal angle [deg]
     @return         : B_hat (3,)
     """
-    th,ph=np.deg2rad(theta_deg),np.deg2rad(phi_deg)
-    return np.array([np.sin(th)*np.cos(ph),np.sin(th)*np.sin(ph),np.cos(th)])
+    th, ph = np.deg2rad(theta_deg), np.deg2rad(phi_deg)
+    return np.array([np.sin(th)*np.cos(ph), np.sin(th)*np.sin(ph), np.cos(th)])
+
 
 def plane_frame(bhat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -333,12 +364,13 @@ def plane_frame(bhat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     @retval  e1: in-plane unit vector
     @retval  e2: in-plane unit vector
     """
-    n=np.asarray(bhat,dtype=float)
-    n=n/np.linalg.norm(n)
-    t=np.array([1.,0.,0.]) if abs(n[0])<0.9 else np.array([0.,1.,0.])
-    e1=np.cross(t,n); e1/=np.linalg.norm(e1)
-    e2=np.cross(n,e1)
-    return e1,e2
+    n = np.asarray(bhat, dtype=float)
+    n = n/np.linalg.norm(n)
+    t = np.array([1., 0., 0.]) if abs(n[0]) < 0.9 else np.array([0., 1., 0.])
+    e1 = np.cross(t, n); e1 /= np.linalg.norm(e1)
+    e2 = np.cross(n, e1)
+    return e1, e2
+
 
 def get_eigs_plane(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray,
                    bhat: np.ndarray, d: float, L: float, mesh: int,
@@ -361,16 +393,17 @@ def get_eigs_plane(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: n
     @return   eig: eigenvalues [Nk, Nb], reshapeable to (mesh+1, mesh+1, Nb).
                    With egrid the columns are the bands egrid['bands'], not all bands.
     """
-    e1,e2=plane_frame(bhat)
-    u=np.linspace(-.5*L,.5*L,mesh+1,True)
-    U,V=np.meshgrid(u,u,indexing='ij')
-    kcart=(U[...,None]*e1+V[...,None]*e2+d*np.asarray(bhat,dtype=float)).reshape(-1,3)
+    e1, e2 = plane_frame(bhat)
+    u = np.linspace(-.5*L, .5*L, mesh+1, True)
+    U, V = np.meshgrid(u, u, indexing='ij')
+    kcart = (U[..., None]*e1+V[..., None]*e2+d*np.asarray(bhat, dtype=float)).reshape(-1, 3)
     # k_frac,i = a_i . k_cart / 2pi ; H(k) is periodic in k_frac, so no wrapping needed
-    kfrac=kcart.dot(np.asarray(avec,dtype=float).T)/(2.*np.pi)
+    kfrac = kcart.dot(np.asarray(avec, dtype=float).T)/(2.*np.pi)
     if egrid is not None:
-        return egrid['interp'](np.mod(kfrac,1.))
-    eig,_=get_eigs(kfrac,ham_r,S_r,rvec)
+        return egrid['interp'](np.mod(kfrac, 1.))
+    eig, _ = get_eigs(kfrac, ham_r, S_r, rvec)
     return eig
+
 
 def encloses_origin(ct: np.ndarray) -> bool:
     """
@@ -383,15 +416,16 @@ def encloses_origin(ct: np.ndarray) -> bool:
     @param ct: closed contour, (N,2+) array of in-plane coordinates
     @return  : True if the origin lies inside
     """
-    x,y=np.asarray(ct)[:,0],np.asarray(ct)[:,1]
-    x2,y2=np.roll(x,-1),np.roll(y,-1)
-    straddle=(y>0.)!=(y2>0.)
+    x, y = np.asarray(ct)[:, 0], np.asarray(ct)[:, 1]
+    x2, y2 = np.roll(x, -1), np.roll(y, -1)
+    straddle = (y > 0.) != (y2 > 0.)
     if not straddle.any():
         return False
     # u of the edge where it crosses y=0, for the straddling edges only
-    xs,ys,xs2,ys2=x[straddle],y[straddle],x2[straddle],y2[straddle]
-    xc=xs+(xs2-xs)*(-ys)/(ys2-ys)
-    return bool((xc>0.).sum()%2==1)
+    xs, ys, xs2, ys2 = x[straddle], y[straddle], x2[straddle], y2[straddle]
+    xc = xs+(xs2-xs)*(-ys)/(ys2-ys)
+    return bool((xc > 0.).sum()%2 == 1)
+
 
 def get_plane_orbits(eig: np.ndarray, mesh: int, L: float, mu: float,
                      bhat: np.ndarray, d: float,
@@ -425,35 +459,36 @@ def get_plane_orbits(eig: np.ndarray, mesh: int, L: float, mu: float,
                     be called open, nor drive the window to grow chasing it.
     """
     import skimage.measure as sk
-    e1,e2=plane_frame(bhat)
-    n=np.asarray(bhat,dtype=float)
-    orbits=[]
-    n_open=0
-    crossing=set()
-    open_near={}
-    closed_near={}
-    axial=set()
-    for i,e in enumerate(eig.T-mu):
+    e1, e2 = plane_frame(bhat)
+    n = np.asarray(bhat, dtype=float)
+    orbits = []
+    n_open = 0
+    crossing = set()
+    open_near = {}
+    closed_near = {}
+    axial = set()
+    for i, e in enumerate(eig.T-mu):
         if e.max()*e.min() >= 0.:
             continue
-        i=i if band_map is None else band_map[i]
+        i = i if band_map is None else band_map[i]
         crossing.add(i)
-        for c in sk.find_contours(e.reshape(mesh+1,mesh+1),0.):
-            ct=(c-mesh/2)/mesh*L        # pixel index -> (u,v) in AA^-1
-            r=float(np.linalg.norm(ct[:,:2],axis=1).min())
-            if not np.allclose(ct[0],ct[-1]):
-                n_open+=1
-                open_near[i]=min(open_near.get(i,np.inf),r)
+        for c in sk.find_contours(e.reshape(mesh+1, mesh+1), 0.):
+            ct = (c-mesh/2)/mesh*L        # pixel index -> (u,v) in AA^-1
+            r = float(np.linalg.norm(ct[:, :2], axis=1).min())
+            if not np.allclose(ct[0], ct[-1]):
+                n_open += 1
+                open_near[i] = min(open_near.get(i, np.inf), r)
                 continue
-            closed_near[i]=min(closed_near.get(i,np.inf),r)
+            closed_near[i] = min(closed_near.get(i, np.inf), r)
             if encloses_origin(ct):
                 axial.add(i)
-            cen=ct[:-1].mean(axis=0)    # drop the repeated closing vertex
-            orbits.append({'band':i,'area':shoelace_area(ct),
-                           'cen2d':cen,'cen3d':cen[0]*e1+cen[1]*e2+d*n,'d':float(d)})
-    axis_open={b for b,r in open_near.items()
-               if b not in axial and r<closed_near.get(b,np.inf)}
-    return orbits,n_open,crossing,axis_open,axial
+            cen = ct[:-1].mean(axis=0)    # drop the repeated closing vertex
+            orbits.append({'band': i, 'area': shoelace_area(ct),
+                           'cen2d': cen, 'cen3d': cen[0]*e1+cen[1]*e2+d*n, 'd': float(d)})
+    axis_open = {b for b, r in open_near.items()
+                 if b not in axial and r < closed_near.get(b, np.inf)}
+    return orbits, n_open, crossing, axis_open, axial
+
 
 def find_plane_orbits(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray,
                       mu: float, bhat: np.ndarray, d: float, L0: float, dk: float,
@@ -494,21 +529,22 @@ def find_plane_orbits(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec
                     small pocket sitting nearer the axis than any open piece, which near
                     a degenerate field direction it cannot.
     """
-    L=float(L0)
-    orbits,n_open,central=[],0,set()
+    L = float(L0)
+    orbits, n_open, central = [], 0, set()
     for it in range(ngrow+1):
-        mesh=int(min(max(np.ceil(L/dk),16),mesh_max))
-        eig=get_eigs_plane(rvec,ham_r,S_r,avec,bhat,d,L,mesh,egrid)
-        orbits,n_open,crossing,central,axial=get_plane_orbits(
-            eig,mesh,L,mu,bhat,d,None if egrid is None else egrid['bands'])
+        mesh = int(min(max(np.ceil(L/dk), 16), mesh_max))
+        eig = get_eigs_plane(rvec, ham_r, S_r, avec, bhat, d, L, mesh, egrid)
+        orbits, n_open, crossing, central, axial = get_plane_orbits(
+            eig, mesh, L, mu, bhat, d, None if egrid is None else egrid['bands'])
         # grow only for a band whose axial section is unresolved: nothing closed around
         # the axis and an open piece is the thing nearest to it
-        if mesh>=mesh_max or it>=ngrow or not central:
+        if mesh >= mesh_max or it >= ngrow or not central:
             break
-        if it>=ngrow_open:
+        if it >= ngrow_open:
             break            # a few zone diameters and still no closed central orbit
-        L*=2.
-    return orbits,n_open,L,central,axial
+        L *= 2.
+    return orbits, n_open, L, central, axial
+
 
 def fs_cartesian_points(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray,
                         avec: np.ndarray, mu: float, mesh: int = 40,
@@ -520,12 +556,13 @@ def fs_cartesian_points(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray,
     @param mesh: 3D sampling mesh per axis
     @return    : (N,3) Cartesian k-points [AA^-1]; empty if no band crosses mu
     """
-    Nk,klist=gen_klist(mesh,mesh,mesh)
-    eig=(get_eigs(klist,ham_r,S_r,rvec)[0] if egrid is None
-         else egrid['interp'](np.mod(klist,1.)))
-    tol=max(1.0e-3,(eig.max()-eig.min())/mesh)
-    sel=(np.abs(eig-mu)<tol).any(axis=1)
-    return klist[sel].dot(get_bvec(np.asarray(avec,dtype=float)))
+    Nk, klist = _lattice.gen_klist(mesh, mesh, mesh)
+    eig = (get_eigs(klist, ham_r, S_r, rvec)[0] if egrid is None
+           else egrid['interp'](np.mod(klist, 1.)))
+    tol = max(1.0e-3, (eig.max()-eig.min())/mesh)
+    sel = (np.abs(eig-mu) < tol).any(axis=1)
+    return klist[sel].dot(_lattice.get_bvec(np.asarray(avec, dtype=float)))
+
 
 def fs_extent_along(kf: np.ndarray, bhat: np.ndarray, avec: np.ndarray) -> tuple[float, float]:
     """
@@ -537,14 +574,15 @@ def fs_extent_along(kf: np.ndarray, bhat: np.ndarray, avec: np.ndarray) -> tuple
     @retval radius: largest in-plane distance from the B_hat axis [AA^-1]
     @retval   dmax: largest |k.B_hat| on the Fermi surface [AA^-1]
     """
-    bv=get_bvec(np.asarray(avec,dtype=float))
-    if len(kf)==0:   # no Fermi surface sampled: fall back to the cell size
-        r=float(np.linalg.norm(np.abs(bv).sum(axis=0)))
-        return r,r
-    n=np.asarray(bhat,dtype=float)
-    kpar=kf.dot(n)
-    kperp=np.linalg.norm(kf-np.outer(kpar,n),axis=1)
-    return float(kperp.max()),float(np.abs(kpar).max())
+    bv = _lattice.get_bvec(np.asarray(avec, dtype=float))
+    if len(kf) == 0:   # no Fermi surface sampled: fall back to the cell size
+        r = float(np.linalg.norm(np.abs(bv).sum(axis=0)))
+        return r, r
+    n = np.asarray(bhat, dtype=float)
+    kpar = kf.dot(n)
+    kperp = np.linalg.norm(kf-np.outer(kpar, n), axis=1)
+    return float(kperp.max()), float(np.abs(kpar).max())
+
 
 def scan_plane_area(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray,
                     mu: float, bhat: np.ndarray, d_arr: np.ndarray, L0: float, dk: float,
@@ -564,33 +602,34 @@ def scan_plane_area(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: 
     @retval axial_bands: bands having a closed orbit that encircles the field axis on
                     the central plane (d=0)
     """
-    S_scan={}
-    orbit_cache={}
-    n_open=0
-    d_arr=np.asarray(d_arr,dtype=float)
+    S_scan = {}
+    orbit_cache = {}
+    n_open = 0
+    d_arr = np.asarray(d_arr, dtype=float)
     # Settle the window on a few probe offsets and then hold it fixed. Letting each
     # slice grow on its own changes how many orbit copies the window holds from slice
     # to slice, which breaks the continuity the branch tracking relies on.
-    L=float(L0)
-    axial_bands=set()
-    for dp in ({d_arr[0],d_arr[len(d_arr)//2],d_arr[-1]} if len(d_arr) else {0.}):
-        _,_,Lp,_,ax=find_plane_orbits(rvec,ham_r,S_r,avec,mu,bhat,float(dp),L0,dk,
-                                      ngrow,egrid=egrid)
-        L=max(L,Lp)
+    L = float(L0)
+    axial_bands = set()
+    for dp in ({d_arr[0], d_arr[len(d_arr)//2], d_arr[-1]} if len(d_arr) else {0.}):
+        _, _, Lp, _, ax = find_plane_orbits(rvec, ham_r, S_r, avec, mu, bhat, float(dp), L0, dk,
+                                            ngrow, egrid=egrid)
+        L = max(L, Lp)
         # reported for the CENTRAL section (d=0); at other offsets a tube has simply
         # shrunk away, which says nothing about the orbit topology
-        if len(d_arr) and np.isclose(dp,d_arr[0]) and np.isclose(d_arr[0],0.):
-            axial_bands=ax
+        if len(d_arr) and np.isclose(dp, d_arr[0]) and np.isclose(d_arr[0], 0.):
+            axial_bands = ax
     for d in d_arr:
-        orbits,nop=find_plane_orbits(rvec,ham_r,S_r,avec,mu,bhat,float(d),L,dk,
-                                     0,egrid=egrid)[:2]
-        n_open+=nop
-        orbit_cache[float(d)]=orbits
+        orbits, nop = find_plane_orbits(rvec, ham_r, S_r, avec, mu, bhat, float(d), L, dk,
+                                        0, egrid=egrid)[:2]
+        n_open += nop
+        orbit_cache[float(d)] = orbits
         for b in {o['band'] for o in orbits}:
-            o=min((o for o in orbits if o['band']==b),
-                  key=lambda o: np.linalg.norm(o['cen2d']))
-            S_scan.setdefault(b,[]).append((float(d),o['area']))
-    return S_scan,orbit_cache,n_open,axial_bands
+            o = min((o for o in orbits if o['band'] == b),
+                    key=lambda o: np.linalg.norm(o['cen2d']))
+            S_scan.setdefault(b, []).append((float(d), o['area']))
+    return S_scan, orbit_cache, n_open, axial_bands
+
 
 def plane_area_at(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray,
                   mu: float, bhat: np.ndarray, d: float, band_idx: int,
@@ -602,11 +641,12 @@ def plane_area_at(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np
            0 when the band has no closed orbit there (so extremum refinement
            walks away from it rather than crashing).
     """
-    orbits=find_plane_orbits(rvec,ham_r,S_r,avec,mu,bhat,float(d),L0,dk,ngrow,egrid=egrid)[0]
-    cand=[o for o in orbits if o['band']==band_idx]
+    orbits = find_plane_orbits(rvec, ham_r, S_r, avec, mu, bhat, float(d), L0, dk, ngrow, egrid=egrid)[0]
+    cand = [o for o in orbits if o['band'] == band_idx]
     if not cand:
         return 0.
-    return min(cand,key=lambda o: np.linalg.norm(o['cen2d']))['area']
+    return min(cand, key=lambda o: np.linalg.norm(o['cen2d']))['area']
+
 
 def find_extremal_d(d_arr: np.ndarray, S_arr: np.ndarray, band_idx: int,
                     rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray,
@@ -619,27 +659,26 @@ def find_extremal_d(d_arr: np.ndarray, S_arr: np.ndarray, band_idx: int,
            (A(-d)=A(d)), provided the scan reaches it.
     @retval : list of extremal d values [AA^-1]
     """
-    from scipy.optimize import minimize_scalar
-    d_arr=np.asarray(d_arr,dtype=float)
-    S_arr=np.asarray(S_arr,dtype=float)
-    cand=[]
-    if len(d_arr) and np.isclose(d_arr[0],0.):
+    d_arr = np.asarray(d_arr, dtype=float)
+    S_arr = np.asarray(S_arr, dtype=float)
+    cand = []
+    if len(d_arr) and np.isclose(d_arr[0], 0.):
         cand.append(0.)
-    dS=np.diff(S_arr)
-    ds_tol=1.0e-5*max(np.max(np.abs(S_arr)) if len(S_arr) else 1.,1.)
+    dS = np.diff(S_arr)
+    ds_tol = 1.0e-5*max(np.max(np.abs(S_arr)) if len(S_arr) else 1., 1.)
     for i in range(len(dS)-1):
-        if (abs(dS[i])>ds_tol and abs(dS[i+1])>ds_tol and dS[i]*dS[i+1]<0):
-            sign=-1. if dS[i]>0 else 1.
-            res=minimize_scalar(
-                lambda d,s=sign: s*plane_area_at(rvec,ham_r,S_r,avec,mu,bhat,d,
-                                                 band_idx,L0,dk,ngrow),
-                bounds=(d_arr[i],d_arr[i+2]),method='bounded',
-                options={'xatol':1e-4,'maxiter':10})
+        if (abs(dS[i]) > ds_tol and abs(dS[i+1]) > ds_tol and dS[i]*dS[i+1] < 0):
+            sign = -1. if dS[i] > 0 else 1.
+            res = scopt.minimize_scalar(
+                lambda d, s=sign: s*plane_area_at(rvec, ham_r, S_r, avec, mu, bhat, d,
+                                                  band_idx, L0, dk, ngrow),
+                bounds=(d_arr[i], d_arr[i+2]), method='bounded',
+                options={'xatol': 1e-4, 'maxiter': 10})
             cand.append(float(res.x))
-    step=(d_arr[-1]-d_arr[0])/max(len(d_arr)-1,1) if len(d_arr)>1 else 1.
-    uniq=[]
+    step = (d_arr[-1]-d_arr[0])/max(len(d_arr)-1, 1) if len(d_arr) > 1 else 1.
+    uniq = []
     for d in sorted(cand):
-        if not uniq or abs(d-uniq[-1])>0.05*step:
+        if not uniq or abs(d-uniq[-1]) > 0.05*step:
             uniq.append(d)
     return uniq
 
@@ -653,6 +692,7 @@ def find_extremal_d(d_arr: np.ndarray, S_arr: np.ndarray, band_idx: int,
 #  Instead every orbit is followed through the scan, extrema are taken per branch,
 #  and only at the end are branches that differ by a whole G collapsed.
 # --------------------------------------------------------------------------- #
+
 
 def slice_period(bvec: np.ndarray, bhat: np.ndarray, nshell: int = 4,
                  rtol: float = 1.0e-5) -> float | None:
@@ -671,36 +711,38 @@ def slice_period(bvec: np.ndarray, bhat: np.ndarray, nshell: int = 4,
     @param   rtol: relative tolerance for accepting the commensurate case
     @return      : period [AA^-1], or None if incommensurate
     """
-    from math import gcd
-    beta=np.asarray(bvec,dtype=float).dot(np.asarray(bhat,dtype=float))  # b_i . B_hat
-    b0=float(np.abs(beta).max())
-    if b0<=0.:
+    import math
+    beta = np.asarray(bvec, dtype=float).dot(np.asarray(bhat, dtype=float))  # b_i . B_hat
+    b0 = float(np.abs(beta).max())
+    if b0 <= 0.:
         return None
     # Commensurate means beta/b0 is rational with a small denominator. Testing that
     # directly is far safer than hunting for the smallest |sum h_i beta_i|: a field
     # a hair away from a symmetry direction makes some combination nearly cancel, and
     # that near-zero would masquerade as a very short period.
-    for q in range(1,nshell*8+1):
-        r=q*beta/b0
-        if not np.allclose(r,np.rint(r),atol=rtol*max(1.,float(np.abs(r).max()))):
+    for q in range(1, nshell*8+1):
+        r = q*beta/b0
+        if not np.allclose(r, np.rint(r), atol=rtol*max(1., float(np.abs(r).max()))):
             continue
-        m=[abs(int(v)) for v in np.rint(r) if abs(int(v))>0]
+        m = [abs(int(v)) for v in np.rint(r) if abs(int(v)) > 0]
         if not m:
             continue
-        g=m[0]
+        g = m[0]
         for v in m[1:]:
-            g=gcd(g,v)
+            g = math.gcd(g, v)
         return b0*g/q     # smallest positive G.B_hat
     return None
+
 
 def _orbit_link_cost(o1: dict, o2: dict) -> float:
     """Dimensionless distance between two orbits of neighbouring slices: centroid
     shift measured in orbit radii, plus relative area change."""
-    r=np.sqrt(max(o1['area'],o2['area'])/np.pi)
-    if r<=0.:
+    r = np.sqrt(max(o1['area'], o2['area'])/np.pi)
+    if r <= 0.:
         return np.inf
     return (np.linalg.norm(o1['cen2d']-o2['cen2d'])/r
-            +abs(o1['area']-o2['area'])/max(o1['area'],o2['area']))
+            + abs(o1['area']-o2['area'])/max(o1['area'], o2['area']))
+
 
 def track_orbit_branches(orbit_cache: dict, d_arr: np.ndarray,
                          link_tol: float = 0.8) -> list:
@@ -713,28 +755,29 @@ def track_orbit_branches(orbit_cache: dict, d_arr: np.ndarray,
     @param   link_tol: maximum link cost; above it a new branch is started
     @return          : list of branches, each a list of orbit dicts ordered in d
     """
-    branches=[]
-    active=[]                       # (branch index, last orbit) still growing
-    for d in np.asarray(d_arr,dtype=float):
-        cur=orbit_cache.get(float(d),[])
-        pairs=sorted(((_orbit_link_cost(o_prev,o),ia,io)
-                      for ia,(_,o_prev) in enumerate(active)
-                      for io,o in enumerate(cur)
-                      if o_prev['band']==o['band']),key=lambda t:t[0])
-        used_a,used_o,new_active=set(),set(),[]
-        for cost,ia,io in pairs:
-            if cost>link_tol or ia in used_a or io in used_o:
+    branches = []
+    active = []                       # (branch index, last orbit) still growing
+    for d in np.asarray(d_arr, dtype=float):
+        cur = orbit_cache.get(float(d), [])
+        pairs = sorted(((_orbit_link_cost(o_prev, o), ia, io)
+                        for ia, (_, o_prev) in enumerate(active)
+                        for io, o in enumerate(cur)
+                        if o_prev['band'] == o['band']), key=lambda t: t[0])
+        used_a, used_o, new_active = set(), set(), []
+        for cost, ia, io in pairs:
+            if cost > link_tol or ia in used_a or io in used_o:
                 continue
             used_a.add(ia); used_o.add(io)
-            bi=active[ia][0]
+            bi = active[ia][0]
             branches[bi].append(cur[io])
-            new_active.append((bi,cur[io]))
-        for io,o in enumerate(cur):  # unmatched orbits start their own branch
+            new_active.append((bi, cur[io]))
+        for io, o in enumerate(cur):  # unmatched orbits start their own branch
             if io not in used_o:
                 branches.append([o])
-                new_active.append((len(branches)-1,o))
-        active=new_active
+                new_active.append((len(branches)-1, o))
+        active = new_active
     return branches
+
 
 def branch_extrema(branch: list, d0_is_extremal: bool = True,
                    d_end: float | None = None) -> list:
@@ -749,42 +792,43 @@ def branch_extrema(branch: list, d0_is_extremal: bool = True,
                    branch reaching it is extremal there. None for an incommensurate B.
     @return: list of dicts (area, d, cen3d, band) at the extrema
     """
-    if len(branch)==1:
+    if len(branch) == 1:
         # a lone orbit still counts when it sits on a symmetry plane
-        o=branch[0]
-        if (d0_is_extremal and np.isclose(o['d'],0.)) or \
-           (d_end is not None and np.isclose(o['d'],d_end)):
-            return [{'band':o['band'],'area':float(o['area']),'d':float(o['d']),
-                     'cen3d':o['cen3d']}]
+        o = branch[0]
+        if (d0_is_extremal and np.isclose(o['d'], 0.)) or \
+           (d_end is not None and np.isclose(o['d'], d_end)):
+            return [{'band': o['band'], 'area': float(o['area']), 'd': float(o['d']),
+                     'cen3d': o['cen3d']}]
         return []
-    d=np.array([o['d'] for o in branch])
-    A=np.array([o['area'] for o in branch])
-    out=[]
-    if d0_is_extremal and np.isclose(d[0],0.):
-        out.append({'band':branch[0]['band'],'area':float(A[0]),'d':0.,
-                    'cen3d':branch[0]['cen3d']})
-    if d_end is not None and np.isclose(d[-1],d_end):
-        out.append({'band':branch[-1]['band'],'area':float(A[-1]),'d':float(d[-1]),
-                    'cen3d':branch[-1]['cen3d']})
-    dA=np.diff(A)
-    tol=1.0e-5*max(A.max(),1.)
+    d = np.array([o['d'] for o in branch])
+    A = np.array([o['area'] for o in branch])
+    out = []
+    if d0_is_extremal and np.isclose(d[0], 0.):
+        out.append({'band': branch[0]['band'], 'area': float(A[0]), 'd': 0.,
+                    'cen3d': branch[0]['cen3d']})
+    if d_end is not None and np.isclose(d[-1], d_end):
+        out.append({'band': branch[-1]['band'], 'area': float(A[-1]), 'd': float(d[-1]),
+                    'cen3d': branch[-1]['cen3d']})
+    dA = np.diff(A)
+    tol = 1.0e-5*max(A.max(), 1.)
     for i in range(len(dA)-1):
-        if abs(dA[i])<tol or abs(dA[i+1])<tol or dA[i]*dA[i+1]>=0.:
+        if abs(dA[i]) < tol or abs(dA[i+1]) < tol or dA[i]*dA[i+1] >= 0.:
             continue
-        x,y=d[i:i+3],A[i:i+3]
-        den=(y[0]-2*y[1]+y[2])
+        x, y = d[i:i+3], A[i:i+3]
+        den = (y[0]-2*y[1]+y[2])
         # vertex of the parabola through the three points (uniform or not)
-        if abs(den)<1.0e-14:
-            xv,yv=x[1],y[1]
+        if abs(den) < 1.0e-14:
+            xv, yv = x[1], y[1]
         else:
-            c=np.polyfit(x,y,2)
-            xv=-0.5*c[1]/c[0]
-            xv=float(np.clip(xv,x[0],x[2]))
-            yv=float(np.polyval(c,xv))
-        w=(xv-x[1])/max(x[2]-x[0],1e-30)
-        cen=branch[i+1]['cen3d']+w*(branch[i+2]['cen3d']-branch[i]['cen3d'])
-        out.append({'band':branch[i+1]['band'],'area':float(yv),'d':float(xv),'cen3d':cen})
+            c = np.polyfit(x, y, 2)
+            xv = -0.5*c[1]/c[0]
+            xv = float(np.clip(xv, x[0], x[2]))
+            yv = float(np.polyval(c, xv))
+        w = (xv-x[1])/max(x[2]-x[0], 1e-30)
+        cen = branch[i+1]['cen3d']+w*(branch[i+2]['cen3d']-branch[i]['cen3d'])
+        out.append({'band': branch[i+1]['band'], 'area': float(yv), 'd': float(xv), 'cen3d': cen})
     return out
+
 
 def follow_orbit(seed: dict, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray,
                  avec: np.ndarray, mu: float, bhat: np.ndarray, L: float, dk: float,
@@ -812,63 +856,64 @@ def follow_orbit(seed: dict, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarra
                    ladder runs monotonically and the extremum must lie further out
     @return      : extremal orbit dict, or None if the orbit is not there any more
     """
-    c=np.asarray(seed['cen3d'],dtype=float)
-    n=np.asarray(bhat,dtype=float)
-    e1,e2=plane_frame(n)
-    r_seed=np.sqrt(max(seed['area'],0.)/np.pi)
-    tol=max(reach*r_seed,3.*dk)
+    c = np.asarray(seed['cen3d'], dtype=float)
+    n = np.asarray(bhat, dtype=float)
+    e1, e2 = plane_frame(n)
+    r_seed = np.sqrt(max(seed['area'], 0.)/np.pi)
+    tol = max(reach*r_seed, 3.*dk)
 
-    def at(d):
-        orbits=find_plane_orbits(rvec,ham_r,S_r,avec,mu,n,float(d),L,dk,0,egrid=egrid)[0]
-        p=np.array([(c-d*n).dot(e1),(c-d*n).dot(e2)])
-        cand=[o for o in orbits if o['band']==seed['band']
-              and np.linalg.norm(o['cen2d']-p)<tol]
-        return min(cand,key=lambda o:np.linalg.norm(o['cen2d']-p)) if cand else None
+    def at(d: float) -> dict | None:
+        orbits = find_plane_orbits(rvec, ham_r, S_r, avec, mu, n, float(d), L, dk, 0, egrid=egrid)[0]
+        p = np.array([(c-d*n).dot(e1), (c-d*n).dot(e2)])
+        cand = [o for o in orbits if o['band'] == seed['band']
+                and np.linalg.norm(o['cen2d']-p) < tol]
+        return min(cand, key=lambda o: np.linalg.norm(o['cen2d']-p)) if cand else None
 
-    d0=float(c.dot(n))
-    h=max(step,1.0e-4)
-    o0=at(d0)
+    d0 = float(c.dot(n))
+    h = max(step, 1.0e-4)
+    o0 = at(d0)
     if o0 is None:
         return None                    # the orbit is gone at this field direction
-    if abs(d0)<0.5*h:
+    if abs(d0) < 0.5*h:
         # sits on the central plane, which time reversal makes extremal outright
-        return {'band':o0['band'],'area':o0['area'],'d':0.,'cen3d':o0['cen3d']}
+        return {'band': o0['band'], 'area': o0['area'], 'd': 0., 'cen3d': o0['cen3d']}
     # ladder out to both sides -- a maximum and a minimum are found the same way, and
     # walking uphill only would miss every neck orbit
-    lad={0:o0}
-    for sgn in (1,-1):
-        for j in range(1,nstep+1):
-            o=at(d0+sgn*j*h)
+    lad = {0: o0}
+    for sgn in (1, -1):
+        for j in range(1, nstep+1):
+            o = at(d0+sgn*j*h)
             if o is None:
                 break
-            lad[sgn*j]=o
-    js=sorted(lad)
-    A=np.array([lad[j]['area'] for j in js])
-    dd=np.array([d0+j*h for j in js])
-    if len(js)<3:
+            lad[sgn*j] = o
+    js = sorted(lad)
+    A = np.array([lad[j]['area'] for j in js])
+    dd = np.array([d0+j*h for j in js])
+    if len(js) < 3:
         return None
-    dA=np.diff(A)
-    best=None
+    dA = np.diff(A)
+    best = None
     for i in range(len(dA)-1):
-        if dA[i]*dA[i+1]>=0.:
+        if dA[i]*dA[i+1] >= 0.:
             continue
-        cand=0.5*(dd[i+1]+dd[i+1])
-        if best is None or abs(dd[i+1]-d0)<abs(best[0]-d0):
-            x,y=dd[i:i+3],A[i:i+3]
-            co=np.polyfit(x,y,2)
-            xv=float(np.clip(-0.5*co[1]/co[0],x[0],x[2])) if abs(co[0])>1e-30 else float(x[1])
-            best=(xv,i+1)
+        cand = 0.5*(dd[i+1]+dd[i+1])
+        if best is None or abs(dd[i+1]-d0) < abs(best[0]-d0):
+            x, y = dd[i:i+3], A[i:i+3]
+            co = np.polyfit(x, y, 2)
+            xv = float(np.clip(-0.5*co[1]/co[0], x[0], x[2])) if abs(co[0]) > 1e-30 else float(x[1])
+            best = (xv, i+1)
     if best is None:
-        if widen>0 and len(lad)>=2*nstep+1:
+        if widen > 0 and len(lad) >= 2*nstep+1:
             # the whole ladder ran uphill or downhill: the extremum is further out
-            return follow_orbit(seed,rvec,ham_r,S_r,avec,mu,bhat,L,dk,2.*h,egrid,
-                                nstep,reach,widen-1)
+            return follow_orbit(seed, rvec, ham_r, S_r, avec, mu, bhat, L, dk, 2.*h, egrid,
+                                nstep, reach, widen-1)
         return None                    # monotonic: this orbit's extremum is elsewhere
-    o=at(best[0])
+    o = at(best[0])
     if o is None:
-        o=lad[js[best[1]]]
-        return {'band':o['band'],'area':o['area'],'d':float(dd[best[1]]),'cen3d':o['cen3d']}
-    return {'band':o['band'],'area':o['area'],'d':float(best[0]),'cen3d':o['cen3d']}
+        o = lad[js[best[1]]]
+        return {'band': o['band'], 'area': o['area'], 'd': float(dd[best[1]]), 'cen3d': o['cen3d']}
+    return {'band': o['band'], 'area': o['area'], 'd': float(best[0]), 'cen3d': o['cen3d']}
+
 
 def verify_orbits_window(records: list, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray,
                          avec: np.ndarray, mu: float, bhat: np.ndarray, L: float, dk: float,
@@ -895,27 +940,28 @@ def verify_orbits_window(records: list, rvec: np.ndarray, ham_r: np.ndarray, S_r
     @retval  good: records whose area is window-independent
     @retval  bad : records rejected
     """
-    n=np.asarray(bhat,dtype=float)
-    e1,e2=plane_frame(n)
-    good,bad=[],[]
+    n = np.asarray(bhat, dtype=float)
+    e1, e2 = plane_frame(n)
+    good, bad = [], []
     for r in records:
-        c=np.asarray(r['cen3d'],dtype=float)
-        p=np.array([(c-r['d']*n).dot(e1),(c-r['d']*n).dot(e2)])
-        tol=max(0.5*np.sqrt(max(r['area'],0.)/np.pi),3.*dk)
-        areas=[r['area']]
+        c = np.asarray(r['cen3d'], dtype=float)
+        p = np.array([(c-r['d']*n).dot(e1), (c-r['d']*n).dot(e2)])
+        tol = max(0.5*np.sqrt(max(r['area'], 0.)/np.pi), 3.*dk)
+        areas = [r['area']]
         for gf in grow:
-            orbits=find_plane_orbits(rvec,ham_r,S_r,avec,mu,n,r['d'],gf*L,dk,
-                                     0,egrid=egrid)[0]
-            cand=[o for o in orbits if o['band']==r['band']
-                  and np.linalg.norm(o['cen2d']-p)<tol]
+            orbits = find_plane_orbits(rvec, ham_r, S_r, avec, mu, n, r['d'], gf*L, dk,
+                                       0, egrid=egrid)[0]
+            cand = [o for o in orbits if o['band'] == r['band']
+                    and np.linalg.norm(o['cen2d']-p) < tol]
             if cand:
-                areas.append(min(cand,key=lambda o:np.linalg.norm(o['cen2d']-p))['area'])
-        if len(areas)<2:
+                areas.append(min(cand, key=lambda o: np.linalg.norm(o['cen2d']-p))['area'])
+        if len(areas) < 2:
             bad.append(r)          # never found again: not an orbit we can stand behind
             continue
-        a=np.array(areas)
-        (good if (a.max()-a.min())<=rtol*a.max() else bad).append(r)
-    return good,bad
+        a = np.array(areas)
+        (good if (a.max()-a.min()) <= rtol*a.max() else bad).append(r)
+    return good, bad
+
 
 def nearest_lattice_offset(g: np.ndarray, bvec: np.ndarray, shell: int = 1) -> np.ndarray:
     """
@@ -934,15 +980,16 @@ def nearest_lattice_offset(g: np.ndarray, bvec: np.ndarray, shell: int = 1) -> n
     @return       : shortest Cartesian representative of g modulo the lattice [AA^-1]
     """
     import itertools
-    bv=np.asarray(bvec,dtype=float)
-    h0=np.rint(np.asarray(g,dtype=float))
-    best=None
-    for dh in itertools.product(range(-shell,shell+1),repeat=3):
-        v=(g-(h0+np.array(dh))).dot(bv)
-        n=float(v.dot(v))
-        if best is None or n<best[0]:
-            best=(n,v)
+    bv = np.asarray(bvec, dtype=float)
+    h0 = np.rint(np.asarray(g, dtype=float))
+    best = None
+    for dh in itertools.product(range(-shell, shell+1), repeat=3):
+        v = (g-(h0+np.array(dh))).dot(bv)
+        n = float(v.dot(v))
+        if best is None or n < best[0]:
+            best = (n, v)
     return best[1]
+
 
 def orbit_key(record: dict, bvec_inv: np.ndarray) -> np.ndarray:
     """
@@ -956,8 +1003,9 @@ def orbit_key(record: dict, bvec_inv: np.ndarray) -> np.ndarray:
     @param bvec_inv: inverse of the reciprocal lattice matrix (rows b_i)
     @return         : reduced fractional centre, each component in [-0.5, 0.5]
     """
-    f=np.asarray(record['cen3d'],dtype=float).dot(bvec_inv)
+    f = np.asarray(record['cen3d'], dtype=float).dot(bvec_inv)
     return f-np.rint(f)
+
 
 def dedup_extremal_orbits(records: list, bvec: np.ndarray, tol_k: float = 0.02,
                           rtol_area: float = 2.0e-4, rtol_copy: float = 1.0e-3,
@@ -993,50 +1041,51 @@ def dedup_extremal_orbits(records: list, bvec: np.ndarray, tol_k: float = 0.02,
                       one nearest the field axis
     @return          : one record per distinct orbit, largest area first
     """
-    inv=np.linalg.inv(np.asarray(bvec,dtype=float))
-    groups=[]
-    for r in sorted(records,key=lambda r:-r['area']):
-        f=orbit_key(r,inv)
+    inv = np.linalg.inv(np.asarray(bvec, dtype=float))
+    groups = []
+    for r in sorted(records, key=lambda r: -r['area']):
+        f = orbit_key(r, inv)
         for gr in groups:
-            if gr['band']!=r['band']:
+            if gr['band'] != r['band']:
                 continue
             # a zone copy has BOTH the same centre modulo the lattice and the same area;
             # requiring the area too keeps two genuinely different orbits that happen to
             # be concentric (a small pocket inside a belly, say) apart
-            if (np.linalg.norm(nearest_lattice_offset(f-gr['key'],bvec))<tol_k
-                    and abs(gr['area']-r['area'])<=rtol_copy*max(gr['area'],1e-30)):
+            if (np.linalg.norm(nearest_lattice_offset(f-gr['key'], bvec)) < tol_k
+                    and abs(gr['area']-r['area']) <= rtol_copy*max(gr['area'], 1e-30)):
                 gr['members'].append(r)
                 break
         else:
-            groups.append({'band':r['band'],'key':f,'area':r['area'],'members':[r]})
+            groups.append({'band': r['band'], 'key': f, 'area': r['area'], 'members': [r]})
     # Keep the copy sitting closest to the field axis. Any member has the right area,
     # but everything downstream that uses the centre -- re-measuring the orbit in a
     # wider window, following it to the next angle -- needs the one in the middle of
     # the window, not a copy several zones out near the rim.
     if bhat is None:
-        pick=lambda r: float(np.linalg.norm(r['cen3d']))
+        pick = lambda r: float(np.linalg.norm(r['cen3d']))
     else:
-        nb=np.asarray(bhat,dtype=float)
-        pick=lambda r: float(np.linalg.norm(r['cen3d']-r['cen3d'].dot(nb)*nb))
-    keep=[]
+        nb = np.asarray(bhat, dtype=float)
+        pick = lambda r: float(np.linalg.norm(r['cen3d']-r['cen3d'].dot(nb)*nb))
+    keep = []
     for gr in groups:
-        r=dict(min(gr['members'],key=pick))
-        r['_key']=gr['key']
+        r = dict(min(gr['members'], key=pick))
+        r['_key'] = gr['key']
         keep.append(r)
-    keep.sort(key=lambda r:-r['area'])
-    merged=[]
+    keep.sort(key=lambda r: -r['area'])
+    merged = []
     for r in keep:
-        if not any(k['band']==r['band']
-                   and abs(k['area']-r['area'])<=rtol_area*max(k['area'],1e-30)
+        if not any(k['band'] == r['band']
+                   and abs(k['area']-r['area']) <= rtol_area*max(k['area'], 1e-30)
                    for k in merged):
             merged.append(r)
     for r in merged:
-        r.pop('_key',None)
+        r.pop('_key', None)
     return merged
+
 
 def scan_fs_area(mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray,
                  rotmat: np.ndarray, mu: float, ABZ: float,
-                 meshkz: int=20) -> tuple[dict, dict]:
+                 meshkz: int = 20) -> tuple[dict, dict]:
     """
     @fn scan_fs_area()
     @brief Phase-1 scan: compute cross-section area S(kz) at mu for all FS bands
@@ -1051,19 +1100,20 @@ def scan_fs_area(mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray
     @return S_scan: dict band_idx -> [(kz, S[AA^-2]), ...]
     @return eig_cache: dict kz -> eig array, reusable in Phase 2
     """
-    kz0=np.linspace(0.,.5,meshkz,True)
-    S_scan={}
-    eig_cache={}
+    kz0 = np.linspace(0., .5, meshkz, True)
+    S_scan = {}
+    eig_cache = {}
     for kz in kz0:
-        eig=get_eigs_2d(mesh,rvec,ham_r,S_r,rotmat,kz)
-        eig_cache[kz]=eig
-        v2,blist=get_kf_points(eig,mesh,mu,kz)
+        eig = get_eigs_2d(mesh, rvec, ham_r, S_r, rotmat, kz)
+        eig_cache[kz] = eig
+        v2, blist = get_kf_points(eig, mesh, mu, kz)
         for band_idx in blist:
-            S=get_band_area(v2,blist,band_idx,ABZ)
+            S = get_band_area(v2, blist, band_idx, ABZ)
             if S is None:   # open contour: orbit is truncated by the slice box, skip it
                 continue
-            S_scan.setdefault(band_idx,[]).append((kz,S))
-    return S_scan,eig_cache
+            S_scan.setdefault(band_idx, []).append((kz, S))
+    return S_scan, eig_cache
+
 
 def find_extremal_kz(kz_arr: np.ndarray, S_arr: np.ndarray, band_idx: int,
                      mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray,
@@ -1084,40 +1134,41 @@ def find_extremal_kz(kz_arr: np.ndarray, S_arr: np.ndarray, band_idx: int,
     @param     ABZ: Brillouin zone area in AA^-2
     @return cand_kz: list of extremal kz values
     """
-    from scipy.optimize import minimize_scalar
-    def S_at_kz(kz):
-        eig=get_eigs_2d(mesh,rvec,ham_r,S_r,rotmat,kz)
-        v2,blist=get_kf_points(eig,mesh,mu,kz)
-        s=get_band_area(v2,blist,band_idx,ABZ)
+
+    def S_at_kz(kz: float) -> float:
+        eig = get_eigs_2d(mesh, rvec, ham_r, S_r, rotmat, kz)
+        v2, blist = get_kf_points(eig, mesh, mu, kz)
+        s = get_band_area(v2, blist, band_idx, ABZ)
         return s if s is not None else 0.
-    dS=np.diff(S_arr)
+    dS = np.diff(S_arr)
     # k_z=0 is fixed by time reversal (S(-kz)=S(kz)) and is therefore always extremal --
     # but only if the scan actually reaches it; a band whose FS appears at finite kz has
     # kz_arr[0]>0, which is an ordinary point.
     # k_z=0.5 is a symmetry plane iff rotmat[2] (=M^T e_z, the slice stacking vector in
     # the fractional basis) is a reciprocal lattice vector: then S(0.5+d)=S(0.5-d) follows
     # from time reversal plus periodicity. For a general tilt it is a spurious orbit.
-    m3=np.asarray(rotmat,dtype=float)[2]
-    cand_kz=[]
-    if np.isclose(kz_arr[0],0.):
+    m3 = np.asarray(rotmat, dtype=float)[2]
+    cand_kz = []
+    if np.isclose(kz_arr[0], 0.):
         cand_kz.append(kz_arr[0])
-    if np.isclose(kz_arr[-1],0.5) and np.allclose(m3,np.rint(m3)):
+    if np.isclose(kz_arr[-1], 0.5) and np.allclose(m3, np.rint(m3)):
         cand_kz.append(kz_arr[-1])
-    ds_tol=1.0e-5*max(np.max(np.abs(S_arr)),1.0)
+    ds_tol = 1.0e-5*max(np.max(np.abs(S_arr)), 1.0)
     for i in range(len(dS)-1):
         if (abs(dS[i]) > ds_tol and abs(dS[i+1]) > ds_tol
-                and dS[i]*dS[i+1]<0):  # sign change in dS/dkz → local extremum in this bracket
-            sign=-1. if dS[i]>0 else 1.
-            res=minimize_scalar(lambda kz,s=sign: s*S_at_kz(kz),
-                                bounds=(kz_arr[i],kz_arr[i+2]),method='bounded',
-                                options={'xatol':1e-4,'maxiter':10})
+                and dS[i]*dS[i+1] < 0):  # sign change in dS/dkz → local extremum in this bracket
+            sign = -1. if dS[i] > 0 else 1.
+            res = scopt.minimize_scalar(lambda kz, s=sign: s*S_at_kz(kz),
+                                        bounds=(kz_arr[i], kz_arr[i+2]), method='bounded',
+                                        options={'xatol': 1e-4, 'maxiter': 10})
             cand_kz.append(res.x)
     # drop duplicates (a refined extremum can land on the kz=0 / kz=0.5 candidate)
-    uniq=[]
+    uniq = []
     for kz in sorted(cand_kz):
-        if not uniq or abs(kz-uniq[-1])>1.0e-3:
+        if not uniq or abs(kz-uniq[-1]) > 1.0e-3:
             uniq.append(kz)
     return uniq
+
 
 def gen_3d_surf_points(mesh: int, rvec: np.ndarray, ham_r: np.ndarray,
                        S_r: np.ndarray, mu: float, kscale: float = 1.0,
@@ -1140,30 +1191,31 @@ def gen_3d_surf_points(mesh: int, rvec: np.ndarray, ham_r: np.ndarray,
     @retval fsband: band index of each sheet
     """
     import skimage.measure as ski
-    Nk,klist=gen_klist(mesh+1,mesh+1,mesh+1)
-    klist=klist*kscale
-    eig,uni=get_eigs(klist,ham_r,S_r,rvec)
+    Nk, klist = _lattice.gen_klist(mesh+1, mesh+1, mesh+1)
+    klist = klist*kscale
+    eig, uni = get_eigs(klist, ham_r, S_r, rvec)
     # accept a scalar (int or float) as well as a per-axis [kx,ky,kz] list
-    ks=np.asarray(kscale,dtype=float)*np.ones(3)
-    fspolys=[]
-    fscenters=[]
-    fsband=[]
-    for i,e in enumerate(eig.T-mu):
-        if(e.max()*e.min()<0.):
-            verts,faces, _, _=ski.marching_cubes(e.reshape(mesh+1,mesh+1,mesh+1),0,
-                                                 spacing=(ks[0]*2*np.pi/mesh,ks[1]*2*np.pi/mesh,
-                                                          ks[2]*2*np.pi/mesh))
-            verts=verts-ks*np.pi
+    ks = np.asarray(kscale, dtype=float)*np.ones(3)
+    fspolys = []
+    fscenters = []
+    fsband = []
+    for i, e in enumerate(eig.T-mu):
+        if (e.max()*e.min() < 0.):
+            verts, faces, _, _ = ski.marching_cubes(e.reshape(mesh+1, mesh+1, mesh+1), 0,
+                                                    spacing=(ks[0]*2*np.pi/mesh, ks[1]*2*np.pi/mesh,
+                                                             ks[2]*2*np.pi/mesh))
+            verts = verts-ks*np.pi
             # k_frac in [-ks/2, ks/2]; klist fed to get_eigs uses the same fractional units
-            kfrac=verts*.5/np.pi
+            kfrac = verts*.5/np.pi
             # Cartesian k = sum_i k_frac_i * b_i, so that the sheet and BZedge(bvec) share a frame
             fspolys.append((kfrac.dot(bvec) if bvec is not None else verts)[faces])
             fscenters.append(kfrac[faces].mean(axis=1))
             fsband.append(i)
-    return fspolys,fscenters,fsband
+    return fspolys, fscenters, fsband
 
-def get_colors(klist: np.ndarray, blist, mrot, rvec: np.ndarray, ham_r: np.ndarray,
-               S_r: np.ndarray, ol, color_option: int, sw_2d: bool = False):
+
+def get_colors(klist: np.ndarray, blist: list, mrot: np.ndarray, rvec: np.ndarray, ham_r: np.ndarray,
+               S_r: np.ndarray, ol: np.ndarray, color_option: int, sw_2d: bool = False) -> list:
     """
     @fn get_colors
     @brief Compute color weights for Fermi surface visualization (orbital weight or velocity magnitude).
@@ -1178,39 +1230,40 @@ def get_colors(klist: np.ndarray, blist, mrot, rvec: np.ndarray, ham_r: np.ndarr
     @param        sw_2d: If True, treat klist as a nested list (2D Fermi surface mode)
     @return       clist: List of color arrays for each contour segment, or [] if color_option==0
     """
-    def get_col(cl,ol):
-        col=(np.abs(cl[:,ol])**2 if isinstance(ol,int)
-             else (np.abs(cl[:,ol])**2).sum(axis=1)).round(4)
+    def get_col(cl: np.ndarray, ol: np.ndarray) -> np.ndarray:
+        col = (np.abs(cl[:, ol])**2 if isinstance(ol, int)
+               else (np.abs(cl[:, ol])**2).sum(axis=1)).round(4)
         return col
-    if color_option==0:
+    if color_option == 0:
         return []
-    elif color_option==1: #orbital weight color
+    elif color_option == 1:  # orbital weight color
         if sw_2d:
-            uni=[[get_eigs(k,ham_r,S_r,rvec,True,True)[:,b] for k in kk] for kk,b in zip(klist,blist)]
-            clist=[[np.array([get_col(cl,ol[0]),get_col(cl,ol[1]),get_col(cl,ol[2])]).T for cl in clst]
-                   for clst in uni]
+            uni = [[get_eigs(k, ham_r, S_r, rvec, True, True)[:, b] for k in kk] for kk, b in zip(klist, blist)]
+            clist = [[np.array([get_col(cl, ol[0]), get_col(cl, ol[1]), get_col(cl, ol[2])]).T for cl in clst]
+                     for clst in uni]
         else:
-            uni=[get_eigs(k,ham_r,S_r,rvec,True,True)[:,b] for k,b in zip(klist,blist)]
-            clist=[np.array([get_col(clst,ol[0]),get_col(clst,ol[1]),get_col(clst,ol[2])]).T for clst in uni]
+            uni = [get_eigs(k, ham_r, S_r, rvec, True, True)[:, b] for k, b in zip(klist, blist)]
+            clist = [np.array([get_col(clst, ol[0]), get_col(clst, ol[1]), get_col(clst, ol[2])]).T for clst in uni]
         return clist
-    elif color_option==2: #velocity size color
+    elif color_option == 2:  # velocity size color
         # eig is needed alongside uni: for a non-orthogonal (MLO) basis the velocity
         # carries the -eps*dS/dk term (get_veloc dispatches on S_r).
         if sw_2d:
-            eu=[[get_eigs(k,ham_r,S_r,rvec) for k in kk] for kk in klist]
-            vk=[[flibs.get_veloc(k,ham_r,rvec,mrot,unkk,S_r,eigk)[:,b,:]
-                 for k,(eigk,unkk) in zip(kk,euk)]
-                for kk,euk,b in zip(klist,eu,blist)]
-            clist=[[np.sqrt((abs(vkkk)*abs(vkkk)).sum(axis=1)) for vkkk in vkk] for vkk in vk]
+            eu = [[get_eigs(k, ham_r, S_r, rvec) for k in kk] for kk in klist]
+            vk = [[flibs.get_veloc(k, ham_r, rvec, mrot, unkk, S_r, eigk)[:, b, :]
+                   for k, (eigk, unkk) in zip(kk, euk)]
+                  for kk, euk, b in zip(klist, eu, blist)]
+            clist = [[np.sqrt((abs(vkkk)*abs(vkkk)).sum(axis=1)) for vkkk in vkk] for vkk in vk]
         else:
-            eu=[get_eigs(k,ham_r,S_r,rvec) for k in klist]
-            vk=[flibs.get_veloc(kk,ham_r,rvec,mrot,unk,S_r,eigk)[:,b,:]
-                for kk,(eigk,unk),b in zip(klist,eu,blist)]
-            clist=[np.sqrt((abs(vkk)*abs(vkk)).sum(axis=1)) for vkk in vk]
+            eu = [get_eigs(k, ham_r, S_r, rvec) for k in klist]
+            vk = [flibs.get_veloc(kk, ham_r, rvec, mrot, unk, S_r, eigk)[:, b, :]
+                  for kk, (eigk, unk), b in zip(klist, eu, blist)]
+            clist = [np.sqrt((abs(vkk)*abs(vkk)).sum(axis=1)) for vkk in vk]
         return clist
 
+
 def get_emesh(Nx: int, Ny: int, Nz: int, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray,
-              avec: np.ndarray, sw_uni: bool = False, sw_veloc: bool = False, sw_mass: bool = False):
+              avec: np.ndarray, sw_uni: bool = False, sw_veloc: bool = False, sw_mass: bool = False) -> tuple:
     """
     @fn get_emesh
     @brief Generate the band energy mesh on a full 3D k-grid with optional eigenvectors, velocities, and inverse mass.
@@ -1226,22 +1279,22 @@ def get_emesh(Nx: int, Ny: int, Nz: int, ham_r: np.ndarray, S_r: np.ndarray, rve
     @param sw_mass: If True (requires sw_veloc=True), also compute and return inverse effective mass tensor
     @return (Nk, eig, [vk], [imass], kweight): Tuple of k-point count, eigenvalues, and optionally velocities/mass
     """
-    Nk, klist = gen_klist(Nx, Ny, Nz, sw_pp=False)
+    Nk, klist = _lattice.gen_klist(Nx, Ny, Nz, sw_pp=False)
     eig, uni = get_eigs(klist, ham_r, S_r, rvec)
     kweight = np.ones(len(eig), dtype=np.float64)
     if sw_veloc:
         if sw_uni:
-            vk=flibs.get_vnmk(klist,ham_r,rvec,avec,uni,S_r,eig)
-            return Nk,eig,vk,kweight
+            vk = flibs.get_vnmk(klist, ham_r, rvec, avec, uni, S_r, eig)
+            return Nk, eig, vk, kweight
         else:
-            vk=flibs.get_veloc(klist,ham_r,rvec,avec,uni,S_r,eig)
+            vk = flibs.get_veloc(klist, ham_r, rvec, avec, uni, S_r, eig)
             if sw_mass:
-                imass=flibs.get_mass(klist,ham_r,rvec,avec,uni,True,S_r,eig)
-                return Nk,eig,vk,imass,kweight
+                imass = flibs.get_mass(klist, ham_r, rvec, avec, uni, True, S_r, eig)
+                return Nk, eig, vk, imass, kweight
             else:
-                return Nk,eig,vk,kweight
+                return Nk, eig, vk, kweight
     else:
         if sw_uni:
-            return Nk,klist,eig,uni,kweight
+            return Nk, klist, eig, uni, kweight
         else:
-            return Nk,eig,kweight
+            return Nk, eig, kweight

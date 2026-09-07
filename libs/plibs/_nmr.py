@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#-*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
 """
 NMR observables in the superconducting state.
 
@@ -95,7 +95,15 @@ when reading the Fortran source.
 """
 import numpy as np
 import libs.flibs as flibs
-from ._response import _prepare_sc_chi0_builder, _solve_chis_path
+import libs.plibs._response as _response
+
+# Public API of this submodule; keeps `from ._x import *` in __init__.py from
+# re-exporting numpy, scipy, ctypes and the sibling packages imported above.
+__all__ = [
+    'BCS_GAP_RATIO', 'BCS_INTERP_C', 'N_DELTA_MIN', 'bcs_gap_ratio', 'bcs_temp_c', 'gap_from_eliashberg',
+    'nmr_qmesh', 'hyperfine_form_factor', 'fermi_surface_gap', 'nmr_scale_check', 'nmr_cost_estimate',
+    'nmr_qconvergence', 'nmr_sweep', 'write_nmr_dat', 'plot_nmr'
+]
 
 # BCS weak-coupling ratio 2*Delta(0)/(kB*Tc) = 3.528
 BCS_GAP_RATIO = 1.764
@@ -184,11 +192,11 @@ def gap_from_eliashberg(klist: np.ndarray, fname: str = 'gap_wannier',
     @return delta_k: static gap in orbital basis [Nk, Norb, Norb] complex128, laid out
                      exactly like the deltak built by the gap_sym path in main.py
     """
-    from ._calc import gap_extrapolate_w0
-    from ._wannier_io import gap_orb_ab
+    import libs.plibs._calc as _calc
+    import libs.plibs._wannier_io as _wannier_io
     d = np.load(f'{fname}.npz')
     gap_R, rvec = d['gap'], d['rvec']                 # (Norb,Norb,N_iw,Nr), (Nr,3)
-    gap_R = gap_orb_ab(gap_R, d, f'{fname}.npz')      # -> gap_R[a,b] = Delta_ab
+    gap_R = _wannier_io.gap_orb_ab(gap_R, d, f'{fname}.npz')      # -> gap_R[a,b] = Delta_ab
     temp_gap = float(d['temp']) if 'temp' in d else None
     Norb, N_iw, Nr = gap_R.shape[0], gap_R.shape[2], gap_R.shape[3]
 
@@ -199,7 +207,7 @@ def gap_from_eliashberg(klist: np.ndarray, fname: str = 'gap_wannier',
         if N_iw < n_points:
             raise ValueError(f"{fname}.npz holds only {N_iw} Matsubara slices, "
                              f"need >= n_points={n_points} for the w_n->0 fit")
-        gR0, bias = gap_extrapolate_w0(gap_R, temp_gap, n_points, order)
+        gR0, bias = _calc.gap_extrapolate_w0(gap_R, temp_gap, n_points, order)
         if verbose:
             print(f'  gap w_n->0 extrapolation: max correction over iw_0 ='
                   f' {bias.max():.3e} of the peak gap', flush=True)
@@ -284,7 +292,7 @@ def nmr_qmesh(Nx: int, Ny: int, Nz: int, Nqx: int, Nqy: int, Nqz: int = 1,
     @retval    qlist: q-points in fractional coordinates [Nq, 3] float64 (Gamma first)
     @retval    qmult: multiplicity of each retained q-point [Nq] float64
     """
-    def axis(N, Nq):
+    def axis(N: int, Nq: int) -> np.ndarray:
         # The stride must DIVIDE N: otherwise the last interval of the sub-mesh is short
         # (biasing the BZ average) and the set is not closed under q -> -q, which would
         # break the folding below.  Round the request down to the nearest divisor of N.
@@ -534,7 +542,7 @@ def nmr_cost_estimate(Nk: int, Nq: int, NT: int, Norb: int, Nchi: int,
 
 
 def nmr_qconvergence(hamk: np.ndarray, delta_k0: np.ndarray, klist: np.ndarray,
-                     Nx: int, Ny: int, Nz: int, qsize, mu: float, temp: float,
+                     Nx: int, Ny: int, Nz: int, qsize: np.ndarray, mu: float, temp: float,
                      temp_c: float, Smat: np.ndarray, olist: np.ndarray,
                      idelta: float = 1.e-3, w0: float | None = None,
                      sw_spsym: bool = False, hf_A: float = 1.0, hf_B: float = 0.0,
@@ -652,11 +660,11 @@ def nmr_sweep(hamk: np.ndarray, delta_k0: np.ndarray, klist: np.ndarray, qlist: 
         # ---- normal state (same mesh / broadening / w0) --------------------
         ffermi_n = flibs.get_ffermi(eig_n, mu, temp)
 
-        def chi0_normal(q):
+        def chi0_normal(q: np.ndarray) -> np.ndarray:
             qshift = flibs.get_qshift(klist, q)
             return flibs.get_chi_irr(uni_n, eig_n, ffermi_n, qshift, olist, wlist, idelta, temp)
 
-        chisq_n, _ = _solve_chis_path(qlist, wlist, olist, Smat, chi0_normal)
+        chisq_n, _ = _response._solve_chis_path(qlist, wlist, olist, Smat, chi0_normal)
         K_n, R_n = _nmr_observables(chisq_n, weight, w0)
 
         # ---- superconducting state ----------------------------------------
@@ -666,9 +674,9 @@ def nmr_sweep(hamk: np.ndarray, delta_k0: np.ndarray, klist: np.ndarray, qlist: 
             # matrix, whose degenerate particle/hole pairs LAPACK may mix arbitrarily.
             K_sc, R_sc = K_n, R_n
         else:
-            builder = _prepare_sc_chi0_builder(hamk, ratio * delta_k0, mu, temp,
-                                               klist, olist, wlist, idelta, sw_spsym)
-            chisq_sc, _ = _solve_chis_path(qlist, wlist, olist, Smat, builder)
+            builder = _response._prepare_sc_chi0_builder(hamk, ratio * delta_k0, mu, temp,
+                                                         klist, olist, wlist, idelta, sw_spsym)
+            chisq_sc, _ = _response._solve_chis_path(qlist, wlist, olist, Smat, builder)
             K_sc, R_sc = _nmr_observables(chisq_sc, weight, w0)
 
         for key, val in (('gap_ratio', ratio), ('K_sc', K_sc), ('K_n', K_n),
@@ -676,8 +684,8 @@ def nmr_sweep(hamk: np.ndarray, delta_k0: np.ndarray, klist: np.ndarray, qlist: 
             out[key].append(val)
         if verbose:
             print(f'  [{it+1:3d}/{len(temp_list):3d}] T={temp:9.6f} eV  T/Tc={temp/temp_c:6.3f}'
-                  f'  D/D0={ratio:5.3f}  K/Kn={K_sc/K_n if K_n!=0 else np.nan:8.5f}'
-                  f'  (1/T1T)/(1/T1T)n={R_sc/R_n if R_n!=0 else np.nan:8.5f}', flush=True)
+                  f'  D/D0={ratio:5.3f}  K/Kn={K_sc/K_n if K_n != 0 else np.nan:8.5f}'
+                  f'  (1/T1T)/(1/T1T)n={R_sc/R_n if R_n != 0 else np.nan:8.5f}', flush=True)
 
     res = {k: np.array(v, dtype=np.float64) for k, v in out.items()}
     res['temp'] = temp_list
@@ -696,16 +704,19 @@ def write_nmr_dat(res: dict, fname: str = 'nmr_sc.dat') -> None:
     @param   res: dict returned by nmr_sweep
     @param fname: output file name
     """
-    with open(fname, 'w') as f:
-        f.write(f'# NMR observables in the SC state  (Tc={res["temp_c"]:.6e} eV, '
-                f'w0={res["w0"]:.3e} eV, idelta={res["idelta"]:.3e} eV, '
-                f'{"triplet d||z" if res["sw_spsym"] else "singlet"})\n')
-        f.write('# T[eV]  T/Tc  D(T)/D(0)  K_sc  K_n  K_sc/K_n  '
-                '(1/T1T)_sc  (1/T1T)_n  ratio\n')
-        for i in range(len(res['temp'])):
-            f.write(f'{res["temp"][i]:12.6e} {res["t_red"][i]:8.5f} {res["gap_ratio"][i]:8.5f} '
-                    f'{res["K_sc"][i]:14.6e} {res["K_n"][i]:14.6e} {res["K_ratio"][i]:12.6f} '
-                    f'{res["R_sc"][i]:14.6e} {res["R_n"][i]:14.6e} {res["R_ratio"][i]:12.6f}\n')
+    try:
+        with open(fname, 'w') as f:
+            f.write(f'# NMR observables in the SC state  (Tc={res["temp_c"]:.6e} eV, '
+                    f'w0={res["w0"]:.3e} eV, idelta={res["idelta"]:.3e} eV, '
+                    f'{"triplet d||z" if res["sw_spsym"] else "singlet"})\n')
+            f.write('# T[eV]  T/Tc  D(T)/D(0)  K_sc  K_n  K_sc/K_n  '
+                    '(1/T1T)_sc  (1/T1T)_n  ratio\n')
+            for i in range(len(res['temp'])):
+                f.write(f'{res["temp"][i]:12.6e} {res["t_red"][i]:8.5f} {res["gap_ratio"][i]:8.5f} '
+                        f'{res["K_sc"][i]:14.6e} {res["K_n"][i]:14.6e} {res["K_ratio"][i]:12.6f} '
+                        f'{res["R_sc"][i]:14.6e} {res["R_n"][i]:14.6e} {res["R_ratio"][i]:12.6f}\n')
+    except OSError as e:
+        print(f"Error: failed to write '{fname}': {e}", flush=True)
 
 
 def plot_nmr(res: dict, fname: str = 'nmr_sc.png') -> None:

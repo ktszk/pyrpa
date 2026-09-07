@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#-*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
 """
 Regression tests for the SC-state NMR observables (libs/plibs/_nmr.py):
 Knight shift K(T) and the spin-lattice relaxation rate 1/(T1 T).
@@ -119,8 +119,7 @@ def test_nmr_qmesh_folding_reproduces_unfolded_sum():
 def _write_gap_wannier(tmpdir, Nx=8, Ny=8, Nz=1, Norb=2, Nw=6, temp=0.02, decay=0.3):
     """Export a known Delta(k, iw_n) through output_gap_wannier and return what it
     should read back as: (path, exact full-grid Delta(k,iw_0), klist, Delta(0) target)."""
-    import os
-    from libs.plibs._wannier_io import _irr_to_full_kgrid
+    import libs.plibs._wannier_io as _wannier_io
     klist, kmap, invk = F.gen_irr_k_TRS(Nx, Ny, Nz)
     rng = np.random.default_rng(7)
     g = (rng.standard_normal((Norb, Norb, len(klist)))
@@ -136,11 +135,11 @@ def _write_gap_wannier(tmpdir, Nx=8, Ny=8, Nz=1, Norb=2, Nw=6, temp=0.02, decay=
         P.output_gap_wannier(gap, kmap, invk, Nx, Ny, Nz, Nw, temp, N_cut=Nw, zero_tol=0.0)
     finally:
         os.chdir(cwd)
-    full = _irr_to_full_kgrid(gap, invk, kmap, Nx, Ny, Nz)
+    full = _wannier_io._irr_to_full_kgrid(gap, invk, kmap, Nx, Ny, Nz)
     kfull = kmap / np.array([Nx, Ny, Nz], dtype=np.float64)
     exact_iw0 = np.transpose(full[:, :, 0, kmap[:, 0], kmap[:, 1], kmap[:, 2]], (2, 0, 1))
     # the exact w_n -> 0 limit on the full grid, in the same [Nk,Norb,Norb] layout
-    g_full = _irr_to_full_kgrid(g[:, :, None, :], invk, kmap, Nx, Ny, Nz)
+    g_full = _wannier_io._irr_to_full_kgrid(g[:, :, None, :], invk, kmap, Nx, Ny, Nz)
     exact_w0 = np.transpose(g_full[:, :, 0, kmap[:, 0], kmap[:, 1], kmap[:, 2]], (2, 0, 1))
     return str(tmpdir), exact_iw0, exact_w0, kfull
 
@@ -442,7 +441,7 @@ def test_zero_gap_matches_normal_state_below_tc():
 # --------------------------------------------------------------------------- #
 def test_write_nmr_dat_roundtrip(tmp_path=None):
     import tempfile
-    from pathlib import Path
+    import pathlib
     N = 48
     hamk, klist, olist, Smat, mu = _square_lattice(N)
     Nk = len(klist)
@@ -452,7 +451,7 @@ def test_write_nmr_dat_roundtrip(tmp_path=None):
     r = P.nmr_sweep(hamk, _gap(np.ones(Nk), Nk, D0), klist, q, mu,
                     np.linspace(0.3, 1.1, 4) * tc, tc, Smat, olist, idelta=4.0e-3,
                     hf_weight=m * P.hyperfine_form_factor(q), verbose=False)
-    d = Path(tmp_path) if tmp_path is not None else Path(tempfile.mkdtemp())
+    d = pathlib.Path(tmp_path) if tmp_path is not None else pathlib.Path(tempfile.mkdtemp())
     fn = d / 'nmr_sc.dat'
     P.write_nmr_dat(r, str(fn))
     data = np.loadtxt(fn)

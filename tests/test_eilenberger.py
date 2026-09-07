@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#-*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
 """
 Regression tests for the quasiclassical Eilenberger / Riccati suite (libs/plibs/
 _eilenberger*.py and the Fortran kernels in libs/flibs/_eilenberger.py).
@@ -21,10 +21,10 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from libs.plibs import _eilenberger as E
-from libs.plibs import _eilenberger_surface as S
-from libs.plibs import _eilenberger_vortex as V
-from libs.plibs import _eilenberger_spin as SP
+import libs.plibs._eilenberger as E
+import libs.plibs._eilenberger_surface as S
+import libs.plibs._eilenberger_vortex as V
+import libs.plibs._eilenberger_spin as SP
 import libs.flibs as F
 
 
@@ -78,7 +78,7 @@ def _ref_chord(om, dd, hvf, ds):
 def _ref_matrix_traj(omega, Dpath, hvf, ds, h):
     """Pure-Python reference for the 2x2 spin-matrix Mobius Riccati along one path
     (the deleted matrix_trajectory_gf), to guard the Fortran matrix kernel."""
-    from scipy.linalg import expm
+    import scipy.linalg as sclin
     sz = np.array([[1, 0], [0, -1]], dtype=np.complex128)
     I2 = np.eye(2, dtype=np.complex128)
     Ns = len(Dpath)
@@ -98,7 +98,7 @@ def _ref_matrix_traj(omega, Dpath, hvf, ds, h):
         return (D if is_a else np.conj(D).T) / (omega + E)
 
     def step(a, D, sgn):
-        M = expm(gen(D, sgn) * t)
+        M = sclin.expm(gen(D, sgn) * t)
         u = M[:2, :2] @ a + M[:2, 2:]
         w = M[2:, :2] @ a + M[2:, 2:]
         return u @ np.linalg.inv(w)
@@ -348,6 +348,7 @@ def test_lattice_symmetry_gap_anisotropy_resolved():
     near Hc2.)"""
     wc, T = 0.5, 8e-4
     om = E.matsubara(T, wc)
+
     def Fth(gs, th):
         st = V.solve_lattice_sc(0.6, T, om, gap_sym=gs, field=0.2, lattice='square',
                                 Ng=18, nbeta=24, kappa=None, itemax=150, mix=0.4,
@@ -373,6 +374,7 @@ def test_lattice_symmetry_wannier_fs_rotation():
     # discretisation (dsym ~ 1e-15 against the 1e-10 threshold), and the pi/4 signal
     # barely moves with it (dnon = 5.0e-3 / 1.3e-3 for s / d at Nth=48 as at Nth=160).
     fm = E.build_model_fs('tb', Nth=48, mu=-1.0, params=1.0)
+
     def Fth(gs, th):
         st = V.solve_lattice_sc(0.6, T, om, gap_sym=gs, field=0.2, Ng=12, nbeta=8,
                                 kappa=None, itemax=60, mix=0.4, eps=1e-3, theta0=th, fs=fm)
@@ -616,7 +618,7 @@ def test_gap_orbital_from_wannier(tmp_path):
     assert abs((fw['nf'] * np.abs(fw['phi']) ** 2).sum() - 1.0) < 1e-9   # normalized
     assert fw['phi'].real.min() < -0.3 and fw['phi'].real.max() > 0.3    # d-wave sign change
     fd = E.build_wannier_fs(rv, ham_r, [], np.eye(3), -1.0, mesh=200, gap_sym=1)
-    assert abs(np.corrcoef(fw['phi'].real, fd['phi'].real)[0, 1]) > 0.99 # matches analytic d
+    assert abs(np.corrcoef(fw['phi'].real, fd['phi'].real)[0, 1]) > 0.99  # matches analytic d
 
 
 def test_gap_orbital_from_wannier_round_trips_the_exporter(tmp_path):
@@ -631,8 +633,7 @@ def test_gap_orbital_from_wannier_round_trips_the_exporter(tmp_path):
     neither symmetric nor Hermitian in the orbital indices, so that transpose is pinned
     here too, not just the Fourier sign."""
     import libs.plibs as p
-    import libs.flibs as F
-    from libs.plibs._wannier_io import _irr_to_full_kgrid
+    import libs.plibs._wannier_io as _wannier_io
     Nx = Ny = 8
     Nz, Norb, Nw, temp = 1, 2, 3, 0.02
     klist, kmap, invk = F.gen_irr_k_TRS(Nx, Ny, Nz)
@@ -647,7 +648,7 @@ def test_gap_orbital_from_wannier_round_trips_the_exporter(tmp_path):
         os.chdir(cwd)
 
     g0 = p.gap_orbital_from_wannier(str(tmp_path / 'gap_wannier'))
-    full = _irr_to_full_kgrid(gap, invk, kmap, Nx, Ny, Nz)      # what the exporter saw
+    full = _wannier_io._irr_to_full_kgrid(gap, invk, kmap, Nx, Ny, Nz)      # what the exporter saw
     kfull = kmap / np.array([Nx, Ny, Nz], dtype=np.float64)
     err = wrong = flipped = 0.0
     for i, kf in enumerate(kfull):
@@ -828,9 +829,9 @@ def test_vortex_maxwell_selfA():
 def test_chiral_pip_gap_sym_minus3():
     """gap_sym = -3 is the chiral p+ip state: a complex form factor (px + i py) that
     is fully gapped (|phi| > 0 everywhere)."""
-    from libs.plibs._response import gap_symms
+    import libs.plibs._response as _response
     kl = np.array([[0.25, 0.0, 0.0], [0.0, 0.25, 0.0]])
-    row = gap_symms(kl, 1, -3)[0]
+    row = _response.gap_symms(kl, 1, -3)[0]
     assert np.iscomplexobj(row)
     assert abs(row[0] - 2.0) < 1e-9 and abs(row[1] - 2.0j) < 1e-9   # px + i py
     import libs.plibs as p
@@ -1067,8 +1068,8 @@ def test_wannier_fs_kz_stack():
     if not os.path.exists(base + '_hr.dat'):
         return
     rvec, ham_r, Norb, Nr = p.import_hoppings(base, 2)
-    from libs.plibs._bands import get_emesh
-    _, _, eig, _, _ = get_emesh(12, 12, 8, ham_r, [], rvec, np.eye(3), sw_uni=True)
+    import libs.plibs._bands as _bands
+    _, _, eig, _, _ = _bands.get_emesh(12, 12, 8, ham_r, [], rvec, np.eye(3), sw_uni=True)
     mu = float(np.quantile(eig.ravel(), 0.6))
     f1 = E.build_wannier_fs(rvec, ham_r, [], np.eye(3), mu, mesh=60, nkz=1, gap_sym=7)
     f3 = E.build_wannier_fs(rvec, ham_r, [], np.eye(3), mu, mesh=60, nkz=12, gap_sym=7)
@@ -1104,8 +1105,8 @@ def test_build_fs_band_projection_3d():
     if not os.path.exists(base + '_hr.dat'):
         return
     rvec, ham_r, Norb, Nr = p.import_hoppings(base, 2)
-    from libs.plibs._bands import get_emesh
-    _, klist, eig, uni, _ = get_emesh(16, 16, 8, ham_r, [], rvec, np.eye(3), sw_uni=True)
+    import libs.plibs._bands as _bands
+    _, klist, eig, uni, _ = _bands.get_emesh(16, 16, 8, ham_r, [], rvec, np.eye(3), sw_uni=True)
     mu = float(np.quantile(eig.ravel(), 0.6))
     # Delta = I -> band uniform (and hence exactly the normalized constant)
     wf, phi = E.build_fs(eig, klist, mu, 0, 2e-2, uni=uni, gap_orbital=np.eye(Norb))
@@ -1220,7 +1221,6 @@ def test_pauli_and_spin_accept_the_projected_gap():
     that build_fs + solve_gap give for the same projection."""
     import inspect
     import libs.plibs as p
-    from libs.plibs import _eilenberger_spin as SP
     for fn in (E.calc_pauli_limit, SP.calc_spin_pauli):
         got = set(inspect.signature(fn).parameters)
         assert {'gap_orbital', 'delta0', 'gauge', 'spin_map'} <= got, fn.__name__
@@ -1229,8 +1229,8 @@ def test_pauli_and_spin_accept_the_projected_gap():
     if not os.path.exists(base + '_hr.dat'):
         return
     rvec, ham_r, Norb, Nr = p.import_hoppings(base, 2)
-    from libs.plibs._bands import get_emesh
-    _, klist, eig, uni, _ = get_emesh(12, 12, 8, ham_r, [], rvec, np.eye(3), sw_uni=True)
+    import libs.plibs._bands as _bands
+    _, klist, eig, uni, _ = _bands.get_emesh(12, 12, 8, ham_r, [], rvec, np.eye(3), sw_uni=True)
     mu = float(np.quantile(eig.ravel(), 0.6))
     D = np.eye(Norb); D[4, 4] = D[Norb - 1, Norb - 1] = -1.0
     T, om = 2e-4, E.matsubara(2e-4, 0.5)
@@ -1353,7 +1353,7 @@ def test_matrix_riccati_complex_gap():
     at beta = 90 deg (Delta purely imaginary), step- and grid-independent, and it inflated
     the chiral homogeneous fixed point to 1.494 x its bulk value.  The scalar kernel had
     it right all along (it integrates the reverse path with conjg(dd))."""
-    from libs import flibs
+    import libs.flibs as flibs
     sx, sy, sz = SP._pauli()
     S = sz @ (1j * sy); Sd = np.conj(S).T
     D, w, ns = 1.8e-3, 3.6e-3, 32
@@ -1462,7 +1462,6 @@ def test_vortex_in_plane_field():
     out circular in the SCALED plane -- i.e. elliptical in real space, with the ellipticity
     set by the Fermi-velocity anisotropy.  Checked for the scalar solver and for the chiral
     two-component one."""
-    from libs.plibs import _eilenberger_vortex as V
     T, wc, lam = 4e-4, 0.5, 0.5
     om = E.matsubara(T, wc)
     # Cost-tuned FS/grid sizes: every check here is a ratio or a node depth, which

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#-*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
 """
 Shared utilities for the pyrpa test-suite.
 
@@ -32,7 +32,7 @@ import os
 import sys
 import tempfile
 import time
-from pathlib import Path
+import pathlib
 
 import numpy as np
 
@@ -425,7 +425,7 @@ def run_standalone(namespace, argv=None):
             with contextlib.ExitStack() as st:
                 if 'tmp_path' in inspect.signature(t).parameters:
                     td = st.enter_context(tempfile.TemporaryDirectory())
-                    kwargs['tmp_path'] = Path(td)
+                    kwargs['tmp_path'] = pathlib.Path(td)
                 t(**kwargs)
             print(f"  PASS  {t.__name__:{width}s} ({time.time()-t0:5.1f}s)",
                   flush=True)

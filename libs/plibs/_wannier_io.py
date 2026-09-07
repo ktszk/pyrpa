@@ -1,13 +1,19 @@
 #!/usr/bin/env python
-#-*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
 """
 EPA output reading, orbital-dependent U/J parameter sets, and Wannier-R space file I/O
 for self-energy and gap functions.
 """
 import numpy as np
 
+# Public API of this submodule; keeps `from ._x import *` in __init__.py from
+# re-exporting numpy, scipy, ctypes and the sibling packages imported above.
+__all__ = [
+    'read_epa_output', 'output_self_wannier', 'GAP_ORB_CONV', 'gap_orb_ab', 'output_gap_wannier', 'read_UJ'
+]
 
-def read_epa_output(filename: str) -> tuple[int,int,np.ndarray,np.ndarray,np.ndarray,np.ndarray,np.ndarray]:
+
+def read_epa_output(filename: str) -> tuple[int, int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     @fn read_epa_output
     @brief Read epa.x (job='egrid') output file and return EPA data arrays.
@@ -46,6 +52,7 @@ def read_epa_output(filename: str) -> tuple[int,int,np.ndarray,np.ndarray,np.nda
             gavg[ii, kk, jj, :] = g2  # eV^2
     return ngrid, nmodes, edge, step, nbin, wavg, gavg
 
+
 def _irr_to_full_kgrid(data_irr: np.ndarray, invk: np.ndarray, kmap: np.ndarray,
                        Nx: int, Ny: int, Nz: int) -> np.ndarray:
     """
@@ -61,12 +68,13 @@ def _irr_to_full_kgrid(data_irr: np.ndarray, invk: np.ndarray, kmap: np.ndarray,
     ix_arr, iy_arr, iz_arr = kmap[:, 0], kmap[:, 1], kmap[:, 2]
     full = np.zeros(data_irr.shape[:-1] + (Nx, Ny, Nz), dtype=np.complex128)
     d = np.where(~is_tr)[0]
-    t = np.where( is_tr)[0]
+    t = np.where(is_tr)[0]
     # Direct k-points: copy irreducible value unchanged
     full[..., ix_arr[d], iy_arr[d], iz_arr[d]] = data_irr[..., ik_arr[d]]
     # TRS-related k-points: apply complex conjugation (TRS: f(k) = f*(-k))
     full[..., ix_arr[t], iy_arr[t], iz_arr[t]] = np.conj(data_irr[..., ik_arr[t]])
     return full
+
 
 def _wannier_all_nonzero(data_full: np.ndarray, Nx: int, Ny: int, Nz: int,
                          N_cut: int, zero_tol: float) -> tuple[np.ndarray, np.ndarray]:
@@ -99,6 +107,7 @@ def _wannier_all_nonzero(data_full: np.ndarray, Nx: int, Ny: int, Nz: int,
     data_out  = data_R[:, :, :, ix_nz, iy_nz, iz_nz]   # (Norb, Norb, N_cut, Nr_nonzero)
     return data_out, rvec_kept
 
+
 def _write_wannier_dat(fname: str, data_out: np.ndarray, rvec_kept: np.ndarray, iw_grid: np.ndarray,
                        Nw_orig: int, label: str, mu: float | None = None, temp: float | None = None) -> None:
     """
@@ -112,7 +121,7 @@ def _write_wannier_dat(fname: str, data_out: np.ndarray, rvec_kept: np.ndarray, 
     """
     Norb, _, N_cut, Nr = data_out.shape
     hdr = f'# {label}: Norb={Norb} N_iw={N_cut} Nr={Nr}'
-    if mu   is not None: hdr += f' mu={mu:.8f}'
+    if mu is not None: hdr += f' mu={mu:.8f}'
     if temp is not None: hdr += f' temp={temp:.8e}'
 
     # Build flat index arrays — order: (ir, n, i, j) C-contiguous
@@ -136,12 +145,13 @@ def _write_wannier_dat(fname: str, data_out: np.ndarray, rvec_kept: np.ndarray, 
         with open(f'{fname}.dat', 'w') as f:
             f.write(hdr + f'\n{Norb} {N_cut} {Nr}\n')
             f.write('\n'.join(lines.tolist()) + '\n')
-    except IOError as e:
+    except OSError as e:
         print(f'Error: Failed to write {fname}.dat: {e}', flush=True)
         return
 
     print(f'{label}: Matsubara {Nw_orig} -> {N_cut} | Nr={Nr} | '
           f'{data_out.nbytes / 1e6:.1f} MB', flush=True)
+
 
 def output_self_wannier(sigmak: np.ndarray, mu_self: float, kmap: np.ndarray, invk: np.ndarray,
                         Nx: int, Ny: int, Nz: int, Nw: int, temp: float, N_cut: int = 64,
@@ -167,7 +177,7 @@ def output_self_wannier(sigmak: np.ndarray, mu_self: float, kmap: np.ndarray, in
     """
     sigma_full = _irr_to_full_kgrid(sigmak, invk, kmap, Nx, Ny, Nz)
     s11_iw0 = sigma_full[0, 0, 0]
-    print(f'[Pre-FFT] Sigma_11(iw_0): Gamma={sigma_full[0,0,0,0,0,0]:.6e}, '
+    print(f'[Pre-FFT] Sigma_11(iw_0): Gamma={sigma_full[0, 0, 0, 0, 0, 0]:.6e}, '
           f'max|..|={np.abs(s11_iw0).max():.6e}', flush=True)
     data_out, rvec_kept = _wannier_all_nonzero(sigma_full, Nx, Ny, Nz, N_cut, zero_tol)
     if data_out.size == 0:
@@ -177,15 +187,16 @@ def output_self_wannier(sigmak: np.ndarray, mu_self: float, kmap: np.ndarray, in
     iw_grid    = (2 * np.arange(N_cut_used) + 1) * np.pi * temp
     try:
         np.savez(fname, sigma=data_out, rvec=rvec_kept, iw=iw_grid, mu=mu_self, temp=temp)
-    except IOError as e:
+    except OSError as e:
         print(f'Error: Failed to write {fname}.npz: {e}', flush=True)
     _write_wannier_dat(fname, data_out, rvec_kept, iw_grid, Nw,
                        'Self-energy', mu=mu_self, temp=temp)
 
+
 GAP_ORB_CONV = 'Delta_ab'   # orbital-order stamp written into gap_wannier.npz (see output_gap_wannier)
 
 
-def gap_orb_ab(gap_R: np.ndarray, npz, fname: str = '') -> np.ndarray:
+def gap_orb_ab(gap_R: np.ndarray, npz: np.lib.npyio.NpzFile, fname: str = '') -> np.ndarray:
     """
     @fn gap_orb_ab
     @brief Return a stored Delta(R) with its orbital pair in the PHYSICAL order,
@@ -206,8 +217,8 @@ def gap_orb_ab(gap_R: np.ndarray, npz, fname: str = '') -> np.ndarray:
     return np.ascontiguousarray(gap_R.swapaxes(0, 1))
 
 
-def output_gap_wannier(gap: np.ndarray, kmap: np.ndarray, invk: np.ndarray, Nx: int, Ny: int, Nz: int,
-                       Nw: int, temp: float, N_cut: int = 64, zero_tol: float = 1e-5, fname: str = 'gap_wannier') -> None:
+def output_gap_wannier(gap: np.ndarray, kmap: np.ndarray, invk: np.ndarray, Nx: int, Ny: int, Nz: int, Nw: int,
+                       temp: float, N_cut: int = 64, zero_tol: float = 1e-5, fname: str = 'gap_wannier') -> None:
     """
     @fn output_gap_wannier
     @brief Convert gap function Delta(k, iw_n) -> Delta(R, iw_n) in Wannier-real-space format.
@@ -239,7 +250,7 @@ def output_gap_wannier(gap: np.ndarray, kmap: np.ndarray, invk: np.ndarray, Nx: 
     else:                        # non-SOC: on irreducible k-points, expand with TRS
         gap_full = _irr_to_full_kgrid(gap, invk, kmap, Nx, Ny, Nz)
     g11_iw0 = gap_full[0, 0, 0]
-    print(f'[Pre-FFT] Delta_11(iw_0): Gamma={gap_full[0,0,0,0,0,0]:.6e}, '
+    print(f'[Pre-FFT] Delta_11(iw_0): Gamma={gap_full[0, 0, 0, 0, 0, 0]:.6e}, '
           f'max|..|={np.abs(g11_iw0).max():.6e}', flush=True)
     data_out, rvec_kept = _wannier_all_nonzero(gap_full, Nx, Ny, Nz, N_cut, zero_tol)
     if data_out.size == 0:
@@ -250,13 +261,13 @@ def output_gap_wannier(gap: np.ndarray, kmap: np.ndarray, invk: np.ndarray, Nx: 
     try:
         np.savez(fname, gap=data_out, rvec=rvec_kept, iw=iw_grid, temp=temp,
                  orb_conv=np.array(GAP_ORB_CONV))
-    except IOError as e:
+    except OSError as e:
         print(f'Error: Failed to write {fname}.npz: {e}', flush=True)
     _write_wannier_dat(fname, data_out, rvec_kept, iw_grid, Nw,
                        'Gap function (io jo = Delta_{io,jo})', temp=temp)
 
 
-def _UJ_to_matrix(vals, label: str, fname: str) -> np.ndarray:
+def _UJ_to_matrix(vals: list, label: str, fname: str) -> np.ndarray:
     """Cast one stored U or J entry to a square float64 matrix (flat Norb^2 list or nested rows)."""
     mat = np.asarray(vals, dtype=np.float64)
     if mat.ndim == 1:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#-*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
 """
 Multi-orbital quasiclassical Eilenberger equation solver.
 
@@ -37,9 +37,23 @@ self-consistency are factored out from the propagator update so that:
 without touching the high-level orchestration in ``calc_eilenberger``.
 """
 import numpy as np
-from scipy.optimize import brentq
-from ._bands import get_emesh
-from ._response import gap_symms
+import scipy.optimize as scopt
+import libs.plibs._bands as _bands
+import libs.plibs._response as _response
+import collections.abc
+
+# Public API of this submodule; keeps `from ._x import *` in __init__.py from
+# re-exporting numpy, scipy, ctypes and the sibling packages imported above.
+__all__ = [
+    'BCS_RATIO', 'PAIR_GAUGE', 'PAIR_SPIN_MAP', 'set_pair_gauge', 'spin_pair_map', 'pair_partner_conj',
+    'check_trs_gauge', 'check_pair_partner', 'project_gap', 'build_fs', 'report_fs_gap', 'matsubara',
+    'solve_quasiclassical', 'riccati_homogeneous', 'propagators_from_riccati', 'gap_kernel', 'pairing_eigenvalue',
+    'solve_gap', 'find_tc', 'dos_zeeman', 'calc_pauli_limit', 'calc_eilenberger', 'superfluid_density',
+    'calc_penetration_depth', 'build_model_fs', 'fs_hvf', 'fs_field_frame', 'reduce_fs_trajectories', 'form_factor',
+    'fs_form_factor', 'set_fs_gap', 'bulk_gap_fs', 'superfluid_density_fs', 'calc_fs_penetration',
+    'free_energy_weights', 'condensation_energy', 'calc_free_energy', 'project_gap_to_band',
+    'gap_orbital_from_wannier', 'build_wannier_fs', 'gap_color_3d'
+]
 
 BCS_RATIO = 1.764        # weak-coupling BCS gap ratio Delta0 / (kB Tc)
 
@@ -86,7 +100,7 @@ PAIR_GAUGE = 'trs'          # module default, see set_pair_gauge
 PAIR_SPIN_MAP = None        # (jidx, sgn) for PAIR_GAUGE='soc'
 
 
-def set_pair_gauge(gauge: str, spin_map=None):
+def set_pair_gauge(gauge: str, spin_map: tuple | None = None) -> str:
     """
     @fn set_pair_gauge
     @brief Set the module-wide pair-partner gauge used by the band-projection
@@ -106,7 +120,7 @@ def set_pair_gauge(gauge: str, spin_map=None):
     return PAIR_GAUGE
 
 
-def spin_pair_map(Nbasis: int, order: str = 'block'):
+def spin_pair_map(Nbasis: int, order: str = 'block') -> tuple[np.ndarray, np.ndarray]:
     """
     @fn spin_pair_map
     @brief Build the (jidx, sgn) spin-partner map required by the 'soc' pair gauge:
@@ -133,7 +147,7 @@ def spin_pair_map(Nbasis: int, order: str = 'block'):
 
 
 def pair_partner_conj(ev: np.ndarray, evm: np.ndarray = None, gauge: str = None,
-                      spin_map=None) -> np.ndarray:
+                      spin_map: tuple | None = None) -> np.ndarray:
     """
     @fn pair_partner_conj
     @brief The array that plays the role of ``conj(u_b(-k_F))`` in the band
@@ -179,7 +193,7 @@ def check_trs_gauge(ev: np.ndarray, evm: np.ndarray, tol: float = 1.0e-8,
     return dev
 
 
-def check_pair_partner(ev: np.ndarray, evm: np.ndarray, gauge: str = None, spin_map=None,
+def check_pair_partner(ev: np.ndarray, evm: np.ndarray, gauge: str = None, spin_map: tuple | None = None,
                        tol: float = 1.0e-6, warn: bool = True) -> float:
     """
     @fn check_pair_partner
@@ -208,7 +222,7 @@ def check_pair_partner(ev: np.ndarray, evm: np.ndarray, gauge: str = None, spin_
     return ov
 
 
-def _eval_gap_orbital(gap_orbital, kfrac: np.ndarray) -> np.ndarray:
+def _eval_gap_orbital(gap_orbital: np.ndarray | collections.abc.Callable | None, kfrac: np.ndarray) -> np.ndarray:
     """Evaluate an orbital-basis pair potential on a batch of k-points [Nk,3].
     Accepts a constant matrix, a callable that already handles a batch (returning
     [Nk,N,N]), or a per-k callable (looped).  @return [Nk, N, N] complex."""
@@ -226,8 +240,8 @@ def _eval_gap_orbital(gap_orbital, kfrac: np.ndarray) -> np.ndarray:
                     dtype=np.complex128)
 
 
-def project_gap(ev: np.ndarray, gap_orbital, kfrac: np.ndarray, evm: np.ndarray = None,
-                gauge: str = None, spin_map=None) -> np.ndarray:
+def project_gap(ev: np.ndarray, gap_orbital: np.ndarray | collections.abc.Callable | None, kfrac: np.ndarray,
+                evm: np.ndarray = None, gauge: str = None, spin_map: tuple | None = None) -> np.ndarray:
     """
     @fn project_gap
     @brief Band-diagonal projection phi_i = sum_ab conj(u_a(k_i)) Delta_orb,ab(k_i) P_b(k_i)
@@ -248,7 +262,6 @@ def project_gap(ev: np.ndarray, gap_orbital, kfrac: np.ndarray, evm: np.ndarray 
     return phi
 
 
-
 def _fs_average(values: np.ndarray, w: np.ndarray) -> np.ndarray:
     """DOS-weighted Fermi-surface average over the FS-point axis (axis 0).
     @param values: array [Nfs, ...] of the quantity to average
@@ -258,10 +271,10 @@ def _fs_average(values: np.ndarray, w: np.ndarray) -> np.ndarray:
     return np.tensordot(w, values, axes=(0, 0)) / w.sum()
 
 
-def build_fs(eig: np.ndarray, klist: np.ndarray, mu: float, gap_sym: int,
-             width: float, w_cut: float = 1.0e-4, uni: np.ndarray = None,
-             gap_orbital=None, delta0=None, gauge: str = None, spin_map=None,
-             sw_band: bool = False):
+def build_fs(eig: np.ndarray, klist: np.ndarray, mu: float, gap_sym: int, width: float, w_cut: float = 1.0e-4,
+             uni: np.ndarray = None, gap_orbital: np.ndarray | collections.abc.Callable | None = None,
+             delta0: np.ndarray | None = None, gauge: str = None, spin_map: tuple | None = None,
+             sw_band: bool = False) -> tuple:
     """
     @fn build_fs
     @brief Select Fermi-surface points from a band mesh and build their DOS
@@ -324,7 +337,7 @@ def build_fs(eig: np.ndarray, klist: np.ndarray, mu: float, gap_sym: int,
         ev = ev / np.where(nrm > 0, nrm, 1.0)[:, None]
         phif = project_gap(ev, gap_orbital, klist[ik], None, gauge, spin_map)
     else:
-        phif = gap_symms(klist, 1, gap_sym)[0][ik].astype(np.complex128)   # k only
+        phif = _response.gap_symms(klist, 1, gap_sym)[0][ik].astype(np.complex128)   # k only
     if delta0 is not None:                           # per-band ratio / sign
         phif = phif * np.asarray(delta0, dtype=np.float64)[ib]
     # normalize so that <|phi|^2>_FS = 1 -> lambda is the dimensionless coupling
@@ -337,7 +350,7 @@ def build_fs(eig: np.ndarray, klist: np.ndarray, mu: float, gap_sym: int,
     return wf, phif
 
 
-def report_fs_gap(wf: np.ndarray, phif: np.ndarray, info: dict, kb: float = 1.0):
+def report_fs_gap(wf: np.ndarray, phif: np.ndarray, info: dict, kb: float = 1.0) -> None:
     """
     @fn report_fs_gap
     @brief Print the sheet-resolved structure of a Fermi-surface form factor: the
@@ -373,7 +386,7 @@ def report_fs_gap(wf: np.ndarray, phif: np.ndarray, info: dict, kb: float = 1.0)
             row = " ".join(f"{v:+7.3f}" if np.isfinite(v) else "   --  " for v in prof)
             good = [v for v in prof if np.isfinite(v)]
             if chiral:      # |phi| dips to zero somewhere inside a k_z bin (binning the
-                            # MEAN would wash a thin node plane out, so test the minima)
+                # MEAN would wash a thin node plane out, so test the minima)
                 hit = any(val[m & (kz >= a) & (kz < c)].min() < small
                           for a, c in zip(edges[:-1], edges[1:])
                           if (m & (kz >= a) & (kz < c)).sum() > 3)
@@ -397,7 +410,7 @@ def matsubara(temp: float, wc: float, Nw_max: int = 2000000) -> np.ndarray:
     return (2 * np.arange(Nw) + 1) * np.pi * temp
 
 
-def _homogeneous_gf(wt: np.ndarray, Dt: np.ndarray, method: str = 'normalization'):
+def _homogeneous_gf(wt: np.ndarray, Dt: np.ndarray, method: str = 'normalization') -> tuple[np.ndarray, np.ndarray]:
     """Homogeneous quasiclassical propagators (g, f) from the renormalized
     frequency w_tilde [Nw] and gap D_tilde [Nfs, Nw].
 
@@ -416,7 +429,7 @@ def _homogeneous_gf(wt: np.ndarray, Dt: np.ndarray, method: str = 'normalization
 
 def solve_quasiclassical(omega: np.ndarray, Delta: np.ndarray, wf: np.ndarray,
                          gamma: float, cimp: float, method: str = 'normalization',
-                         eps: float = 1.0e-10, itemax: int = 2000):
+                         eps: float = 1.0e-10, itemax: int = 2000) -> tuple[np.ndarray, np.ndarray]:
     """
     @fn solve_quasiclassical
     @brief Solve the homogeneous Eilenberger equation with a self-consistent
@@ -483,7 +496,7 @@ def solve_quasiclassical(omega: np.ndarray, Delta: np.ndarray, wf: np.ndarray,
 # Delta(R) (with the magnetic phase) on a real-space grid under quasi-periodic
 # boundary conditions.
 
-def riccati_homogeneous(omega, Delta):
+def riccati_homogeneous(omega: np.ndarray, Delta: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
     @fn riccati_homogeneous
     @brief Stable stationary root of the homogeneous Riccati equation,
@@ -506,7 +519,7 @@ def riccati_homogeneous(omega, Delta):
     return gamma, gammat
 
 
-def propagators_from_riccati(gamma, gammat):
+def propagators_from_riccati(gamma: float, gammat: np.ndarray) -> tuple:
     """
     @fn propagators_from_riccati
     @brief Quasiclassical propagators from the coherence functions.
@@ -601,7 +614,7 @@ def find_tc(wf: np.ndarray, phif: np.ndarray, gamma: float, cimp: float,
     Returns 0.0 if no superconducting solution is bracketed (lambda_lin(t_lo) < 1).
     @param wc: fixed Matsubara cutoff energy [eV] (sets the pairing energy scale)
     """
-    def lam(T):
+    def lam(T: float) -> float:
         return pairing_eigenvalue(T, wf, phif, matsubara(T, wc), gamma, cimp, coupling, method)
 
     lo, hi = t_lo, t_hi
@@ -650,10 +663,11 @@ def dos_zeeman(wlist: np.ndarray, Damp: float, wf: np.ndarray, phif: np.ndarray,
     return out
 
 
-def calc_pauli_limit(Nx: int, Ny: int, Nz: int, wc: float, ham_r, S_r, rvec, avec,
-                     mu: float, temp: float, gap_sym: int, coupling: float,
-                     h_list=None, fs_width: float = 5.0e-3, kb: float = 1.0,
-                     gap_orbital=None, delta0=None, gauge: str = None, spin_map=None):
+def calc_pauli_limit(Nx: int, Ny: int, Nz: int, wc: float, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray,
+                     avec: np.ndarray, mu: float, temp: float, gap_sym: int, coupling: float,
+                     h_list: np.ndarray | None = None, fs_width: float = 5.0e-3, kb: float = 1.0,
+                     gap_orbital: np.ndarray | collections.abc.Callable | None = None,
+                     delta0: np.ndarray | None = None, gauge: str = None, spin_map: tuple | None = None) -> None:
     """
     @fn calc_pauli_limit
     @brief Sweep the Zeeman (Maki) field h and report the singlet gap Delta(h) (the
@@ -667,7 +681,7 @@ def calc_pauli_limit(Nx: int, Ny: int, Nz: int, wc: float, ham_r, S_r, rvec, ave
            exactly as in calc_eilenberger (band-projected orbital gap / per-sheet signs)
     """
     omega = matsubara(temp, wc)
-    Nk, klist, eig, uni, kweight = get_emesh(Nx, Ny, Nz, ham_r, S_r, rvec, avec, sw_uni=True)
+    Nk, klist, eig, uni, kweight = _bands.get_emesh(Nx, Ny, Nz, ham_r, S_r, rvec, avec, sw_uni=True)
     wf, phif, fsinfo = build_fs(eig, klist, mu, gap_sym, fs_width, uni=uni,
                                 gap_orbital=gap_orbital, delta0=delta0,
                                 gauge=gauge, spin_map=spin_map, sw_band=True)
@@ -691,7 +705,7 @@ def calc_pauli_limit(Nx: int, Ny: int, Nz: int, wc: float, ham_r, S_r, rvec, ave
             if Dh > 0.1 * D0:                 # robust SC threshold (ignore tiny residuals)
                 h_sp = h
         fh.close()
-    except IOError as e:
+    except OSError as e:
         print(f"Error writing pauli_gap.dat: {e}", flush=True)
     print(f"  spinodal h* (SC branch collapses) ~ {h_sp/D0:.2f} Delta0", flush=True)
     # Zeeman-split DOS at h = 0.5 Delta0
@@ -702,17 +716,17 @@ def calc_pauli_limit(Nx: int, Ny: int, Nz: int, wc: float, ham_r, S_r, rvec, ave
             f2.write("# w/Delta0   N(w)/N0  (Zeeman split, h=0.5 Delta0)\n")
             for w, n in zip(wl, ndos):
                 f2.write(f"{w/D0:10.4f} {n:12.5e}\n")
-    except IOError as e:
+    except OSError as e:
         print(f"Error writing pauli_dos.dat: {e}", flush=True)
 
 
-def calc_eilenberger(Nx: int, Ny: int, Nz: int, wc: float, ham_r, S_r, rvec, avec,
-                     mu: float, temp: float, gap_sym: int, coupling: float,
-                     imp_gamma: float = 0.0, imp_c: float = 1.0e8,
-                     fs_width: float = 5.0e-3, kb: float = 1.0, method: str = 'normalization',
-                     sw_find_tc: bool = False, sw_imp_sweep: bool = False,
-                     imp_sweep: np.ndarray = None, gap_orbital=None, delta0=None,
-                     gauge: str = None, spin_map=None):
+def calc_eilenberger(Nx: int, Ny: int, Nz: int, wc: float, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray,
+                     avec: np.ndarray, mu: float, temp: float, gap_sym: int, coupling: float, imp_gamma: float = 0.0,
+                     imp_c: float = 1.0e8, fs_width: float = 5.0e-3, kb: float = 1.0, method: str = 'normalization',
+                     sw_find_tc: bool = False, sw_imp_sweep: bool = False, imp_sweep: np.ndarray = None,
+                     gap_orbital: np.ndarray | collections.abc.Callable | None = None,
+                     delta0: np.ndarray | None = None, gauge: str = None,
+                     spin_map: tuple | None = None) -> float | None:
     """
     @fn calc_eilenberger
     @brief High-level driver for the homogeneous multi-orbital quasiclassical
@@ -751,7 +765,7 @@ def calc_eilenberger(Nx: int, Ny: int, Nz: int, wc: float, ham_r, S_r, rvec, ave
     @param gauge,spin_map: pair-partner gauge for the projection (set_pair_gauge)
     """
     print("calculate homogeneous quasiclassical Eilenberger equation", flush=True)
-    Nk, klist, eig, uni, kweight = get_emesh(Nx, Ny, Nz, ham_r, S_r, rvec, avec, sw_uni=True)
+    Nk, klist, eig, uni, kweight = _bands.get_emesh(Nx, Ny, Nz, ham_r, S_r, rvec, avec, sw_uni=True)
     wf, phif, fsinfo = build_fs(eig, klist, mu, gap_sym, fs_width, uni=uni,
                                 gap_orbital=gap_orbital, delta0=delta0,
                                 gauge=gauge, spin_map=spin_map, sw_band=True)
@@ -786,7 +800,7 @@ def calc_eilenberger(Nx: int, Ny: int, Nz: int, wc: float, ham_r, S_r, rvec, ave
             fh.write("# omega_n[eV]  Re<f>  Im<f>\n")
             for wl, fa in zip(omega, favg):
                 fh.write(f"{wl:14.6e} {fa.real:14.6e} {fa.imag:14.6e}\n")
-    except IOError as e:
+    except OSError as e:
         print(f"Error: failed to write 'eilenberger_f.dat': {e}", flush=True)
 
     if sw_find_tc:
@@ -805,7 +819,7 @@ def calc_eilenberger(Nx: int, Ny: int, Nz: int, wc: float, ham_r, S_r, rvec, ave
                     tc = find_tc(wf, phif, float(g_imp), imp_c, coupling, wc, 1.0e-4, 5.0 * temp, method)
                     fh.write(f"{g_imp:14.6e} {tc:14.6e} {tc/kb:10.4f}\n")
                     print(f"  {g_imp:12.4e} {tc:12.4e} {tc/kb:10.3f}", flush=True)
-        except IOError as e:
+        except OSError as e:
             print(f"Error: failed to write 'eilenberger_tc.dat': {e}", flush=True)
     return damp
 
@@ -821,7 +835,7 @@ def calc_eilenberger(Nx: int, Ny: int, Nz: int, wc: float, ham_r, S_r, rvec, ave
 # that is the hallmark of nodal superconductors.
 
 def superfluid_density(coupling: float, temp: float, wc: float, gap_sym: str = 's',
-                       Nbeta: int = 360):
+                       Nbeta: int = 360) -> tuple[float, float]:
     """
     @fn superfluid_density
     @brief Self-consistent bulk gap Delta(T) and normalized superfluid density
@@ -829,12 +843,12 @@ def superfluid_density(coupling: float, temp: float, wc: float, gap_sym: str = '
     @param gap_sym: 's','d','dxy','px','py','p+ip'/'p-ip'
     @return (Delta, rho_ratio): bulk gap [eV] and rho_s(T)/rho_s(0) (0 if normal)
     """
-    from ._eilenberger_surface import _bulk_gap
+    import libs.plibs._eilenberger_surface as _eilenberger_surface
     omega = matsubara(temp, wc)
     beta = np.linspace(0.0, 2.0 * np.pi, Nbeta, endpoint=False)
     phi = form_factor(beta, gap_sym)
     vx2 = np.cos(beta) ** 2
-    Delta = _bulk_gap(coupling, temp, omega, phi)
+    Delta = _eilenberger_surface._bulk_gap(coupling, temp, omega, phi)
     if Delta <= 1.0e-6 * temp:
         return 0.0, 0.0
     Dk = Delta * np.abs(phi)                                  # gap magnitude per direction
@@ -845,7 +859,7 @@ def superfluid_density(coupling: float, temp: float, wc: float, gap_sym: str = '
 
 
 def calc_penetration_depth(coupling: float, temp: float, wc: float, gap_sym: str = 's',
-                           t_list=None, kb: float = 1.0):
+                           t_list: np.ndarray | None = None, kb: float = 1.0) -> list:
     """
     @fn calc_penetration_depth
     @brief Temperature sweep of the superfluid density rho_s(T)/rho_s(0) and the
@@ -883,7 +897,7 @@ def calc_penetration_depth(coupling: float, temp: float, wc: float, gap_sym: str
             fh.write("# T[eV]   Delta[eV]   rho_s(T)/rho_s(0)   lambda(T)/lambda(0)\n")
             for T, D, rho, lam in rows:
                 fh.write(f"{T:12.6e} {D:12.6e} {rho:12.6e} {lam:12.6e}\n")
-    except IOError as e:
+    except OSError as e:
         print(f"Error writing penetration_depth.dat: {e}", flush=True)
     return rows
 
@@ -905,7 +919,7 @@ def calc_penetration_depth(coupling: float, temp: float, wc: float, gap_sym: str
 #   'tb'      : eps = -2 t (cos kx + cos ky) - mu -> tight-binding (below van Hove)
 
 
-def _disp(kind, params):
+def _disp(kind: str, params: tuple | None) -> tuple:
     """Return (eps(kx,ky,kz), grad eps -> (vx,vy,vz), default mu, radial search rmax).
 
     The in-plane kinds ('iso', 'ellipse', 'tb') ignore k_z and have v_z = 0, so
@@ -947,7 +961,7 @@ def _disp(kind, params):
     raise ValueError(f"unknown FS kind: {kind}")
 
 
-def _radial_kf(eps, mu, th, kzv, rmax):
+def _radial_kf(eps: collections.abc.Callable, mu: float, th: np.ndarray, kzv: float, rmax: float) -> np.ndarray | None:
     """Radial Fermi wavenumber k_F(theta) of a convex sheet on one k_z slice, or None
     if the slice carries no Fermi surface (beyond the pole of a closed sheet)."""
     kF = np.empty(len(th))
@@ -956,19 +970,19 @@ def _radial_kf(eps, mu, th, kzv, rmax):
         f = lambda r: eps(r * c, r * s, kzv) - mu
         lo, hi = 1e-6, rmax
         try:
-            kF[i] = brentq(f, lo, hi)
+            kF[i] = scopt.brentq(f, lo, hi)
         except ValueError:
             rs = np.linspace(lo, hi, 200)
             fv = np.array([f(r) for r in rs])
             sgn = np.where(np.diff(np.sign(fv)) != 0)[0]
             if not len(sgn):
                 return None                            # no crossing on this slice
-            kF[i] = brentq(f, rs[sgn[0]], rs[sgn[0] + 1])
+            kF[i] = scopt.brentq(f, rs[sgn[0]], rs[sgn[0] + 1])
     return kF
 
 
-def build_model_fs(kind: str = 'iso', Nth: int = 360, mu: float = None, params=None,
-                   nkz: int = 1, kz_max: float = np.pi):
+def build_model_fs(kind: str = 'iso', Nth: int = 360, mu: float = None, params: tuple | None = None,
+                   nkz: int = 1, kz_max: float = np.pi) -> dict:
     """
     @fn build_model_fs
     @brief Build a model Fermi surface (radial parametrization, convex single sheet)
@@ -1030,7 +1044,7 @@ def build_model_fs(kind: str = 'iso', Nth: int = 360, mu: float = None, params=N
     return fs
 
 
-def fs_hvf(fs, hvf: float = 1.0) -> float:
+def fs_hvf(fs: dict, hvf: float = 1.0) -> float:
     """
     @fn fs_hvf
     @brief The representative Fermi speed that sets the coherence length
@@ -1048,8 +1062,8 @@ def fs_hvf(fs, hvf: float = 1.0) -> float:
     return float((np.asarray(fs['nf']) * np.asarray(fs['vabs'])).sum())
 
 
-def fs_field_frame(fs, bdir=None, gap_sym=None, aniso=True, vmin_frac=1.0e-3,
-                   verbose=False):
+def fs_field_frame(fs: dict, bdir: np.ndarray | None = None, gap_sym: int | str | None = None, aniso: bool = True,
+                   vmin_frac: float = 1.0e-3, verbose: bool = False) -> dict:
     """
     @fn fs_field_frame
     @brief Trajectory set for vortex lines along an ARBITRARY field direction.
@@ -1180,8 +1194,8 @@ def fs_field_frame(fs, bdir=None, gap_sym=None, aniso=True, vmin_frac=1.0e-3,
     return out
 
 
-def reduce_fs_trajectories(fs, gap_sym=None, nbeta: int = 48, nv: int = 4, nphi: int = 8,
-                           wmin: float = 1.0e-5, bdir=None, verbose: bool = True):
+def reduce_fs_trajectories(fs: dict, gap_sym: int | str | None = None, nbeta: int = 48, nv: int = 4, nphi: int = 8,
+                           wmin: float = 1.0e-5, bdir: np.ndarray | None = None, verbose: bool = True) -> dict:
     """
     @fn reduce_fs_trajectories
     @brief Reduce a Fermi surface to a small set of WEIGHTED in-plane trajectories for
@@ -1236,7 +1250,8 @@ def reduce_fs_trajectories(fs, gap_sym=None, nbeta: int = 48, nv: int = 4, nphi:
     phi = np.asarray(fr['phi'], dtype=np.complex128)
     n0 = len(v)
 
-    def _bin(x, nb):                                   # uniform bins over the data range
+    def _bin(x: np.ndarray,
+             nb: int) -> tuple[np.ndarray, int]:                                   # uniform bins over the data range
         if nb <= 1 or x.max() - x.min() < 1e-12 * max(1.0, abs(x).max()):
             return np.zeros(len(x), dtype=np.int64), 1
         e = np.linspace(x.min(), x.max(), nb + 1)[1:-1]
@@ -1281,7 +1296,7 @@ _INT_GAP_STR = {0: 's', 1: 'd', 2: 's', 3: 'dxy', 6: 'd+id',
                 -1: 'px', -2: 'py', -3: 'p+ip'}   # int -> continuum phi
 
 
-def _gap_sym_str(gap_sym):
+def _gap_sym_str(gap_sym: int | str | None) -> str:
     """Map the global integer gap_sym index (gap_symms convention) to the continuum
     string used by the model-FS/cylinder routines; pass strings through unchanged.
     Indices without a 2D continuum harmonic (e.g. 4 dxz, 5 dyz) raise ValueError
@@ -1298,7 +1313,7 @@ def _gap_sym_str(gap_sym):
     return gap_sym
 
 
-def form_factor(beta: np.ndarray, gap_sym, beta_surf: float = 0.0) -> np.ndarray:
+def form_factor(beta: np.ndarray, gap_sym: int | str | None, beta_surf: float = 0.0) -> np.ndarray:
     """
     @fn form_factor
     @brief Continuum pairing form factor phi(beta) on the cylindrical FS,
@@ -1338,7 +1353,7 @@ def form_factor(beta: np.ndarray, gap_sym, beta_surf: float = 0.0) -> np.ndarray
     raise ValueError(f"unknown gap_sym: {gap_sym}")
 
 
-def fs_form_factor(fs: dict, gap_sym) -> np.ndarray:
+def fs_form_factor(fs: dict, gap_sym: int | str | None) -> np.ndarray:
     """Pairing form factor phi at each FS point, normalized to nf-weighted <|phi|^2>=1.
 
     If the FS dict already carries a precomputed ``phi`` (e.g. a Wannier multiband FS
@@ -1352,7 +1367,7 @@ def fs_form_factor(fs: dict, gap_sym) -> np.ndarray:
         return fs['phi']
     if isinstance(gap_sym, (int, np.integer)):
         if 'kf' in fs:                                   # lattice harmonic on the real FS
-            phi = gap_symms(fs['kf'], 1, int(gap_sym))[0].astype(np.complex128)
+            phi = _response.gap_symms(fs['kf'], 1, int(gap_sym))[0].astype(np.complex128)
             norm = np.sqrt((fs['nf'] * np.abs(phi) ** 2).sum())
             return phi / norm if norm > 0 else phi
         gap_sym = _gap_sym_str(gap_sym)                  # continuum fallback (model FS)
@@ -1381,14 +1396,14 @@ def fs_form_factor(fs: dict, gap_sym) -> np.ndarray:
     return phi / norm if norm > 0 else phi
 
 
-def set_fs_gap(fs: dict, gap_sym, delta0=None):
+def set_fs_gap(fs: dict, gap_sym: int | str | None, delta0: np.ndarray | None = None) -> dict:
     """Bake the pairing form factor into a (Wannier) FS dict: phi = gap_symms(k,gap_sym)
     with per-band amplitude and sign from ``delta0`` (indexed by fs['band']), normalized
     to nf-weighted <|phi|^2>=1.  Stores fs['phi'] and returns fs.
     @param gap_sym: integer symmetry index (gap_symms convention)
     @param  delta0: per-band gap amplitudes/signs (None = uniform 1); array indexed by band
     """
-    phi = gap_symms(fs['kf'], 1, int(gap_sym))[0].astype(np.complex128)
+    phi = _response.gap_symms(fs['kf'], 1, int(gap_sym))[0].astype(np.complex128)
     if delta0 is not None:
         d0 = np.asarray(delta0, dtype=np.float64)
         phi = phi * d0[fs['band']]                       # band-resolved ratio + sign
@@ -1404,7 +1419,8 @@ def set_fs_gap(fs: dict, gap_sym, delta0=None):
     return fs
 
 
-def bulk_gap_fs(coupling, temp, omega, fs, gap_sym, eps=1e-8, itemax=500, mix=0.5):
+def bulk_gap_fs(coupling: float, temp: float, omega: np.ndarray, fs: dict, gap_sym: int | str | None,
+                eps: float = 1e-8, itemax: int = 500, mix: float = 0.5) -> float:
     """Homogeneous gap amplitude on a model FS (nf-weighted FS average)."""
     phi = fs_form_factor(fs, gap_sym)
     nf = fs['nf']
@@ -1423,7 +1439,8 @@ def bulk_gap_fs(coupling, temp, omega, fs, gap_sym, eps=1e-8, itemax=500, mix=0.
     return damp
 
 
-def superfluid_density_fs(coupling, temp, wc, fs, gap_sym):
+def superfluid_density_fs(coupling: float, temp: float, wc: float, fs: dict,
+                          gap_sym: int | str | None) -> tuple[float, float, float, float]:
     """
     @fn superfluid_density_fs
     @brief Superfluid-density tensor (rho_xx, rho_yy, rho_zz)/rho_n(0) on a model FS
@@ -1450,7 +1467,7 @@ def superfluid_density_fs(coupling, temp, wc, fs, gap_sym):
                         (omega[None, :] ** 2 + Dk[:, None] ** 2) ** 1.5).sum(axis=1)
     nf = fs['nf']
 
-    def rho(vi2):                                      # pi <v_i^2 fac> / <v_i^2>
+    def rho(vi2: np.ndarray) -> float:                                      # pi <v_i^2 fac> / <v_i^2>
         den = (nf * vi2).sum()
         return np.pi * (nf * vi2 * fac).sum() / den if den > 0.0 else 0.0
 
@@ -1459,9 +1476,10 @@ def superfluid_density_fs(coupling, temp, wc, fs, gap_sym):
             rho(vz ** 2) if vz is not None else 0.0)
 
 
-def calc_fs_penetration(coupling, temp, wc, kind='ellipse', gap_sym='s', Nth=360,
-                        mu=None, params=None, t_list=None, kb=1.0, nkz=1,
-                        kz_max=np.pi, fs=None):
+def calc_fs_penetration(coupling: float, temp: float, wc: float, kind: str = 'ellipse', gap_sym: str = 's',
+                        Nth: int = 360, mu: float | None = None, params: tuple | None = None,
+                        t_list: np.ndarray | None = None, kb: float = 1.0, nkz: int = 1, kz_max: float = np.pi,
+                        fs: dict | None = None) -> list:
     """
     @fn calc_fs_penetration
     @brief Temperature sweep of the anisotropic superfluid density / penetration
@@ -1512,7 +1530,7 @@ def calc_fs_penetration(coupling, temp, wc, kind='ellipse', gap_sym='s', Nth=360
             for T, D, rxx, ryy, rzz, ratio, rat_c in rows:
                 fh.write(f"{T:12.6e} {D:12.6e} {rxx:12.6e} {ryy:12.6e} {rzz:12.6e} "
                          f"{ratio:12.6e} {rat_c:12.6e}\n")
-    except IOError as e:
+    except OSError as e:
         print(f"Error writing fs_penetration.dat: {e}", flush=True)
     return rows
 
@@ -1531,7 +1549,8 @@ def calc_fs_penetration(coupling, temp, wc, kind='ellipse', gap_sym='s', Nth=360
 # spatial order parameter.)
 
 
-def free_energy_weights(gap_sym='s', fs=None, phi=None, wnf=None, Nb=240):
+def free_energy_weights(gap_sym: str = 's', fs: dict | None = None, phi: np.ndarray | None = None,
+                        wnf: np.ndarray | None = None, Nb: int = 240) -> tuple[np.ndarray, np.ndarray, str]:
     """
     @fn free_energy_weights
     @brief Resolve the (phi, weights, label) triple the free-energy routines average
@@ -1562,8 +1581,9 @@ def free_energy_weights(gap_sym='s', fs=None, phi=None, wnf=None, Nb=240):
             np.full(Nb, 1.0 / Nb), lab)
 
 
-def condensation_energy(coupling, temp, wc, gap_sym='s', fs=None, Damp=None,
-                        phi=None, wnf=None):
+def condensation_energy(coupling: float, temp: float, wc: float, gap_sym: str = 's', fs: dict | None = None,
+                        Damp: float | None = None, phi: np.ndarray | None = None,
+                        wnf: np.ndarray | None = None) -> tuple[float, float]:
     """
     @fn condensation_energy
     @brief Homogeneous superconducting condensation free energy (Omega_s-Omega_n)/N0
@@ -1587,8 +1607,9 @@ def condensation_energy(coupling, temp, wc, gap_sym='s', fs=None, Damp=None,
     return dOmega, Damp
 
 
-def calc_free_energy(coupling, temp, wc, gap_sym='s', fs=None, t_list=None, kb=1.0,
-                     phi=None, wnf=None, fname='free_energy.dat'):
+def calc_free_energy(coupling: float, temp: float, wc: float, gap_sym: str = 's', fs: dict | None = None,
+                     t_list: np.ndarray | None = None, kb: float = 1.0, phi: np.ndarray | None = None,
+                     wnf: np.ndarray | None = None, fname: str = 'free_energy.dat') -> list:
     """
     @fn calc_free_energy
     @brief Temperature sweep of the homogeneous condensation free energy
@@ -1626,12 +1647,13 @@ def calc_free_energy(coupling, temp, wc, gap_sym='s', fs=None, t_list=None, kb=1
             for T, D, dO in rows:
                 print(f"  {T/kb:7.3f}  {D:12.5e}  {dO:14.6e}   {dO/D0**2:9.4f}", flush=True)
                 fh.write(f"{T:12.6e} {D:12.6e} {dO:14.6e} {dO/D0**2:12.6e}\n")
-    except IOError as e:
+    except OSError as e:
         print(f"Error writing {fname}: {e}", flush=True)
     return rows
 
 
-def project_gap_to_band(fs, gap_orbital, normalize=True, gauge=None, spin_map=None):
+def project_gap_to_band(fs: dict, gap_orbital: np.ndarray | collections.abc.Callable | None, normalize: bool = True,
+                        gauge: str | None = None, spin_map: tuple | None = None) -> dict:
     """
     @fn project_gap_to_band
     @brief Band-basis pairing form factor by the systematic low-energy projection of an
@@ -1662,7 +1684,7 @@ def project_gap_to_band(fs, gap_orbital, normalize=True, gauge=None, spin_map=No
     return fs
 
 
-def gap_orbital_from_wannier(fname='gap_wannier', iw_index=0, n_avg=1):
+def gap_orbital_from_wannier(fname: str = 'gap_wannier', iw_index: int = 0, n_avg: int = 1) -> collections.abc.Callable:
     """
     @fn gap_orbital_from_wannier
     @brief Load an RPA/FLEX gap Delta(R, iw_n) written by output_gap_wannier (the gap
@@ -1695,7 +1717,7 @@ def gap_orbital_from_wannier(fname='gap_wannier', iw_index=0, n_avg=1):
     @param n_avg: number of consecutive Matsubara slices to average (1 = single slice)
     @return callable kfrac(3,) -> Delta_orb(k) [Norb, Norb] complex
     """
-    from ._wannier_io import gap_orb_ab
+    import libs.plibs._wannier_io as _wannier_io
     d = np.load(f'{fname}.npz')
     gap, rvec = d['gap'], d['rvec']                  # (Norb,Norb,N_cut,Nr), (Nr,3)
     # Orbital index order.  project_gap contracts u^dag Delta u, so it needs the PHYSICAL
@@ -1706,7 +1728,7 @@ def gap_orbital_from_wannier(fname='gap_wannier', iw_index=0, n_avg=1):
     # with S real/symmetric/even in k and A purely imaginary/antisymmetric/odd), and the
     # transpose flips the sign of A -- 63% of max|Delta| for the 000AsP RPA solution,
     # enough to turn the fully gapped s+- electron pocket into a spuriously nodal one.
-    gap = gap_orb_ab(gap, d, f'{fname}.npz')
+    gap = _wannier_io.gap_orb_ab(gap, d, f'{fname}.npz')
     n0, n1 = iw_index, min(iw_index + n_avg, gap.shape[2])
     if n0 >= gap.shape[2]:
         raise ValueError(f"iw_index={iw_index} out of range (N_iw={gap.shape[2]})")
@@ -1716,7 +1738,8 @@ def gap_orbital_from_wannier(fname='gap_wannier', iw_index=0, n_avg=1):
     No, Nr = gR.shape[0], gR.shape[2]
     gR2 = gR.reshape(No * No, Nr)                    # BLAS-friendly (Norb^2, Nr)
 
-    def gap_orbital(kfrac):                          # Delta_orb(k) = sum_R e^{-i 2pi k.R} Delta(R)
+    # Delta_orb(k) = sum_R e^{-i 2pi k.R} Delta(R)
+    def gap_orbital(kfrac: np.ndarray) -> np.ndarray:
         k = np.asarray(kfrac, dtype=np.float64)
         if k.ndim == 1:                              # single k -> (Norb, Norb)
             return (gR * np.exp(-2j * np.pi * (rg @ k))).sum(axis=-1)
@@ -1728,9 +1751,12 @@ def gap_orbital_from_wannier(fname='gap_wannier', iw_index=0, n_avg=1):
     return gap_orbital
 
 
-def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, nkz=1, kz_list=None,
-                     band=None, RotMat=None, gap_sym=None, delta0=None, gap_orbital=None,
-                     gauge=None, spin_map=None):
+def build_wannier_fs(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray, mu: float,
+                     mesh: int = 360, kz: float = 0.0, nkz: int = 1, kz_list: np.ndarray | None = None,
+                     band: int | None = None, RotMat: np.ndarray | None = None, gap_sym: int | str | None = None,
+                     delta0: np.ndarray | None = None,
+                     gap_orbital: np.ndarray | collections.abc.Callable | None = None, gauge: str | None = None,
+                     spin_map: tuple | None = None) -> dict:
     """
     @fn build_wannier_fs
     @brief Build the Fermi surface (with Fermi velocities) of a REAL Wannier tight-
@@ -1772,8 +1798,7 @@ def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, nkz=1, kz_lis
            3D velocity is kept as vz / vabs3 for quantities that need it
            (e.g. rho_zz, out-of-plane response).
     """
-    from ._bands import get_eigs_2d, get_kf_points, get_eigs
-    from .. import flibs
+    import libs.flibs as flibs
     if RotMat is None:
         RotMat = np.eye(3)
     if kz_list is not None:
@@ -1784,8 +1809,8 @@ def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, nkz=1, kz_lis
         kzs = np.array([float(kz)])
     kxs, kys, vxs, vys, vzs, nfs, kfs, bnd, evs, evms = ([] for _ in range(10))
     for kz_i in kzs:
-        eig2d = get_eigs_2d(mesh, rvec, ham_r, S_r, RotMat, kz_i)
-        kf, fsband = get_kf_points(eig2d, mesh, mu, kz_i)
+        eig2d = _bands.get_eigs_2d(mesh, rvec, ham_r, S_r, RotMat, kz_i)
+        kf, fsband = _bands.get_kf_points(eig2d, mesh, mu, kz_i)
         for contlist, b in zip(kf, fsband):
             if band is not None and b != band:
                 continue
@@ -1793,14 +1818,14 @@ def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, nkz=1, kz_lis
                 pts = np.ascontiguousarray(cont, dtype=np.float64)   # [Np,3] fractional
                 if len(pts) < 2:
                     continue
-                eg, uni = get_eigs(pts, ham_r, S_r, rvec)
+                eg, uni = _bands.get_eigs(pts, ham_r, S_r, rvec)
                 # S_r/eg carry the -eps*dS/dk overlap term for a non-orthogonal (MLO) basis
                 vk = flibs.get_veloc(pts, ham_r, rvec, avec.T, uni, S_r, eg).real  # [Np,Norb,3]
                 v = vk[:, b, :]
                 # band eigenvectors u(k_F) and u(-k_F) (orbital content) for the gap projection
                 ub = uni[:, b, :].copy()               # [Np, Norb] (Eilenberger band a=b)
                 ub /= np.sqrt((np.abs(ub) ** 2).sum(axis=1))[:, None]
-                _, uni_m = get_eigs(np.ascontiguousarray(-pts), ham_r, S_r, rvec)
+                _, uni_m = _bands.get_eigs(np.ascontiguousarray(-pts), ham_r, S_r, rvec)
                 umb = uni_m[:, b, :].copy()
                 umb /= np.sqrt((np.abs(umb) ** 2).sum(axis=1))[:, None]
                 kc = 2.0 * np.pi * pts[:, :2]          # Cartesian in-plane k (a=1)
@@ -1835,8 +1860,10 @@ def build_wannier_fs(rvec, ham_r, S_r, avec, mu, mesh=360, kz=0.0, nkz=1, kz_lis
     return fs
 
 
-def gap_color_3d(centers, blist, rvec, ham_r, S_r, gap_sym=None, delta0=None, gap_orbital=None,
-                 gauge=None, spin_map=None, sw_abs=None):
+def gap_color_3d(centers: np.ndarray, blist: list, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray,
+                 gap_sym: int | str | None = None, delta0: np.ndarray | None = None,
+                 gap_orbital: np.ndarray | collections.abc.Callable | None = None, gauge: str | None = None,
+                 spin_map: tuple | None = None, sw_abs: bool | None = None) -> list:
     """
     @fn gap_color_3d
     @brief Re[phi(k)] at each face center of the 3D Wannier Fermi surface
@@ -1857,21 +1884,20 @@ def gap_color_3d(centers, blist, rvec, ham_r, S_r, gap_sym=None, delta0=None, ga
            supersedes gap_sym/delta0, same convention as build_wannier_fs
     @return clist: list (per FS sheet) of real arrays [Nfaces], Re[phi(k)]
     """
-    from ._bands import get_eigs
     clist = []
     for k, b in zip(centers, blist):
         k = np.ascontiguousarray(k, dtype=np.float64)
         if gap_orbital is not None:
-            _, uni = get_eigs(k, ham_r, S_r, rvec)
+            _, uni = _bands.get_eigs(k, ham_r, S_r, rvec)
             ub = uni[:, b, :].copy()                              # u(k)  [Nfaces,Norb]
             ub /= np.sqrt((np.abs(ub) ** 2).sum(axis=1))[:, None]
-            _, uni_m = get_eigs(-k, ham_r, S_r, rvec)
+            _, uni_m = _bands.get_eigs(-k, ham_r, S_r, rvec)
             umb = uni_m[:, b, :].copy()                           # u(-k) [Nfaces,Norb]
             umb /= np.sqrt((np.abs(umb) ** 2).sum(axis=1))[:, None]
             check_pair_partner(ub, umb, gauge, spin_map)
             phi = project_gap(ub, gap_orbital, k, umb, gauge, spin_map)
         else:
-            phi = gap_symms(k, 1, int(gap_sym))[0].astype(np.complex128)
+            phi = _response.gap_symms(k, 1, int(gap_sym))[0].astype(np.complex128)
             if delta0 is not None:
                 phi = phi * np.asarray(delta0, dtype=np.float64)[b]
         # A chiral phi has no meaningful sign: Re[phi] would draw spurious nodes where
@@ -1883,6 +1909,6 @@ def gap_color_3d(centers, blist, rvec, ham_r, S_r, gap_sym=None, delta0=None, ga
         # every real gap fell back to |phi| and its s+- sign structure was erased.
         scale = float(np.abs(phi).max()) if len(phi) else 0.0
         use_abs = (np.abs(phi.imag).max() > 1.0e-2 * scale if scale > 0.0 else False) \
-                  if sw_abs is None else bool(sw_abs)
+            if sw_abs is None else bool(sw_abs)
         clist.append(np.abs(phi) if use_abs else phi.real)
     return clist

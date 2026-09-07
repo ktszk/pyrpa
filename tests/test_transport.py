@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#-*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
 """
 Regression / physics tests for the thermoelectric transport coefficients
 (libs/flibs/_transport.py wrapping libs/src/fcond.f90).

@@ -1,9 +1,15 @@
 #!/usr/bin/env python
-#-*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
 """
 Point group symmetry operations, symmetry detection, and irreducible k-point generation.
 """
 import numpy as np
+
+# Public API of this submodule; keeps `from ._x import *` in __init__.py from
+# re-exporting numpy, scipy, ctypes and the sibling packages imported above.
+__all__ = [
+    'detect_symm_ops_auto_U', 'detect_symm_ops', 'gen_irr_k_symm', 'expand_irr_to_full_symm', 'inversion_op'
+]
 
 
 def _standard_point_group_ops() -> list[np.ndarray]:
@@ -13,38 +19,38 @@ def _standard_point_group_ops() -> list[np.ndarray]:
     ops.append(-I)                                                           # inversion
     for ax in range(3):                                                      # C2 about x, y, z
         R = -I.copy(); R[ax, ax] = 1; ops.append(R)
-    ops.append(np.array([[ 0,-1, 0],[ 1, 0, 0],[ 0, 0, 1]]))               # C4z
-    ops.append(np.array([[ 0, 1, 0],[-1, 0, 0],[ 0, 0, 1]]))               # C4z^{-1}
-    ops.append(np.array([[ 1, 0, 0],[ 0, 0,-1],[ 0, 1, 0]]))               # C4x
-    ops.append(np.array([[ 1, 0, 0],[ 0, 0, 1],[ 0,-1, 0]]))               # C4x^{-1}
-    ops.append(np.array([[ 0, 0, 1],[ 0, 1, 0],[-1, 0, 0]]))               # C4y
-    ops.append(np.array([[ 0, 0,-1],[ 0, 1, 0],[ 1, 0, 0]]))               # C4y^{-1}
-    ops.append(np.array([[ 0,-1, 0],[ 1, 0, 0],[ 0, 0,-1]]))               # S4z
-    ops.append(np.array([[ 0, 1, 0],[-1, 0, 0],[ 0, 0,-1]]))               # S4z^{-1}
+    ops.append(np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]]))               # C4z
+    ops.append(np.array([[0, 1, 0], [-1, 0, 0], [0, 0, 1]]))               # C4z^{-1}
+    ops.append(np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]]))               # C4x
+    ops.append(np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]]))               # C4x^{-1}
+    ops.append(np.array([[0, 0, 1], [0, 1, 0], [-1, 0, 0]]))               # C4y
+    ops.append(np.array([[0, 0, -1], [0, 1, 0], [1, 0, 0]]))               # C4y^{-1}
+    ops.append(np.array([[0, -1, 0], [1, 0, 0], [0, 0, -1]]))               # S4z
+    ops.append(np.array([[0, 1, 0], [-1, 0, 0], [0, 0, -1]]))               # S4z^{-1}
     for ax in range(3):                                                      # mirror x, y, z
         R = I.copy(); R[ax, ax] = -1; ops.append(R)
     # C3 about all four body diagonals [±1,±1,±1] and their inverses
-    ops.append(np.array([[ 0, 0, 1],[ 1, 0, 0],[ 0, 1, 0]]))               # C3 [111]
-    ops.append(np.array([[ 0, 1, 0],[ 0, 0, 1],[ 1, 0, 0]]))               # C3^2 [111]
-    ops.append(np.array([[ 0, 0,-1],[-1, 0, 0],[ 0, 1, 0]]))               # C3 [1-1-1]
-    ops.append(np.array([[ 0,-1, 0],[ 0, 0, 1],[-1, 0, 0]]))               # C3^2 [1-1-1]
-    ops.append(np.array([[ 0, 0, 1],[-1, 0, 0],[ 0,-1, 0]]))               # C3 [-11-1]
-    ops.append(np.array([[ 0,-1, 0],[ 0, 0,-1],[ 1, 0, 0]]))               # C3^2 [-11-1]
-    ops.append(np.array([[ 0, 0,-1],[ 1, 0, 0],[ 0,-1, 0]]))               # C3 [-1-11]
-    ops.append(np.array([[ 0, 1, 0],[ 0, 0,-1],[-1, 0, 0]]))               # C3^2 [-1-11]
+    ops.append(np.array([[0, 0, 1], [1, 0, 0], [0, 1, 0]]))               # C3 [111]
+    ops.append(np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]]))               # C3^2 [111]
+    ops.append(np.array([[0, 0, -1], [-1, 0, 0], [0, 1, 0]]))               # C3 [1-1-1]
+    ops.append(np.array([[0, -1, 0], [0, 0, 1], [-1, 0, 0]]))               # C3^2 [1-1-1]
+    ops.append(np.array([[0, 0, 1], [-1, 0, 0], [0, -1, 0]]))               # C3 [-11-1]
+    ops.append(np.array([[0, -1, 0], [0, 0, -1], [1, 0, 0]]))               # C3^2 [-11-1]
+    ops.append(np.array([[0, 0, -1], [1, 0, 0], [0, -1, 0]]))               # C3 [-1-11]
+    ops.append(np.array([[0, 1, 0], [0, 0, -1], [-1, 0, 0]]))               # C3^2 [-1-11]
     # Face-diagonal mirrors σ_d and C2 rotations about face diagonals
-    ops.append(np.array([[ 0, 1, 0],[ 1, 0, 0],[ 0, 0, 1]]))               # σ_d [110]
-    ops.append(np.array([[ 0,-1, 0],[-1, 0, 0],[ 0, 0, 1]]))               # σ_d [1-10]
-    ops.append(np.array([[ 0, 1, 0],[ 1, 0, 0],[ 0, 0,-1]]))               # C2 [110]
-    ops.append(np.array([[ 0,-1, 0],[-1, 0, 0],[ 0, 0,-1]]))               # C2 [1-10]
-    ops.append(np.array([[ 0, 0, 1],[ 0, 1, 0],[ 1, 0, 0]]))               # σ [101]
-    ops.append(np.array([[ 0, 0,-1],[ 0, 1, 0],[-1, 0, 0]]))               # σ [10-1]
-    ops.append(np.array([[ 0, 0, 1],[ 0,-1, 0],[ 1, 0, 0]]))               # C2 [101]
-    ops.append(np.array([[ 0, 0,-1],[ 0,-1, 0],[-1, 0, 0]]))               # C2 [10-1]
-    ops.append(np.array([[ 1, 0, 0],[ 0, 0, 1],[ 0, 1, 0]]))               # σ [011]
-    ops.append(np.array([[ 1, 0, 0],[ 0, 0,-1],[ 0,-1, 0]]))               # σ [01-1]
-    ops.append(np.array([[-1, 0, 0],[ 0, 0, 1],[ 0, 1, 0]]))               # C2 [011]
-    ops.append(np.array([[-1, 0, 0],[ 0, 0,-1],[ 0,-1, 0]]))               # C2 [01-1]
+    ops.append(np.array([[0, 1, 0], [1, 0, 0], [0, 0, 1]]))               # σ_d [110]
+    ops.append(np.array([[0, -1, 0], [-1, 0, 0], [0, 0, 1]]))               # σ_d [1-10]
+    ops.append(np.array([[0, 1, 0], [1, 0, 0], [0, 0, -1]]))               # C2 [110]
+    ops.append(np.array([[0, -1, 0], [-1, 0, 0], [0, 0, -1]]))               # C2 [1-10]
+    ops.append(np.array([[0, 0, 1], [0, 1, 0], [1, 0, 0]]))               # σ [101]
+    ops.append(np.array([[0, 0, -1], [0, 1, 0], [-1, 0, 0]]))               # σ [10-1]
+    ops.append(np.array([[0, 0, 1], [0, -1, 0], [1, 0, 0]]))               # C2 [101]
+    ops.append(np.array([[0, 0, -1], [0, -1, 0], [-1, 0, 0]]))               # C2 [10-1]
+    ops.append(np.array([[1, 0, 0], [0, 0, 1], [0, 1, 0]]))               # σ [011]
+    ops.append(np.array([[1, 0, 0], [0, 0, -1], [0, -1, 0]]))               # σ [01-1]
+    ops.append(np.array([[-1, 0, 0], [0, 0, 1], [0, 1, 0]]))               # C2 [011]
+    ops.append(np.array([[-1, 0, 0], [0, 0, -1], [0, -1, 0]]))               # C2 [01-1]
     return ops
 
 
@@ -68,7 +74,7 @@ def _find_U_for_S(rvec_int: np.ndarray, ham_r: np.ndarray,
     Returns U (Norb×Norb complex128) if valid, None otherwise.
     """
     import math
-    from itertools import permutations
+    import itertools
 
     Norb = ham_r.shape[1]
     pairs: list[tuple[int, int]] = []
@@ -88,7 +94,7 @@ def _find_U_for_S(rvec_int: np.ndarray, ham_r: np.ndarray,
     A0, B0 = ham_r[i0], ham_r[j0]
 
     def _try_monomial_block(n_orb: int, orb_perm: tuple, signs_int: int,
-                             n_sites: int, site_perm: tuple) -> np.ndarray | None:
+                            n_sites: int, site_perm: tuple) -> np.ndarray | None:
         """Build and quick-check one block-monomial candidate U."""
         U_orb = np.zeros((n_orb, n_orb), dtype=complex)
         for row in range(n_orb):
@@ -106,7 +112,7 @@ def _find_U_for_S(rvec_int: np.ndarray, ham_r: np.ndarray,
     # --- Strategy 1: full signed-permutation search (small Norb) ---
     MAX_MONOMIAL = 100_000
     if math.factorial(Norb) * (2 ** Norb) <= MAX_MONOMIAL:
-        for perm in permutations(range(Norb)):
+        for perm in itertools.permutations(range(Norb)):
             for signs_int in range(2 ** Norb):
                 U = _try_monomial_block(Norb, perm, signs_int, 1, (0,))
                 if U is not None:
@@ -116,7 +122,7 @@ def _find_U_for_S(rvec_int: np.ndarray, ham_r: np.ndarray,
         # Step 2a: null-space SVD on ALL available pairs (used as primary reject filter
         # AND to guide the block search).  A clear null space (s_min/s_max < tol_null)
         # is a necessary condition; without it we return None immediately.
-        from scipy.optimize import linear_sum_assignment
+        import scipy.optimize as scopt
         rows_ns = [np.kron(np.eye(Norb), ham_r[j]) - np.kron(ham_r[i].T, np.eye(Norb))
                    for i, j in pairs]
         M_ns = np.vstack(rows_ns)
@@ -139,11 +145,11 @@ def _find_U_for_S(rvec_int: np.ndarray, ham_r: np.ndarray,
                 [[np.linalg.norm(U_guide[r*n_orb:(r+1)*n_orb, c*n_orb:(c+1)*n_orb])
                   for c in range(n_sites)] for r in range(n_sites)]
             )
-            _, site_col = linear_sum_assignment(-block_norm)
+            _, site_col = scopt.linear_sum_assignment(-block_norm)
             site_perm = tuple(site_col.tolist())
             # Infer orbital permutation + signs from the dominant block
             dominant_block = U_guide[0:n_orb, site_perm[0]*n_orb:(site_perm[0]+1)*n_orb]
-            _, orb_col = linear_sum_assignment(-np.abs(dominant_block))
+            _, orb_col = scopt.linear_sum_assignment(-np.abs(dominant_block))
             # Try the inferred candidate plus small perturbations (±signs)
             for signs_int in range(2 ** n_orb):
                 U = _try_monomial_block(n_orb, tuple(orb_col.tolist()), signs_int,
@@ -151,14 +157,14 @@ def _find_U_for_S(rvec_int: np.ndarray, ham_r: np.ndarray,
                 if U is not None:
                     return U
             # Fallback: enumerate all orbital permutations for this site permutation
-            for orb_perm in permutations(range(n_orb)):
+            for orb_perm in itertools.permutations(range(n_orb)):
                 for signs_int in range(2 ** n_orb):
                     U = _try_monomial_block(n_orb, orb_perm, signs_int, n_sites, site_perm)
                     if U is not None:
                         return U
 
     # --- Strategy 3: null-space + nearest-monomial (general fallback) ---
-    from scipy.optimize import linear_sum_assignment
+    import scipy.optimize as scopt
     subset = pairs[::max(1, len(pairs) // 200)][:200]
     rows = [np.kron(np.eye(Norb), ham_r[j]) - np.kron(ham_r[i].T, np.eye(Norb))
             for i, j in subset]
@@ -170,7 +176,7 @@ def _find_U_for_S(rvec_int: np.ndarray, ham_r: np.ndarray,
     V, _, Wh = np.linalg.svd(U_raw)
     U_smooth = V @ Wh                       # nearest general unitary
     # Round to nearest monomial
-    row_ind, col_ind = linear_sum_assignment(-np.abs(U_smooth))
+    row_ind, col_ind = scopt.linear_sum_assignment(-np.abs(U_smooth))
     U_mono = np.zeros((Norb, Norb), dtype=complex)
     for r, c in zip(row_ind, col_ind):
         if abs(U_smooth[r, c]) < 0.3:
@@ -183,10 +189,10 @@ def _find_U_for_S(rvec_int: np.ndarray, ham_r: np.ndarray,
 
 
 def detect_symm_ops_auto_U(rvec: np.ndarray, ham_r: np.ndarray,
-                            candidate_S: list[np.ndarray] | None = None,
-                            tol: float = 1e-3,
-                            min_fraction: float = 0.9
-                            ) -> list[tuple[np.ndarray, np.ndarray]]:
+                           candidate_S: list[np.ndarray] | None = None,
+                           tol: float = 1e-3,
+                           min_fraction: float = 0.9
+                           ) -> list[tuple[np.ndarray, np.ndarray]]:
     """
     @fn detect_symm_ops_auto_U
     @brief Detect point group symmetry operations and automatically determine the orbital
@@ -317,10 +323,10 @@ def gen_irr_k_symm(Nx: int, Ny: int, Nz: int,
 
 
 def expand_irr_to_full_symm(data_irr: np.ndarray, invk: np.ndarray,
-                              kmap: np.ndarray,
-                              sym_ops: list[tuple[np.ndarray, np.ndarray]],
-                              Nx: int, Ny: int, Nz: int,
-                              orb_axes: tuple[int, int] | None = None) -> np.ndarray:
+                            kmap: np.ndarray,
+                            sym_ops: list[tuple[np.ndarray, np.ndarray]],
+                            Nx: int, Ny: int, Nz: int,
+                            orb_axes: tuple[int, int] | None = None) -> np.ndarray:
     """
     @fn expand_irr_to_full_symm
     @brief Expand data from irreducible k-points to the full BZ using symmetry operations.

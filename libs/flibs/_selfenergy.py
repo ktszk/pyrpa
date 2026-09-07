@@ -1,63 +1,72 @@
-from ctypes import *
+import ctypes
 import numpy as np
-from ._loader import _lib, i64, dbl
+import libs.flibs._loader as _loader
+
+# Public API of this submodule; keeps `from ._x import *` in __init__.py from
+# re-exporting numpy, scipy, ctypes and the sibling packages imported above.
+__all__ = [
+    'get_Vsigma_nosoc_flex', 'mkself', 'mkself_soc'
+]
 
 # --- ctypes signatures: set once at import.
 # All Fortran entry points are subroutines, so restype is always None.
-_lib.get_vsigma_flex_nosoc_.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64)
+_loader._lib.get_vsigma_flex_nosoc_.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),          # chi (inout)
+    np.ctypeslib.ndpointer(dtype=np.float64),             # Smat
+    np.ctypeslib.ndpointer(dtype=np.float64),             # Cmat
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nw, Nchi
 ]
-_lib.get_vsigma_flex_nosoc_.restype = None
-_lib.mkself.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    POINTER(c_double),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    POINTER(c_double), POINTER(c_double),
-    POINTER(c_double), POINTER(c_int64),
-    POINTER(c_double), POINTER(c_double), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_bool), POINTER(c_bool),
-    POINTER(c_int64),
-    POINTER(c_bool),
-    POINTER(c_bool),  # sw_tail
-    POINTER(c_double) # sigma_scale
+_loader._lib.get_vsigma_flex_nosoc_.restype = None
+_loader._lib.mkself.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),             # sigmak (out)
+    ctypes.POINTER(ctypes.c_double),                                       # mu (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),                # Smat
+    np.ctypeslib.ndpointer(dtype=np.float64),                # Cmat
+    np.ctypeslib.ndpointer(dtype=np.int64),                  # kmap
+    np.ctypeslib.ndpointer(dtype=np.int64),                  # invk
+    np.ctypeslib.ndpointer(dtype=np.int64),                  # olist
+    np.ctypeslib.ndpointer(dtype=np.complex128),             # hamk
+    np.ctypeslib.ndpointer(dtype=np.float64),                # eig
+    np.ctypeslib.ndpointer(dtype=np.complex128),             # uni
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),                    # mu_init, rfill
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int64),                     # temp, scf_loop
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int64),  # pp, eps, Nkall
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),                      # Nk, Nw
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),                      # Norb, Nchi
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),    # Nx, Ny, Nz
+    ctypes.POINTER(ctypes.c_int64),                                        # sub_sigma
+    ctypes.POINTER(ctypes.c_bool), ctypes.POINTER(ctypes.c_bool),          # sw_out, sw_in
+    ctypes.POINTER(ctypes.c_int64),                                        # m_diis
+    ctypes.POINTER(ctypes.c_bool),                                         # sw_rescale
+    ctypes.POINTER(ctypes.c_bool),                                         # sw_tail
+    ctypes.POINTER(ctypes.c_double)                                        # sigma_scale
 ]
-_lib.mkself.restype = None
-_lib.mkself_soc.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    POINTER(c_double),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.int64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    np.ctypeslib.ndpointer(dtype=np.float64),
-    np.ctypeslib.ndpointer(dtype=np.complex128),
-    POINTER(c_double), POINTER(c_double),
-    POINTER(c_double), POINTER(c_int64),
-    POINTER(c_double), POINTER(c_double), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_int64), POINTER(c_int64),
-    POINTER(c_int64), POINTER(c_bool), POINTER(c_bool),
-    POINTER(c_int64), POINTER(c_bool),
-    POINTER(c_double) # sigma_scale
+_loader._lib.mkself.restype = None
+_loader._lib.mkself_soc.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),             # sigmak (out)
+    ctypes.POINTER(ctypes.c_double),                                       # mu (out)
+    np.ctypeslib.ndpointer(dtype=np.float64),                # Vmat
+    np.ctypeslib.ndpointer(dtype=np.int64),                  # kmap
+    np.ctypeslib.ndpointer(dtype=np.int64),                  # invk
+    np.ctypeslib.ndpointer(dtype=np.int64),                  # invs
+    np.ctypeslib.ndpointer(dtype=np.int64),                  # olist
+    np.ctypeslib.ndpointer(dtype=np.int64),                  # slist
+    np.ctypeslib.ndpointer(dtype=np.complex128),             # hamk
+    np.ctypeslib.ndpointer(dtype=np.float64),                # eig
+    np.ctypeslib.ndpointer(dtype=np.complex128),             # uni
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),                    # mu_init, rfill
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int64),                     # temp, scf_loop
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int64),  # pp, eps, Nkall
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),                      # Nk, Nw
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),                      # Norb, Nchi
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),    # Nx, Ny, Nz
+    ctypes.POINTER(ctypes.c_int64),                                        # sub_sigma
+    ctypes.POINTER(ctypes.c_bool), ctypes.POINTER(ctypes.c_bool),          # sw_out, sw_in
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_bool),                       # m_diis, sw_rescale
+    ctypes.POINTER(ctypes.c_double)                                        # sigma_scale
 ]
-_lib.mkself_soc.restype = None
+_loader._lib.mkself_soc.restype = None
+
 
 def get_Vsigma_nosoc_flex(chi: np.ndarray, Smat: np.ndarray, Cmat: np.ndarray) -> np.ndarray:
     """
@@ -69,9 +78,10 @@ def get_Vsigma_nosoc_flex(chi: np.ndarray, Smat: np.ndarray, Cmat: np.ndarray) -
     @return  chi: Copy of the vertex-corrected susceptibility tensor
     """
     Nk, Nw, Nchi = len(chi), len(chi[0]), len(Smat)
-    _lib.get_vsigma_flex_nosoc_(chi, Smat, Cmat, i64(Nk),
-                                i64(Nw), i64(Nchi))
+    _loader._lib.get_vsigma_flex_nosoc_(chi, Smat, Cmat, _loader.i64(Nk),
+                                        _loader.i64(Nw), _loader.i64(Nchi))
     return chi.copy()
+
 
 def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray,
            olist: np.ndarray, hamk: np.ndarray, eig: np.ndarray, uni: np.ndarray, mu: float,
@@ -110,21 +120,22 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
     @retval      sigmak: Converged self-energy [Norb, Norb, Nw, Nk] complex128
     @retval     mu_self: Final chemical potential in eV
     """
-    print("mixing rate: pp = %3.1f, DIIS m = %d" % (pp, m_diis))
+    print("mixing rate: pp = %3.1f, DIIS m = %d" % (pp, m_diis), flush=True)
     if sw_tail:
-        print("chi0: tail-corrected convolution (analytic G0 reference)")
+        print("chi0: tail-corrected convolution (analytic G0 reference)", flush=True)
     Nkall, Nk, Nchi = len(kmap), len(hamk), len(Smat)
     Norb = hamk.shape[1]
-    mu_self = c_double()
+    mu_self = ctypes.c_double()
     sigmak = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
-    _lib.mkself(sigmak, byref(mu_self), Smat, Cmat, kmap, invk, olist, hamk, eig, uni,
-        dbl(mu), dbl(fill), dbl(temp), i64(scf_loop),
-        dbl(pp), dbl(eps), i64(Nkall), i64(Nk),
-        i64(Nw), i64(Norb), i64(Nchi), i64(Nx),
-        i64(Ny), i64(Nz), i64(sub_sigma), byref(c_bool(sw_out)),
-        byref(c_bool(sw_in)), i64(m_diis), byref(c_bool(sw_rescale)),
-        byref(c_bool(sw_tail)), dbl(sigma_scale))
+    _loader._lib.mkself(sigmak, ctypes.byref(mu_self), Smat, Cmat, kmap, invk, olist, hamk, eig, uni, _loader.dbl(mu),
+                        _loader.dbl(fill), _loader.dbl(temp), _loader.i64(scf_loop), _loader.dbl(pp), _loader.dbl(eps),
+                        _loader.i64(Nkall), _loader.i64(Nk), _loader.i64(Nw), _loader.i64(Norb), _loader.i64(Nchi),
+                        _loader.i64(Nx), _loader.i64(Ny), _loader.i64(Nz), _loader.i64(sub_sigma),
+                        ctypes.byref(ctypes.c_bool(sw_out)), ctypes.byref(ctypes.c_bool(sw_in)), _loader.i64(m_diis),
+                        ctypes.byref(ctypes.c_bool(sw_rescale)), ctypes.byref(ctypes.c_bool(sw_tail)),
+                        _loader.dbl(sigma_scale))
     return sigmak, mu_self.value
+
 
 def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.ndarray,
                olist: np.ndarray, slist: np.ndarray, hamk: np.ndarray, eig: np.ndarray,
@@ -162,16 +173,16 @@ def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.nd
     @retval      sigmak: Converged self-energy [Norb, Norb, Nw, Nk] complex128
     @retval     mu_self: Final chemical potential in eV
     """
-    print("mixing rate: pp = %3.1f, DIIS m = %d" % (pp, m_diis))
+    print("mixing rate: pp = %3.1f, DIIS m = %d" % (pp, m_diis), flush=True)
     Nkall, Nk, Nchi = len(kmap), len(hamk), len(Vmat)
     Norb = hamk.shape[1]
-    mu_self = c_double()
+    mu_self = ctypes.c_double()
     sigmak = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
-    _lib.mkself_soc(sigmak, byref(mu_self), Vmat, kmap, invk, invs, olist, slist, hamk, eig, uni,
-               dbl(mu), dbl(fill), dbl(temp), i64(scf_loop),
-               dbl(pp), dbl(eps), i64(Nkall), i64(Nk),
-               i64(Nw), i64(Norb), i64(Nchi), i64(Nx),
-               i64(Ny), i64(Nz), i64(sub_sigma), byref(c_bool(sw_out)),
-               byref(c_bool(sw_in)), i64(m_diis), byref(c_bool(sw_rescale)),
-               dbl(sigma_scale))
+    _loader._lib.mkself_soc(sigmak, ctypes.byref(mu_self), Vmat, kmap, invk, invs, olist, slist, hamk, eig, uni,
+                            _loader.dbl(mu), _loader.dbl(fill), _loader.dbl(temp), _loader.i64(scf_loop),
+                            _loader.dbl(pp), _loader.dbl(eps), _loader.i64(Nkall), _loader.i64(Nk), _loader.i64(Nw),
+                            _loader.i64(Norb), _loader.i64(Nchi), _loader.i64(Nx), _loader.i64(Ny), _loader.i64(Nz),
+                            _loader.i64(sub_sigma), ctypes.byref(ctypes.c_bool(sw_out)),
+                            ctypes.byref(ctypes.c_bool(sw_in)), _loader.i64(m_diis),
+                            ctypes.byref(ctypes.c_bool(sw_rescale)), _loader.dbl(sigma_scale))
     return sigmak, mu_self.value

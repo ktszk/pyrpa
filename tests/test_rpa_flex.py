@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#-*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
 """
 Regression tests for the RPA / FLEX / Eliashberg building blocks outside the
 quasiclassical Eilenberger suite.
@@ -10,10 +10,12 @@ Requires the Fortran library libfmod.so (cd libs && make FC=ifx SL=MKL).
 """
 import json
 import os
+import re
 import sys
 import contextlib
 import io
-from pathlib import Path
+import pathlib
+import tempfile
 
 import numpy as np
 
@@ -26,6 +28,31 @@ import libs.plibs as P
 # --------------------------------------------------------------------------- #
 #  helpers
 # --------------------------------------------------------------------------- #
+@contextlib.contextmanager
+def _capture_fortran_stdout(sink):
+    """Capture stdout at the FILE-DESCRIPTOR level into sink['text'].
+
+    contextlib.redirect_stdout only swaps Python's sys.stdout, so it never sees
+    what the Fortran library writes straight to fd 1.  Same dup2 trick as
+    _tools.silence(), but pointed at a temp file instead of devnull so the
+    output can be read back.
+    """
+    sys.stdout.flush()
+    saved = os.dup(1)
+    tmp = tempfile.TemporaryFile(mode='w+b')
+    try:
+        os.dup2(tmp.fileno(), 1)
+        with contextlib.redirect_stdout(io.StringIO()):
+            yield sink
+    finally:
+        sys.stdout.flush()
+        os.dup2(saved, 1)
+        os.close(saved)
+        tmp.seek(0)
+        sink['text'] = tmp.read().decode(errors='replace')
+        tmp.close()
+
+
 def _tiny_one_orbital_model(Nx=2, Ny=2, Nz=1, Nw=4, temp=0.1):
     """Small one-orbital tight-binding model for RPA/FLEX smoke tests."""
     rvec = np.array(
@@ -146,7 +173,7 @@ def test_orbital_dependent_vertices_reference_values():
 
 def test_read_UJ_stored_sets_feed_the_orbital_dependent_vertex(tmp_path):
     """read_UJ returns Norb x Norb matrices in the get_scmat_orb convention (diag U, off-diag U')."""
-    root = Path(__file__).resolve().parents[1]
+    root = pathlib.Path(__file__).resolve().parents[1]
     Umat, Jmat = P.read_UJ('FeSe', str(root / 'UJ'))
     assert Umat.shape == Jmat.shape == (5, 5)
     assert Umat.dtype == np.float64 and Umat.flags['F_CONTIGUOUS']
@@ -182,7 +209,7 @@ def test_read_UJ_stored_sets_feed_the_orbital_dependent_vertex(tmp_path):
 
 def test_expand_UJ_sites_replicates_one_site_on_every_site():
     """A stored one-site U/J set fills the on-site blocks of a multi-site hamiltonian."""
-    root = Path(__file__).resolve().parents[1]
+    root = pathlib.Path(__file__).resolve().parents[1]
     Umat, Jmat = P.read_UJ('FeSe', str(root / 'UJ'))
     # 2-Fe (10-orbital) model: the 5-orbital set goes on both sites, inter-site blocks stay 0
     Uex, Jex = P.expand_UJ_sites(Umat, Jmat, 10, [5, 5])
@@ -279,6 +306,32 @@ def test_flex_vertex_zero_interaction_returns_zero():
     assert np.allclose(vsigma, 0.0)
 
 
+def _soc_model(Nx=8, Ny=8, Nz=1, Nw=8, temp=0.05, U=0.8, J=0.1):
+    """Spin-resolved model for the SOC RPA/FLEX/Eliashberg smoke tests.
+
+    Built from inputs/hop2_soc.input rather than a hand-written Hamiltonian: the
+    SOC entry points index slist/invs on the FORTRAN side (1-based, spin labelled
+    +1/-1) and take the parity list from get_plist, so a hand-rolled model that
+    gets any of those conventions wrong segfaults or silently returns NaN instead
+    of exercising the code.  The conventions below mirror main.py exactly.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    rvec, ham_r, Norb, _ = P.import_hoppings(str(root / 'inputs' / 'hop2_soc.input'), 1)
+    klist, kmap, invk = F.gen_irr_k_TRS(Nx, Ny, Nz)
+    eig, uni = F.get_eig(F.gen_ham(klist, ham_r, rvec))
+    mu = P.calc_mu(eig, len(klist), fill=Norb/2.0, temp=temp)
+    Gk = F.gen_Green0(eig, uni, mu=mu, temp=temp, Nw=Nw)
+    slist = np.ones(Norb, dtype=np.int64)
+    slist[(Norb + 1)//2:] = -1                                    # up-spin majority, as in main.py
+    invs = np.concatenate([np.arange((Norb + 1)//2, Norb), np.arange((Norb + 1)//2)]) + 1
+    olist, site = P.get_chi_orb_list(Norb, [Norb])
+    Vmat = F.gen_Vmatrix(olist, slist, site, invs, U=U, J=J)
+    return dict(rvec=rvec, ham_r=ham_r, Norb=Norb, klist=klist, kmap=kmap, invk=invk,
+                eig=eig, uni=uni, Gk=Gk, slist=slist, invs=invs, olist=olist, site=site,
+                Vmat=Vmat, plist=F.get_plist(rvec, ham_r),
+                Nx=Nx, Ny=Ny, Nz=Nz, Nw=Nw, temp=temp)
+
+
 # --------------------------------------------------------------------------- #
 #  linearized / nonlinear Eliashberg smoke tests
 # --------------------------------------------------------------------------- #
@@ -335,7 +388,7 @@ def test_output_gap_function_writes_expected_one_orbital_file(tmp_path):
             ret = P.output_gap_function(
                 st['invk'], st['kmap'], gap, st['uni'], st['plist'], gap_sym=0, Nx=st['Nx'], sw_orb=False
             )
-        out = Path('gap_11.dat')
+        out = pathlib.Path('gap_11.dat')
         assert ret == 0
         assert out.exists()
         text = out.read_text()
@@ -350,8 +403,8 @@ def test_output_gap_function_writes_expected_one_orbital_file(tmp_path):
 # --------------------------------------------------------------------------- #
 def _lindhard_setup(Nx=8, Ny=8, temp=0.04, mu=0.3):
     """One-orbital model + exact Matsubara Lindhard chi0 on all irreducible q."""
-    rvec = np.array([[0,0,0],[1,0,0],[-1,0,0],[0,1,0],[0,-1,0]], dtype=np.float64)
-    ham_r = np.array([[[0.0]],[[-1.0]],[[-1.0]],[[-0.5]],[[-0.5]]], dtype=np.complex128)
+    rvec = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]], dtype=np.float64)
+    ham_r = np.array([[[0.0]], [[-1.0]], [[-1.0]], [[-0.5]], [[-0.5]]], dtype=np.complex128)
     klist, kmap, invk = F.gen_irr_k_TRS(Nx, Ny, 1)
     hamk = F.gen_ham(klist, ham_r, rvec)
     eig, uni = F.get_eig(hamk)
@@ -461,7 +514,7 @@ def test_regrid_sigma_bin_roundtrip_and_reseed(tmp_path):
     sigma exactly at every kept frequency (the dropped last point carries the
     wrap-around artifact), the result is causal, and a re-gridded seed with
     changed (T, Nw) is accepted by mkself via sw_in."""
-    from scipy.io import FortranFile
+    import scipy.io as scio
     m = _tiny_one_orbital_model(Nx=4, Ny=4, Nw=32, temp=0.1)
     Smat, Cmat = F.gen_SCmatrix(m['olist'], m['site'], U=1.0, J=0.0)
 
@@ -471,7 +524,7 @@ def test_regrid_sigma_bin_roundtrip_and_reseed(tmp_path):
                         m['Nx'], m['Ny'], m['Nz'], sw_out, sw_in, eps=1.0e-6)
 
     def read_sigma_bin(Nw):
-        with FortranFile('sigma.bin', 'r') as f:
+        with scio.FortranFile('sigma.bin', 'r') as f:
             f.read_record(np.float64)
             f.read_record(np.float64)
             return f.read_record(np.complex128).reshape((-1, Nw, 1, 1), order='F')
@@ -512,8 +565,8 @@ def test_auto_regrid_sigma_seed(tmp_path):
     seed whose footer Nw differs from the run's is re-gridded in place before
     mkself reads it; a matching Nw and a footer-less (old-format) file are
     left byte-identical."""
-    from scipy.io import FortranFile
-    from libs.plibs import _calc as PC
+    import scipy.io as scio
+    import libs.plibs._calc as PC
     m = _tiny_one_orbital_model(Nx=4, Ny=4, Nw=32, temp=0.1)
     Smat, Cmat = F.gen_SCmatrix(m['olist'], m['site'], U=1.0, J=0.0)
 
@@ -533,10 +586,10 @@ def test_auto_regrid_sigma_seed(tmp_path):
         assert (round(Nw0), round(Norb0)) == (32, 1) and abs(temp0 - 0.1) < 1e-12
 
         # matching Nw: the seed must not be touched
-        before = Path('sigma.bin').read_bytes()
+        before = pathlib.Path('sigma.bin').read_bytes()
         with _silence_stdout():
             PC._auto_regrid_sigma_seed(0.1, 32)
-        assert Path('sigma.bin').read_bytes() == before
+        assert pathlib.Path('sigma.bin').read_bytes() == before
 
         # Nw mismatch (cool + enlarge): re-gridded in place, footer updated,
         # and the seed is then accepted by mkself via sw_in
@@ -551,19 +604,19 @@ def test_auto_regrid_sigma_seed(tmp_path):
         assert np.abs(sg).max() > 0
 
         # footer-less (old io_sigma) file: meta is None and the file is left alone
-        with FortranFile('sigma.bin', 'r') as f:
+        with scio.FortranFile('sigma.bin', 'r') as f:
             mu = f.read_record(np.float64)
             mu_old = f.read_record(np.float64)
             flat = f.read_record(np.complex128)
-        with FortranFile('sigma.bin', 'w') as f:
+        with scio.FortranFile('sigma.bin', 'w') as f:
             f.write_record(mu)
             f.write_record(mu_old)
             f.write_record(flat)
         assert PC._read_sigma_bin_meta() is None
-        before = Path('sigma.bin').read_bytes()
+        before = pathlib.Path('sigma.bin').read_bytes()
         with _silence_stdout():
             PC._auto_regrid_sigma_seed(0.1, 64)
-        assert Path('sigma.bin').read_bytes() == before
+        assert pathlib.Path('sigma.bin').read_bytes() == before
     finally:
         os.chdir(olddir)
 
@@ -770,7 +823,7 @@ def test_gap_extrapolate_w0_recovers_delta0_and_flags_iw0_bias():
     Delta(-iw_n)=Delta(iw_n)^*): the w_n^2 fit must recover Delta0 far more
     accurately than reading off Delta(iw_0), and the reported bias must match
     the known analytic (pi*T)^2*|c|/Delta0 offset of that iw_0 shortcut."""
-    from libs.plibs._calc import gap_extrapolate_w0
+    import libs.plibs._calc as _calc
     temp = 0.02
     Nw, Norb, Nk = 200, 2, 3
     wn = (2 * np.arange(Nw) + 1) * np.pi * temp
@@ -782,9 +835,9 @@ def test_gap_extrapolate_w0_recovers_delta0_and_flags_iw0_bias():
         scale = 1.0 + 0.1 * k
         for i in range(Norb):
             gap[i, i, :, k] = (delta0_true[i] * scale + c_true * wn**2
-                              + 1.0e-6 * rng.standard_normal(Nw))
+                               + 1.0e-6 * rng.standard_normal(Nw))
 
-    gap0, bias = gap_extrapolate_w0(gap, temp, n_points=4, order=1)
+    gap0, bias = _calc.gap_extrapolate_w0(gap, temp, n_points=4, order=1)
 
     for i in range(Norb):
         assert abs(gap0[i, i, 0].real - delta0_true[i]) < 1.0e-3 * delta0_true[i]
@@ -994,7 +1047,6 @@ def test_flex_filling_weights_irreducible_k_by_multiplicity():
         assert not np.isclose(occ.sum() / Nk, (mult * occ).sum() / Nkall, atol=1e-6)
 
 
-
 # --------------------------------------------------------------------------- #
 #  Cartesian (R-shell) gap harmonics
 # --------------------------------------------------------------------------- #
@@ -1091,6 +1143,82 @@ def test_set_harmonic_lattice_switches_the_route_and_survives_a_tiny_r_set():
     finally:
         P.set_harmonic_lattice(None, None)
     assert np.abs(P.gap_symms(kf, 1, 1)[0] - frac).max() == 0.0
+
+
+# --------------------------------------------------------------------------- #
+#  SOC counterparts.  The SOC entry points had no coverage at all, which is how
+#  a missing ndpointer in lin_eliash_soc.argtypes (the `prt` slot) survived: it
+#  shifted every later argument and made the call raise, but nothing called it.
+#  These mirror the non-SOC tests above so the two paths stay in step.
+# --------------------------------------------------------------------------- #
+def test_get_chi0_soc_returns_the_four_soc_tables():
+    """chi0 with SOC hands back the sign tables and the inverse orbital map."""
+    st = _soc_model()
+    with _silence_stdout():
+        chi, sgnsig, sgnsig2, invschi = F.get_chi0_soc(
+            st['Vmat'], st['Gk'], st['olist'], st['slist'], st['kmap'], st['invk'],
+            st['invs'], st['temp'], st['Nx'], st['Ny'], st['Nz'],
+        )
+    Nchi, Norb = len(st['olist']), st['Norb']
+    assert chi.shape == (Nchi, Nchi, st['Nw'], len(st['klist']))
+    assert sgnsig.shape == (Norb, Norb)
+    assert sgnsig2.shape == (Nchi, Nchi)
+    assert invschi.shape == (Nchi,)
+    assert np.isfinite(chi).all()
+    # invschi is a 1-based permutation of the orbital-pair index
+    assert sorted(invschi.tolist()) == list(range(1, Nchi + 1))
+
+
+def test_linearized_eliashberg_soc_returns_lambda_and_finite_gap():
+    """The SOC solver must return (gap, lambda) like the non-SOC one, both finite.
+
+    Guards the whole ctypes signature: a wrong or missing argtype entry shifts the
+    argument list and the call raises before the solver runs.
+    """
+    st = _soc_model()
+    with _silence_stdout():
+        chi, sgnsig, sgnsig2, invschi = F.get_chi0_soc(
+            st['Vmat'], st['Gk'], st['olist'], st['slist'], st['kmap'], st['invk'],
+            st['invs'], st['temp'], st['Nx'], st['Ny'], st['Nz'],
+        )
+        init_delta = P.get_initial_gap(st['klist'], st['Norb'], 1)
+        out = F.linearized_eliashberg_soc(
+            chi, st['Gk'], st['uni'], init_delta, st['Vmat'], sgnsig, sgnsig2,
+            st['plist'], st['slist'], st['olist'], st['kmap'], st['invk'],
+            st['invs'], invschi, st['Nx'], st['Ny'], st['Nz'], st['temp'],
+            gap_sym=1, itemax=15, arnoldi_m=0,
+        )
+    assert isinstance(out, tuple) and len(out) == 2, 'SOC solver must return (gap, lambda)'
+    gap, lam = out
+    assert gap.shape == (st['Norb'], st['Norb'], st['Nw'], len(st['kmap']))
+    assert np.isfinite(gap).all()
+    assert np.isfinite(lam), 'lambda must be finite, not NaN'
+    assert isinstance(lam, float)
+
+
+def test_linearized_eliashberg_soc_lambda_matches_the_printed_value():
+    """lambda_out must carry exactly the eigenvalue the Fortran driver prints.
+
+    The driver runs two eigenvalue passes and prints 'eliash=' after each; the
+    PHYSICAL eigenvalue is the last one, and that is what has to come back.
+    """
+    st = _soc_model()
+    log = {}
+    with _capture_fortran_stdout(log):
+        chi, sgnsig, sgnsig2, invschi = F.get_chi0_soc(
+            st['Vmat'], st['Gk'], st['olist'], st['slist'], st['kmap'], st['invk'],
+            st['invs'], st['temp'], st['Nx'], st['Ny'], st['Nz'],
+        )
+        init_delta = P.get_initial_gap(st['klist'], st['Norb'], 1)
+        _, lam = F.linearized_eliashberg_soc(
+            chi, st['Gk'], st['uni'], init_delta, st['Vmat'], sgnsig, sgnsig2,
+            st['plist'], st['slist'], st['olist'], st['kmap'], st['invk'],
+            st['invs'], invschi, st['Nx'], st['Ny'], st['Nz'], st['temp'],
+            gap_sym=1, itemax=15, arnoldi_m=0,
+        )
+    printed = re.findall(r'eliash=\s*(\S+)', log['text'])
+    assert printed, 'the driver should print eliash='
+    assert abs(float(printed[-1].replace('E', 'e')) - lam) < 1e-12
 
 
 # --------------------------------------------------------------------------- #

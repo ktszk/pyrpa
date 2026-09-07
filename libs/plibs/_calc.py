@@ -1,20 +1,29 @@
 #!/usr/bin/env python
-#-*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
 """
 Higher-level calculation routines: FLEX, Eliashberg, susceptibility spectra, carrier analysis.
 """
 import numpy as np
 import scipy.linalg as sclin
 import libs.flibs as flibs
-from ._bands import get_eigs, get_emesh, calc_mu
-from ._eilenberger import BCS_RATIO
-from ._response import get_initial_gap, chis_spectrum, phi_spectrum
-from ._wannier_io import output_self_wannier, output_gap_wannier
+import libs.plibs._bands as _bands
+import libs.plibs._eilenberger as _eilenberger
+import libs.plibs._response as _response
+import libs.plibs._wannier_io as _wannier_io
+
+# Public API of this submodule; keeps `from ._x import *` in __init__.py from
+# re-exporting numpy, scipy, ctypes and the sibling packages imported above.
+__all__ = [
+    'regrid_sigma_bin', 'calc_path_spectrum', 'hall_coefficient', 'hall_carrier_density', 'fs_carrier_density',
+    'report_band_filling', 'get_mu', 'gap_extrapolate_w0', 'output_gap_function', 'calc_flex', 'calc_flex_soc',
+    'calc_lin_eliashberg_eq', 'calc_lin_eliash_soc', 'calc_eliashberg_eq'
+]
 
 
-def _prepare_kspace_state(Nx:int, Ny:int, Nz:int, ham_r, S_r, rvec, need_ham:bool=False):
+def _prepare_kspace_state(Nx: int, Ny: int, Nz: int, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray,
+                          need_ham: bool = False) -> dict:
     klist, kmap, invk = flibs.gen_irr_k_TRS(Nx, Ny, Nz)
-    eig, uni = get_eigs(klist, ham_r, S_r, rvec)
+    eig, uni = _bands.get_eigs(klist, ham_r, S_r, rvec)
     state = {
         'klist': klist,
         'kmap': kmap,
@@ -27,30 +36,34 @@ def _prepare_kspace_state(Nx:int, Ny:int, Nz:int, ham_r, S_r, rvec, need_ham:boo
     return state
 
 
-def _prepare_normal_interaction(olist, site, orb_dep:bool, U:float, J:float, Umat=None, Jmat=None):
+def _prepare_normal_interaction(olist: np.ndarray, site: np.ndarray, orb_dep: bool, U: float, J: float,
+                                Umat: np.ndarray | None = None,
+                                Jmat: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
     if orb_dep:
         return flibs.gen_SCmatrix_orb(olist, site, Umat, Jmat)
     return flibs.gen_SCmatrix(olist, site, U, J)
 
 
-def _prepare_soc_interaction(olist, slist, site, invs, orb_dep:bool, U:float, J:float, Umat=None, Jmat=None):
+def _prepare_soc_interaction(olist: np.ndarray, slist: np.ndarray, site: np.ndarray, invs: np.ndarray, orb_dep: bool,
+                             U: float, J: float, Umat: np.ndarray | None = None,
+                             Jmat: np.ndarray | None = None) -> np.ndarray:
     if orb_dep:
         return flibs.gen_Vmatrix_orb(olist, slist, site, invs, Umat, Jmat)
     return flibs.gen_Vmatrix(olist, slist, site, invs, U, J)
 
 
-def _load_sigma_from_file():
+def _load_sigma_from_file() -> tuple | None:
     """Load (sigmak, mu_self) from self_en.npz, or None if the file is missing."""
     try:
         npz = np.load('self_en.npz')
-        print("Import sigma from self_en.npz")
+        print("Import sigma from self_en.npz", flush=True)
         return npz['arr_0'], npz['arr_1']
     except FileNotFoundError:
         print("Error: 'self_en.npz' not found", flush=True)
         return None
 
 
-def _read_sigma_bin_meta(path:str='sigma.bin'):
+def _read_sigma_bin_meta(path: str = 'sigma.bin') -> tuple | None:
     """Metadata footer (temp, Nw, Norb, Nk) of a sigma.bin as a tuple, or None
     if the file is missing, malformed, or carries no footer (older io_sigma).
     Walks the sequential records by their 4-byte markers without loading the
@@ -83,7 +96,7 @@ def _read_sigma_bin_meta(path:str='sigma.bin'):
     return struct.unpack('=4d', last)
 
 
-def _auto_regrid_sigma_seed(temp:float, Nw:int, path:str='sigma.bin'):
+def _auto_regrid_sigma_seed(temp: float, Nw: int, path: str = 'sigma.bin') -> None:
     """Bring the sigma.bin seed loaded via sw_in_self onto the current run's
     Matsubara mesh: if the metadata footer reports a different Nw, the file is
     re-gridded in place with regrid_sigma_bin before the Fortran side reads it.
@@ -103,9 +116,9 @@ def _auto_regrid_sigma_seed(temp:float, Nw:int, path:str='sigma.bin'):
     regrid_sigma_bin(temp_new=temp, Nw_new=Nw, w_scale=temp_old / temp, path=path)
 
 
-def regrid_sigma_bin(temp_old:float=None, temp_new:float=None, Norb:int=None,
-                     Nw_old:int=None, Nw_new:int=None, w_scale:float=None,
-                     path:str='sigma.bin', out_path:str=None):
+def regrid_sigma_bin(temp_old: float = None, temp_new: float = None, Norb: int = None,
+                     Nw_old: int = None, Nw_new: int = None, w_scale: float = None,
+                     path: str = 'sigma.bin', out_path: str = None) -> tuple:
     """Re-grid the FLEX self-energy seed sigma.bin from the Matsubara mesh at
     temp_old onto the mesh at temp_new (T-annealing helper for sw_in_self).
 
@@ -155,13 +168,13 @@ def regrid_sigma_bin(temp_old:float=None, temp_new:float=None, Norb:int=None,
     @param out_path: output file (default: overwrite path)
     @return (Nk, Nw_new): shape information of the written sigma
     """
-    from scipy.io import FortranFile
-    from scipy.interpolate import CubicSpline
+    import scipy.io as scio
+    import scipy.interpolate as scinterp
     if temp_new is None:
         raise ValueError("temp_new is required")
     if w_scale is None:
         w_scale = 1.0
-    with FortranFile(path, 'r') as f:
+    with scio.FortranFile(path, 'r') as f:
         mu = f.read_record(np.float64)
         mu_old = f.read_record(np.float64)
         flat = f.read_record(np.complex128)
@@ -203,7 +216,7 @@ def regrid_sigma_bin(temp_old:float=None, temp_new:float=None, Norb:int=None,
     mirror = np.conj(np.swapaxes(sig, 2, 3))[:, ::-1, :, :]
     wext = np.concatenate([-w_old[::-1], w_old])
     ext = np.concatenate([mirror, sig], axis=1)
-    out = CubicSpline(wext, ext, axis=1, extrapolate=False)(w_new)
+    out = scinterp.CubicSpline(wext, ext, axis=1, extrapolate=False)(w_new)
     beyond = w_new > w_old[-1]
     if beyond.any():
         # tail Sigma ~ c0 + c1/(iw), least-squares over an interior window:
@@ -226,7 +239,7 @@ def regrid_sigma_bin(temp_old:float=None, temp_new:float=None, Norb:int=None,
         print(f"regrid_sigma_bin: clipped {nbad} causality-violating "
               f"diagonal points (Im Sigma_ll > 0)", flush=True)
     out[:, :, di, di] = out[:, :, di, di].real + 1j * np.minimum(imdiag, 0.0)
-    with FortranFile(out_path or path, 'w') as f:
+    with scio.FortranFile(out_path or path, 'w') as f:
         f.write_record(mu)
         f.write_record(mu_old)
         f.write_record(np.ascontiguousarray(out.ravel(order='F')))
@@ -236,11 +249,11 @@ def regrid_sigma_bin(temp_old:float=None, temp_new:float=None, Norb:int=None,
     return Nk, Nw_new
 
 
-def _prepare_green_state_normal(state, olist, interaction, mu:float, fill:float, temp:float,
-                                Nw:int, Nx:int, Ny:int, Nz:int, sw_self:bool,
-                                sw_from_file:bool=False, sw_out_self:bool=False, sw_in_self:bool=False,
-                                eps:float=1.0e-4, pp:float=0.5, m_diis:int=5, sw_rescale:bool=True,
-                                sw_tail:bool=False, sigma_scale:float=1.0):
+def _prepare_green_state_normal(state: dict, olist: np.ndarray, interaction: tuple, mu: float, fill: float, temp: float,
+                                Nw: int, Nx: int, Ny: int, Nz: int, sw_self: bool,
+                                sw_from_file: bool = False, sw_out_self: bool = False, sw_in_self: bool = False,
+                                eps: float = 1.0e-4, pp: float = 0.5, m_diis: int = 5, sw_rescale: bool = True,
+                                sw_tail: bool = False, sigma_scale: float = 1.0) -> dict | None:
     Smat, Cmat = interaction
     if sw_self:
         if sw_from_file:
@@ -265,11 +278,11 @@ def _prepare_green_state_normal(state, olist, interaction, mu:float, fill:float,
     return {'Gk': Gk, 'mu_self': mu_self, 'sigmak': sigmak}
 
 
-def _prepare_green_state_soc(state, olist, slist, invs, interaction, mu:float, fill:float, temp:float,
-                             Nw:int, Nx:int, Ny:int, Nz:int, sw_self:bool,
-                             sw_from_file:bool=False, sw_out_self:bool=False, sw_in_self:bool=False,
-                             eps:float=1.0e-4, pp:float=0.5, m_diis:int=5, sw_rescale:bool=True,
-                             sigma_scale:float=1.0):
+def _prepare_green_state_soc(state: dict, olist: np.ndarray, slist: np.ndarray, invs: np.ndarray, interaction: tuple,
+                             mu: float, fill: float, temp: float, Nw: int, Nx: int, Ny: int, Nz: int, sw_self: bool,
+                             sw_from_file: bool = False, sw_out_self: bool = False, sw_in_self: bool = False,
+                             eps: float = 1.0e-4, pp: float = 0.5, m_diis: int = 5, sw_rescale: bool = True,
+                             sigma_scale: float = 1.0) -> dict | None:
     Vmat = interaction
     if sw_self:
         if sw_from_file:
@@ -293,7 +306,9 @@ def _prepare_green_state_soc(state, olist, slist, invs, interaction, mu:float, f
         Gk = flibs.gen_Green0(state['eig'], state['uni'], mu, temp, Nw)
     return {'Gk': Gk, 'mu_self': mu_self, 'sigmak': sigmak}
 
-def _get_chi0_normal(state, Gk, chiolist, Smat, Cmat, mu_self, temp, Nx, Ny, Nz, sw_tail):
+
+def _get_chi0_normal(state: dict, Gk: np.ndarray, chiolist: np.ndarray, Smat: np.ndarray, Cmat: np.ndarray,
+                     mu_self: float, temp: float, Nx: int, Ny: int, Nz: int, sw_tail: bool) -> tuple[np.ndarray, float]:
     """Irreducible chi0 on the irreducible q-grid; sw_tail=True uses the
     tail-corrected convolution (conv[G]-conv[G0]+analytic reference, needs the
     chemical potential mu_self of Gk)."""
@@ -303,15 +318,42 @@ def _get_chi0_normal(state, Gk, chiolist, Smat, Cmat, mu_self, temp, Nx, Ny, Nz,
     return flibs.get_chi0(Smat, Cmat, Gk, chiolist, state['kmap'], state['invk'], temp, Nx, Ny, Nz)
 
 
-def calc_path_spectrum(kind:str, mu:float, temp:float, klist, qlist, chiolist, eig, uni,
-                       spa_length, Nw:int, Emax:float, delta:float, Smat=None):
+def calc_path_spectrum(kind: str, mu: float, temp: float, klist: np.ndarray, qlist: np.ndarray, chiolist: np.ndarray,
+                       eig: np.ndarray, uni: np.ndarray, spa_length: np.ndarray, Nw: int, Emax: float, delta: float,
+                       Smat: np.ndarray | None = None) -> tuple:
+    """
+    @fn calc_path_spectrum
+    @brief Compute a susceptibility spectrum along a symmetry line and write it out.
+
+    Thin driver over _response.chis_spectrum / phi_spectrum: it runs the solver,
+    writes the trace to '<kind>.dat' as (path length, omega, Im chi) blocks
+    separated by a blank line (gnuplot pm3d layout), and for 'chis' additionally
+    writes the per-orbital decomposition to 'chis_<i>.dat'.  A failed write is
+    reported and skipped, not raised, so a long run is never lost to a full disk.
+
+    @param    kind: 'chis' (spin susceptibility) or 'phi' (pairing susceptibility)
+    @param      mu: chemical potential [eV]
+    @param    temp: temperature k_B*T [eV]
+    @param   klist: k-points of the BZ sum in fractional coordinates [Nk, 3]
+    @param   qlist: q-points along the symmetry line [Nq, 3]
+    @param chiolist: orbital-pair basis of chi [Nchi, 2] int64
+    @param     eig: eigenvalues on klist [Nk, Norb]
+    @param     uni: eigenvectors on klist [Nk, Norb, Norb]
+    @param spa_length: cumulative path length of each q-point [Nq], the x axis of the plot
+    @param      Nw: number of real frequencies
+    @param    Emax: upper end of the frequency window [eV]
+    @param   delta: spectral broadening eta [eV]
+    @param    Smat: static spin vertex [Nchi, Nchi]; required for kind='chis', unused for 'phi'
+    @return (w, sp, spec): frequency mesh, path-length mesh and the spectrum, all [Nq, Nw]
+    """
     if kind == 'chis':
         print("calculate spin susceptibility", flush=True)
-        spec, spec_orb, wlist = chis_spectrum(mu, temp, Smat, klist, qlist, chiolist, eig, uni, Nw, Emax, delta)
+        spec, spec_orb, wlist = _response.chis_spectrum(mu, temp, Smat, klist, qlist, chiolist, eig, uni, Nw, Emax,
+                                                        delta)
         outname = 'chis.dat'
     elif kind == 'phi':
         print("calculate sc susceptibility", flush=True)
-        spec, spec_orb, wlist = phi_spectrum(mu, temp, klist, qlist, chiolist, eig, uni, Nw, Emax, delta)
+        spec, spec_orb, wlist = _response.phi_spectrum(mu, temp, klist, qlist, chiolist, eig, uni, Nw, Emax, delta)
         outname = 'phi.dat'
     else:
         raise ValueError(f"Unknown spectrum kind: {kind}")
@@ -323,7 +365,7 @@ def calc_path_spectrum(kind:str, mu:float, temp:float, klist, qlist, chiolist, e
                 for www, sssp, spec_val in zip(ww, ssp, spec_row):
                     f.write(f'{sssp:8.4f} {www:8.4f} {spec_val.imag:9.4f}\n')
                 f.write('\n')
-    except IOError as e:
+    except OSError as e:
         print(f"Error: Failed to write '{outname}': {e}", flush=True)
 
     if kind == 'chis':
@@ -334,7 +376,7 @@ def calc_path_spectrum(kind:str, mu:float, temp:float, klist, qlist, chiolist, e
                         for www, sssp, spec_val in zip(ww, ssp, spec_band):
                             f.write(f'{sssp:8.4f} {www:8.4f} {spec_val.imag:9.4f}\n')
                         f.write('\n')
-            except IOError as e:
+            except OSError as e:
                 print(f"Error: Failed to write 'chis_{i}.dat': {e}", flush=True)
                 continue
 
@@ -422,6 +464,7 @@ def hall_carrier_density(Rh: np.ndarray, eC: float) -> tuple[np.ndarray, list]:
     kind = ['-' if not np.isfinite(r) else ('electron' if r < 0 else 'hole') for r in Rh]
     return n_H, kind
 
+
 def _periodic_components(mask: np.ndarray) -> list:
     """
     @fn _periodic_components
@@ -438,13 +481,13 @@ def _periodic_components(mask: np.ndarray) -> list:
     @param mask: occupied (or unoccupied) region on the [Nx,Ny,Nz] mesh
     @return list of (fraction, spans) per component, largest fraction first
     """
-    from scipy import ndimage
+    import scipy.ndimage as ndimage
     lab, n = ndimage.label(mask)
     if n == 0:
         return []
     parent = list(range(n+1))
 
-    def find(x):
+    def find(x: int) -> int:
         while parent[x] != x:
             parent[x] = parent[parent[x]]
             x = parent[x]
@@ -562,7 +605,8 @@ def fs_carrier_density(eig: np.ndarray, mu: float, Vuc: float, gsp: float = 2.0,
             'n_e': ne_band.sum(), 'n_h': nh_band.sum()}
 
 
-def report_band_filling(kmesh, rvec, ham_r, S_r, mu:float, Arot):
+def report_band_filling(kmesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, mu: float,
+                        Arot: np.ndarray) -> None:
     """
     @fn report_band_filling
     @brief Print, for each band, the fraction of the mesh lying above and below mu.
@@ -586,7 +630,7 @@ def report_band_filling(kmesh, rvec, ham_r, S_r, mu:float, Arot):
     @param     mu: Chemical potential in eV
     @param   Arot: Rotation matrix passed through to get_emesh
     """
-    Nk, eig, kweight = get_emesh(kmesh, kmesh, kmesh, ham_r, S_r, rvec, Arot)
+    Nk, eig, kweight = _bands.get_emesh(kmesh, kmesh, kmesh, ham_r, S_r, rvec, Arot)
     if Nk <= 0:
         print("Error: Number of k-points (Nk) is non-positive", flush=True)
         return
@@ -598,7 +642,27 @@ def report_band_filling(kmesh, rvec, ham_r, S_r, mu:float, Arot):
         fill += num_particle
     print(f'sum of electrons is {fill:.4f}', flush=True)
 
-def get_mu(ham_r, S_r, rvec, Arot, temp:float, fill:float, kmesh=40) -> float:
+
+def get_mu(ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray, Arot: np.ndarray, temp: float, fill: float,
+           kmesh: int = 40) -> float:
+    """
+    @fn get_mu
+    @brief Chemical potential of the normal state on a cubic kmesh^3 mesh.
+
+    Convenience wrapper around get_emesh + calc_mu for the callers that only need
+    mu and have no use for the eigenvalues.  Returns None (after printing) rather
+    than raising when temp or kmesh is non-positive, matching the other drivers
+    in this module.
+
+    @param   ham_r: hopping matrix H(R) [Nr, Norb, Norb] complex128
+    @param     S_r: overlap matrix S(R) for a non-orthogonal (MLO) basis; [] if orthogonal
+    @param    rvec: R-vectors [Nr, 3]
+    @param    Arot: rotation matrix passed through to get_emesh (None = no rotation)
+    @param    temp: temperature k_B*T [eV]
+    @param    fill: band filling; mu solves sum f(eps-mu) = Nk*fill
+    @param   kmesh: linear mesh size; the sum runs over kmesh^3 points
+    @return mu: chemical potential [eV], or None when temp <= 0 or kmesh <= 0
+    """
     if temp <= 0:
         print("Error: Temperature (temp) is non-positive", flush=True)
         return None
@@ -607,11 +671,13 @@ def get_mu(ham_r, S_r, rvec, Arot, temp:float, fill:float, kmesh=40) -> float:
         return None
     print("calc chem. pot.", flush=True)
     print(f"band filling = {fill:.4f}", flush=True)
-    Nk, eig, kweight = get_emesh(kmesh, kmesh, kmesh, ham_r, S_r, rvec, Arot)
-    mu = calc_mu(eig, Nk, fill, temp)
+    Nk, eig, kweight = _bands.get_emesh(kmesh, kmesh, kmesh, ham_r, S_r, rvec, Arot)
+    mu = _bands.calc_mu(eig, Nk, fill, temp)
     return mu
 
-def gap_extrapolate_w0(gap: np.ndarray, temp: float, n_points: int = 4, order: int = 1):
+
+def gap_extrapolate_w0(gap: np.ndarray, temp: float, n_points: int = 4,
+                       order: int = 1) -> tuple[np.ndarray, np.ndarray]:
     """
     @fn gap_extrapolate_w0
     @brief Extrapolate the gap function Delta(k,iw_n) to the w_n->0 limit along the
@@ -646,7 +712,7 @@ def gap_extrapolate_w0(gap: np.ndarray, temp: float, n_points: int = 4, order: i
     if Nw < n_points:
         raise ValueError(f"gap has only {Nw} Matsubara points, need >= {n_points}")
     wn2 = ((2*np.arange(n_points)+1)*np.pi*temp)**2                    # [n_points]
-    data = np.transpose(gap[:, :, :n_points, :], (2,0,1,3)).reshape(n_points, -1)  # [n_points, Norb^2*Nk]
+    data = np.transpose(gap[:, :, :n_points, :], (2, 0, 1, 3)).reshape(n_points, -1)  # [n_points, Norb^2*Nk]
     A = np.vander(wn2, order+1, increasing=True)                       # [n_points, order+1]
     coeffs, *_ = np.linalg.lstsq(A, data, rcond=None)                  # [order+1, Norb^2*Nk]
     gap0 = coeffs[0].reshape(Norb1, Norb2, Nk)
@@ -658,9 +724,46 @@ def gap_extrapolate_w0(gap: np.ndarray, temp: float, n_points: int = 4, order: i
         bias = np.abs(gap0 - iw0) / gap_scale
     return gap0, bias
 
-def output_gap_function(invk, kmap, gap, uni, plist, gap_sym, Nx:int,
-                        soc=False, invs=None, slist=None, sw_orb=False,
-                        sw_extrapolate=False, temp=None, n_points=4, order=1, iperm=None):
+
+def output_gap_function(invk: np.ndarray, kmap: np.ndarray, gap: np.ndarray, uni: np.ndarray, plist: np.ndarray,
+                        gap_sym: int, Nx: int, soc: bool = False, invs: np.ndarray | None = None,
+                        slist: np.ndarray | None = None, sw_orb: bool = False, sw_extrapolate: bool = False,
+                        temp: float | None = None, n_points: int = 4, order: int = 1,
+                        iperm: np.ndarray | None = None) -> int:
+    """
+    @fn output_gap_function
+    @brief Convert the converged gap to the requested basis and write the kz=0 plane.
+
+    Writes one file per orbital pair, 'gap_<i><j>.dat', holding
+    (kx index, ky index, Re Delta, Im Delta) for the kz = 0 slice, with a blank
+    line after each kx row so gnuplot's pm3d reads it as a grid.  A failed write
+    is reported and skipped rather than raised.
+
+    Two conversions may happen first.  With sw_extrapolate the Matsubara axis is
+    extrapolated to omega_n -> 0 (gap_extrapolate_w0), which removes the
+    O((pi T)^2) bias of using the lowest slice alone; the maximum relative
+    correction is printed.  With sw_orb=False the orbital-basis gap is rotated
+    into the band basis, which needs the inversion operator (plist / iperm) to
+    rebuild Delta(-k).
+
+    @param    invk: index map k -> -k [Nkall, 3] int64
+    @param    kmap: fractional index of every k-point [Nkall, 3] int64
+    @param     gap: gap function [Norb, Norb, Nw, Nkall] complex128
+    @param     uni: eigenvectors used for the band rotation [Nk, Norb, Norb]
+    @param   plist: parity sign (+1/-1) per orbital [Norb] float64
+    @param gap_sym: pairing symmetry index; its sign selects singlet/triplet
+    @param      Nx: k-mesh size along x, used to break the output into rows
+    @param     soc: True when the model carries spin-orbit coupling
+    @param    invs: spin-flip index map [Norb] int64 (SOC only)
+    @param   slist: spin label of each orbital [Norb] int64 (SOC only)
+    @param  sw_orb: True keeps the orbital basis, False rotates to the band basis
+    @param sw_extrapolate: extrapolate Delta(iw_n) -> Delta(0) before writing
+    @param    temp: temperature k_B*T [eV], required when sw_extrapolate is True
+    @param n_points: number of Matsubara slices used by the extrapolation fit
+    @param   order: polynomial order of that fit
+    @param   iperm: orbital permutation of the inversion operator (None = identity)
+    @return 0
+    """
     if sw_extrapolate:
         gap0, bias = gap_extrapolate_w0(gap, temp, n_points, order)
         print(f'gap w_n->0 extrapolation: max relative correction over iw_0 = {bias.max():.4e}', flush=True)
@@ -675,63 +778,178 @@ def output_gap_function(invk, kmap, gap, uni, plist, gap_sym, Nx:int,
             gapb = flibs.conv_delta_orb_to_band_soc(gap, uni, invk, invs, slist)
         else:
             gapb = flibs.conv_delta_orb_to_band(gap, uni, invk, plist, gap_sym, iperm=iperm)
-    print('output gap function')
+    print('output gap function', flush=True)
     for iorb in range(len(gapb)):
         for jorb in range(len(gapb)):
             try:
                 with open(f'gap_{iorb+1}{jorb+1}.dat', 'w') as f:
                     for i, km in enumerate(kmap):
                         if km[2] == 0:
-                            f.write(f'{km[0]:3} {km[1]:3} {gapb[iorb,jorb,i].real:15.8e} {gapb[iorb,jorb,i].imag:15.8e}\n')
+                            f.write(f'{km[0]:3} {km[1]:3} '
+                                    f'{gapb[iorb, jorb, i].real:15.8e} '
+                                    f'{gapb[iorb, jorb, i].imag:15.8e}\n')
                             if km[0] == Nx - 1:
                                 f.write('\n')
-            except IOError as e:
+            except OSError as e:
                 print(f"Error: Failed to write 'gap_{iorb+1}{jorb+1}.dat': {e}", flush=True)
                 continue
     return 0
 
-def calc_flex(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, mu:float, temp:float,
-              olist, site, orb_dep:bool, U:float, J:float, fill:float, sw_out_self:bool, sw_in_self:bool, 
-              Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True, sw_tail:bool=False,
-              sigma_scale:float=1.0):
+
+def calc_flex(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray, mu: float,
+              temp: float, olist: np.ndarray, site: np.ndarray, orb_dep: bool, U: float, J: float, fill: float,
+              sw_out_self: bool, sw_in_self: bool, Umat: np.ndarray | None = None, Jmat: np.ndarray | None = None,
+              eps: float = 1.0e-4, pp: float = 0.5, m_diis: int = 5, sw_rescale: bool = True, sw_tail: bool = False,
+              sigma_scale: float = 1.0) -> None:
+    """
+    @fn calc_flex
+    @brief Solve the FLEX self-energy loop (no SOC) and optionally export it.
+
+    Builds the irreducible-mesh Green's function and the static Coulomb vertex
+    (S/C matrices) from the same orbital-pair basis the response routines use,
+    then hands both to the Fortran FLEX driver, which iterates Sigma and mu to
+    self-consistency.  With sw_out_self the converged self-energy is written
+    twice: 'self_en.npz' (mesh bound, for a restart on the same grid) and the
+    mesh-independent Wannier form via output_self_wannier.
+
+    @param Nx, Ny, Nz: k-mesh size
+    @param      Nw: number of positive Matsubara frequencies
+    @param   ham_r: hopping matrix H(R) [Nr, Norb, Norb] complex128
+    @param     S_r: overlap matrix S(R); [] for an orthogonal basis
+    @param    rvec: R-vectors [Nr, 3]
+    @param      mu: starting chemical potential [eV]
+    @param    temp: temperature k_B*T [eV]
+    @param   olist: orbital-pair basis of chi [Nchi, 2] int64
+    @param    site: site index of each orbital [Norb] int64
+    @param orb_dep: True uses the orbital-dependent Umat/Jmat, False the scalar U/J
+    @param    U, J: on-site Hubbard U and Hund J [eV] (U' = U - 2J is used internally)
+    @param    fill: band filling that fixes mu each iteration
+    @param sw_out_self: write the converged self-energy to disk
+    @param sw_in_self: start from the stored self-energy instead of Sigma = 0
+    @param Umat, Jmat: orbital-resolved U and J [Norb, Norb] (orb_dep only)
+    @param     eps: convergence tolerance of the self-consistency loop
+    @param      pp: linear mixing weight of the new self-energy
+    @param  m_diis: DIIS subspace size (0 disables DIIS)
+    @param sw_rescale: rescale the interaction to keep the Stoner factor below 1
+    @param sw_tail: add the high-frequency tail correction to chi0
+    @param sigma_scale: scale factor applied to a self-energy read from file
+    @return None
+    """
     state = _prepare_kspace_state(Nx, Ny, Nz, ham_r, S_r, rvec, need_ham=True)
     # FLEX uses the irreducible k-mesh Green's function together with the same orbital-pair
     # interaction basis used in the response routines above.
     Smat, Cmat = _prepare_normal_interaction(olist, site, orb_dep, U, J, Umat, Jmat)
     if sw_in_self:
         _auto_regrid_sigma_seed(temp, Nw)
-    sigmak, mu_self = flibs.mkself(Smat, Cmat, state['kmap'], state['invk'], olist, state['ham_k'], state['eig'], state['uni'],
-                                   mu, fill, temp, Nw, Nx, Ny, Nz, sw_out_self, sw_in_self,
-                                   eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale, sw_tail=sw_tail,
+    sigmak, mu_self = flibs.mkself(Smat, Cmat, state['kmap'], state['invk'], olist, state['ham_k'], state['eig'],
+                                   state['uni'], mu, fill, temp, Nw, Nx, Ny, Nz, sw_out_self, sw_in_self, eps=eps,
+                                   pp=pp, m_diis=m_diis, sw_rescale=sw_rescale, sw_tail=sw_tail,
                                    sigma_scale=sigma_scale)
     if sw_out_self:
         np.savez('self_en', sigmak, mu_self)
-        output_self_wannier(sigmak, mu_self, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
+        _wannier_io.output_self_wannier(sigmak, mu_self, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
 
-def calc_flex_soc(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, mu:float, temp:float,
-                  olist, slist, invs, site,
-                  orb_dep:bool, U:float, J:float, fill:float,
-                  sw_out_self:bool, sw_in_self:bool,
-                  Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True,
-                  sigma_scale:float=1.0):
+
+def calc_flex_soc(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray, mu: float,
+                  temp: float, olist: np.ndarray, slist: np.ndarray, invs: np.ndarray, site: np.ndarray, orb_dep: bool,
+                  U: float, J: float, fill: float, sw_out_self: bool, sw_in_self: bool, Umat: np.ndarray | None = None,
+                  Jmat: np.ndarray | None = None, eps: float = 1.0e-4, pp: float = 0.5, m_diis: int = 5,
+                  sw_rescale: bool = True, sigma_scale: float = 1.0) -> None:
+    """
+    @fn calc_flex_soc
+    @brief Solve the FLEX self-energy loop WITH spin-orbit coupling.
+
+    Same loop as calc_flex, but the spin-resolved basis makes the spin and charge
+    channels mix, so the separate S/C matrices are replaced by the single SOC
+    vertex Vmat and the Fortran entry point is mkself_soc.  Output handling is
+    identical to calc_flex.
+
+    @param Nx, Ny, Nz: k-mesh size
+    @param      Nw: number of positive Matsubara frequencies
+    @param   ham_r: hopping matrix H(R) [Nr, Norb, Norb] complex128 (spin-resolved basis)
+    @param     S_r: overlap matrix S(R); [] for an orthogonal basis
+    @param    rvec: R-vectors [Nr, 3]
+    @param      mu: starting chemical potential [eV]
+    @param    temp: temperature k_B*T [eV]
+    @param   olist: orbital-pair basis of chi [Nchi, 2] int64
+    @param   slist: spin label of each orbital [Norb] int64
+    @param    invs: spin-flip index map [Norb] int64
+    @param    site: site index of each orbital [Norb] int64
+    @param orb_dep: True uses the orbital-dependent Umat/Jmat, False the scalar U/J
+    @param    U, J: on-site Hubbard U and Hund J [eV]
+    @param    fill: band filling that fixes mu each iteration (total, not per spin)
+    @param sw_out_self: write the converged self-energy to disk
+    @param sw_in_self: start from the stored self-energy instead of Sigma = 0
+    @param Umat, Jmat: orbital-resolved U and J [Norb, Norb] (orb_dep only)
+    @param     eps: convergence tolerance of the self-consistency loop
+    @param      pp: linear mixing weight of the new self-energy
+    @param  m_diis: DIIS subspace size (0 disables DIIS)
+    @param sw_rescale: rescale the interaction to keep the Stoner factor below 1
+    @param sigma_scale: scale factor applied to a self-energy read from file
+    @return None
+    """
     state = _prepare_kspace_state(Nx, Ny, Nz, ham_r, S_r, rvec, need_ham=True)
     Vmat = _prepare_soc_interaction(olist, slist, site, invs, orb_dep, U, J, Umat, Jmat)
     if sw_in_self:
         _auto_regrid_sigma_seed(temp, Nw)
-    sigmak, mu_self = flibs.mkself_soc(Vmat, state['kmap'], state['invk'], invs, olist, slist, state['ham_k'], state['eig'], state['uni'],
-                                       mu, fill, temp, Nw, Nx, Ny, Nz, sw_out_self, sw_in_self,
-                                       eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale,
+    sigmak, mu_self = flibs.mkself_soc(Vmat, state['kmap'], state['invk'], invs, olist, slist, state['ham_k'],
+                                       state['eig'], state['uni'], mu, fill, temp, Nw, Nx, Ny, Nz, sw_out_self,
+                                       sw_in_self, eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale,
                                        sigma_scale=sigma_scale)
     if sw_out_self:
         np.savez('self_en', sigmak, mu_self)
-        output_self_wannier(sigmak, mu_self, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
+        _wannier_io.output_self_wannier(sigmak, mu_self, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
 
-def calc_lin_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, chiolist, site, plist,
-                           mu:float, temp:float, gap_sym:int, sw_self:bool, orb_dep:bool, U:float, J:float,
-                           fill:float, sw_from_file:bool, sw_out_self:bool, sw_in_self:bool,
-                           Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True,
-                           sw_tail:bool=False, sigma_scale:float=1.0, sw_gap_extrapolate:bool=False, iperm=None,
-                           gap_extrap_points=4, gap_extrap_order=1):
+
+def calc_lin_eliashberg_eq(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray,
+                           chiolist: np.ndarray, site: np.ndarray, plist: np.ndarray, mu: float, temp: float,
+                           gap_sym: int, sw_self: bool, orb_dep: bool, U: float, J: float, fill: float,
+                           sw_from_file: bool, sw_out_self: bool, sw_in_self: bool, Umat: np.ndarray | None = None,
+                           Jmat: np.ndarray | None = None, eps: float = 1.0e-4, pp: float = 0.5, m_diis: int = 5,
+                           sw_rescale: bool = True, sw_tail: bool = False, sigma_scale: float = 1.0,
+                           sw_gap_extrapolate: bool = False, iperm: np.ndarray | None = None,
+                           gap_extrap_points: int = 4, gap_extrap_order: int = 1) -> None:
+    """
+    @fn calc_lin_eliashberg_eq
+    @brief Solve the linearized Eliashberg equation (no SOC) and report lambda.
+
+    Runs the whole chain: k-space state -> Coulomb vertex -> Green's function
+    (optionally through the FLEX self-energy when sw_self) -> chi0 -> chi_s/chi_c
+    -> pairing kernel -> leading eigenvalue.  lambda_eliash = 1 marks Tc, so the
+    printed value at a given temperature says how far the model is from ordering;
+    the Stoner factor printed alongside it warns how close chi_s is to diverging.
+
+    Side effects: 'chis.dat' and 'chic.dat' receive the kz=0 plane of the leading
+    eigenvalue of chi_s and chi_c; the gap is written by output_gap_function, and
+    with sw_out_self also as 'gap.npy' plus the mesh-independent Wannier form.
+    Returns early (without writing) when the self-energy could not be prepared.
+
+    @param Nx, Ny, Nz: k-mesh size
+    @param      Nw: number of positive Matsubara frequencies
+    @param   ham_r: hopping matrix H(R) [Nr, Norb, Norb] complex128
+    @param     S_r: overlap matrix S(R); [] for an orthogonal basis
+    @param    rvec: R-vectors [Nr, 3]
+    @param chiolist: orbital-pair basis of chi [Nchi, 2] int64
+    @param    site: site index of each orbital [Norb] int64
+    @param   plist: parity sign (+1/-1) per orbital [Norb] float64
+    @param      mu: chemical potential [eV]
+    @param    temp: temperature k_B*T [eV]
+    @param gap_sym: symmetry index of the initial gap; its sign selects singlet/triplet
+    @param sw_self: True solves FLEX first, False uses the bare Green's function
+    @param orb_dep: True uses the orbital-dependent Umat/Jmat, False the scalar U/J
+    @param    U, J: on-site Hubbard U and Hund J [eV]
+    @param    fill: band filling
+    @param sw_from_file: read the self-energy from disk instead of solving FLEX
+    @param sw_out_self: write the self-energy and the gap to disk
+    @param sw_in_self: seed the FLEX loop from the stored self-energy
+    @param Umat, Jmat: orbital-resolved U and J [Norb, Norb] (orb_dep only)
+    @param eps, pp, m_diis, sw_rescale, sw_tail, sigma_scale: FLEX loop controls, see calc_flex
+    @param sw_gap_extrapolate: extrapolate Delta(iw_n) -> Delta(0) before output
+    @param   iperm: orbital permutation of the inversion operator (None = identity)
+    @param gap_extrap_points: number of Matsubara slices used by that extrapolation
+    @param gap_extrap_order: polynomial order of that fit
+    @return None
+    """
     state = _prepare_kspace_state(Nx, Ny, Nz, ham_r, S_r, rvec, need_ham=sw_self)
     Smat, Cmat = _prepare_normal_interaction(chiolist, site, orb_dep, U, J, Umat, Jmat)
     green_state = _prepare_green_state_normal(state, chiolist, (Smat, Cmat), mu, fill, temp, Nw,
@@ -741,7 +959,7 @@ def calc_lin_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, chi
     if green_state is None:
         return
     Gk = green_state['Gk']
-    init_delta = get_initial_gap(state['klist'], len(state['eig'].T), gap_sym)
+    init_delta = _response.get_initial_gap(state['klist'], len(state['eig'].T), gap_sym)
     sw_eig = True  # True: leading eigenvalue (most-unstable mode); False: trace
     chi, stoner = _get_chi0_normal(state, Gk, chiolist, Smat, Cmat, green_state['mu_self'],
                                    temp, Nx, Ny, Nz, sw_tail)
@@ -754,24 +972,74 @@ def calc_lin_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, chi
                 if k[2] == 0.0:
                     f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chisq[i].real:11.4e}\n')
                     f2.write(f'{k[0]:6.4f} {k[1]:6.4f} {chicq[i].real:11.4e}\n')
-    except IOError as e:
+    except OSError as e:
         print(f"Error: Failed to write 'chis.dat' or 'chic.dat': {e}", flush=True)
     gap, lambda_eliash = flibs.linearized_eliashberg(chi, Gk, state['uni'], init_delta, Smat, Cmat, chiolist, plist,
-                                      state['kmap'], state['invk'], Nx, Ny, Nz, temp, gap_sym, iperm=iperm)
+                                                     state['kmap'], state['invk'], Nx, Ny, Nz, temp, gap_sym,
+                                                     iperm=iperm)
     print(f'Stoner factor = {stoner:.6f}, lambda_eliash = {lambda_eliash:.6f}', flush=True)
     if sw_out_self:
         np.save('gap', gap)
-        output_gap_wannier(gap, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
+        _wannier_io.output_gap_wannier(gap, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
     output_gap_function(state['invk'], state['kmap'], gap, state['uni'], plist, gap_sym, Nx, iperm=iperm,
                         sw_extrapolate=sw_gap_extrapolate, temp=temp,
                         n_points=gap_extrap_points, order=gap_extrap_order)
 
-def calc_lin_eliash_soc(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, mu:float, temp:float,
-                        chiolist, slist, plist, invs, site, orb_dep:bool, U:float, J:float, fill:float,
-                        gap_sym:int, sw_self:bool, sw_from_file:bool, sw_out_self:bool, sw_in_self:bool,
-                        Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True,
-                        sigma_scale:float=1.0, sw_gap_extrapolate:bool=False,
-                        gap_extrap_points=4, gap_extrap_order=1):
+
+def calc_lin_eliash_soc(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray,
+                        mu: float, temp: float, chiolist: np.ndarray, slist: np.ndarray, plist: np.ndarray,
+                        invs: np.ndarray, site: np.ndarray, orb_dep: bool, U: float, J: float, fill: float,
+                        gap_sym: int, sw_self: bool, sw_from_file: bool, sw_out_self: bool, sw_in_self: bool,
+                        Umat: np.ndarray | None = None, Jmat: np.ndarray | None = None, eps: float = 1.0e-4,
+                        pp: float = 0.5, m_diis: int = 5, sw_rescale: bool = True, sigma_scale: float = 1.0,
+                        sw_gap_extrapolate: bool = False, gap_extrap_points: int = 4,
+                        gap_extrap_order: int = 1) -> None:
+    """
+    @fn calc_lin_eliash_soc
+    @brief Solve the linearized Eliashberg equation WITH spin-orbit coupling.
+
+    Same chain as calc_lin_eliashberg_eq, but in the spin-resolved basis: one SOC
+    vertex Vmat replaces the S/C pair, and chi0 comes back with the sign tables
+    (sgnsig, sgnsig2) and the inverse orbital map invschi that the SOC pairing
+    kernel needs.  Because spin is no longer a good quantum number, chi_s splits
+    into a longitudinal (chi_szz) and a transverse (chi_spm) channel and both are
+    written to 'chis.dat'; 'chic.dat' holds the charge channel.  Returns early
+    when the self-energy could not be prepared.
+
+    lambda_eliash is reported exactly as in the non-SOC path: the Fortran driver
+    prints 'lambda_elsh=' every iteration and 'eliash=' on convergence, and hands
+    the converged value back through lambda_out, which is printed here.  The only
+    remaining difference is that no Stoner factor accompanies it: the SOC chi0
+    entry point does not return one, and the quantity is defined differently in
+    the spin-resolved basis, so it is deliberately not reported here.
+
+    @param Nx, Ny, Nz: k-mesh size
+    @param      Nw: number of positive Matsubara frequencies
+    @param   ham_r: hopping matrix H(R) [Nr, Norb, Norb] complex128 (spin-resolved basis)
+    @param     S_r: overlap matrix S(R); [] for an orthogonal basis
+    @param    rvec: R-vectors [Nr, 3]
+    @param      mu: chemical potential [eV]
+    @param    temp: temperature k_B*T [eV]
+    @param chiolist: orbital-pair basis of chi [Nchi, 2] int64
+    @param   slist: spin label of each orbital [Norb] int64
+    @param   plist: parity sign (+1/-1) per orbital [Norb] float64
+    @param    invs: spin-flip index map [Norb] int64
+    @param    site: site index of each orbital [Norb] int64
+    @param orb_dep: True uses the orbital-dependent Umat/Jmat, False the scalar U/J
+    @param    U, J: on-site Hubbard U and Hund J [eV]
+    @param    fill: band filling (total, not per spin)
+    @param gap_sym: symmetry index of the initial gap
+    @param sw_self: True solves FLEX first, False uses the bare Green's function
+    @param sw_from_file: read the self-energy from disk instead of solving FLEX
+    @param sw_out_self: write the self-energy and the gap to disk
+    @param sw_in_self: seed the FLEX loop from the stored self-energy
+    @param Umat, Jmat: orbital-resolved U and J [Norb, Norb] (orb_dep only)
+    @param eps, pp, m_diis, sw_rescale, sigma_scale: FLEX loop controls, see calc_flex_soc
+    @param sw_gap_extrapolate: extrapolate Delta(iw_n) -> Delta(0) before output
+    @param gap_extrap_points: number of Matsubara slices used by that extrapolation
+    @param gap_extrap_order: polynomial order of that fit
+    @return None
+    """
     state = _prepare_kspace_state(Nx, Ny, Nz, ham_r, S_r, rvec, need_ham=sw_self)
     Vmat = _prepare_soc_interaction(chiolist, slist, site, invs, orb_dep, U, J, Umat, Jmat)
     green_state = _prepare_green_state_soc(state, chiolist, slist, invs, Vmat, mu, fill, temp, Nw,
@@ -782,7 +1050,8 @@ def calc_lin_eliash_soc(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, mu:flo
         return
     Gk = green_state['Gk']
     sw_eig = True  # True: leading eigenvalue (most-unstable mode); False: trace
-    chi, sgnsig, sgnsig2, invschi = flibs.get_chi0_soc(Vmat, Gk, chiolist, slist, state['kmap'], state['invk'], invs, temp, Nx, Ny, Nz)
+    chi, sgnsig, sgnsig2, invschi = flibs.get_chi0_soc(Vmat, Gk, chiolist, slist, state['kmap'], state['invk'], invs,
+                                                       temp, Nx, Ny, Nz)
     chic, chiszz, chispm = flibs.get_chis_chic_soc(chi, Vmat, chiolist, slist, invs)
     chiszzq = flibs.get_eig_or_tr_chi(chiszz, state['invk'], sw_eig)
     chispmq = flibs.get_eig_or_tr_chi(chispm, state['invk'], sw_eig)
@@ -793,24 +1062,29 @@ def calc_lin_eliash_soc(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec, mu:flo
                 if k[2] == 0.0:
                     f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chiszzq[i].real:11.4e} {chispmq[i].real:11.4e}\n')
                     f2.write(f'{k[0]:6.4f} {k[1]:6.4f} {chicq[i].real:11.4e}\n')
-    except IOError as e:
+    except OSError as e:
         print(f"Error: Failed to write 'chis.dat' or 'chic.dat': {e}", flush=True)
-    init_delta = get_initial_gap(state['klist'], len(slist), gap_sym)
-    gap = flibs.linearized_eliashberg_soc(chi, Gk, state['uni'], init_delta, Vmat, sgnsig, sgnsig2, plist, slist, chiolist,
-                                          state['kmap'], state['invk'], invs, invschi, Nx, Ny, Nz, temp, gap_sym)
+    init_delta = _response.get_initial_gap(state['klist'], len(slist), gap_sym)
+    gap, lambda_eliash = flibs.linearized_eliashberg_soc(chi, Gk, state['uni'], init_delta, Vmat, sgnsig, sgnsig2,
+                                                         plist, slist, chiolist, state['kmap'], state['invk'],
+                                                         invs, invschi, Nx, Ny, Nz, temp, gap_sym)
+    print(f'lambda_eliash = {lambda_eliash:.6f}', flush=True)
     if sw_out_self:
         np.save('gap', gap)
-        output_gap_wannier(gap, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
+        _wannier_io.output_gap_wannier(gap, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
     output_gap_function(state['invk'], state['kmap'], gap, state['uni'], plist, gap_sym, Nx, True, invs, slist,
                         sw_extrapolate=sw_gap_extrapolate, temp=temp,
                         n_points=gap_extrap_points, order=gap_extrap_order)
 
-def calc_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec,
-                       chiolist, site, plist, mu:float, temp:float, gap_sym:int, sw_self:bool,
-                       orb_dep:bool, U:float, J:float, fill:float, sw_from_file:bool, sw_out_self:bool,
-                       sw_in_self:bool, Umat=None, Jmat=None, eps=1.0e-4, pp=0.5, m_diis=5, sw_rescale:bool=True,
-                       sw_check_only:bool=False, sw_tail:bool=False, sigma_scale:float=1.0,
-                       sw_gap_extrapolate:bool=False, gap_extrap_points=4, gap_extrap_order=1, iperm=None):
+
+def calc_eliashberg_eq(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray,
+                       chiolist: np.ndarray, site: np.ndarray, plist: np.ndarray, mu: float, temp: float, gap_sym: int,
+                       sw_self: bool, orb_dep: bool, U: float, J: float, fill: float, sw_from_file: bool,
+                       sw_out_self: bool, sw_in_self: bool, Umat: np.ndarray | None = None,
+                       Jmat: np.ndarray | None = None, eps: float = 1.0e-4, pp: float = 0.5, m_diis: int = 5,
+                       sw_rescale: bool = True, sw_check_only: bool = False, sw_tail: bool = False,
+                       sigma_scale: float = 1.0, sw_gap_extrapolate: bool = False, gap_extrap_points: int = 4,
+                       gap_extrap_order: int = 1, iperm: np.ndarray | None = None) -> None:
     """
     @param sw_check_only: If True, stop after the linearized Eliashberg solve (before the
                           nonlinear loop) and report the Stoner factor and lambda_eliash.
@@ -828,7 +1102,7 @@ def calc_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec,
         return
     Gk = green_state['Gk']
     mu_self = green_state['mu_self']
-    delta_init_band = get_initial_gap(state['klist'], len(state['eig'].T), gap_sym)
+    delta_init_band = _response.get_initial_gap(state['klist'], len(state['eig'].T), gap_sym)
     # Use linearized Eliashberg to obtain a symmetry-correct initial gap.
     # Alternative: flibs.get_initial_delta (plain orbital projection, kept for reference).
     if True:
@@ -841,8 +1115,8 @@ def calc_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec,
                   f"nonlinear Eliashberg.", flush=True)
             return
         delta_init, lambda_eliash = flibs.linearized_eliashberg(chi, Gk, state['uni'], delta_init_band, Smat, Cmat,
-                                                 chiolist, plist, state['kmap'], state['invk'], Nx, Ny, Nz, temp, gap_sym,
-                                                 iperm=iperm)
+                                                                chiolist, plist, state['kmap'], state['invk'], Nx, Ny,
+                                                                Nz, temp, gap_sym, iperm=iperm)
         print(f'Stoner factor = {stoner:.6f}, lambda_eliash = {lambda_eliash:.6f}', flush=True)
         if lambda_eliash < 1.0:
             print(f"lambda_eliash = {lambda_eliash:.6f} < 1: no superconducting instability "
@@ -852,10 +1126,10 @@ def calc_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec,
             print("sw_check_only=True: stopping after linearized Eliashberg.", flush=True)
             return
     else:
-        delta_init_band = get_initial_gap(state['klist'], len(state['eig'].T), gap_sym)
+        delta_init_band = _response.get_initial_gap(state['klist'], len(state['eig'].T), gap_sym)
         delta_init = flibs.get_initial_delta(delta_init_band, state['uni'], state['kmap'], state['invk'], Nw, gap_sym)
     # BCS weak-coupling ratio: Δ₀ = 1.764 kB Tc; scale initial gap to this amplitude.
-    target_gap = BCS_RATIO * temp
+    target_gap = _eilenberger.BCS_RATIO * temp
     delta_max = np.abs(delta_init).max()
     if delta_max > 0.0:
         # Only the shape from the linearized eigenvector matters here; the nonlinear solver
@@ -868,7 +1142,7 @@ def calc_eliashberg_eq(Nx:int, Ny:int, Nz:int, Nw:int, ham_r, S_r, rvec,
                                                sw_sigma=sw_self, sw_Vconst=True, eps=eps, m_diis=m_diis, iperm=iperm)
     if sw_out_self:
         np.save('gap', delta)
-        output_gap_wannier(delta, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
+        _wannier_io.output_gap_wannier(delta, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
     output_gap_function(state['invk'], state['kmap'], delta, state['uni'], plist, gap_sym, Nx, iperm=iperm,
                         sw_extrapolate=sw_gap_extrapolate, temp=temp,
                         n_points=gap_extrap_points, order=gap_extrap_order)

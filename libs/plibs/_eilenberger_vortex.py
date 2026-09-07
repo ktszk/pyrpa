@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#-*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
 """
 Vortex quasiclassical Eilenberger solver via the Riccati equation: the isolated
 vortex (axisymmetric s-wave and the general 2D solver) and, at the end of the
@@ -28,22 +28,31 @@ potential phase along trajectories, and quasi-periodic (magnetic-Bloch) boundary
 conditions -- on top of the same chord integration and self-consistency here.
 """
 import numpy as np
-from scipy.interpolate import RegularGridInterpolator
-from ._eilenberger import matsubara, form_factor, fs_hvf, fs_field_frame
-from ._eilenberger_surface import _bulk_gap, _bulk_gap_imp
-from ..flibs import (riccati_chords, riccati_chords_bc, bilinear_eval,
-                     bilinear_cell_eval, abrikosov_z)
+import scipy.interpolate as scinterp
+import libs.plibs._eilenberger as _eilenberger
+import libs.plibs._eilenberger_surface as _eilenberger_surface
+import libs.flibs as flibs
+import collections.abc
+
+# Public API of this submodule; keeps `from ._x import *` in __init__.py from
+# re-exporting numpy, scipy, ctypes and the sibling packages imported above.
+__all__ = [
+    'solve_vortex', 'vortex_ldos', 'solve_vortex2d', 'vortex_ldos2d', 'vortex_field_profile', 'calc_vortex',
+    'calc_vortex_lattice', 'solve_lattice', 'lattice_dos', 'calc_vortex_lattice_periodic', 'vortex_current2d',
+    'vortex_current_profile', 'calc_vortex_current', 'calc_vortex_maxwell', 'solve_lattice_sc', 'lattice_dos_sc',
+    'lattice_free_energy', 'calc_vortex_lattice_symmetry', 'calc_vortex_lattice_sc'
+]
 
 
-def _chords_batch(om3: np.ndarray, dd3: np.ndarray, hvf: float, ds):
+def _chords_batch(om3: np.ndarray, dd3: np.ndarray, hvf: float, ds: float) -> tuple[np.ndarray, np.ndarray]:
     """Batched scalar g, f over all chords [Ns, Nchord, Nw] via the Fortran
     riccati_chords kernel (forward gamma + backward gamma-tilde + combine).  ds is
     scalar or per-chord [Nchord]."""
-    return riccati_chords(om3, dd3, hvf, ds)
+    return flibs.riccati_chords(om3, dd3, hvf, ds)
 
 
 def _eval_field(field: np.ndarray, xg: np.ndarray, px: np.ndarray, py: np.ndarray,
-                fill=0.0) -> np.ndarray:
+                fill: float = 0.0) -> np.ndarray:
     """Evaluate a grid field at scattered points (px, py).  ``field`` is
     [ng, ng] or [ng, ng, Nw] on the uniform axis ``xg``; returns px.shape
     (+ (Nw,)).  Bilinear, ``fill`` outside the grid -- the Fortran kernel
@@ -51,7 +60,7 @@ def _eval_field(field: np.ndarray, xg: np.ndarray, px: np.ndarray, py: np.ndarra
     field stays real (that is how the gap amplitude is sampled, fill=Dbulk); a
     complex field gets ``fill`` itself outside, not fill*(1+1j) as interpolating
     the real and imaginary parts with two scipy interpolators would."""
-    return bilinear_eval(field, xg, px, py, fill)
+    return flibs.bilinear_eval(field, xg, px, py, fill)
 
 
 def _delta_grid(Dr: np.ndarray, rgrid: np.ndarray, Rg: np.ndarray, phase: np.ndarray,
@@ -62,7 +71,7 @@ def _delta_grid(Dr: np.ndarray, rgrid: np.ndarray, Rg: np.ndarray, phase: np.nda
     return Damp * phase
 
 
-def _grid(Lxi: float, xi: float, ngrid: int):
+def _grid(Lxi: float, xi: float, ngrid: int) -> tuple:
     """Square (x, y) grid of half width Lxi*xi, the phase factor e^{i theta} and
     the radius on the grid, plus a radial grid for the amplitude profile."""
     R = Lxi * xi
@@ -75,7 +84,7 @@ def _grid(Lxi: float, xi: float, ngrid: int):
 
 
 def _azimuthal(field: np.ndarray, xg: np.ndarray, rgrid: np.ndarray,
-               theta: np.ndarray, weight_phase: bool):
+               theta: np.ndarray, weight_phase: bool) -> np.ndarray:
     """Azimuthal average of a complex (x, y, Nw) field on circles of radius rgrid.
     If weight_phase, multiply by e^{-i theta} first (gap equation: projects out the
     vortex winding); otherwise plain average (LDOS).
@@ -90,7 +99,7 @@ def _azimuthal(field: np.ndarray, xg: np.ndarray, rgrid: np.ndarray,
 
 def solve_vortex(coupling: float, temp: float, omega: np.ndarray, Dbulk: float = None,
                  Lxi: float = 8.0, ngrid: int = 81, ntheta: int = 48, hvf: float = 1.0,
-                 eps: float = 1.0e-3, itemax: int = 100, mix: float = 0.3):
+                 eps: float = 1.0e-3, itemax: int = 100, mix: float = 0.3) -> tuple:
     """
     @fn solve_vortex
     @brief Self-consistently solve the radial amplitude D(rho) of an isolated
@@ -107,7 +116,7 @@ def solve_vortex(coupling: float, temp: float, omega: np.ndarray, Dbulk: float =
     @return (rgrid, Dr, Dbulk, xi): radial grid, amplitude profile, bulk gap, xi
     """
     if Dbulk is None:
-        Dbulk = _bulk_gap(coupling, temp, omega, np.ones(16))   # s-wave, <phi^2>=1
+        Dbulk = _eilenberger_surface._bulk_gap(coupling, temp, omega, np.ones(16))   # s-wave, <phi^2>=1
     if Dbulk < 1.0e-6 * temp:
         xi = hvf / (np.pi * max(temp, 1e-12))
         rgrid = np.linspace(0.0, Lxi * xi, ngrid // 2)
@@ -137,7 +146,7 @@ def solve_vortex(coupling: float, temp: float, omega: np.ndarray, Dbulk: float =
 
 def vortex_ldos(Dr: np.ndarray, rgrid: np.ndarray, xi: float, wlist: np.ndarray,
                 Dbulk: float, delta: float = None, Lxi: float = 8.0, ngrid: int = 81,
-                ntheta: int = 48, hvf: float = 1.0, rho_list: np.ndarray = None):
+                ntheta: int = 48, hvf: float = 1.0, rho_list: np.ndarray = None) -> tuple:
     """
     @fn vortex_ldos
     @brief Local density of states N(rho, w)/N0 from the converged vortex profile,
@@ -173,7 +182,7 @@ def vortex_ldos(Dr: np.ndarray, rgrid: np.ndarray, xi: float, wlist: np.ndarray,
 # the rotational symmetry of the s-wave vortex is reduced to fourfold.
 
 
-def _reject_chiral_ff(gap_sym, solver: str):
+def _reject_chiral_ff(gap_sym: int | str | None, solver: str) -> None:
     """The scalar self-consistent vortex solvers enforce a REAL amplitude ansatz
     Delta = phi(beta) A(r) e^{i theta} (update: (accf e^{-i theta}).real >= 0).
     For a real phi the mirror symmetry beta -> 2 theta - beta makes the discarded
@@ -185,7 +194,7 @@ def _reject_chiral_ff(gap_sym, solver: str):
     the multi-component complex-amplitude solvers (_eilenberger_spin, per-channel
     windings).  Detected by evaluating phi, so any future chiral harmonic is
     covered automatically."""
-    phi = form_factor(np.linspace(0.0, 2.0 * np.pi, 12, endpoint=False), gap_sym)
+    phi = _eilenberger.form_factor(np.linspace(0.0, 2.0 * np.pi, 12, endpoint=False), gap_sym)
     if np.abs(np.imag(phi)).max() > 1e-12:
         raise ValueError(
             f"{solver}: chiral (complex) form factor {gap_sym!r} is not supported by the "
@@ -193,7 +202,7 @@ def _reject_chiral_ff(gap_sym, solver: str):
             "in _eilenberger_spin (main.py: eil_vort_dvector) instead")
 
 
-def _doppler_chord(Lx, Ly, Rc, cb, sb, rho_min):
+def _doppler_chord(Lx: float, Ly: float, Rc: float, cb: float, sb: float, rho_min: float) -> np.ndarray:
     """Field (vector-potential) Doppler shift along a chord for the circular cell.
 
     Here the order parameter keeps its vortex phase e^{i theta} (formulation A), so
@@ -215,7 +224,8 @@ def _doppler_chord(Lx, Ly, Rc, cb, sb, rho_min):
     return np.where(rho2 < Rc ** 2, delta, 0.0)
 
 
-def _doppler_aphi(Lx, Ly, Rc, cb, sb, rho_min, rgrid, aphi):
+def _doppler_aphi(Lx: float, Ly: float, Rc: float, cb: float, sb: float, rho_min: float, rgrid: np.ndarray,
+                  aphi: np.ndarray) -> np.ndarray:
     """Field Doppler shift -v_F.A from a SELF-CONSISTENT radial vector potential
     A_theta(rho) (finite-kappa Maxwell back-reaction), replacing the uniform-field
     _doppler_chord.  delta = -A_theta(rho) (v_hat . theta_hat); outside the tabulated
@@ -231,8 +241,8 @@ def _doppler_aphi(Lx, Ly, Rc, cb, sb, rho_min, rgrid, aphi):
 def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str = 'd',
                    Dbulk: float = None, Lxi: float = 8.0, ngrid: int = 49, nbeta: int = 24,
                    hvf: float = 1.0, imp_gamma: float = 0.0, imp_c: float = 1.0e8,
-                   field: float = 0.0, fs: dict = None, qprof=None, eps: float = 2.0e-3,
-                   itemax: int = 80, mix: float = 0.3, bdir=None):
+                   field: float = 0.0, fs: dict = None, qprof: np.ndarray | None = None, eps: float = 2.0e-3,
+                   itemax: int = 80, mix: float = 0.3, bdir: np.ndarray | None = None) -> tuple:
     """
     @fn solve_vortex2d
     @brief Self-consistently solve the complex 2D order-parameter field Psi(r) of a
@@ -276,7 +286,7 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
     use_fs = fs is not None
     # representative velocity scale (sets the coherence length xi); per-direction
     # |v_F| is used in each Riccati and Doppler so the field effect is consistent
-    frame = fs_field_frame(fs, bdir, gap_sym) if use_fs else None
+    frame = _eilenberger.fs_field_frame(fs, bdir, gap_sym) if use_fs else None
     # A finite field needs no special treatment for a tilted B, because the Doppler term
     # is FORM INVARIANT under the (area-preserving) rescaling of the two axes.  With
     # u = c1 r1, w = c2 r2 and c1 c2 = 1:
@@ -292,11 +302,12 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
     bfull = np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False)
     if Dbulk is None:
         if use_fs:
-            from ._eilenberger import bulk_gap_fs
-            Dbulk = bulk_gap_fs(coupling, temp, omega, fs, gap_sym)
+            Dbulk = _eilenberger.bulk_gap_fs(coupling, temp, omega, fs, gap_sym)
         else:
-            Dbulk = (_bulk_gap(coupling, temp, omega, form_factor(bfull, gap_sym)) if no_imp
-                     else _bulk_gap_imp(coupling, temp, omega, form_factor(bfull, gap_sym), imp_gamma, imp_c))
+            ff_bulk = _eilenberger.form_factor(bfull, gap_sym)
+            Dbulk = (_eilenberger_surface._bulk_gap(coupling, temp, omega, ff_bulk) if no_imp
+                     else _eilenberger_surface._bulk_gap_imp(coupling, temp, omega, ff_bulk,
+                                                             imp_gamma, imp_c))
     if Dbulk < 1.0e-6 * temp:
         xi = hvf_eff / (np.pi * max(temp, 1e-12))
         xg = np.linspace(-Lxi * xi, Lxi * xi, ngrid)
@@ -320,7 +331,7 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
         nbeta = len(dirs)
     else:                                               # isotropic cylinder (v_hat = k_hat, uniform)
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
-        phi = form_factor(dirs, gap_sym)
+        phi = _eilenberger.form_factor(dirs, gap_sym)
         hvfarr = np.full(nbeta, hvf)
         wt_dir = np.full(nbeta, 1.0 / nbeta)
     SS, BB = np.meshgrid(xg, xg, indexing='ij')        # rotated-frame sample grid (s, b)
@@ -350,7 +361,7 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
                 # gap and Doppler are frequency independent: the broadcast-aware
                 # kernel takes them as [ns,nb] instead of two [ns,nb,Nw] arrays
                 dom = None if dch is None else 1j * hvf_i * dch
-                g_rot, f_rot = riccati_chords_bc(omega, base, hvf_i, dx, dom=dom)
+                g_rot, f_rot = flibs.riccati_chords_bc(omega, base, hvf_i, dx, dom=dom)
             if not use_pos:
                 sumf = f_rot.sum(axis=2)
                 accf += wt_dir[ib] * np.conj(phi[ib]) * _eval_field(sumf, xg, sxy, bxy, fill=0.0)
@@ -385,11 +396,11 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
     return xg, A * np.exp(1j * theta), Dbulk, xi
 
 
-def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
-                  gap_sym: str, Dbulk: float, delta: float = None, nbeta: int = 36,
-                  hvf: float = 1.0, imp_gamma: float = 0.0, imp_c: float = 1.0e8,
-                  field: float = 0.0, h: float = 0.0, fs: dict = None, qprof=None, bdir=None,
-                  eps: float = 3.0e-3, itemax: int = 60, mix: float = 0.5):
+def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray, gap_sym: str, Dbulk: float,
+                  delta: float = None, nbeta: int = 36, hvf: float = 1.0, imp_gamma: float = 0.0, imp_c: float = 1.0e8,
+                  field: float = 0.0, h: float = 0.0, fs: dict = None, qprof: np.ndarray | None = None,
+                  bdir: np.ndarray | None = None, eps: float = 3.0e-3, itemax: int = 60,
+                  mix: float = 0.5) -> np.ndarray:
     """
     @fn vortex_ldos2d
     @brief 2D local density of states N(x,y,w)/N0 from a converged Psi field, via
@@ -415,13 +426,12 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
     use_pos = (not no_imp) or (field > 0.0)
     use_fs = fs is not None
     if use_fs:
-        from ._eilenberger import fs_form_factor
         # trajectories in the plane PERPENDICULAR to B (fs_field_frame; bdir=None is
         # the c axis and reproduces the historical (x,y) set bit for bit).  The
         # Doppler/supercurrent needs no change: the rescaling of the two axes is
         # area preserving, so v.p_s is form invariant in the scaled plane -- see the
         # derivation in solve_vortex2d.
-        _fr = fs_field_frame(fs, bdir, gap_sym)
+        _fr = _eilenberger.fs_field_frame(fs, bdir, gap_sym)
         dirs = _fr['dirs']
         phi = _fr['phi']
         hvfarr = _fr['vabs']
@@ -429,7 +439,7 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
         nbeta = len(dirs)
     else:
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
-        phi = form_factor(dirs, gap_sym)
+        phi = _eilenberger.form_factor(dirs, gap_sym)
         hvfarr = np.full(nbeta, hvf)
         wt_dir = np.full(nbeta, 1.0 / nbeta)
     gpref = imp_gamma * (imp_c ** 2 + 1.0)
@@ -450,7 +460,7 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
         else:
             dopp.append(_doppler_chord(Lx, Ly, Rc, cb, sb, rho_min))
 
-    def _sector(zomega):
+    def _sector(zomega: complex) -> np.ndarray:
         """N(x,y,w) for a given (possibly spin-shifted) retarded frequency [Nw]."""
         wt = np.broadcast_to(zomega, (ngrid, ngrid, Nw)).copy()
         sigf = np.zeros((ngrid, ngrid, Nw), dtype=np.complex128)
@@ -462,7 +472,7 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
                 sxy, bxy, Lx, Ly = sxyb[ib]
                 if no_imp:      # frequency-independent gap/Doppler -> broadcast kernel
                     dom = None if dopp[ib] is None else 1j * hvfarr[ib] * dopp[ib]
-                    g_rot, _ = riccati_chords_bc(zomega, base[ib], hvfarr[ib], dx, dom=dom)
+                    g_rot, _ = flibs.riccati_chords_bc(zomega, base[ib], hvfarr[ib], dx, dom=dom)
                     gacc += wt_dir[ib] * _eval_field(g_rot, xg, sxy, bxy, fill=0.0)
                 else:
                     om_rot = np.broadcast_to(zomega, (ngrid, ngrid, Nw)).astype(np.complex128).copy()
@@ -494,7 +504,8 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
     return 0.5 * (_sector(base_z + 1j * h) + _sector(base_z - 1j * h))
 
 
-def vortex_field_profile(rgrid, Dr, Dbulk, xi, kappa, omega):
+def vortex_field_profile(rgrid: np.ndarray, Dr: np.ndarray, Dbulk: float, xi: float, kappa: float,
+                         omega: np.ndarray) -> tuple:
     """
     @fn vortex_field_profile
     @brief Self-consistent (finite-kappa Maxwell) magnetic field profile B(rho) of
@@ -546,11 +557,10 @@ def vortex_field_profile(rgrid, Dr, Dbulk, xi, kappa, omega):
     return rho_s, lam, Brel
 
 
-def calc_vortex(coupling: float, temp: float, wc: float, gap_sym: str = 's', kb: float = 1.0,
-                sw_ldos: bool = True, imp_gamma: float = 0.0, imp_c: float = 1.0e8,
-                field: float = 0.0, h: float = 0.0, kappa: float = 0.0, tilt_deg: float = 0.0,
-                fs_kind: str = None, fs_params=None, fs=None, Lxi: float = 8.0, ngrid: int = 81,
-                bdir=None):
+def calc_vortex(coupling: float, temp: float, wc: float, gap_sym: str = 's', kb: float = 1.0, sw_ldos: bool = True,
+                imp_gamma: float = 0.0, imp_c: float = 1.0e8, field: float = 0.0, h: float = 0.0, kappa: float = 0.0,
+                tilt_deg: float = 0.0, fs_kind: str = None, fs_params: tuple | None = None, fs: dict | None = None,
+                Lxi: float = 8.0, ngrid: int = 81, bdir: np.ndarray | None = None) -> tuple:
     """
     @fn calc_vortex
     @brief Driver: self-consistent vortex profile and (optionally) LDOS.
@@ -573,11 +583,10 @@ def calc_vortex(coupling: float, temp: float, wc: float, gap_sym: str = 's', kb:
     h_eff = h / np.cos(np.radians(tilt_deg)) if tilt_deg else h
     if gap_sym != 's' or imp_gamma != 0.0 or field > 0.0 or h_eff != 0.0 or fs_kind is not None or fs is not None:
         if fs is None and fs_kind is not None:        # build a model FS (else use the prebuilt fs)
-            from ._eilenberger import build_model_fs
-            fs = build_model_fs(fs_kind, 64, params=fs_params)
+            fs = _eilenberger.build_model_fs(fs_kind, 64, params=fs_params)
         return _calc_vortex_dwave(coupling, temp, wc, gap_sym, kb, sw_ldos, Lxi, ngrid,
                                   imp_gamma, imp_c, field, h_eff, fs, bdir=bdir)
-    omega = matsubara(temp, wc)
+    omega = _eilenberger.matsubara(temp, wc)
     print("isolated-vortex quasiclassical Eilenberger (Riccati, s-wave, clean)", flush=True)
     print(f"T={temp/kb:.2f} K, lambda={coupling:.3f}, {len(omega)} Matsubara freqs, "
           f"grid={ngrid}x{ngrid}, cell={Lxi} xi", flush=True)
@@ -592,7 +601,7 @@ def calc_vortex(coupling: float, temp: float, wc: float, gap_sym: str = 's', kb:
             fh.write("# rho/xi   D(rho)/Dbulk   D(rho)[eV]\n")
             for rj, dj in zip(rgrid, Dr):
                 fh.write(f"{rj/xi:12.5e} {dj/Dbulk:12.5e} {dj:14.6e}\n")
-    except IOError as e:
+    except OSError as e:
         print(f"Error: failed to write 'vortex_gap.dat': {e}", flush=True)
 
     if kappa > 0.0:   # self-consistent finite-kappa Maxwell field profile B(rho)
@@ -604,7 +613,7 @@ def calc_vortex(coupling: float, temp: float, wc: float, gap_sym: str = 's', kb:
                 fh.write("# rho/xi  rho_s(rho)/rho_s_bulk  lambda(rho)/xi  B(rho)/<B>\n")
                 for rj, rsj, lj, bj in zip(rgrid, rho_s, lam, Brel):
                     fh.write(f"{rj/xi:12.5e} {rsj:12.5e} {lj/xi:12.5e} {bj:12.5e}\n")
-        except IOError as e:
+        except OSError as e:
             print(f"Error: failed to write 'vortex_field.dat': {e}", flush=True)
 
     if sw_ldos:
@@ -620,13 +629,14 @@ def calc_vortex(coupling: float, temp: float, wc: float, gap_sym: str = 's', kb:
                 for iw, wj in enumerate(wlist):
                     fh.write(f"{wj/Dbulk:12.5e} " +
                              " ".join(f"{ldos[ir, iw]:11.5e}" for ir in range(len(rho_out))) + "\n")
-        except IOError as e:
+        except OSError as e:
             print(f"Error: failed to write 'vortex_ldos.dat': {e}", flush=True)
     return rgrid, Dr
 
 
-def _calc_vortex_dwave(coupling, temp, wc, gap_sym, kb, sw_ldos, Lxi, ngrid,
-                       imp_gamma=0.0, imp_c=1.0e8, field=0.0, h=0.0, fs=None, bdir=None):
+def _calc_vortex_dwave(coupling: float, temp: float, wc: float, gap_sym: int | str | None, kb: float, sw_ldos: bool,
+                       Lxi: float, ngrid: int, imp_gamma: float = 0.0, imp_c: float = 1.0e8, field: float = 0.0,
+                       h: float = 0.0, fs: dict | None = None, bdir: np.ndarray | None = None) -> tuple:
     """Driver for the general 2D vortex (non-s pairing, impurities, finite field =
     circular-cell vortex lattice, Zeeman h, and/or a model FS with Fermi velocities):
     full 2D self-consistent Psi(r), the azimuthally-averaged amplitude profile, the
@@ -634,7 +644,7 @@ def _calc_vortex_dwave(coupling, temp, wc, gap_sym, kb, sw_ldos, Lxi, ngrid,
     Zeeman-split core)."""
     # the 2D solver is far heavier per point than the radial one; use a coarser grid
     ng2d = min(ngrid, 49)
-    omega = matsubara(temp, wc)
+    omega = _eilenberger.matsubara(temp, wc)
     imp_txt = 'clean' if imp_gamma == 0 else ('Born' if imp_c > 10 else 'unitary')
     cell_txt = f"lattice B/Hc2={field:.3f}" if field > 0 else f"isolated cell={Lxi} xi"
     if h != 0.0:
@@ -660,15 +670,14 @@ def _calc_vortex_dwave(coupling, temp, wc, gap_sym, kb, sw_ldos, Lxi, ngrid,
     rgrid = np.linspace(0.0, Redge, ng2d // 2)
     amp = np.abs(Psi)
     try:
-        from scipy.interpolate import RegularGridInterpolator as _RGI
-        ai = _RGI((xg, xg), amp, bounds_error=False, fill_value=Dbulk)
+        ai = scinterp.RegularGridInterpolator((xg, xg), amp, bounds_error=False, fill_value=Dbulk)
         th = np.linspace(0.0, 2.0 * np.pi, 48, endpoint=False)
         with open('vortex_gap.dat', 'w') as fh:
             fh.write("# rho/xi   |Psi|(rho)/Dbulk\n")
             for r in rgrid:
                 val = ai(np.stack([r * np.cos(th), r * np.sin(th)], axis=1)).mean()
                 fh.write(f"{r/xi:12.5e} {val/Dbulk:12.5e}\n")
-    except IOError as e:
+    except OSError as e:
         print(f"Error: failed to write 'vortex_gap.dat': {e}", flush=True)
 
     if sw_ldos:
@@ -682,13 +691,12 @@ def _calc_vortex_dwave(coupling, temp, wc, gap_sym, kb, sw_ldos, Lxi, ngrid,
             print(f"cell-averaged zero-energy DOS  <N(0)>/N0 = {nmap[mask].mean():.4f}", flush=True)
         # anisotropy: zero-energy LDOS at rho~xi along node [110] vs antinode [100]
         try:
-            from scipy.interpolate import RegularGridInterpolator as _RGI
-            ni = _RGI((xg, xg), nmap, bounds_error=False, fill_value=0.0)
+            ni = scinterp.RegularGridInterpolator((xg, xg), nmap, bounds_error=False, fill_value=0.0)
             r1 = xi
             n_anti = float(ni([[r1, 0.0]])[0])                       # [100] antinode dir
             n_node = float(ni([[r1 / np.sqrt(2), r1 / np.sqrt(2)]])[0])  # [110] node dir
             print(f"zero-energy LDOS at rho=xi: node[110]/antinode[100] = "
-                  f"{n_node:.3f}/{n_anti:.3f} = {n_node/max(n_anti,1e-9):.2f}", flush=True)
+                  f"{n_node:.3f}/{n_anti:.3f} = {n_node/max(n_anti, 1e-9):.2f}", flush=True)
         except Exception:
             pass
         try:
@@ -698,7 +706,7 @@ def _calc_vortex_dwave(coupling, temp, wc, gap_sym, kb, sw_ldos, Lxi, ngrid,
                     for j in range(ng2d):
                         fh.write(f"{xg[i]/xi:10.4f} {xg[j]/xi:10.4f} {nmap[i, j]:12.5e}\n")
                     fh.write("\n")
-        except IOError as e:
+        except OSError as e:
             print(f"Error: failed to write 'vortex_ldos_map.dat': {e}", flush=True)
         # core spectrum N(0,0,w)
         wlist = np.linspace(-3.0 * Dbulk, 3.0 * Dbulk, 121)
@@ -709,14 +717,14 @@ def _calc_vortex_dwave(coupling, temp, wc, gap_sym, kb, sw_ldos, Lxi, ngrid,
                 fh.write("# w/Dbulk   N(core,w)/N0\n")
                 for wj, nj in zip(wlist, spec):
                     fh.write(f"{wj/Dbulk:12.5e} {nj:12.5e}\n")
-        except IOError as e:
+        except OSError as e:
             print(f"Error: failed to write 'vortex_ldos.dat': {e}", flush=True)
     return xg, Psi
 
 
 def calc_vortex_lattice(coupling: float, temp: float, wc: float, gap_sym: str = 's',
-                        field_list=None, kb: float = 1.0, imp_gamma: float = 0.0,
-                        imp_c: float = 1.0e8, ngrid: int = 37, nbeta: int = 20):
+                        field_list: np.ndarray | None = None, kb: float = 1.0, imp_gamma: float = 0.0,
+                        imp_c: float = 1.0e8, ngrid: int = 37, nbeta: int = 20) -> list:
     """
     @fn calc_vortex_lattice
     @brief Sweep the field B/Hc2 (circular-cell vortex lattice) and report the
@@ -728,7 +736,7 @@ def calc_vortex_lattice(coupling: float, temp: float, wc: float, gap_sym: str = 
     @param field_list: list of B/Hc2 values (default a log-spaced set 0.03..0.5)
     @return list of (field, <N(0)>/N0, Dbulk)
     """
-    omega = matsubara(temp, wc)
+    omega = _eilenberger.matsubara(temp, wc)
     if field_list is None:
         field_list = [0.03, 0.06, 0.12, 0.25, 0.5]
     print(f"vortex lattice (circular-cell, Doppler) <N(0)>(B): {gap_sym}, lambda={coupling:.3f}, "
@@ -759,7 +767,7 @@ def calc_vortex_lattice(coupling: float, temp: float, wc: float, gap_sym: str = 
             fh.write("# B/Hc2   <N(0)>/N0   Dbulk[eV]\n")
             for b, n0, Db in results:
                 fh.write(f"{b:12.5e} {n0:12.5e} {Db:14.6e}\n")
-    except IOError as e:
+    except OSError as e:
         print(f"Error: failed to write 'vortex_lattice_dos.dat': {e}", flush=True)
     return results
 
@@ -780,7 +788,7 @@ def calc_vortex_lattice(coupling: float, temp: float, wc: float, gap_sym: str = 
 # (fractional-coordinate sampling) -- the genuine 2D lattice, not a circular cell.
 
 
-def _lattice_vectors(field: float, xi: float, lattice: str = 'square', nflux: int = 1):
+def _lattice_vectors(field: float, xi: float, lattice: str = 'square', nflux: int = 1) -> tuple:
     """Primitive (a1,a2) and reciprocal (b1,b2) vectors of the (super)cell holding
     ``nflux`` flux quanta (area S = nflux * 2 pi xi^2 / (B/Hc2), so the area per vortex
     -- hence the field -- is unchanged).  ai.bj = 2 pi dij."""
@@ -796,7 +804,7 @@ def _lattice_vectors(field: float, xi: float, lattice: str = 'square', nflux: in
     return a1, a2, Bm[:, 0], Bm[:, 1], S, M
 
 
-def _vortex_positions(nflux: int, a1: np.ndarray, a2: np.ndarray):
+def _vortex_positions(nflux: int, a1: np.ndarray, a2: np.ndarray) -> list:
     """Cartesian positions of the ``nflux`` vortices in the (super)cell, on a regular
     n1 x n2 sub-grid (near-square factorization).  For nflux=1 -> the cell origin; for
     a perfect-square nflux the sub-grid coincides with the primitive vortex lattice so
@@ -808,7 +816,8 @@ def _vortex_positions(nflux: int, a1: np.ndarray, a2: np.ndarray):
     return [(p / n1) * a1 + (q / n2) * a2 for p in range(n1) for q in range(n2)]
 
 
-def _lattice_QB(X, Y, b1, b2, S, lam, xi, vpos, nmax=8):
+def _lattice_QB(X: np.ndarray, Y: np.ndarray, b1: np.ndarray, b2: np.ndarray, S: float, lam: float, xi: float,
+                vpos: np.ndarray, nmax: int = 8) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Periodic supercurrent momentum Q(r)=(Qx,Qy) and field B(r)/Bbar on the grid,
     from the London/Brandt Fourier sum (finite kappa via lambda).  ``vpos`` are the
     Cartesian positions of the (nflux) vortices in the cell; their structure factor
@@ -834,7 +843,8 @@ def _lattice_QB(X, Y, b1, b2, S, lam, xi, vpos, nmax=8):
     return Qx, Qy, Brel
 
 
-def _nn_dist(X, Y, a1, a2, vpos, nrep=2):
+def _nn_dist(X: np.ndarray, Y: np.ndarray, a1: np.ndarray, a2: np.ndarray, vpos: np.ndarray,
+             nrep: int = 2) -> np.ndarray:
     """Distance to the nearest vortex (periodic over the cell), for the model |Delta|
     seed/profile.  ``vpos`` are the in-cell vortex positions."""
     d = np.full(X.shape, np.inf)
@@ -847,7 +857,7 @@ def _nn_dist(X, Y, a1, a2, vpos, nrep=2):
     return d
 
 
-def _periodic_interp(field, Ng):
+def _periodic_interp(field: np.ndarray, Ng: int) -> scinterp.RegularGridInterpolator:
     """Bilinear interpolator on fractional coords [0,1]^2 with periodic wrap."""
     fp = np.empty((Ng + 1, Ng + 1), dtype=field.dtype)
     fp[:Ng, :Ng] = field
@@ -855,10 +865,10 @@ def _periodic_interp(field, Ng):
     fp[:Ng, Ng] = field[:, 0]
     fp[Ng, Ng] = field[0, 0]
     ax = np.linspace(0.0, 1.0, Ng + 1)
-    return RegularGridInterpolator((ax, ax), fp, bounds_error=False, fill_value=None)
+    return scinterp.RegularGridInterpolator((ax, ax), fp, bounds_error=False, fill_value=None)
 
 
-def _sample_pts(interp, x, y, Minv):
+def _sample_pts(interp: collections.abc.Callable, x: np.ndarray, y: np.ndarray, Minv: np.ndarray) -> np.ndarray:
     """Sample a periodic interpolator at array points x,y (any shape)."""
     f1 = (Minv[0, 0] * x + Minv[0, 1] * y) % 1.0
     f2 = (Minv[1, 0] * x + Minv[1, 1] * y) % 1.0
@@ -866,8 +876,9 @@ def _sample_pts(interp, x, y, Minv):
     return interp(pts).reshape(x.shape)
 
 
-def solve_lattice(coupling, temp, omega, gap_sym='d', field=0.2, kappa=5.0,
-                  lattice='square', Dbulk=None, Ng=24, nbeta=18, hvf=1.0, fs=None, nflux=1):
+def solve_lattice(coupling: float, temp: float, omega: np.ndarray, gap_sym: str = 'd', field: float = 0.2,
+                  kappa: float = 5.0, lattice: str = 'square', Dbulk: float | None = None, Ng: int = 24,
+                  nbeta: int = 18, hvf: float = 1.0, fs: dict | None = None, nflux: int = 1) -> dict | None:
     """
     @fn solve_lattice
     @brief Build the periodic vortex-lattice state: lattice geometry, periodic
@@ -879,13 +890,12 @@ def solve_lattice(coupling, temp, omega, gap_sym='d', field=0.2, kappa=5.0,
     @return dict (F1,F2,X,Y,absD,Qx,Qy,Brel,Minv,a1,a2,S,xi,Dbulk,acell,lam)
     """
     bfull = np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False)
-    hvf_eff = fs_hvf(fs, hvf)
+    hvf_eff = _eilenberger.fs_hvf(fs, hvf)
     if Dbulk is None:
         if fs is not None:
-            from ._eilenberger import bulk_gap_fs
-            Dbulk = bulk_gap_fs(coupling, temp, omega, fs, gap_sym)
+            Dbulk = _eilenberger.bulk_gap_fs(coupling, temp, omega, fs, gap_sym)
         else:
-            Dbulk = _bulk_gap(coupling, temp, omega, form_factor(bfull, gap_sym))
+            Dbulk = _eilenberger_surface._bulk_gap(coupling, temp, omega, _eilenberger.form_factor(bfull, gap_sym))
     if Dbulk <= 0:
         return None
     xi = hvf_eff / (np.pi * Dbulk)
@@ -905,8 +915,10 @@ def solve_lattice(coupling, temp, omega, gap_sym='d', field=0.2, kappa=5.0,
                 acell=np.sqrt(S), lam=lam)
 
 
-def lattice_dos(state, gap_sym, wlist, coupling=None, temp=None, omega=None,
-                delta=None, nbeta=24, hvf=1.0, fs=None, Ls_cell=1.5, ds_xi=0.3, bdir=None):
+def lattice_dos(state: dict, gap_sym: int | str | None, wlist: np.ndarray, coupling: float | None = None,
+                temp: float | None = None, omega: np.ndarray | None = None, delta: float | None = None,
+                nbeta: int = 24, hvf: float = 1.0, fs: dict | None = None, Ls_cell: float = 1.5, ds_xi: float = 0.3,
+                bdir: np.ndarray | None = None) -> np.ndarray:
     """
     @fn lattice_dos
     @brief Spatially-averaged density of states N(w)/N0 of the vortex lattice from a
@@ -926,13 +938,12 @@ def lattice_dos(state, gap_sym, wlist, coupling=None, temp=None, omega=None,
     zomega = delta - 1j * wlist
     Nw = len(wlist)
     if fs is not None:                                # model FS: v_hat directions, nf weights
-        from ._eilenberger import fs_form_factor
         # trajectories in the plane PERPENDICULAR to B (fs_field_frame; bdir=None is
         # the c axis and reproduces the historical (x,y) set bit for bit).  The
         # Doppler/supercurrent needs no change: the rescaling of the two axes is
         # area preserving, so v.p_s is form invariant in the scaled plane -- see the
         # derivation in solve_vortex2d.
-        _fr = fs_field_frame(fs, bdir, gap_sym)
+        _fr = _eilenberger.fs_field_frame(fs, bdir, gap_sym)
         dirs = _fr['dirs']
         phi = _fr['phi']
         hvfarr = _fr['vabs']
@@ -940,7 +951,7 @@ def lattice_dos(state, gap_sym, wlist, coupling=None, temp=None, omega=None,
         nbeta = len(dirs)
     else:                                             # isotropic cylinder (v_hat = k_hat, uniform)
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
-        phi = form_factor(dirs, gap_sym)               # gap a trajectory sees = phi(beta)*|Delta(r)|
+        phi = _eilenberger.form_factor(dirs, gap_sym)               # gap a trajectory sees = phi(beta)*|Delta(r)|
         hvfarr = np.full(nbeta, hvf)
         wt_dir = np.full(nbeta, 1.0 / nbeta)
     Di = _periodic_interp(state['absD'], Ng)
@@ -975,9 +986,11 @@ def lattice_dos(state, gap_sym, wlist, coupling=None, temp=None, omega=None,
     return gsum.real
 
 
-def calc_vortex_lattice_periodic(coupling, temp, wc, gap_sym='d', field_list=None,
-                                 kappa=5.0, lattice='square', kb=1.0, Ng=20, nbeta=16,
-                                 fs_kind=None, fs_params=None, fs=None, nflux=1, bdir=None):
+def calc_vortex_lattice_periodic(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
+                                 field_list: np.ndarray | None = None, kappa: float = 5.0, lattice: str = 'square',
+                                 kb: float = 1.0, Ng: int = 20, nbeta: int = 16, fs_kind: str | None = None,
+                                 fs_params: tuple | None = None, fs: dict | None = None, nflux: int = 1,
+                                 bdir: np.ndarray | None = None) -> list:
     """
     @fn calc_vortex_lattice_periodic
     @brief Driver: true periodic vortex lattice (Doppler/London, finite kappa).
@@ -987,12 +1000,11 @@ def calc_vortex_lattice_periodic(coupling, temp, wc, gap_sym='d', field_list=Non
     (model FS) or a prebuilt ``fs`` (e.g. build_wannier_fs) the trajectories run on a
     Fermi surface with real Fermi velocities.
     """
-    omega = matsubara(temp, wc)
+    omega = _eilenberger.matsubara(temp, wc)
     if field_list is None:
         field_list = [0.05, 0.1, 0.2, 0.4]
     if fs is None and fs_kind is not None:
-        from ._eilenberger import build_model_fs
-        fs = build_model_fs(fs_kind, 120, params=fs_params)
+        fs = _eilenberger.build_model_fs(fs_kind, 120, params=fs_params)
     print(f"periodic vortex lattice (Doppler/London): {gap_sym}, {lattice}, kappa={kappa}, "
           f"lambda={coupling:.3f}, T={temp/kb:.2f} K, {nflux} vortices/cell"
           f"{', FS+v_F' if fs is not None else ''}", flush=True)
@@ -1030,15 +1042,16 @@ def calc_vortex_lattice_periodic(coupling, temp, wc, gap_sym='d', field_list=Non
                 xi = last['xi']
                 for i in range(last['X'].shape[0]):
                     for j in range(last['X'].shape[1]):
-                        fh.write(f"{last['X'][i,j]/xi:9.3f} {last['Y'][i,j]/xi:9.3f} "
-                                 f"{last['absD'][i,j]/last['Dbulk']:10.4e} {last['Brel'][i,j]:10.4e}\n")
+                        fh.write(f"{last['X'][i, j]/xi:9.3f} {last['Y'][i, j]/xi:9.3f} "
+                                 f"{last['absD'][i, j]/last['Dbulk']:10.4e} {last['Brel'][i, j]:10.4e}\n")
                     fh.write("\n")
-    except IOError as e:
+    except OSError as e:
         print(f"Error: failed to write lattice output: {e}", flush=True)
     return results
 
 
-def vortex_current2d(Psi, xg, xi, omega, temp, gap_sym='d', nbeta=24, hvf=1.0):
+def vortex_current2d(Psi: np.ndarray, xg: np.ndarray, xi: float, omega: np.ndarray, temp: float, gap_sym: str = 'd',
+                     nbeta: int = 24, hvf: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
     """
     @fn vortex_current2d
     @brief Equilibrium charge supercurrent density j(r) of a converged vortex order
@@ -1054,10 +1067,10 @@ def vortex_current2d(Psi, xg, xi, omega, temp, gap_sym='d', nbeta=24, hvf=1.0):
     X, Y = np.meshgrid(xg, xg, indexing='ij')
     SS, BB = np.meshgrid(xg, xg, indexing='ij')
     Nw = len(omega)
-    AmpI = RegularGridInterpolator((xg, xg), np.abs(Psi), bounds_error=False,
-                                   fill_value=float(np.abs(Psi).max()))
+    AmpI = scinterp.RegularGridInterpolator((xg, xg), np.abs(Psi), bounds_error=False,
+                                            fill_value=float(np.abs(Psi).max()))
     dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
-    phi = form_factor(dirs, gap_sym)
+    phi = _eilenberger.form_factor(dirs, gap_sym)
     jx = np.zeros((ngrid, ngrid))
     jy = np.zeros((ngrid, ngrid))
     for ib in range(nbeta):
@@ -1077,7 +1090,8 @@ def vortex_current2d(Psi, xg, xi, omega, temp, gap_sym='d', nbeta=24, hvf=1.0):
     return jx, jy
 
 
-def vortex_current_profile(jx, jy, xg, ntheta=72):
+def vortex_current_profile(jx: np.ndarray, jy: np.ndarray, xg: np.ndarray,
+                           ntheta: int = 72) -> tuple[np.ndarray, np.ndarray]:
     """
     @fn vortex_current_profile
     @brief Azimuthal (circulating) supercurrent j_phi(rho) from the 2D current field,
@@ -1085,8 +1099,8 @@ def vortex_current_profile(jx, jy, xg, ntheta=72):
     @return (rho, jphi): radius grid and the azimuthal current [Nr]
     """
     R = 0.5 * (xg[-1] - xg[0])
-    jxi = RegularGridInterpolator((xg, xg), jx, bounds_error=False, fill_value=0.0)
-    jyi = RegularGridInterpolator((xg, xg), jy, bounds_error=False, fill_value=0.0)
+    jxi = scinterp.RegularGridInterpolator((xg, xg), jx, bounds_error=False, fill_value=0.0)
+    jyi = scinterp.RegularGridInterpolator((xg, xg), jy, bounds_error=False, fill_value=0.0)
     rho = np.linspace(0.0, 0.85 * R, len(xg) // 2)
     th = np.linspace(0.0, 2.0 * np.pi, ntheta, endpoint=False)
     jphi = np.empty(len(rho))
@@ -1096,16 +1110,17 @@ def vortex_current_profile(jx, jy, xg, ntheta=72):
     return rho, jphi
 
 
-def calc_vortex_current(coupling, temp, wc, gap_sym='d', kb=1.0, Lxi=8.0, ngrid=49, nbeta=24):
+def calc_vortex_current(coupling: float, temp: float, wc: float, gap_sym: str = 'd', kb: float = 1.0, Lxi: float = 8.0,
+                        ngrid: int = 49, nbeta: int = 24) -> tuple:
     """
     @fn calc_vortex_current
     @brief Driver: converge an isolated vortex and report its circulating charge
     supercurrent j_phi(rho) (arb. units), which vanishes at the core, peaks near a
     coherence length, and decays outward.  Writes 'vortex_current.dat'.
     """
-    omega = matsubara(temp, wc)
+    omega = _eilenberger.matsubara(temp, wc)
     print(f"vortex supercurrent (Riccati Eilenberger, {gap_sym}): T={temp/kb:.2f} K, "
-          f"lambda={coupling:.3f}, grid={min(ngrid,49)}^2", flush=True)
+          f"lambda={coupling:.3f}, grid={min(ngrid, 49)}^2", flush=True)
     xg, Psi, Dbulk, xi = solve_vortex2d(coupling, temp, omega, gap_sym, Lxi=Lxi, ngrid=min(ngrid, 49), nbeta=nbeta)
     if Dbulk <= 0.0:
         print("normal state (Dbulk=0); no supercurrent", flush=True)
@@ -1120,21 +1135,22 @@ def calc_vortex_current(coupling, temp, wc, gap_sym='d', kb=1.0, Lxi=8.0, ngrid=
             fh.write("# rho/xi   j_phi[arb]\n")
             for r, jp in zip(rho, jphi):
                 fh.write(f"{r/xi:10.4f} {jp:14.6e}\n")
-    except IOError as e:
+    except OSError as e:
         print(f"Error writing vortex_current.dat: {e}", flush=True)
     return rho, jphi
 
 
-def _radial_amp(Psi, xg, rgrid, ntheta=48):
+def _radial_amp(Psi: np.ndarray, xg: np.ndarray, rgrid: np.ndarray, ntheta: int = 48) -> np.ndarray:
     """Azimuthal average of |Psi| on circles of radius rgrid (radial gap profile)."""
-    ai = RegularGridInterpolator((xg, xg), np.abs(Psi), bounds_error=False,
-                                 fill_value=float(np.abs(Psi).max()))
+    ai = scinterp.RegularGridInterpolator((xg, xg), np.abs(Psi), bounds_error=False,
+                                          fill_value=float(np.abs(Psi).max()))
     th = np.linspace(0.0, 2.0 * np.pi, ntheta, endpoint=False)
     return np.array([ai(np.stack([r * np.cos(th), r * np.sin(th)], axis=1)).mean() for r in rgrid])
 
 
-def calc_vortex_maxwell(coupling, temp, wc, gap_sym='s', field=0.2, kappa=2.0, kb=1.0,
-                        Lxi=8.0, ngrid=41, nbeta=24, itemax_a=6):
+def calc_vortex_maxwell(coupling: float, temp: float, wc: float, gap_sym: str = 's', field: float = 0.2,
+                        kappa: float = 2.0, kb: float = 1.0, Lxi: float = 8.0, ngrid: int = 41, nbeta: int = 24,
+                        itemax_a: int = 6) -> tuple | None:
     """
     @fn calc_vortex_maxwell
     @brief Circular-cell vortex with the SELF-CONSISTENT (finite-kappa Maxwell)
@@ -1147,8 +1163,10 @@ def calc_vortex_maxwell(coupling, temp, wc, gap_sym='s', field=0.2, kappa=2.0, k
     field-induced zero-energy DOS.  Reports <N(0)> for the self-consistent A and,
     for reference, the extreme type-II (kappa->infinity) result.  Writes 'vortex_maxwell.dat'.
     """
-    omega = matsubara(temp, wc)
-    Dbulk = (_bulk_gap(coupling, temp, omega, form_factor(np.linspace(0, 2 * np.pi, 180, endpoint=False), gap_sym)))
+    omega = _eilenberger.matsubara(temp, wc)
+    beta_full = np.linspace(0, 2 * np.pi, 180, endpoint=False)
+    Dbulk = _eilenberger_surface._bulk_gap(coupling, temp, omega,
+                                           _eilenberger.form_factor(beta_full, gap_sym))
     if Dbulk <= 0:
         print("normal state (Dbulk=0)", flush=True)
         return None
@@ -1183,9 +1201,10 @@ def calc_vortex_maxwell(coupling, temp, wc, gap_sym='s', field=0.2, kappa=2.0, k
                           field=field)[ic, ic, 0]
     a_ext = rgrid / (2.0 * Rc ** 2)                    # extreme type-II A_theta
     im = len(rgrid) // 2                                # mid-radius rho ~ Rc/2
-    print(f"Dbulk={Db:.4e}, xi={xiv:.4g}, lambda/xi=kappa={kappa} (finite kappa concentrates B near the core)", flush=True)
+    print(f"Dbulk={Db:.4e}, xi={xiv:.4g}, lambda/xi=kappa={kappa} (finite kappa concentrates B near the core)",
+          flush=True)
     print(f"  A_theta(Rc/2): self-consistent={aphi[im]:.4e} vs extreme type-II={a_ext[im]:.4e} "
-          f"(ratio {aphi[im]/max(a_ext[im],1e-30):.3f})", flush=True)
+          f"(ratio {aphi[im]/max(a_ext[im], 1e-30):.3f})", flush=True)
     print(f"  A_theta(edge): self={aphi[-1]:.4e} vs extreme={a_ext[-1]:.4e} (enclosed flux fixed)", flush=True)
     print(f"  N(core,0)/N0: self-consistent A = {n0_sc:.3f},  extreme type-II (kappa->inf) = {n0_ex:.3f}", flush=True)
     try:
@@ -1193,8 +1212,8 @@ def calc_vortex_maxwell(coupling, temp, wc, gap_sym='s', field=0.2, kappa=2.0, k
             fh.write("# rho/xi   A_theta(self)   A_theta(extreme)   B(rho)/<B>\n")
             for r, a in zip(rgrid, aphi):
                 fh.write(f"{r/xiv:10.4f} {a:12.5e} {r/(2*Rc**2):12.5e} "
-                         f"{np.interp(r,rgrid,Brel):12.5e}\n")
-    except IOError as e:
+                         f"{np.interp(r, rgrid, Brel):12.5e}\n")
+    except OSError as e:
         print(f"Error writing vortex_maxwell.dat: {e}", flush=True)
     return rgrid, aphi, n0_sc, n0_ex
 
@@ -1213,7 +1232,7 @@ def calc_vortex_maxwell(coupling, temp, wc, gap_sym='s', field=0.2, kappa=2.0, k
 # Extreme type-II (A=0): the supercurrent/Volovik shift emerges from the phase
 # variation of the complex Delta sampled along each chord.
 # --------------------------------------------------------------------------- #
-def _cell_geom(field, xi, lattice='square', nflux=1, shape=None):
+def _cell_geom(field: float, xi: float, lattice: str = 'square', nflux: int = 1, shape: str | None = None) -> dict:
     """Magnetic-cell geometry (je convention): rectangular generators (Dlx, Dly) with
     obliqueness zeta so the primitive translations are a1=((1-zeta)Dlx, -Dly),
     a2=(zeta Dlx, Dly) and the cell holds ``nflux`` flux quanta (area Dlx*Dly =
@@ -1240,22 +1259,22 @@ def _cell_geom(field, xi, lattice='square', nflux=1, shape=None):
                 b1=B[:, 0], b2=B[:, 1], S=abs(Dlx * Dly), nflux=nflux)
 
 
-def _to_frac(x, y, g):
+def _to_frac(x: np.ndarray, y: np.ndarray, g: np.ndarray) -> tuple:
     """Cartesian -> fractional cell coordinates (r1, r2) (inverse of the je map
     x=(r1(1-z)+r2 z)Dlx, y=(-r1+r2)Dly)."""
     return x / g['Dlx'] - g['zeta'] * y / g['Dly'], x / g['Dlx'] + (1.0 - g['zeta']) * y / g['Dly']
 
 
-def _abrikosov_z(x, y, g, np_sum=6):
+def _abrikosov_z(x: np.ndarray, y: np.ndarray, g: np.ndarray, np_sum: int = 6) -> np.ndarray:
     """Abrikosov (lowest-Landau-level) quasi-periodic order parameter for the magnetic
     cell ``g`` (je's Sabrikosov; Dr=Dly/Dlx, obliqueness zeta, one zero per primitive
     cell at Dx0=-0.5(1+zeta), Dy0=-0.5).  Its phase is the vortex winding, its modulus
     ~1 between vortices and 0 at each core; works for square and triangular cells."""
     x, y = np.broadcast_arrays(np.asarray(x, dtype=float), np.asarray(y, dtype=float))
-    return abrikosov_z(x, y, g['Dlx'], g['Dly'], g['zeta'], np_sum)
+    return flibs.abrikosov_z(x, y, g['Dlx'], g['Dly'], g['zeta'], np_sum)
 
 
-def _abrikosov_unit_phase(x, y, g, Vw=1):
+def _abrikosov_unit_phase(x: np.ndarray, y: np.ndarray, g: np.ndarray, Vw: int = 1) -> np.ndarray:
     """Unit phase factor e^{i chi(r)} = (conj(Abrikosov)/|Abrikosov|)^Vw  (conjugate
     convention, je's conj(Zphase)^Vw); Vw>1 gives a multiply-quantized (giant) vortex."""
     Z = _abrikosov_z(x, y, g)
@@ -1264,14 +1283,14 @@ def _abrikosov_unit_phase(x, y, g, Vw=1):
     return u if Vw == 1 else u ** Vw
 
 
-def _periodic_eval(field, g, px, py):
+def _periodic_eval(field: np.ndarray, g: np.ndarray, px: np.ndarray, py: np.ndarray) -> np.ndarray:
     """Bilinear interpolation of a cell-centred field [Ng,Ng] (grid points at fractional
     (k+0.5)/Ng-0.5) at scattered Cartesian points (px,py), with periodic wrap on the
     (oblique) cell.  Real field only (the amplitude)."""
-    return bilinear_cell_eval(field, px, py, g['Dlx'], g['Dly'], g['zeta'])
+    return flibs.bilinear_cell_eval(field, px, py, g['Dlx'], g['Dly'], g['zeta'])
 
 
-def _london_A(g, lam, Vw=1, nfft=64):
+def _london_A(g: np.ndarray, lam: float, Vw: int = 1, nfft: int = 64) -> tuple:
     """Finite-kappa (London) vector potential A(r) on the magnetic cell ``g``, as the
     low-pass-filtered bare supervelocity:  A(K) = (grad(chi)/2)(K) / (1 + lambda^2 K^2),
     K = m b1 + n b2.  The filter makes A SMOOTH and regular at the core (so -v_F.A does
@@ -1300,7 +1319,7 @@ def _london_A(g, lam, Vw=1, nfft=64):
     return Ax, Ay
 
 
-def _maxwell_A(jx, jy, g):
+def _maxwell_A(jx: np.ndarray, jy: np.ndarray, g: np.ndarray) -> tuple:
     """Coulomb-gauge vector potential from a 2D current density on the cell grid:
     A(K) = j_T(K) / K^2 with j_T the transverse (divergence-free) projection
     j_T(K) = j(K) - K (K.j)/K^2  (je Svector_potential).  K = m b1 + n b2.
@@ -1320,11 +1339,13 @@ def _maxwell_A(jx, jy, g):
     return np.fft.ifft2(Ax).real, np.fft.ifft2(Ay).real
 
 
-def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='square',
-                     Ng=20, nbeta=16, hvf=1.0, fs=None, kappa=None, Vw=1, Lchord=6.0, bdir=None,
-                     ds_xi=0.3, itemax=60, mix=0.4, eps=3.0e-3, anderson=True, m_and=4,
-                     seed_profile=None, self_consistent_A=False, mixA=0.3,
-                     shape=None, theta0=0.0):
+def solve_lattice_sc(coupling: float, temp: float, omega: np.ndarray, gap_sym: str = 'd', field: float = 0.2,
+                     lattice: str = 'square', Ng: int = 20, nbeta: int = 16, hvf: float = 1.0, fs: dict | None = None,
+                     kappa: float | None = None, Vw: int = 1, Lchord: float = 6.0, bdir: np.ndarray | None = None,
+                     ds_xi: float = 0.3, itemax: int = 60, mix: float = 0.4, eps: float = 3.0e-3,
+                     anderson: bool = True, m_and: int = 4, seed_profile: np.ndarray | None = None,
+                     self_consistent_A: bool = False, mixA: float = 0.3, shape: str | None = None,
+                     theta0: float = 0.0) -> dict | None:
     """
     @fn solve_lattice_sc
     @brief Self-consistent complex order parameter Psi(r)=|Psi|(r) e^{i chi(r)} of a
@@ -1362,13 +1383,12 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
     _reject_chiral_ff(gap_sym, 'solve_lattice_sc')
     bfull = np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False)
     # xi must use the speed IN THE VORTEX PLANE, which depends on the field direction
-    hvf_eff = (fs_field_frame(fs, bdir)['hvf_eff']
+    hvf_eff = (_eilenberger.fs_field_frame(fs, bdir)['hvf_eff']
                if fs is not None else hvf)
     if fs is not None:
-        from ._eilenberger import bulk_gap_fs, fs_form_factor
-        Dbulk = bulk_gap_fs(coupling, temp, omega, fs, gap_sym)
+        Dbulk = _eilenberger.bulk_gap_fs(coupling, temp, omega, fs, gap_sym)
     else:
-        Dbulk = _bulk_gap(coupling, temp, omega, form_factor(bfull, gap_sym))
+        Dbulk = _eilenberger_surface._bulk_gap(coupling, temp, omega, _eilenberger.form_factor(bfull, gap_sym))
     if Dbulk <= 0:
         return None
     xi = hvf_eff / (np.pi * Dbulk)
@@ -1385,13 +1405,13 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
         # Doppler/supercurrent needs no change: the rescaling of the two axes is
         # area preserving, so v.p_s is form invariant in the scaled plane -- see the
         # derivation in solve_vortex2d.
-        _fr = fs_field_frame(fs, bdir, gap_sym)
+        _fr = _eilenberger.fs_field_frame(fs, bdir, gap_sym)
         dirs = _fr['dirs'] + theta0                     # rigidly rotate the trajectories;
         phi = _fr['phi']                                # gap phi stays attached to each FS point
         hvfarr = np.asarray(_fr['vabs']); wt_dir = np.asarray(_fr['nf']); nbd = len(dirs)
     else:
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
-        phi = form_factor(dirs - theta0, gap_sym); hvfarr = np.full(nbeta, hvf)
+        phi = _eilenberger.form_factor(dirs - theta0, gap_sym); hvfarr = np.full(nbeta, hvf)
         wt_dir = np.full(nbeta, 1.0 / nbeta); nbd = nbeta
     L = Lchord * xi; ds = ds_xi * xi
     ns = int(2 * L / ds) | 1                            # odd -> exact centre index
@@ -1430,22 +1450,24 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
         Cj = -1.0 / (lam ** 2 * rho_s) if rho_s != 0 else 0.0
         Axf, Ayf = _london_A(g, lam, Vw, nfft=Ng)      # seed A from the London solution (Ng grid)
         AuX, AuY = Axf.mean(), Ayf.mean()              # uniform (K=0) part: cancels the chi gauge term
-                                                       # (gauge invariance); _maxwell_A gives only K!=0
+        # (gauge invariance); _maxwell_A gives only K!=0
     # iteration-independent per-direction frequency SHIFT [ns,Nanch] (fixed Doppler;
     # recomputed if scA).  Only the shift is stored: the frequency axis is added
     # inside riccati_chords_bc, so no [ns,Nanch,Nw] array is ever built.
     dom_dir = [None if dch is None else 1j * hvfarr[ib] * dch
                for ib, (_, _, _, _, dch) in enumerate(chord)]
 
-    def gap_map(Af, dom_use):                           # one pass: returns A_new (+ current grids if scA)
+    def gap_map(Af: np.ndarray | None,
+                dom_use: np.ndarray | None) -> np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray]:
+        # one pass: returns A_new (+ current grids if scA)
         accf = np.zeros(Nanch, dtype=np.complex128)
         curx = np.zeros(Nanch); cury = np.zeros(Nanch)
         for ib in range(nbd):
             px, py, eichi, proj, _ = chord[ib]
             base = phi[ib] * _periodic_eval(Af, g, px, py) * eichi
             # only the anchor row is needed, so ask the kernel for that row alone
-            gch, f = riccati_chords_bc(omega, base, hvfarr[ib], ds,
-                                       dom=dom_use[ib], row=ic)
+            gch, f = flibs.riccati_chords_bc(omega, base, hvfarr[ib], ds,
+                                             dom=dom_use[ib], row=ic)
             accf += proj * f.sum(axis=1)
             if scA:                                    # supercurrent <v_F Im g> at the anchor
                 img = gch.imag.sum(axis=1)
@@ -1494,8 +1516,9 @@ def solve_lattice_sc(coupling, temp, omega, gap_sym='d', field=0.2, lattice='squ
                 Afield=((Axf, Ayf) if scA else None), iters=it + 1, err=err)
 
 
-def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None, bdir=None,
-                   Lchord=6.0, ds_xi=0.3, theta0=None):
+def lattice_dos_sc(state: dict, gap_sym: int | str | None, wlist: np.ndarray, delta: float | None = None,
+                   nbeta: int = 24, hvf: float = 1.0, fs: dict | None = None, bdir: np.ndarray | None = None,
+                   Lchord: float = 6.0, ds_xi: float = 0.3, theta0: float | None = None) -> np.ndarray:
     """
     @fn lattice_dos_sc
     @brief Spatially-averaged DOS N(w)/N0 of the je-style self-consistent periodic
@@ -1522,18 +1545,17 @@ def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None
     Nw = zomega.size
     th0 = state.get('theta0', 0.0) if theta0 is None else theta0  # same rotation the gap was solved on
     if fs is not None:
-        from ._eilenberger import fs_form_factor
         # trajectories in the plane PERPENDICULAR to B (fs_field_frame; bdir=None is
         # the c axis and reproduces the historical (x,y) set bit for bit).  The
         # Doppler/supercurrent needs no change: the rescaling of the two axes is
         # area preserving, so v.p_s is form invariant in the scaled plane -- see the
         # derivation in solve_vortex2d.
-        _fr = fs_field_frame(fs, bdir, gap_sym)
+        _fr = _eilenberger.fs_field_frame(fs, bdir, gap_sym)
         dirs = _fr['dirs'] + th0; phi = _fr['phi']
         hvfarr = np.asarray(_fr['vabs']); wt_dir = np.asarray(_fr['nf']); nbd = len(dirs)
     else:
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
-        phi = form_factor(dirs - th0, gap_sym); hvfarr = np.full(nbeta, hvf)
+        phi = _eilenberger.form_factor(dirs - th0, gap_sym); hvfarr = np.full(nbeta, hvf)
         wt_dir = np.full(nbeta, 1.0 / nbeta); nbd = nbeta
     L = Lchord * xi; ds = ds_xi * xi
     ns = int(2 * L / ds) | 1; ic = ns // 2
@@ -1549,14 +1571,14 @@ def lattice_dos_sc(state, gap_sym, wlist, delta=None, nbeta=24, hvf=1.0, fs=None
         dom = (None if lam is None else
                -1j * hvfarr[ib] * (cb * _periodic_eval(Axg, g, px, py)
                                    + sb * _periodic_eval(Ayg, g, px, py)))
-        gg, _ = riccati_chords_bc(zomega, base, hvfarr[ib], ds, dom=dom, row=ic)
+        gg, _ = flibs.riccati_chords_bc(zomega, base, hvfarr[ib], ds, dom=dom, row=ic)
         gsum += wt_dir[ib] * gg.real.mean(axis=0)       # <Re g> over anchors
     return gsum
 
 
-def lattice_free_energy(state, coupling, temp, omega, gap_sym, nbeta=24, hvf=1.0, fs=None,
-                        bdir=None,
-                        Lchord=6.0, ds_xi=0.3, theta0=0.0):
+def lattice_free_energy(state: dict, coupling: float, temp: float, omega: np.ndarray, gap_sym: int | str | None,
+                        nbeta: int = 24, hvf: float = 1.0, fs: dict | None = None, bdir: np.ndarray | None = None,
+                        Lchord: float = 6.0, ds_xi: float = 0.3, theta0: float = 0.0) -> np.ndarray:
     """
     @fn lattice_free_energy
     @brief Electronic (condensation) free energy of the converged formulation-A vortex
@@ -1579,18 +1601,17 @@ def lattice_free_energy(state, coupling, temp, omega, gap_sym, nbeta=24, hvf=1.0
     Axg, Ayg = (Afield if Afield is not None
                 else (_london_A(g, lam, Vw) if lam is not None else (None, None)))
     if fs is not None:
-        from ._eilenberger import fs_form_factor
         # trajectories in the plane PERPENDICULAR to B (fs_field_frame; bdir=None is
         # the c axis and reproduces the historical (x,y) set bit for bit).  The
         # Doppler/supercurrent needs no change: the rescaling of the two axes is
         # area preserving, so v.p_s is form invariant in the scaled plane -- see the
         # derivation in solve_vortex2d.
-        _fr = fs_field_frame(fs, bdir, gap_sym)
+        _fr = _eilenberger.fs_field_frame(fs, bdir, gap_sym)
         dirs = _fr['dirs']; phi = _fr['phi']
         hvfarr = np.asarray(_fr['vabs']); wt_dir = np.asarray(_fr['nf']); nbd = len(dirs)
     else:
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
-        phi = form_factor(dirs - theta0, gap_sym); hvfarr = np.full(nbeta, hvf)
+        phi = _eilenberger.form_factor(dirs - theta0, gap_sym); hvfarr = np.full(nbeta, hvf)
         wt_dir = np.full(nbeta, 1.0 / nbeta); nbd = nbeta
     L = Lchord * xi; ds = ds_xi * xi
     ns = int(2 * L / ds) | 1; ic = ns // 2
@@ -1606,7 +1627,7 @@ def lattice_free_energy(state, coupling, temp, omega, gap_sym, nbeta=24, hvf=1.0
         dom = (None if lam is None else
                -1j * hvfarr[ib] * (cb * _periodic_eval(Axg, g, px, py)
                                    + sb * _periodic_eval(Ayg, g, px, py)))
-        gc, fc = riccati_chords_bc(omega, Dl, hvfarr[ib], ds, dom=dom, row=ic)
+        gc, fc = flibs.riccati_chords_bc(omega, Dl, hvfarr[ib], ds, dom=dom, row=ic)
         Dia = Dl[ic]                                                # Delta at the anchor [Nanch]
         Ii = 2.0 * np.real(np.conj(Dia)[:, None] * fc) / (1.0 + gc).real           # [Nanch, Nw]
         Isum += wt_dir[ib] * Ii.sum(axis=1).mean()                  # sum_n, FS-weight, <>_r
@@ -1614,16 +1635,17 @@ def lattice_free_energy(state, coupling, temp, omega, gap_sym, nbeta=24, hvf=1.0
     return cond - 2.0 * temp * Isum / Dbulk ** 2
 
 
-def _apex_angle(ratio):
+def _apex_angle(ratio: float) -> np.ndarray:
     """Apex angle (deg) of the rhombic (|a1|=|a2|, zeta=1/2) cell with Dly/Dlx=ratio:
     cos(alpha) = (1/4 - ratio^2)/(1/4 + ratio^2).  ratio=1/2 -> 90 (square),
     ratio=sqrt3/2 -> 120 (triangular, 60-deg apex of the equilateral triangle)."""
     return np.degrees(np.arccos((0.25 - ratio ** 2) / (0.25 + ratio ** 2)))
 
 
-def calc_vortex_lattice_symmetry(coupling, temp, wc, gap_sym='d', field_list=None,
-                                 kb=1.0, Ng=28, nbeta=36, fs=None,
-                                 n_ratio=5, n_theta=4, ratio_range=(0.5, None)):
+def calc_vortex_lattice_symmetry(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
+                                 field_list: np.ndarray | None = None, kb: float = 1.0, Ng: int = 28, nbeta: int = 36,
+                                 fs: dict | None = None, n_ratio: int = 5, n_theta: int = 4,
+                                 ratio_range: tuple = (0.5, None)) -> list:
     """
     @fn calc_vortex_lattice_symmetry
     @brief Vortex-lattice SYMMETRY by minimizing the Eilenberger free energy
@@ -1641,7 +1663,7 @@ def calc_vortex_lattice_symmetry(coupling, temp, wc, gap_sym='d', field_list=Non
     electronic free energy selects the geometry.  Warm-started across the scan.
     @return list of (field, best_ratio, best_apex_deg, best_theta0_deg, Fmin)
     """
-    omega = matsubara(temp, wc)
+    omega = _eilenberger.matsubara(temp, wc)
     if field_list is None:
         field_list = [0.2]
     rmax = ratio_range[1] if ratio_range[1] is not None else np.sqrt(3.0) / 2.0
@@ -1676,9 +1698,10 @@ def calc_vortex_lattice_symmetry(coupling, temp, wc, gap_sym='d', field_list=Non
     return out
 
 
-def calc_vortex_lattice_sc(coupling, temp, wc, gap_sym='d', field_list=None,
-                           lattice='square', kb=1.0, Ng=20, nbeta=16, fs=None,
-                           kappa=None, Vw=1, self_consistent_A=False, bdir=None):
+def calc_vortex_lattice_sc(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
+                           field_list: np.ndarray | None = None, lattice: str = 'square', kb: float = 1.0,
+                           Ng: int = 20, nbeta: int = 16, fs: dict | None = None, kappa: float | None = None,
+                           Vw: int = 1, self_consistent_A: bool = False, bdir: np.ndarray | None = None) -> list:
     """
     @fn calc_vortex_lattice_sc
     @brief Driver: je-style self-consistent PERIODIC vortex lattice (formulation A).
@@ -1694,7 +1717,7 @@ def calc_vortex_lattice_sc(coupling, temp, wc, gap_sym='d', field_list=None,
     the actual quasiclassical current (je A_renew) instead of the analytic London A.
     Writes the converged |Psi|(r) for the largest field to lattice_sc_op.dat.
     """
-    omega = matsubara(temp, wc)
+    omega = _eilenberger.matsubara(temp, wc)
     if field_list is None:
         field_list = [0.05, 0.1, 0.2, 0.35]
     akind = ('extreme type-II' if kappa is None else
@@ -1736,8 +1759,8 @@ def calc_vortex_lattice_sc(coupling, temp, wc, gap_sym='d', field_list=None,
                 xi = last['xi']; Db = last['Dbulk']
                 for i in range(last['X'].shape[0]):
                     for j in range(last['X'].shape[1]):
-                        fh.write(f"{last['X'][i,j]/xi:10.4f} {last['Y'][i,j]/xi:10.4f} "
-                                 f"{last['absD'][i,j]/Db:10.5f}\n")
+                        fh.write(f"{last['X'][i, j]/xi:10.4f} {last['Y'][i, j]/xi:10.4f} "
+                                 f"{last['absD'][i, j]/Db:10.5f}\n")
                     fh.write("\n")
     except OSError:
         pass

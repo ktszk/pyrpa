@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#-*- coding:utf-8 -*-
+# -*- coding:utf-8 -*-
 """
 Maximum-entropy (MaxEnt) analytic continuation of the trace of a Matsubara
 Green's function to the real-frequency axis, as a drop-in, spurious-pole-free
@@ -10,8 +10,14 @@ Requires the optional 'ana_cont' package (MIT license, pip install ana_cont).
 """
 import numpy as np
 
+# Public API of this submodule; keeps `from ._x import *` in __init__.py from
+# re-exporting numpy, scipy, ctypes and the sibling packages imported above.
+__all__ = [
+    'maxent_trace_spectrum'
+]
 
-def _ensure_np_trapz():
+
+def _ensure_np_trapz() -> None:
     """ana_cont (numpy<2.0 API) calls np.trapz, removed in numpy>=2.0 in favor
     of the identical np.trapezoid; restore the old name just before ana_cont
     needs it, rather than monkeypatching numpy at import of this module."""
