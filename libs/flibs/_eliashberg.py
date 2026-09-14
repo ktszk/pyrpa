@@ -162,26 +162,26 @@ def linearized_eliashberg(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init
                           temp: float, gap_sym: int, eps: float = 1.0e-5, itemax: int = 300,
                           arnoldi_m: int = 10, iperm: np.ndarray | None = None) -> tuple[np.ndarray, float]:
     """
-    @fn linearized_eliashberg
     @brief Solve the linearized Eliashberg gap equation (without SOC) to obtain the superconducting gap function.
-    @param       chi: Irreducible susceptibility [Nchi, Nchi, Nw, Nk] complex128
-    @param        Gk: Green's function on full k-grid [Norb, Norb, Nw, Nkall] complex128
-    @param       uni: Eigenvector matrices [Nk, Norb, Norb] complex128
+    @param        chi: Irreducible susceptibility [Nchi, Nchi, Nw, Nk] complex128
+    @param         Gk: Green's function on full k-grid [Norb, Norb, Nw, Nkall] complex128
+    @param        uni: Eigenvector matrices [Nk, Norb, Norb] complex128
     @param init_delta: Initial gap function [Norb, Norb, Nw, Nkall] float64
-    @param      Smat: Spin interaction matrix [Nchi, Nchi] float64
-    @param      Cmat: Charge interaction matrix [Nchi, Nchi] float64
-    @param     olist: Orbital index list [Nchi] int64
-    @param     plist: Parity list for gap symmetry [Norb] float64
-    @param      kmap: Full-to-reduced k-point mapping [Nkall] int64
-    @param      invk: Inverse k-point mapping [Nkall] int64
-    @param    Nx,Ny,Nz: k-grid dimensions
-    @param      temp: Temperature in eV
-    @param   gap_sym: Gap symmetry index (0=s, 1=dx2-y2, etc.)
-    @param       eps: Convergence tolerance
-    @param    itemax: Maximum number of iterations
-    @param     iperm: Orbital permutation of the inversion operator [Norb] int64.
-                      None = identity, i.e. the diagonal-parity convention. Use
-                      plibs.inversion_op() to obtain (plist, iperm) for multi-site cells.
+    @param       Smat: Spin interaction matrix [Nchi, Nchi] float64
+    @param       Cmat: Charge interaction matrix [Nchi, Nchi] float64
+    @param      olist: Orbital-pair list of chi [Nchi, 2] int64 (1-based)
+    @param      plist: Parity list for gap symmetry [Norb] float64
+    @param       kmap: Full-to-reduced k-point mapping [Nkall] int64
+    @param       invk: Inverse k-point mapping [Nkall] int64
+    @param   Nx,Ny,Nz: k-grid dimensions
+    @param       temp: Temperature in eV
+    @param    gap_sym: Gap symmetry index (0=s, 1=dx2-y2, etc.)
+    @param        eps: Convergence tolerance
+    @param     itemax: Maximum number of iterations
+    @param  arnoldi_m: Krylov subspace dimension (0 = power method, >0 = Arnoldi)
+    @param      iperm: Orbital permutation of the inversion operator [Norb] int64.
+                       None = identity, i.e. the diagonal-parity convention. Use
+                       plibs.inversion_op() to obtain (plist, iperm) for multi-site cells.
     @return    delta: Linearized gap function [Norb, Norb, Nw, Nkall] complex128
     @return   lambda_eliash: Physical (largest) Eliashberg eigenvalue (>1 means T<Tc)
     """
@@ -207,7 +207,6 @@ def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, 
                               gap_sym: int, eps: float = 1.0e-4, itemax: int = 300,
                               arnoldi_m: int = 10) -> tuple[np.ndarray, float]:
     """
-    @fn linearized_eliashberg_soc
     @brief Solve the linearized Eliashberg gap equation with spin-orbit coupling (SOC).
     @param        chi: Irreducible susceptibility [Nchi, Nchi, Nw, Nk] complex128
     @param         Gk: Green's function on full k-grid [Norb, Norb, Nw, Nkall] complex128
@@ -218,7 +217,7 @@ def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, 
     @param    sgnsig2: Sign matrix for chi orbital mapping [Nchi, Nchi] float64
     @param      plist: Parity list for gap symmetry [Norb] float64
     @param      slist: Spin label list [Norb] int64
-    @param      olist: Orbital index list [Nchi] int64
+    @param      olist: Orbital-pair list of chi [Nchi, 2] int64 (1-based)
     @param       kmap: Full-to-reduced k-point mapping [Nkall] int64
     @param       invk: Inverse k-point mapping [Nkall] int64
     @param       invs: Inverse spin index mapping [Norb] int64
@@ -228,6 +227,7 @@ def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, 
     @param    gap_sym: Gap symmetry index
     @param        eps: Convergence tolerance
     @param     itemax: Maximum number of iterations
+    @param  arnoldi_m: Krylov subspace dimension (0 = power method, >0 = Arnoldi)
     @return     delta: Linearized gap function [Norb, Norb, Nw, Nkall] complex128
     @return   lambda_eliash: Physical (largest) Eliashberg eigenvalue (>1 means T<Tc)
     """
@@ -255,7 +255,6 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
                          gap_min: float = 1.0e-2,
                          sw_amp_newton: bool = True, iperm: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn nonlinear_eliashberg
     @brief Solve the non-linear FLEX-Eliashberg self-consistency loop (no SOC).
     Iteratively updates the gap Δ, normal/anomalous Green's functions G/F,
     irreducible χ_0_S = χ^GG + χ^FF, χ_0_C = χ^GG - χ^FF, and the FLEX
@@ -263,49 +262,50 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
     (linear mixing pp=0.3 falls back when m_diis<=1 or for the first iteration).
     Convergence: |Δ_new - Δ|_∞ / |Δ|_∞ < eps.
 
-    @param  delta_init: Initial gap function [Norb, Norb, Nw, Nk] complex128.
-                        Caller is responsible for providing a non-zero initial Δ.
-                        Recommended sources:
-                          - flibs.get_initial_delta(...) for a symmetry-adapted seed
-                          - a converged linearized_eliashberg() output (scaled to a
-                            physical magnitude, e.g. ~1.764·T) for a fast start
-                        If the array is C-contiguous complex128 it is modified in place;
-                        otherwise a contiguous copy is created.
-    @param          Gk: Initial normal Green's function [Norb, Norb, Nw, Nk] complex128
-                        (typically from flibs.gen_Green0 or a converged normal-state solution)
-    @param        hamk: k-space Hamiltonian [Nk, Norb, Norb] complex128
-    @param        Smat: Spin interaction matrix [Nchi, Nchi] float64
-    @param        Cmat: Charge interaction matrix [Nchi, Nchi] float64
-    @param       olist: Orbital index pairs for chi [Nchi, 2] int64
-    @param       plist: Parity factors per orbital [Norb] float64
-    @param        kmap: Full k-grid to irreducible-grid mapping [Nkall, 3] int64
-    @param        invk: Inverse k-point list [Nkall, 3] int64
-    @param          mu: Chemical potential in eV
-    @param        temp: Temperature in eV
-    @param     gap_sym: Gap symmetry (>=0 singlet, <0 triplet)
-    @param    Nx,Ny,Nz: k-grid dimensions
-    @param    sw_sigma: Include FLEX self-energy correction in the dressed G_0 (default False)
-    @param    sw_Vconst: Use constant pairing interaction instead of FLEX vertices (default False)
-    @param         eps: Convergence threshold on |Δ_new-Δ|/|Δ|
-    @param      itemax: Maximum SCF iterations
-    @param      m_diis: DIIS history length (m_diis<=1 → linear mixing only; default 5)
-    @param     gap_min: Gap-collapse cutoff as a fraction of the initial |Δ|max (default 1e-2).
-                        The loop stops early once |Δ|max falls below gap_min·|Δ_init|max,
-                        i.e. the gap is decaying toward the trivial solution (T >= Tc).
-                        Set gap_min<=0 to disable the early stop.
+    @param    delta_init: Initial gap function [Norb, Norb, Nw, Nk] complex128.
+                          Caller is responsible for providing a non-zero initial Δ.
+                          Recommended sources:
+                            - flibs.get_initial_delta(...) for a symmetry-adapted seed
+                            - a converged linearized_eliashberg() output (scaled to a
+                              physical magnitude, e.g. ~1.764·T) for a fast start
+                          If the array is C-contiguous complex128 it is modified in place;
+                          otherwise a contiguous copy is created.
+    @param            Gk: Initial normal Green's function [Norb, Norb, Nw, Nk] complex128
+                          (typically from flibs.gen_Green0 or a converged normal-state solution)
+    @param          hamk: k-space Hamiltonian [Nk, Norb, Norb] complex128
+    @param          Smat: Spin interaction matrix [Nchi, Nchi] float64
+    @param          Cmat: Charge interaction matrix [Nchi, Nchi] float64
+    @param         olist: Orbital index pairs for chi [Nchi, 2] int64
+    @param         plist: Parity factors per orbital [Norb] float64
+    @param          kmap: Full k-grid to irreducible-grid mapping [Nkall, 3] int64
+    @param          invk: Inverse k-point list [Nkall, 3] int64
+    @param            mu: Chemical potential in eV
+    @param          temp: Temperature in eV
+    @param       gap_sym: Gap symmetry (>=0 singlet, <0 triplet)
+    @param      Nx,Ny,Nz: k-grid dimensions
+    @param      sw_sigma: Include FLEX self-energy correction in the dressed G_0 (default False)
+    @param     sw_Vconst: Use constant pairing interaction instead of FLEX vertices (default False)
+    @param           eps: Convergence threshold on |Δ_new-Δ|/|Δ|
+    @param        itemax: Maximum SCF iterations
+    @param        m_diis: DIIS history length (m_diis<=1 → linear mixing only; default 5)
+    @param       gap_min: Gap-collapse cutoff as a fraction of the initial |Δ|max (default 1e-2).
+                          The loop stops early once |Δ|max falls below gap_min·|Δ_init|max,
+                          i.e. the gap is decaying toward the trivial solution (T >= Tc).
+                          Set gap_min<=0 to disable the early stop.
     @param sw_amp_newton: Enable the amplitude accelerator with adaptive anchoring (default True).
                         Near the bifurcated SC fixed point the slow mode is the gap amplitude.
                         The gap shape is anchored to the (normalized) seed eigenvector v0 (Δ=a·v0),
                         which suppresses drift onto the unphysical negative eigenmode; the v0-
-                        projected gain g(a)=<v0,M[a v0]>/a follows the pitchfork form g(a)=λ0-c·a²,
+                        projected gain g(a)=@<v0,M[a v0]@>/a follows the pitchfork form g(a)=λ0-c·a²,
                         and the amplitude is solved by the cubic root a*=sqrt((λ0-1)/c) (Phase 1).
                         Once |g-1|<2% it switches to DIIS to relax the shape (Phase 2), and after a
                         few polish steps re-anchors v0 to the relaxed shape and re-solves a
                         (adaptive anchoring), alternating until converged. Set False to use plain
                         DIIS/linear mixing throughout (uses m_diis).
-    @retval      delta: Converged gap function [Norb, Norb, Nw, Nk] complex128
+    @param         iperm: orbital permutation of the inversion operator (None = identity)
+    @return      delta: Converged gap function [Norb, Norb, Nw, Nk] complex128
                         (same array as delta_init when contiguous; otherwise a new copy)
-    @retval     sigmak: FLEX self-energy [Norb, Norb, Nw, Nk] complex128
+    @return     sigmak: FLEX self-energy [Norb, Norb, Nw, Nk] complex128
                         (zero array when sw_sigma=False)
     """
     if delta_init.dtype != np.complex128 or not delta_init.flags['C_CONTIGUOUS']:
@@ -329,13 +329,13 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
 def conv_delta_orb_to_band(delta: np.ndarray, uni: np.ndarray, invk: np.ndarray,
                            plist: np.ndarray, gap_sym: int | str | None, iperm: np.ndarray | None = None) -> np.ndarray:
     """
-    @fn conv_delta_orb_to_band
     @brief Convert the superconducting gap function from orbital basis to band basis (without SOC).
     @param   delta: Gap function in orbital basis [Norb, Norb, Nw, Nkall] complex128
     @param     uni: Eigenvector matrices [Nk, Norb, Norb] complex128
     @param    invk: Inverse k-point mapping [Nkall] int64
     @param   plist: Parity list for gap symmetry [Norb] float64
     @param gap_sym: Gap symmetry index
+    @param   iperm: orbital permutation of the inversion operator (None = identity)
     @return deltab: Gap function in band basis [Norb, Norb, Nkall] complex128
     """
     Nkall, Nk, Nw, Norb = len(invk), len(uni), len(delta[0, 0]), len(delta)
@@ -351,7 +351,6 @@ def conv_delta_orb_to_band(delta: np.ndarray, uni: np.ndarray, invk: np.ndarray,
 def conv_delta_orb_to_band_soc(delta: np.ndarray, uni: np.ndarray, invk: np.ndarray,
                                invs: np.ndarray, slist: np.ndarray) -> np.ndarray:
     """
-    @fn conv_delta_orb_to_band_soc
     @brief Convert the superconducting gap function from orbital basis to band basis with SOC.
     @param   delta: Gap function in orbital basis [Norb, Norb, Nw, Nkall] complex128
     @param     uni: Eigenvector matrices [Nk, Norb, Norb] complex128
@@ -369,7 +368,6 @@ def conv_delta_orb_to_band_soc(delta: np.ndarray, uni: np.ndarray, invk: np.ndar
 
 def gen_Fk(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray) -> np.ndarray:
     """
-    @fn gen_Fk
     @brief Generate the anomalous Green's function Fk from G and delta (without SOC).
     @param     Gk: Normal Green's function [Norb, Norb, Nw, Nk] complex128
     @param  delta: Anomalous self-energy [Norb, Norb, Nw, Nkall] complex128
@@ -385,7 +383,6 @@ def gen_Fk(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray) -> np.ndarray:
 def gen_Fk_soc(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray, invs: np.ndarray,
                slist: np.ndarray, gap_sym: int) -> np.ndarray:
     """
-    @fn gen_Fk_soc
     @brief Generate the anomalous Green's function Fk from G and delta with SOC.
     @param     Gk: Normal Green's function [Norb, Norb, Nw, Nk] complex128
     @param  delta: Anomalous self-energy [Norb, Norb, Nw, Nkall] complex128
@@ -407,7 +404,6 @@ def gen_Fk_soc(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray, invs: np.nda
 def get_initial_delta(init_delta: np.ndarray, uni: np.ndarray, kmap: np.ndarray,
                       invk: np.ndarray, Nw: int, gap_sym: int) -> np.ndarray:
     """
-    @fn get_initial_delta
     @brief Convert a band-basis initial gap function into an orbital-basis gap function,
     broadcast over Matsubara frequencies, and normalize.
     Applies U * diag(init_delta) * U† at each k-point, then normalises by the total norm.
@@ -430,7 +426,6 @@ def get_initial_delta(init_delta: np.ndarray, uni: np.ndarray, kmap: np.ndarray,
 
 def get_band_to_orb_delta(init_delta: np.ndarray, uni: np.ndarray) -> np.ndarray:
     """
-    @fn get_band_to_orb_delta
     @brief Transform the gap function from band-diagonal representation to orbital basis.
     The eigenvector matrices returned by get_eig/get_eigs are stored as row-eigenvectors,
     i.e. U(k) H(k) = E(k) U(k). Under this convention used with mkBdGhamk,
@@ -457,12 +452,12 @@ def get_band_to_orb_delta(init_delta: np.ndarray, uni: np.ndarray) -> np.ndarray
 def remap_gap(delta0: np.ndarray, plist: np.ndarray, invk: np.ndarray, gap_sym: int | str | None,
               iperm: np.ndarray | None = None) -> np.ndarray:
     """
-    @fn remap_gap
     @brief Remap the anomalous self-energy from the reduced k-grid to the full k-grid applying gap symmetry.
     @param  delta0: Anomalous self-energy on reduced k-grid [Norb, Norb, Nw, Nk] complex128
     @param   plist: Parity list for gap symmetry [Norb] float64
     @param    invk: Inverse k-point mapping [Nkall] int64
     @param gap_sym: Gap symmetry index
+    @param   iperm: orbital permutation of the inversion operator (None = identity)
     @return  delta: Anomalous self-energy on full k-grid [Norb, Norb, Nw, Nkall] complex128
     """
     Nkall, Nk, Norb = len(invk), len(delta0.T), len(plist)

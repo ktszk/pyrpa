@@ -21,7 +21,8 @@ file is executed directly).  Contents:
   * numerics .............. rel_err, fit_power_order
   * physics assertions .... assert_hermitian, assert_positive_semidefinite,
                             assert_green_causal, assert_raises
-  * runner ................ run_standalone (shared "no pytest needed" driver)
+  * runner ................ run_standalone (shared "no pytest needed" driver),
+                            slow (marker for long-running tests, see --runslow)
 
 Requires the Fortran library libfmod.so (cd libs && make FC=ifx SL=MKL).
 """
@@ -397,12 +398,25 @@ def assert_raises(exc, fn, *args, **kwargs):
 # --------------------------------------------------------------------------- #
 #  standalone runner
 # --------------------------------------------------------------------------- #
+def slow(fn):
+    """Mark a long-running test.  It is skipped by default -- under pytest (conftest.py)
+    and by run_standalone / run_all.py alike -- and runs only with --runslow.  Usable
+    without pytest installed: the pytest marker is attached only when pytest imports."""
+    fn.slow = True
+    try:
+        import pytest
+    except ImportError:
+        return fn
+    return pytest.mark.slow(fn)
+
+
 def run_standalone(namespace, argv=None):
     """Shared 'no pytest required' driver: run every test_* callable in
     namespace (a module's globals()), report PASS/FAIL with timings and
     return a shell exit code.  Supplies a temporary directory to tests with
     a tmp_path parameter.  Optional argv (default sys.argv[1:]): substring
-    filters, only tests whose name contains one of them are run.
+    filters, only tests whose name contains one of them are run; the flag
+    --runslow also runs the tests marked with slow (skipped otherwise).
 
     Usage at the end of a test module:
 
@@ -412,13 +426,19 @@ def run_standalone(namespace, argv=None):
     """
     if argv is None:
         argv = sys.argv[1:]
+    runslow = '--runslow' in argv
+    argv = [a for a in argv if a != '--runslow']
     tests = [v for k, v in sorted(namespace.items())
              if k.startswith('test_') and callable(v)]
     if argv:
         tests = [t for t in tests if any(s in t.__name__ for s in argv)]
     width = max((len(t.__name__) for t in tests), default=10) + 2
-    npass = 0
+    npass = nskip = 0
     for t in tests:
+        if getattr(t, 'slow', False) and not runslow:
+            print(f"  SKIP  {t.__name__:{width}s} (slow: add --runslow to run)", flush=True)
+            nskip += 1
+            continue
         t0 = time.time()
         try:
             kwargs = {}
@@ -433,5 +453,6 @@ def run_standalone(namespace, argv=None):
         except Exception as e:
             print(f"  FAIL  {t.__name__:{width}s} ({time.time()-t0:5.1f}s)"
                   f"  -> {type(e).__name__}: {e}", flush=True)
-    print(f"\n{npass}/{len(tests)} passed")
-    return 0 if npass == len(tests) else 1
+    nrun = len(tests) - nskip
+    print(f"\n{npass}/{nrun} passed" + (f"  ({nskip} slow skipped)" if nskip else ""))
+    return 0 if npass == nrun else 1

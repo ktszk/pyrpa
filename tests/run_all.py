@@ -8,6 +8,7 @@ prints a summary table.
     python tests/run_all.py               # everything
     python tests/run_all.py rpa trans     # only files whose name matches
     python tests/run_all.py -q            # per-file summary lines only
+    python tests/run_all.py --runslow     # also the tests marked slow (_tools.slow)
 
 Exit code 0 iff every file passed.  With pytest installed, `pytest` from the
 repository root remains the recommended runner (parallel-friendly, --runslow).
@@ -27,6 +28,8 @@ def main():
                     help='substring filters on the test file names')
     ap.add_argument('-q', '--quiet', action='store_true',
                     help='suppress per-test output, keep the summary')
+    ap.add_argument('--runslow', action='store_true',
+                    help='also run the tests marked slow (_tools.slow)')
     args = ap.parse_args()
 
     files = sorted(f for f in os.listdir(TESTS)
@@ -42,7 +45,7 @@ def main():
         print(f"=== {f} ===", flush=True)
         t0 = time.time()
         proc = subprocess.run(
-            [sys.executable, os.path.join(TESTS, f)],
+            [sys.executable, os.path.join(TESTS, f)] + (['--runslow'] if args.runslow else []),
             stdout=(subprocess.DEVNULL if args.quiet else None),
             stderr=None,
         )

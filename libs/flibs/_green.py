@@ -88,7 +88,6 @@ _loader._lib.pade_with_trace.restype = None
 def gen_Green0(eig: np.ndarray, uni: np.ndarray,
                mu: float, temp: float, Nw: int) -> np.ndarray:
     """
-    @fn gen_Green0
     @brief Construct the non-interacting Matsubara Green's function G0(k, iω_n).
     @param   eig: Eigenvalues [Nk, Norb] float64
     @param   uni: Eigenvector matrices [Nk, Norb, Norb] complex128
@@ -108,7 +107,6 @@ def gen_Green0(eig: np.ndarray, uni: np.ndarray,
 def gen_green(selfen: np.ndarray, hamk: np.ndarray,
               mu: float, temp: float) -> np.ndarray:
     """
-    @fn gen_green
     @brief Construct the interacting Matsubara Green's function G(k, iω_n) = [iω_n + mu - H(k) - Sigma(k,iω_n)]^-1.
     @param  selfen: Self-energy tensor [Norb, Norb, Nw, Nk] complex128
     @param    hamk: k-space Hamiltonian [Nk, Norb, Norb] complex128
@@ -129,7 +127,6 @@ def gen_green(selfen: np.ndarray, hamk: np.ndarray,
 def gen_green_from_eig(selfen: np.ndarray, eig: np.ndarray,
                        uni: np.ndarray, mu: float, temp: float) -> np.ndarray:
     """
-    @fn gen_green_from_eig
     @brief Construct the interacting Green's function using pre-computed eigenvalues and eigenvectors.
     @param  selfen: Self-energy tensor [Norb, Norb, Nw, Nk] complex128
     @param     eig: Eigenvalues [Nk, Norb] float64
@@ -151,7 +148,6 @@ def gen_green_from_eig(selfen: np.ndarray, eig: np.ndarray,
 def gen_tr_Greenw_0(eig: np.ndarray, mu: float,
                     wlist: np.ndarray, delta: float) -> np.ndarray:
     """
-    @fn gen_tr_Greenw_0
     @brief Compute the k-resolved spectral function (imaginary part of trace of G0) on the real-frequency axis.
     @param    eig: Eigenvalues [Nk, Norb] float64
     @param     mu: Chemical potential in eV
@@ -170,7 +166,6 @@ def gen_tr_Greenw_0(eig: np.ndarray, mu: float,
 def gen_dos(eig: np.ndarray, uni: np.ndarray, mu: float,
             wlist: np.ndarray, delta: float) -> np.ndarray:
     """
-    @fn gen_dos
     @brief Compute the orbital-resolved partial density of states (pDOS) on the real-frequency axis.
     @param    eig: Eigenvalues [Nk, Norb] float64
     @param    uni: Eigenvector matrices [Nk, Norb, Norb] complex128
@@ -189,7 +184,6 @@ def gen_dos(eig: np.ndarray, uni: np.ndarray, mu: float,
 
 def get_a(inp_data: np.ndarray, xlist: np.ndarray) -> np.ndarray:
     """
-    @fn get_a
     @brief Compute Pade continued-fraction coefficients from input data on Matsubara grid.
     @param inp_data: Input data (e.g. Green's function) at Matsubara points [Np] complex128
     @param    xlist: Matsubara frequency points [Np] complex128
@@ -203,13 +197,12 @@ def get_a(inp_data: np.ndarray, xlist: np.ndarray) -> np.ndarray:
 
 def get_QP(a: np.ndarray, xlist: np.ndarray, wlist: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn get_QP
     @brief Evaluate Pade numerator Q and denominator P on the real-frequency axis from continued-fraction coefficients.
     @param      a: Pade coefficient array [Np] complex128 (from get_a)
     @param  xlist: Matsubara frequency points [Np] complex128
     @param  wlist: Real-frequency mesh [Nw] complex128
-    @retval     Q: Pade numerator evaluated on real axis [Nw] complex128
-    @retval     P: Pade denominator evaluated on real axis [Nw] complex128
+    @return     Q: Pade numerator evaluated on real axis [Nw] complex128
+    @return     P: Pade denominator evaluated on real axis [Nw] complex128
     """
     Nw, Np = len(wlist), len(a)
     Q = np.zeros(Nw, dtype=np.complex128)
@@ -220,7 +213,6 @@ def get_QP(a: np.ndarray, xlist: np.ndarray, wlist: np.ndarray) -> tuple[np.ndar
 
 def pade_with_trace(A: np.ndarray, iwlist: np.ndarray, wlist: np.ndarray) -> np.ndarray:
     """
-    @fn pade_with_trace
     @brief Perform Pade analytic continuation and trace over orbital indices to obtain the real-axis spectrum.
     @param      A: Matrix on Matsubara axis [Norb, Norb, Niw, Nk] complex128
     @param iwlist: Matsubara frequency points [Niw] complex128

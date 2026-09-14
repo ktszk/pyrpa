@@ -19,14 +19,13 @@ RY_TO_EV = 13.6          # Rydberg -> eV conversion for the MLO (ecalj) importer
 
 def import_hoppings(fname: str, ftype: int) -> tuple[np.ndarray, np.ndarray, int, int]:
     """
-    @fn import_hoppings()
     @brief This function imports hopping parameters from files
     @param fname: Name of import files
     @param ftype: File format of import files
-    @retval  rvec: the array of r-vector, size:(nr,3)
-    @retval ham_r: the array of hopping integrals, size:(nr,no,no)
-    @retval    no: the number of orbitals
-    @retval    nr: the number of r-vectors
+    @return  rvec: the array of r-vector, size:(nr,3)
+    @return ham_r: the array of hopping integrals, size:(nr,no,no)
+    @return    no: the number of orbitals
+    @return    nr: the number of r-vectors
     """
     def import_hop(name: str) -> tuple:
         rvec = np.loadtxt(f'{name}/irvec.txt')
@@ -87,14 +86,13 @@ def import_hoppings(fname: str, ftype: int) -> tuple[np.ndarray, np.ndarray, int
 
 def import_MLO_hoppings(name: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
     """
-    @fn import_MLO_hoppings()
     @brief This function imports MLO hopping parameters from files
     @param name: File name
-    @retval  rvec: the array of r-vector, size:(nr,3)
-    @retval ham_r: the array of hopping integrals, size:(nr,no,no)
-    @retval   S_r: the array of overlap integrals, size:(nr,no,no)
-    @retval    no: the number of orbitals
-    @retval    nr: the number of r-vectors
+    @return  rvec: the array of r-vector, size:(nr,3)
+    @return ham_r: the array of hopping integrals, size:(nr,no,no)
+    @return   S_r: the array of overlap integrals, size:(nr,no,no)
+    @return    no: the number of orbitals
+    @return    nr: the number of r-vectors
     """
     tmp = [f.split() for f in open(f'{name}', 'r')]
     tmp1 = np.array([[float(t) for t in tp] for tp in tmp])
@@ -110,15 +108,14 @@ def import_MLO_hoppings(name: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, 
 
 def read_HamRsMLO(directory: str = '.') -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
     """
-    @fn read_HamRsMLO()
     @brief Read ecalj job_mlo binary output (HamRsMLO + HamiltonianPMTInfo).
            Returns the same format as import_MLO_hoppings.
     @param directory: path containing HamRsMLO and HamiltonianPMTInfo
-    @retval  rvec: R-vectors (nr, 3) float64, in lattice-vector units
-    @retval ham_r: H(R) (nr, no, no) complex128, eV
-    @retval   S_r: S(R) (nr, no, no) complex128, dimensionless
-    @retval    no: number of MLO orbitals (ndimMTO)
-    @retval    nr: number of R-vectors
+    @return  rvec: R-vectors (nr, 3) float64, in lattice-vector units
+    @return ham_r: H(R) (nr, no, no) complex128, eV
+    @return   S_r: S(R) (nr, no, no) complex128, dimensionless
+    @return    no: number of MLO orbitals (ndimMTO)
+    @return    nr: number of R-vectors
     """
     def _read_record(f: np.ndarray) -> bytes:
         raw = f.read(4)
@@ -222,7 +219,6 @@ def read_HamRsMLO(directory: str = '.') -> tuple[np.ndarray, np.ndarray, np.ndar
 
 def get_bvec(avec: np.ndarray) -> np.ndarray:
     """
-    @fn get_bvec()
     @brief This function generates reciprocal lattice vector from primitive translation vector
     @param  avec: primitive translation vector
     @return bvec: reciprocal lattice vector
@@ -234,7 +230,6 @@ def get_bvec(avec: np.ndarray) -> np.ndarray:
 
 def gen_rlist(Nx: int, Ny: int, Nz: int) -> np.ndarray:
     """
-    @fn gen_rlist
     @brief This function generates the list of r-vectors
     @param     Nx: Number of sites along x-axis
     @param     Ny: Number of sites along y-axis
@@ -252,13 +247,12 @@ def gen_rlist(Nx: int, Ny: int, Nz: int) -> np.ndarray:
 
 def gen_klist_with_kmap(Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn gen_klist_with_kmap
     @brief This function generates the list of k-vectors
     @param     Nx: Number of kx mesh
     @param     Ny: Number of ky mesh
     @param     Nz: Number of kz mesh
-    @retval klist: The array of k-vectors
-    @retval  kmap: The array of property of k-points
+    @return klist: The array of k-vectors
+    @return  kmap: The array of property of k-points
     """
     x0 = np.linspace(0, Nx, Nx, False, dtype=int)
     y0 = np.linspace(0, Ny, Ny, False, dtype=int)
@@ -271,15 +265,14 @@ def gen_klist_with_kmap(Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, np.ndarr
 
 def gen_klist(Nx: int, Ny: int, Nz: int | None = None, sw_pp: bool = True, kz: float = 0.0) -> tuple[int, np.ndarray]:
     """
-    @fn gen_klist()
     @brief This function generates a k-point list meshed in Nx,Ny,Nz
     @param     Nx: Number of axis 1 mesh (usually kx mesh)
     @param     Ny: Number of axis 2 mesh (usually ky mesh)
     @param     Nz: Number of axis 3 mesh (usually kz mesh)
     @param  sw_pp: switch output 2D mesh or 3D mesh
     @param     kz: value of axis 3 at 2D mesh (use only if sw_pp is True)
-    @retval    Nk: number of k-points
-    @retval klist: list of k-points
+    @return    Nk: number of k-points
+    @return klist: list of k-points
     """
     if sw_pp:
         # Symmetric BZ: k in [-0.5, 0.5] for band/FS plots (includes both zone boundaries)
@@ -303,14 +296,13 @@ def gen_klist(Nx: int, Ny: int, Nz: int | None = None, sw_pp: bool = True, kz: f
 
 def mk_klist(k_list: np.ndarray | list, N: int, bvec: np.ndarray) -> tuple[np.ndarray, np.ndarray, list]:
     """
-    @fn mk_klist()
     @brief This function generates k-point list for symmetry line
     @param  k_list: the list of symmetry points
     @param       N: Number of mesh between symmetry points
     @param    bvec: reciprocal lattice vector
-    @retval  klist: list of k-points at band plot
-    @retval  splen: length of symmetry points
-    @retval xticks: footnotes of klist at ticks of symmetry points
+    @return  klist: list of k-points at band plot
+    @return  splen: length of symmetry points
+    @return xticks: footnotes of klist at ticks of symmetry points
     """
     klist = []
     splen = []
@@ -337,16 +329,15 @@ def mk_klist(k_list: np.ndarray | list, N: int, bvec: np.ndarray) -> tuple[np.nd
 def mk_qlist(k_set: np.ndarray | list, Nx: int, Ny: int, Nz: int,
              bvec: np.ndarray) -> tuple[np.ndarray, np.ndarray, list]:
     """
-    @fn mk_qlist()
     @brief This function generates q-point list for symmetry line
     @param   k_set: the list of symmetry points
     @param      Nx: Number of x-mesh
     @param      Ny: Number of y-mesh
     @param      Nz: Number of z-mesh
     @param    bvec: reciprocal lattice vector
-    @retval  qlist: list of q-points at band plot
-    @retval  splen: length of symmetry points
-    @retval xticks: footnotes of qlist at ticks of symmetry points
+    @return  qlist: list of q-points at band plot
+    @return  splen: length of symmetry points
+    @return xticks: footnotes of qlist at ticks of symmetry points
     """
     qlist = []
     splen = []
@@ -381,14 +372,13 @@ def mk_qlist(k_set: np.ndarray | list, Nx: int, Ny: int, Nz: int,
 
 def get_ptv(alatt: np.ndarray, deg: np.ndarray, brav: int) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn get_ptv
     @brief Generate primitive translation vectors (avec) and rotation matrix (Arot) for a given Bravais lattice type.
     @param  alatt: Lattice constants [a, b, c] in Angstrom
     @param    deg: Lattice angles [alpha, beta, gamma] in degrees (used for brav>=8)
     @param   brav: Bravais lattice type index (0=simple cubic, 1=FCC, 2=BCC, 3=hexagonal,
                    4=trigonal, 5=base-centered, 6=FCC2, 7=BCC2, >=8=general triclinic)
-    @retval  avec: Primitive translation vectors as rows (shape [3,3])
-    @retval  Arot: Rotation matrix defining the primitive cell in terms of conventional cell
+    @return  avec: Primitive translation vectors as rows (shape [3,3])
+    @return  Arot: Rotation matrix defining the primitive cell in terms of conventional cell
     """
     if brav == 0:  # simple
         Arot = np.array([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]])
@@ -441,11 +431,10 @@ def get_ptv(alatt: np.ndarray, deg: np.ndarray, brav: int) -> tuple[np.ndarray, 
 
 def get_symm_line(brav: int) -> tuple[list, list]:
     """
-    @fn get_symm_line
     @brief Return the high-symmetry k-point path and corresponding axis labels for a given Bravais lattice.
     @param    brav: Bravais lattice type index (same convention as get_ptv)
-    @retval k_list: List of high-symmetry k-points in fractional coordinates
-    @retval xlabel: List of label strings (LaTeX) for each high-symmetry point
+    @return k_list: List of high-symmetry k-points in fractional coordinates
+    @return xlabel: List of label strings (LaTeX) for each high-symmetry point
     """
     if brav == 0:  # simple
         k_list = [[0., 0., .5], [0., 0., 0.], [.5, 0., 0.], [.5, .5, 0.], [0., 0., 0.]]
@@ -479,13 +468,12 @@ def get_symm_line(brav: int) -> tuple[list, list]:
 
 def BZedge(bvec: np.ndarray, ax: object | None = None) -> np.ndarray:
     """
-    @fn BZedge
     @brief Draw first Brillouin zone boundary edges using Wigner-Seitz construction in reciprocal space.
            The edges are drawn in Cartesian k [Angstrom^-1], so whatever is overlaid on the same
            axes (Fermi sheets, k-points) must be Cartesian too.
     @param bvec: reciprocal lattice vectors as rows, shape (3,3), in Angstrom^-1
     @param   ax: matplotlib Axes3D; uses plt.gca() if None
-    @retval  the BZ corner points [Nv,3] in Cartesian k, for setting the axis ranges
+    @return  the BZ corner points [Nv,3] in Cartesian k, for setting the axis ranges
     """
     import itertools
     import matplotlib.pyplot as plt

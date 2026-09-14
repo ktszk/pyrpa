@@ -26,7 +26,6 @@ __all__ = [
 def get_eigs(klist: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray,
              sw_uni: bool = False, sw_std: bool = False) -> tuple[np.ndarray, np.ndarray] | np.ndarray:
     """
-    @fn get_eigs
     @brief This function generates eigenvalues of Hamiltonian
     @param  klist: list of k-points
     @param  ham_r: hopping parameters
@@ -34,8 +33,8 @@ def get_eigs(klist: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.nda
     @param   rvec: r vector of hoppings
     @param sw_uni: switch of output only unitary matrix or not
     @param sw_std: switch standardization of unitary matrix at MLO hoppings
-    @retval   eig: eigenvalues of Hamiltonian
-    @retval   uni: unitary matrix of eigenfunctions
+    @return   eig: eigenvalues of Hamiltonian
+    @return   uni: unitary matrix of eigenfunctions
     """
     if len(S_r) == 0:
         ham_k = flibs.gen_ham(klist, ham_r, rvec)
@@ -77,7 +76,6 @@ def _solve_mu(func: collections.abc.Callable, emin: float, emax: float, label: s
 
 def calc_mu(eig: np.ndarray, Nk: int, fill: float, temp: float) -> float:
     """
-    @fn calc_mu()
     @brief This function obtains chemical potential mu
     @param   eig: Eigenvalues array
     @param    Nk: Number of k-points
@@ -96,7 +94,6 @@ def calc_mu(eig: np.ndarray, Nk: int, fill: float, temp: float) -> float:
 
 def calc_mu_imp(eigs: np.ndarray, Nsite: int, fill: float, temp: float) -> float:
     """
-    @fn calc_mu_imp
     @brief Calculate the chemical potential for an impurity system using the bisection method (brentq).
     @param   eigs: Eigenvalues array (all k-points and bands)
     @param  Nsite: Number of sites in the unit cell
@@ -115,12 +112,13 @@ def calc_mu_imp(eigs: np.ndarray, Nsite: int, fill: float, temp: float) -> float
 
 def get_kf_points(eig: np.ndarray, mesh: int, mu: float, kz: float) -> tuple[list, list]:
     """
-    @fn get_kf_points()
     @brief This function obtains fermi wave-number points from precomputed eigenvalues
-    @param   eig: eigenvalues of Hamiltonian shape (Nk, Norb)
-    @param  mesh: k-mesh
-    @param    mu: chemical potential
-    @param    kz: kz value (used to tag contour coordinates)
+    @param  eig: eigenvalues of Hamiltonian shape (Nk, Norb)
+    @param mesh: k-mesh
+    @param   mu: chemical potential
+    @param   kz: kz value (used to tag contour coordinates)
+    @return (kf_points, fsband): Fermi-surface contours in fractional coordinates (for each band with a Fermi
+            surface, a list of [N, 3] contour arrays) and the band index of each entry
     """
     import skimage.measure as sk
     kf_points = []
@@ -138,7 +136,6 @@ def get_kf_points(eig: np.ndarray, mesh: int, mu: float, kz: float) -> tuple[lis
 def get_eigs_2d(mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray,
                 RotMat: np.ndarray, kz: float) -> np.ndarray:
     """
-    @fn get_eigs_2d()
     @brief Compute eigenvalues on 2D k-mesh at fixed kz (no contour finding)
     @param   mesh: k-mesh
     @param   rvec: r vector of hoppings
@@ -157,7 +154,6 @@ def get_eigs_2d(mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray,
 
 def shoelace_area(ct: np.ndarray) -> float:
     """
-    @fn shoelace_area()
     @brief Compute area of a closed contour in normalized BZ coordinates via shoelace formula
     @param    ct: contour point array shape (N, 3), columns [kx, ky, kz] in normalized coords
     @return     : contour area in normalized BZ units
@@ -174,7 +170,6 @@ _open_contour_state = {'n': 0}
 
 def open_contour_report(reset: bool = True) -> int:
     """
-    @fn open_contour_report()
     @brief Number of orbits get_band_area() discarded because the contour was open.
     @param reset: clear the counter after reading (default True)
     @return     : count since the last reset
@@ -188,7 +183,6 @@ def open_contour_report(reset: bool = True) -> int:
 def get_band_area(v2: list, blist: list, band_idx: int, ABZ: float,
                   sw_strict: bool = True) -> float | None:
     """
-    @fn get_band_area()
     @brief Compute total Fermi surface cross-section area for one band in AA^-2
            Sums over disconnected contour pieces. Returns None if band has no FS at this kz,
            or (with sw_strict) if any contour piece is open.
@@ -214,7 +208,6 @@ def get_band_area(v2: list, blist: list, band_idx: int, ABZ: float,
 
 def slice_area_factor(rotmat: np.ndarray, bvec: np.ndarray) -> float:
     """
-    @fn slice_area_factor()
     @brief Area Jacobian [AA^-2] converting a contour area measured in the rotated
            fractional (k1,k2) box into a physical cross-section area.
            get_eigs_2d replaces R -> rotmat.R in the fractional basis, i.e.
@@ -236,7 +229,6 @@ def slice_area_factor(rotmat: np.ndarray, bvec: np.ndarray) -> float:
 
 def field_direction(rotmat: np.ndarray, avec: np.ndarray) -> np.ndarray:
     """
-    @fn field_direction()
     @brief Cartesian unit vector along which the kz-slices are actually stacked,
            i.e. the magnetic field direction the rotated Hamiltonian really describes.
            The slice normal is v1 x v2, which equals sum_i rotmat[2,i] a_i up to a factor.
@@ -250,7 +242,6 @@ def field_direction(rotmat: np.ndarray, avec: np.ndarray) -> np.ndarray:
 
 def make_rotmat(theta_deg: float, phi_deg: float) -> np.ndarray:
     """
-    @fn make_rotmat()
     @brief Build rotation matrix R = Ry(-theta) @ Rz(-phi), s.t. R @ B_hat = z_hat.
            get_eigs_2d applies it to the FRACTIONAL R-vectors, so the resulting
            kz-slices are perpendicular to B only for a cubic cell; for any other
@@ -272,7 +263,6 @@ def make_rotmat(theta_deg: float, phi_deg: float) -> np.ndarray:
 
 def make_rotmat_bfield(theta_deg: float, phi_deg: float, bvec: np.ndarray) -> np.ndarray:
     """
-    @fn make_rotmat_bfield()
     @brief Build the fractional-basis matrix M whose kz-slices are EXACTLY perpendicular
            to B in Cartesian k-space, for an arbitrary (also non-orthogonal) lattice.
            The slice tangents are v_i = sum_k M[i,k] b_k, so v_i . B_hat = 0 requires
@@ -315,12 +305,15 @@ def build_fs_energy_grid(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, m
                          mesh: int = 120, ewin: float = 0.0,
                          method: str = 'cubic') -> dict | None:
     """
-    @fn build_fs_energy_grid()
     @brief Diagonalise once on a periodic fractional grid and wrap the result in an
            interpolator, so that an angle sweep costs lookups instead of eigen-solves.
            Only bands reaching the Fermi level (within ewin) are stored; sorted
            eigenvalues are continuous in k, so interpolating them is safe even across
            band crossings.
+    @param   rvec: R-vectors [Nr, 3]
+    @param  ham_r: hopping matrix H(R) [Nr, Norb, Norb] complex128
+    @param    S_r: overlap matrix S(R); [] for an orthogonal basis
+    @param     mu: chemical potential [eV]
     @param   mesh: grid points per axis over the primitive cell
     @param   ewin: keep bands whose range comes within ewin of mu (0 = crossing bands only)
     @param method: interpolation order for scipy RegularGridInterpolator
@@ -345,7 +338,6 @@ def build_fs_energy_grid(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, m
 
 def bfield_hat(theta_deg: float, phi_deg: float) -> np.ndarray:
     """
-    @fn bfield_hat()
     @brief Cartesian unit vector of the field for polar/azimuthal angles.
     @param theta_deg: polar angle from the z-axis [deg]
     @param   phi_deg: azimuthal angle [deg]
@@ -357,12 +349,11 @@ def bfield_hat(theta_deg: float, phi_deg: float) -> np.ndarray:
 
 def plane_frame(bhat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn plane_frame()
     @brief Right-handed orthonormal in-plane axes (e1,e2) with e1 x e2 = B_hat.
            The in-plane orientation is arbitrary; orbit areas do not depend on it.
     @param bhat: field direction (need not be normalised)
-    @retval  e1: in-plane unit vector
-    @retval  e2: in-plane unit vector
+    @return  e1: in-plane unit vector
+    @return  e2: in-plane unit vector
     """
     n = np.asarray(bhat, dtype=float)
     n = n/np.linalg.norm(n)
@@ -376,7 +367,6 @@ def get_eigs_plane(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: n
                    bhat: np.ndarray, d: float, L: float, mesh: int,
                    egrid: dict | None = None) -> np.ndarray:
     """
-    @fn get_eigs_plane()
     @brief Eigenvalues on a square Cartesian window of the plane k.B_hat = d:
            k = u*e1 + v*e2 + d*B_hat with u,v in [-L/2, L/2].
     @param   rvec: r vector of hoppings (fractional, NOT rotated -- the tilt lives
@@ -407,7 +397,6 @@ def get_eigs_plane(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: n
 
 def encloses_origin(ct: np.ndarray) -> bool:
     """
-    @fn encloses_origin()
     @brief Does this closed contour surround the field axis (the origin of the window)?
            Even-odd ray crossing along +u. This is the test that decides whether the
            section through the centre of the Fermi surface is a closed orbit, which a
@@ -431,27 +420,27 @@ def get_plane_orbits(eig: np.ndarray, mesh: int, L: float, mu: float,
                      bhat: np.ndarray, d: float,
                      band_map: list | None = None) -> tuple[list, int, set, dict, set]:
     """
-    @fn get_plane_orbits()
     @brief Extract the closed Fermi-surface orbits of one plane window.
            Areas come out directly in AA^-2 (the grid is Cartesian, Jacobian 1).
-    @param    eig: eigenvalues from get_eigs_plane
-    @param   mesh: number of intervals per edge
-    @param      L: window edge length [AA^-1]
-    @param     mu: chemical potential
-    @param   bhat: field direction (unit)
-    @param      d: plane offset [AA^-1]
-    @retval orbits: list of dicts with keys
+    @param      eig: eigenvalues from get_eigs_plane
+    @param     mesh: number of intervals per edge
+    @param        L: window edge length [AA^-1]
+    @param       mu: chemical potential
+    @param     bhat: field direction (unit)
+    @param        d: plane offset [AA^-1]
+    @param band_map: map from the columns of eig to global band indices (None = identity)
+    @return orbits: list of dicts with keys
                     band  : band index
                     area  : orbit area [AA^-2]
                     cen2d : (u,v) centroid in the window [AA^-1]
                     cen3d : Cartesian centroid [AA^-1]
                     d     : plane offset [AA^-1]
-    @retval n_open: number of contour pieces that ran into the window edge
+    @return n_open: number of contour pieces that ran into the window edge
                     (open orbits, or a window too small to enclose them)
-    @retval crossing: set of band indices that cross mu somewhere in the window
-    @retval axial: bands having a closed orbit that encloses the field axis, i.e. whose
+    @return crossing: set of band indices that cross mu somewhere in the window
+    @return axial: bands having a closed orbit that encloses the field axis, i.e. whose
                     section through the centre is a genuine closed orbit
-    @retval axis_open: bands whose section through the axis is an OPEN orbit -- nothing
+    @return axis_open: bands whose section through the axis is an OPEN orbit -- nothing
                     closed surrounds the axis AND the contour nearest to it is an open
                     piece. The second half matters: a band whose pockets simply sit away
                     from the axis (electron pockets at X, say) also has nothing closed
@@ -495,7 +484,6 @@ def find_plane_orbits(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec
                       ngrow: int = 3, mesh_max: int = 1200, egrid: dict | None = None,
                       ngrow_open: int = 2) -> tuple[list, int, float, set, set]:
     """
-    @fn find_plane_orbits()
     @brief Orbits of one plane, widening the window until the section through the centre
            is resolved, and saying which bands are left with an open orbit there.
 
@@ -509,21 +497,27 @@ def find_plane_orbits(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec
            diameters) is an open orbit, not a window artefact: it carries no dHvA
            oscillation, and shows up in magnetoresistance instead. Growth stops there
            rather than chasing it to the mesh cap.
-    @param     mu: chemical potential
-    @param   bhat: field direction (unit)
-    @param      d: plane offset [AA^-1]
-    @param     L0: initial window edge length [AA^-1]
-    @param     dk: target k-resolution [AA^-1] (mesh follows L to keep it fixed)
-    @param  ngrow: how many times the window may be doubled
-    @param mesh_max: cap on the grid size per edge
+    @param       rvec: R-vectors [Nr, 3]
+    @param      ham_r: hopping matrix H(R) [Nr, Norb, Norb] complex128
+    @param        S_r: overlap matrix S(R); [] for an orthogonal basis
+    @param       avec: primitive translation vectors as rows [AA]
+    @param         mu: chemical potential
+    @param       bhat: field direction (unit)
+    @param          d: plane offset [AA^-1]
+    @param         L0: initial window edge length [AA^-1]
+    @param         dk: target k-resolution [AA^-1] (mesh follows L to keep it fixed)
+    @param      ngrow: how many times the window may be doubled
+    @param   mesh_max: cap on the grid size per edge
+    @param      egrid: optional energy interpolator from build_fs_energy_grid; when given the band energies are
+                       looked up instead of diagonalised
     @param ngrow_open: doublings spent on a central open section before calling it open
-    @retval orbits: closed orbits (see get_plane_orbits)
-    @retval n_open: pieces still open at the largest window tried
-    @retval      L: window edge length actually used
-    @retval unresolved: bands with nothing closed around the axis and an open piece as
+    @return orbits: closed orbits (see get_plane_orbits)
+    @return n_open: pieces still open at the largest window tried
+    @return      L: window edge length actually used
+    @return unresolved: bands with nothing closed around the axis and an open piece as
                     the nearest thing to it -- an open section, as far as the window can
                     tell. Used to decide whether to widen.
-    @retval axial: bands that DO have a closed orbit encircling the axis. Reporting is
+    @return axial: bands that DO have a closed orbit encircling the axis. Reporting is
                     better based on this: "no orbit encircles the axis here" is a plain
                     measurement, whereas calling a section open also has to rule out a
                     small pocket sitting nearer the axis than any open piece, which near
@@ -550,10 +544,16 @@ def fs_cartesian_points(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray,
                         avec: np.ndarray, mu: float, mesh: int = 40,
                         egrid: dict | None = None) -> np.ndarray:
     """
-    @fn fs_cartesian_points()
     @brief Coarse cloud of Cartesian k-points lying on the Fermi surface, computed once
            and reused for every field angle to size the slice window and the slice range.
-    @param mesh: 3D sampling mesh per axis
+    @param  rvec: R-vectors [Nr, 3]
+    @param ham_r: hopping matrix H(R) [Nr, Norb, Norb] complex128
+    @param   S_r: overlap matrix S(R); [] for an orthogonal basis
+    @param  avec: primitive translation vectors as rows [AA]
+    @param    mu: chemical potential [eV]
+    @param  mesh: 3D sampling mesh per axis
+    @param egrid: optional energy interpolator from build_fs_energy_grid; when given the band energies are
+                  looked up instead of diagonalised
     @return    : (N,3) Cartesian k-points [AA^-1]; empty if no band crosses mu
     """
     Nk, klist = _lattice.gen_klist(mesh, mesh, mesh)
@@ -566,13 +566,12 @@ def fs_cartesian_points(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray,
 
 def fs_extent_along(kf: np.ndarray, bhat: np.ndarray, avec: np.ndarray) -> tuple[float, float]:
     """
-    @fn fs_extent_along()
     @brief Fermi-surface size relative to a field direction.
     @param     kf: Fermi-surface point cloud from fs_cartesian_points
     @param   bhat: field direction (unit)
     @param   avec: primitive translation vectors as rows, used as a fallback size
-    @retval radius: largest in-plane distance from the B_hat axis [AA^-1]
-    @retval   dmax: largest |k.B_hat| on the Fermi surface [AA^-1]
+    @return radius: largest in-plane distance from the B_hat axis [AA^-1]
+    @return   dmax: largest |k.B_hat| on the Fermi surface [AA^-1]
     """
     bv = _lattice.get_bvec(np.asarray(avec, dtype=float))
     if len(kf) == 0:   # no Fermi surface sampled: fall back to the cell size
@@ -588,18 +587,26 @@ def scan_plane_area(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: 
                     mu: float, bhat: np.ndarray, d_arr: np.ndarray, L0: float, dk: float,
                     ngrow: int = 3, egrid: dict | None = None) -> tuple[dict, dict, int, set]:
     """
-    @fn scan_plane_area()
     @brief Scan the orbit area along the field direction: for every plane offset d,
            take for each band the orbit closest to the B_hat axis.
            (Step 1 reduction -- one representative branch per band; orbits further out
            are the same branches at other offsets, which the d-scan already covers.)
-    @param  d_arr: plane offsets to scan [AA^-1]
-    @param     L0: initial window edge length [AA^-1]
-    @param     dk: target k-resolution [AA^-1]
-    @retval S_scan: dict band_idx -> [(d, area[AA^-2]), ...]
-    @retval  orbit_cache: dict d -> full orbit list (all bands, all copies)
-    @retval n_open: number of contour pieces that never closed
-    @retval axial_bands: bands having a closed orbit that encircles the field axis on
+    @param  rvec: R-vectors [Nr, 3]
+    @param ham_r: hopping matrix H(R) [Nr, Norb, Norb] complex128
+    @param   S_r: overlap matrix S(R); [] for an orthogonal basis
+    @param  avec: primitive translation vectors as rows [AA]
+    @param    mu: chemical potential [eV]
+    @param  bhat: field direction (need not be normalised)
+    @param d_arr: plane offsets to scan [AA^-1]
+    @param    L0: initial window edge length [AA^-1]
+    @param    dk: target k-resolution [AA^-1]
+    @param ngrow: how many times the search window may be doubled
+    @param egrid: optional energy interpolator from build_fs_energy_grid; when given the band energies are
+                  looked up instead of diagonalised
+    @return S_scan: dict band_idx -> [(d, area[AA^-2]), ...]
+    @return  orbit_cache: dict d -> full orbit list (all bands, all copies)
+    @return n_open: number of contour pieces that never closed
+    @return axial_bands: bands having a closed orbit that encircles the field axis on
                     the central plane (d=0)
     """
     S_scan = {}
@@ -636,10 +643,23 @@ def plane_area_at(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np
                   L0: float, dk: float, ngrow: int = 3,
                   egrid: dict | None = None) -> float:
     """
-    @fn plane_area_at()
     @brief Area of the representative orbit of one band at one plane offset,
            0 when the band has no closed orbit there (so extremum refinement
            walks away from it rather than crashing).
+    @param     rvec: R-vectors [Nr, 3]
+    @param    ham_r: hopping matrix H(R) [Nr, Norb, Norb] complex128
+    @param      S_r: overlap matrix S(R); [] for an orthogonal basis
+    @param     avec: primitive translation vectors as rows [AA]
+    @param       mu: chemical potential [eV]
+    @param     bhat: field direction (need not be normalised)
+    @param        d: plane offset [AA^-1]
+    @param band_idx: target band index
+    @param       L0: initial window edge length [AA^-1]
+    @param       dk: target k-resolution [AA^-1]
+    @param    ngrow: how many times the search window may be doubled
+    @param    egrid: optional energy interpolator from build_fs_energy_grid; when given the band energies are
+                     looked up instead of diagonalised
+    @return area of the orbit [AA^-2]; 0.0 when the band has no closed orbit at this offset
     """
     orbits = find_plane_orbits(rvec, ham_r, S_r, avec, mu, bhat, float(d), L0, dk, ngrow, egrid=egrid)[0]
     cand = [o for o in orbits if o['band'] == band_idx]
@@ -653,11 +673,22 @@ def find_extremal_d(d_arr: np.ndarray, S_arr: np.ndarray, band_idx: int,
                     mu: float, bhat: np.ndarray, L0: float, dk: float,
                     ngrow: int = 3) -> list:
     """
-    @fn find_extremal_d()
     @brief Plane offsets where dA/dd = 0, by sign-change detection on the coarse scan
            followed by a bounded refinement. d=0 is always extremal by time reversal
            (A(-d)=A(d)), provided the scan reaches it.
-    @retval : list of extremal d values [AA^-1]
+    @param    d_arr: plane offsets of the coarse scan [AA^-1]
+    @param    S_arr: orbit areas at d_arr from the coarse scan [AA^-2]
+    @param band_idx: target band index
+    @param     rvec: R-vectors [Nr, 3]
+    @param    ham_r: hopping matrix H(R) [Nr, Norb, Norb] complex128
+    @param      S_r: overlap matrix S(R); [] for an orthogonal basis
+    @param     avec: primitive translation vectors as rows [AA]
+    @param       mu: chemical potential [eV]
+    @param     bhat: field direction (need not be normalised)
+    @param       L0: initial window edge length [AA^-1]
+    @param       dk: target k-resolution [AA^-1]
+    @param    ngrow: how many times the search window may be doubled
+    @return : list of extremal d values [AA^-1]
     """
     d_arr = np.asarray(d_arr, dtype=float)
     S_arr = np.asarray(S_arr, dtype=float)
@@ -697,7 +728,6 @@ def find_extremal_d(d_arr: np.ndarray, S_arr: np.ndarray, band_idx: int,
 def slice_period(bvec: np.ndarray, bhat: np.ndarray, nshell: int = 4,
                  rtol: float = 1.0e-5) -> float | None:
     """
-    @fn slice_period()
     @brief Repeat distance of the Fermi surface along B: the smallest positive value of
            G.B_hat over reciprocal lattice vectors G. Together with A(-d)=A(d) it makes
            [0, period/2] the fundamental domain of the slice scan, and both of its ends
@@ -747,7 +777,6 @@ def _orbit_link_cost(o1: dict, o2: dict) -> float:
 def track_orbit_branches(orbit_cache: dict, d_arr: np.ndarray,
                          link_tol: float = 0.8) -> list:
     """
-    @fn track_orbit_branches()
     @brief Follow each orbit through the slice scan, linking orbits of neighbouring
            offsets by centroid and area continuity (greedy nearest match per band).
     @param orbit_cache: dict d -> orbit list, from scan_plane_area
@@ -782,14 +811,15 @@ def track_orbit_branches(orbit_cache: dict, d_arr: np.ndarray,
 def branch_extrema(branch: list, d0_is_extremal: bool = True,
                    d_end: float | None = None) -> list:
     """
-    @fn branch_extrema()
     @brief Extremal orbits of one branch: dA/dd = 0, located by a sign change of the
            area difference and refined by a parabolic fit through the bracketing
            triple (A is quadratic near an extremum, so the vertex is second order).
            d=0 is extremal by time reversal, A(-d)=A(d).
-    @param  d_end: end of the fundamental domain (half the slice period) when B is
-                   commensurate with the lattice; A is symmetric about it too, so a
-                   branch reaching it is extremal there. None for an incommensurate B.
+    @param         branch: one orbit branch: list of orbit dicts (band, area, d, cen3d) ordered by d
+    @param d0_is_extremal: treat d = 0 as extremal (time reversal, A(-d) = A(d))
+    @param          d_end: end of the fundamental domain (half the slice period) when B is
+                           commensurate with the lattice; A is symmetric about it too, so a
+                           branch reaching it is extremal there. None for an incommensurate B.
     @return: list of dicts (area, d, cen3d, band) at the extrema
     """
     if len(branch) == 1:
@@ -835,7 +865,6 @@ def follow_orbit(seed: dict, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarra
                  step: float, egrid: dict | None = None, nstep: int = 6,
                  reach: float = 1.5, widen: int = 2) -> dict | None:
     """
-    @fn follow_orbit()
     @brief Re-find, at a new field direction, the orbit that was extremal at the
            previous one, and return its extremum there.
 
@@ -846,14 +875,23 @@ def follow_orbit(seed: dict, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarra
            moves in k-space and the plane that carries it is simply the one through
            that centre, d = centre . B_hat. From there a short parabolic search along d
            finds dA/dd = 0 without any branch bookkeeping.
-    @param   seed: extremal orbit dict from the previous angle (band, area, cen3d)
-    @param      L: sampling window edge length [AA^-1]
-    @param   step: offset step of the coarse scan, used as the search increment
-    @param  nstep: maximum plane evaluations while bracketing the extremum
-    @param  reach: how far from the predicted centre the orbit may have moved,
-                   in units of its own radius
-    @param  widen: how many times the search increment may be doubled when the whole
-                   ladder runs monotonically and the extremum must lie further out
+    @param  seed: extremal orbit dict from the previous angle (band, area, cen3d)
+    @param  rvec: R-vectors [Nr, 3]
+    @param ham_r: hopping matrix H(R) [Nr, Norb, Norb] complex128
+    @param   S_r: overlap matrix S(R); [] for an orthogonal basis
+    @param  avec: primitive translation vectors as rows [AA]
+    @param    mu: chemical potential [eV]
+    @param  bhat: field direction (need not be normalised)
+    @param     L: sampling window edge length [AA^-1]
+    @param    dk: target k-resolution [AA^-1]
+    @param  step: offset step of the coarse scan, used as the search increment
+    @param egrid: optional energy interpolator from build_fs_energy_grid; when given the band energies are
+                  looked up instead of diagonalised
+    @param nstep: maximum plane evaluations while bracketing the extremum
+    @param reach: how far from the predicted centre the orbit may have moved,
+                  in units of its own radius
+    @param widen: how many times the search increment may be doubled when the whole
+                  ladder runs monotonically and the extremum must lie further out
     @return      : extremal orbit dict, or None if the orbit is not there any more
     """
     c = np.asarray(seed['cen3d'], dtype=float)
@@ -921,7 +959,6 @@ def verify_orbits_window(records: list, rvec: np.ndarray, ham_r: np.ndarray, S_r
                          grow: tuple = (1.3, 1.7, 2.1),
                          rtol: float = 5.0e-3) -> tuple[list, list]:
     """
-    @fn verify_orbits_window()
     @brief Keep only orbits whose area does not move when the sampling window changes.
            A window cutting through a connected Fermi-surface region returns the
            boundary of whatever part of it fits: a closed curve, but not an orbit, and
@@ -934,11 +971,20 @@ def verify_orbits_window(records: list, rvec: np.ndarray, ham_r: np.ndarray, S_r
            belly at theta=25 disagrees by 4e-1 at 1.6*L and by 1e-6 at 2.0*L. Several
            windows are tried and the spread of the areas decides.
     @param records: extremal orbit dicts (band, area, d, cen2d/cen3d)
+    @param    rvec: R-vectors [Nr, 3]
+    @param   ham_r: hopping matrix H(R) [Nr, Norb, Norb] complex128
+    @param     S_r: overlap matrix S(R); [] for an orthogonal basis
+    @param    avec: primitive translation vectors as rows [AA]
+    @param      mu: chemical potential [eV]
+    @param    bhat: field direction (need not be normalised)
     @param       L: window edge length the records were found with [AA^-1]
+    @param      dk: target k-resolution [AA^-1]
+    @param   egrid: optional energy interpolator from build_fs_energy_grid; when given the band energies are
+                    looked up instead of diagonalised
     @param    grow: window factors to re-measure at
     @param    rtol: relative spread allowed across those windows
-    @retval  good: records whose area is window-independent
-    @retval  bad : records rejected
+    @return  good: records whose area is window-independent
+    @return  bad : records rejected
     """
     n = np.asarray(bhat, dtype=float)
     e1, e2 = plane_frame(n)
@@ -965,7 +1011,6 @@ def verify_orbits_window(records: list, rvec: np.ndarray, ham_r: np.ndarray, S_r
 
 def nearest_lattice_offset(g: np.ndarray, bvec: np.ndarray, shell: int = 1) -> np.ndarray:
     """
-    @fn nearest_lattice_offset()
     @brief Reduce a fractional difference to the shortest Cartesian vector modulo the
            reciprocal lattice.
            Rounding each fractional component is the obvious thing and is exact ONLY for
@@ -993,7 +1038,6 @@ def nearest_lattice_offset(g: np.ndarray, bvec: np.ndarray, shell: int = 1) -> n
 
 def orbit_key(record: dict, bvec_inv: np.ndarray) -> np.ndarray:
     """
-    @fn orbit_key()
     @brief The orbit's 3D centre reduced into the first Brillouin zone, in fractional
            reciprocal coordinates. Two records of the SAME orbit seen in different
            zones differ by exactly a reciprocal lattice vector, so their keys coincide;
@@ -1011,7 +1055,6 @@ def dedup_extremal_orbits(records: list, bvec: np.ndarray, tol_k: float = 0.02,
                           rtol_area: float = 2.0e-4, rtol_copy: float = 1.0e-3,
                           bhat: np.ndarray | None = None) -> list:
     """
-    @fn dedup_extremal_orbits()
     @brief Reduce the raw extremal orbits to one record per distinct dHvA frequency,
            in two stages that answer two different questions.
 
@@ -1087,7 +1130,6 @@ def scan_fs_area(mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray
                  rotmat: np.ndarray, mu: float, ABZ: float,
                  meshkz: int = 20) -> tuple[dict, dict]:
     """
-    @fn scan_fs_area()
     @brief Phase-1 scan: compute cross-section area S(kz) at mu for all FS bands
     @param    mesh: k-mesh for 2D kx-ky grid
     @param    rvec: r vector of hoppings
@@ -1119,7 +1161,6 @@ def find_extremal_kz(kz_arr: np.ndarray, S_arr: np.ndarray, band_idx: int,
                      mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray,
                      rotmat: np.ndarray, mu: float, ABZ: float) -> list:
     """
-    @fn find_extremal_kz()
     @brief Phase-2 extremal search: find kz where dS/dkz=0 by sign-change detection,
            then refine each bracket with minimize_scalar. BZ boundaries always included.
     @param  kz_arr: kz values from Phase-1 scan
@@ -1174,7 +1215,6 @@ def gen_3d_surf_points(mesh: int, rvec: np.ndarray, ham_r: np.ndarray,
                        S_r: np.ndarray, mu: float, kscale: float = 1.0,
                        bvec: np.ndarray | None = None) -> tuple[list, list, list]:
     """
-    @fn gen_3d_surf_points()
     @brief This function obtains 3d fermi wave-numbers
     @param   mesh: k-mesh
     @param   rvec: r vector of hoppings
@@ -1185,10 +1225,10 @@ def gen_3d_surf_points(mesh: int, rvec: np.ndarray, ham_r: np.ndarray,
     @param   bvec: reciprocal lattice vectors as rows [Angstrom^-1]. If given, the
                    surface vertices are returned in Cartesian k (same frame as BZedge);
                    otherwise they stay in 2pi*fractional units of the reciprocal cell.
-    @retval fspolys: triangles of each Fermi sheet (Cartesian if bvec is given)
-    @retval fscenters: triangle centers in FRACTIONAL coordinates (always), because
+    @return fspolys: triangles of each Fermi sheet (Cartesian if bvec is given)
+    @return fscenters: triangle centers in FRACTIONAL coordinates (always), because
                    they are fed back to get_eigs/get_colors, which take fractional k
-    @retval fsband: band index of each sheet
+    @return fsband: band index of each sheet
     """
     import skimage.measure as ski
     Nk, klist = _lattice.gen_klist(mesh+1, mesh+1, mesh+1)
@@ -1217,7 +1257,6 @@ def gen_3d_surf_points(mesh: int, rvec: np.ndarray, ham_r: np.ndarray,
 def get_colors(klist: np.ndarray, blist: list, mrot: np.ndarray, rvec: np.ndarray, ham_r: np.ndarray,
                S_r: np.ndarray, ol: np.ndarray, color_option: int, sw_2d: bool = False) -> list:
     """
-    @fn get_colors
     @brief Compute color weights for Fermi surface visualization (orbital weight or velocity magnitude).
     @param        klist: List of k-points on the Fermi surface contours
     @param        blist: List of band indices corresponding to each contour in klist
@@ -1265,7 +1304,6 @@ def get_colors(klist: np.ndarray, blist: list, mrot: np.ndarray, rvec: np.ndarra
 def get_emesh(Nx: int, Ny: int, Nz: int, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray,
               avec: np.ndarray, sw_uni: bool = False, sw_veloc: bool = False, sw_mass: bool = False) -> tuple:
     """
-    @fn get_emesh
     @brief Generate the band energy mesh on a full 3D k-grid with optional eigenvectors, velocities, and inverse mass.
     @param     Nx: Number of k-points along kx
     @param     Ny: Number of k-points along ky

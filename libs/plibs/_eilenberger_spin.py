@@ -93,9 +93,11 @@ def _pauli() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
 
 def gap_matrix(channel: str, dvec: tuple = (0.0, 0.0, 1.0)) -> np.ndarray:
-    """2x2 spin gap matrix Delta_hat (unit amplitude).
+    """
+    @brief 2x2 spin gap matrix Delta_hat (unit amplitude).
     @param channel: 'singlet' or 'triplet'
-    @param   dvec: triplet d-vector direction (ignored for singlet)
+    @param    dvec: triplet d-vector direction (ignored for singlet)
+    @return Delta_hat: 2x2 complex matrix, i sigma_y (singlet) or (d.sigma) i sigma_y (triplet)
     """
     sx, sy, sz = _pauli()
     isy = 1j * sy                                   # [[0,1],[-1,0]]
@@ -142,10 +144,21 @@ def solve_gap_spin(coupling: float, temp: float, omega: np.ndarray, wf: np.ndarr
                    channel: str = 'singlet', dvec: tuple = (0, 0, 1), h: float = 0.0, damp_init: float | None = None,
                    eps: float = 1e-8, itemax: int = 400, mix: float = 0.5) -> float:
     """
-    @fn solve_gap_spin
     @brief Self-consistent homogeneous gap amplitude for a singlet or triplet
     (d-vector) channel in a Zeeman field h (Maki), via the 4x4 Nambu(x)spin g_hat.
     Gap equation: Damp = lambda * T sum_n < phi* tr(Shat^dag f)/tr(Shat^dag Shat) >.
+    @param  coupling: dimensionless separable pairing coupling lambda
+    @param      temp: temperature k_B*T [eV]
+    @param     omega: positive Matsubara frequencies [Nw] (the -omega half is added internally)
+    @param        wf: FS DOS weights [Nfs]
+    @param      phif: normalized form factor on FS points [Nfs]
+    @param   channel: 'singlet' or 'triplet'
+    @param      dvec: triplet d-vector direction (ignored for singlet)
+    @param         h: Zeeman (Maki) energy mu*B [eV]
+    @param damp_init: initial gap amplitude [eV] (None = BCS_RATIO*temp)
+    @param       eps: relative convergence tolerance on Damp
+    @param    itemax: maximum number of self-consistency iterations
+    @param       mix: linear-mixing factor for the self-consistency update
     @return Damp [eV]
     """
     Shat = gap_matrix(channel, dvec)
@@ -177,13 +190,28 @@ def calc_spin_pauli(Nx: int, Ny: int, Nz: int, wc: float, ham_r: np.ndarray, S_r
                     gap_orbital: np.ndarray | collections.abc.Callable | None = None, delta0: np.ndarray | None = None,
                     gauge: str | None = None, spin_map: tuple | None = None) -> dict | None:
     """
-    @fn calc_spin_pauli
     @brief Compare the Zeeman (Maki) field response of singlet vs triplet pairing
     using the 2x2 spin solver: singlet and triplet d||h are Pauli-limited, triplet
     d perpendicular to h is Pauli-immune (equal-spin pairing).  Sweeps h and writes
     'spin_pauli.dat' (Delta(h)/Delta0 for each channel).
+    @param       Nx: k-mesh for the Fermi-surface average along x
+    @param       Ny: k-mesh for the Fermi-surface average along y
+    @param       Nz: k-mesh for the Fermi-surface average along z
+    @param       wc: Matsubara cutoff energy [eV]
+    @param    ham_r: hopping matrix H(R) [Nr, Norb, Norb] complex128
+    @param      S_r: overlap matrix S(R); [] for an orthogonal basis
+    @param     rvec: R-vectors [Nr, 3]
+    @param     avec: primitive translation vectors as rows [AA]
+    @param       mu: chemical potential [eV]
+    @param     temp: temperature k_B*T [eV]
+    @param coupling: dimensionless separable pairing coupling lambda
+    @param  gap_sym: gap symmetry index (gap_symms convention)
+    @param   h_list: Zeeman energies h [eV] (None = fractions of Delta0)
+    @param fs_width: Gaussian FS broadening [eV]
+    @param       kb: Boltzmann constant [eV/K] for K-unit reporting
     @param gap_orbital,delta0,gauge,spin_map: gap specification on the 3D Fermi surface,
            exactly as in calc_eilenberger (band-projected orbital gap / per-sheet signs)
+    @return D0: dict channel name -> Delta0 at h = 0 [eV]; None in the normal state
     """
     import libs.plibs._bands as _bands
     omega = _eilenberger.matsubara(temp, wc)
@@ -242,7 +270,6 @@ def _default_dvector_channels() -> list:
 
 def chiral_channels(ell: int = 1, dvec: str = 'z') -> list:
     """
-    @fn chiral_channels
     @brief Two-component basis of a CHIRAL equal-spin triplet: phi_pm(beta) =
     e^{+-i ell beta} carried by ONE spin matrix (unlike _default_dvector_channels, whose
     two channels sit on DIFFERENT spin matrices and describe a d-vector texture in spin
@@ -254,6 +281,7 @@ def chiral_channels(ell: int = 1, dvec: str = 'z') -> list:
     already satisfies <|phi|^2> = 1 and the two are degenerate in the bulk -- they are
     time-reversed partners of the same irrep, so they take the SAME coupling and the
     chiral state is the one that spontaneously picks a single component.
+    @param  ell: chirality (1 = p+ip, 2 = d+id)
     @param dvec: spin direction of the equal-spin pairing, 'z' (Shat=sigma_z i sigma_y)
                  or 'x'.  'y' is excluded: Shat_y is proportional to the identity, which
                  the unitary matrix-Riccati bulk seed does not handle.
@@ -275,7 +303,6 @@ def chiral_channels(ell: int = 1, dvec: str = 'z') -> list:
 
 def chiral_windings(m_dom: int = 1, ell: int = 1) -> tuple[int, int]:
     """
-    @fn chiral_windings
     @brief Phase windings of the two chiral_channels around an axisymmetric vortex.
 
     With Delta(r,k) = sum_pm A_pm(r) e^{+-i ell beta} and A_pm = a_pm(rho) e^{i m_pm theta},
@@ -290,6 +317,8 @@ def chiral_windings(m_dom: int = 1, ell: int = 1) -> tuple[int, int]:
     (m_+ = -1) induces it with winding 1.  Getting this wrong does not merely change the
     answer, it makes the ansatz non-axisymmetric and the self-consistency will not settle.
 
+    @param m_dom: winding of the dominant component (+1 parallel to the chirality, -1 antiparallel)
+    @param   ell: chirality (1 = p+ip, 2 = d+id)
     @warning solve_vortex2d_dvector CANNOT yet run this.  Measured on the isotropic
     cylinder (lambda=0.5, T=4e-4, Lxi=7, ngrid=33, nbeta=24, itemax=60-80), the solver is
     sound only for the winding pattern it was built and validated for -- one winding-1
@@ -373,7 +402,6 @@ def solve_surface_dvector(couplings: np.ndarray, temp: float, omega: np.ndarray,
                           hvf: float = 1.0, cos_min: float = 0.06, eps: float = 3e-3, itemax: int = 60,
                           mix: float = 0.4) -> tuple:
     """
-    @fn solve_surface_dvector
     @brief Self-consistent d-vector TEXTURE at a specular surface (x>=0) for a
     multi-component unitary triplet, via the 2x2 spin-matrix Riccati.  Each spin
     component a has an orbital form factor phi_a(beta), a spin matrix Shat_a, and its
@@ -383,6 +411,19 @@ def solve_surface_dvector(couplings: np.ndarray, temp: float, omega: np.ndarray,
     dominant + subdominant pair makes the net d-vector reorient in spin space as the
     surface is approached -- the texture.
     @param couplings: per-channel lambda_a (use a dominant + subdominant pair).
+    @param      temp: temperature k_B*T [eV]
+    @param     omega: positive Matsubara frequencies [Nw] (the -omega half is added internally)
+    @param  channels: spin channels as (label, phi(beta) callable, 2x2 spin matrix) tuples (None =
+                      _default_dvector_channels: p_x(e_x) + p_y(e_z))
+    @param     Dbulk: bulk channel gaps [Ncomp] (None = solved from the coupled bulk gap equation)
+    @param       Lxi: domain length in units of the coherence length xi
+    @param      nper: x-grid points per xi
+    @param     Nbeta: number of outgoing trajectory angles
+    @param       hvf: hbar |v_F| (length unit; physics depends only on x/xi)
+    @param   cos_min: drop grazing trajectories with |cos beta| < cos_min
+    @param       eps: convergence tolerance of the self-consistency loop
+    @param    itemax: maximum number of self-consistency iterations
+    @param       mix: linear-mixing factor for the self-consistency update
     @return (x, Damp [Ncomp, Ng] complex, Dbulk [Ncomp])
     """
     if channels is None:
@@ -446,13 +487,20 @@ def surface_dvector_ldos(x: np.ndarray, Damp: np.ndarray, wlist: np.ndarray, cha
                          Dbulk: float | None = None, delta: float | None = None, Nbeta: int = 16, hvf: float = 1.0,
                          cos_min: float = 0.06) -> np.ndarray:
     """
-    @fn surface_dvector_ldos
     @brief Surface local density of states N(x=0, w)/N0 of a converged d-vector
     texture state, via the retarded 2x2 spin-matrix Riccati (w -> w + i delta).
     The sign-changing dominant component gives a zero-energy surface bound state
     (Andreev/ZEBS of the triplet edge); the subdominant / d-vector texture splits
     or shifts it.  Angle-averaged over the trajectory directions.
-    @param x, Damp: grid and converged complex amplitudes [Ncomp, Ng] from solve_surface_dvector
+    @param  x, Damp: grid and converged complex amplitudes [Ncomp, Ng] from solve_surface_dvector
+    @param    wlist: real-frequency grid [Nw]
+    @param channels: spin channels as (label, phi(beta) callable, 2x2 spin matrix) tuples (None =
+                     _default_dvector_channels: p_x(e_x) + p_y(e_z))
+    @param    Dbulk: bulk channel gaps [Ncomp] used as the reference scale (None = max |Damp|)
+    @param    delta: retarded broadening [eV] (None = 0.03 x the largest bulk gap)
+    @param    Nbeta: number of outgoing trajectory angles
+    @param      hvf: hbar |v_F| (length unit; physics depends only on x/xi)
+    @param  cos_min: drop grazing trajectories with |cos beta| < cos_min
     @return N(0, w)/N0 [Nw]
     """
     if channels is None:
@@ -489,7 +537,6 @@ def surface_dvector_ldos(x: np.ndarray, Damp: np.ndarray, wlist: np.ndarray, cha
 def calc_surface_dvector(coupling: float, temp: float, wc: float, kb: float = 1.0, Lxi: float = 8.0, nper: int = 8,
                          Nbeta: int = 16, sub_ratio: float = 0.9, sw_ldos: bool = True) -> tuple:
     """
-    @fn calc_surface_dvector
     @brief Driver: self-consistent d-vector texture at a specular surface of a
     triplet superconductor.  The bulk orders in the dominant p_x channel (spin e_x,
     orbital cos(b), sign-changing at an x-surface, lambda); a subdominant p_y channel
@@ -499,7 +546,16 @@ def calc_surface_dvector(coupling: float, temp: float, wc: float, kb: float = 1.
     component amplitudes and the rotation angle theta_d(x) = atan2(|Dpy|,|Dpx|), the
     relative phase (90 deg = time-reversal-broken p_x + i p_y surface state), and
     writes 'surface_dvector.dat'.
+    @param  coupling: dimensionless separable pairing coupling lambda
+    @param      temp: temperature k_B*T [eV]
+    @param        wc: Matsubara cutoff energy [eV]
+    @param        kb: Boltzmann constant [eV/K] for K-unit reporting
+    @param       Lxi: domain length in units of the coherence length xi
+    @param      nper: x-grid points per xi
+    @param     Nbeta: number of outgoing trajectory angles
     @param sub_ratio: lambda_py / lambda_px (subdominant strength)
+    @param   sw_ldos: also compute the real-frequency surface LDOS (the bound state)
+    @return (x, Damp): surface grid and complex channel amplitudes [Ncomp, Ng]
     """
     omega = _eilenberger.matsubara(temp, wc)
     couplings = (coupling, coupling * sub_ratio)
@@ -554,7 +610,6 @@ def solve_vortex2d_dvector(couplings: np.ndarray, temp: float, omega: np.ndarray
                            eps: float = 4.0e-3, itemax: int = 40, mix: float = 0.4, A_init: np.ndarray | None = None,
                            bdir: np.ndarray | None = None) -> tuple:
     """
-    @fn solve_vortex2d_dvector
     @brief Self-consistent d-vector order parameter of a multi-component unitary
     triplet around a vortex (field=0: isolated vortex) or on the circular-cell vortex
     LATTICE (field=B/Hc2>0: Wigner-Seitz cell of radius Rc=sqrt(2/field)*xi with the
@@ -567,18 +622,35 @@ def solve_vortex2d_dvector(couplings: np.ndarray, temp: float, omega: np.ndarray
     d-vector reorients in spin space across the core -- the d-vector texture.  With
     field>0 the supercurrent v_F.Q fills the inter-vortex states (Volovik), entering as
     a position-dependent Doppler shift omega -> omega + i v_F.Q in the matrix Riccati.
-    @param   bdir: field / vortex-line direction (default c axis).  The lines run along
-           B, so the order parameter varies in the plane PERPENDICULAR to it and the
-           problem stays 2D; fs_field_frame supplies the trajectory set there, with
-           its two axes rescaled by their rms velocities.  Note the two frames are
-           different objects: the TRAJECTORY direction is in the field frame, while
-           the channel form factors phi(beta) are functions of the CRYSTAL in-plane
-           angle and keep using it.  Needs a 3D FS for anything but B || c.
-    @param A_init: explicit initial amplitudes [Ncomp, ngrid, ngrid], overriding the
-           built-in seed.  Needed to ask whether a given state is a fixed point AT ALL
-           (start exactly on it and see whether one iteration moves off it), which the
-           built-in seed cannot express -- it always injects a nucleation amplitude into
-           every subcritical channel.
+    @param couplings: per-channel couplings lambda_a (a dominant + subdominant pair)
+    @param      temp: temperature k_B*T [eV]
+    @param     omega: positive Matsubara frequencies [Nw] (the -omega half is added internally)
+    @param  channels: spin channels as (label, phi(beta) callable, 2x2 spin matrix) tuples (None =
+                      _default_dvector_channels: p_x(e_x) + p_y(e_z))
+    @param  windings: phase winding m_a of each channel (default (1, 0): the dominant winds, the subdominant
+                      is core-localized)
+    @param     Dbulk: bulk channel gaps [Ncomp] (None = solved from the coupled bulk gap equation)
+    @param       Lxi: cell half width in units of the coherence length xi (isolated vortex)
+    @param     ngrid: grid points per axis
+    @param     nbeta: number of trajectory directions over the full circle
+    @param       hvf: hbar |v_F| (length unit; physics depends only on x/xi)
+    @param     field: B/Hc2 (0 = isolated vortex; >0 = circular-cell vortex lattice)
+    @param        fs: FS dict (build_model_fs / build_wannier_fs); None = isotropic model cylinder
+    @param       eps: convergence tolerance of the self-consistency loop
+    @param    itemax: maximum number of self-consistency iterations
+    @param       mix: linear-mixing factor for the self-consistency update
+    @param      bdir: field / vortex-line direction (default c axis).  The lines run along
+              B, so the order parameter varies in the plane PERPENDICULAR to it and the
+              problem stays 2D; fs_field_frame supplies the trajectory set there, with
+              its two axes rescaled by their rms velocities.  Note the two frames are
+              different objects: the TRAJECTORY direction is in the field frame, while
+              the channel form factors phi(beta) are functions of the CRYSTAL in-plane
+              angle and keep using it.  Needs a 3D FS for anything but B || c.
+    @param    A_init: explicit initial amplitudes [Ncomp, ngrid, ngrid], overriding the
+              built-in seed.  Needed to ask whether a given state is a fixed point AT ALL
+              (start exactly on it and see whether one iteration moves off it), which the
+              built-in seed cannot express -- it always injects a nucleation amplitude into
+              every subcritical channel.
     @return (xg, A [Ncomp, ngrid, ngrid] complex, Dbulk [Ncomp], xi)
     """
     import libs.plibs._eilenberger_vortex as _eilenberger_vortex
@@ -756,7 +828,6 @@ def solve_lattice_sc_dvector(couplings: np.ndarray, temp: float, omega: np.ndarr
                              Lchord: float = 6.0, ds_xi: float = 0.3, eps: float = 4.0e-3, itemax: int = 60,
                              mix: float = 0.4, anderson: bool = True, m_and: int = 4) -> dict | None:
     """
-    @fn solve_lattice_sc_dvector
     @brief Self-consistent d-vector (multi-component unitary triplet) on the TRUE
     periodic vortex lattice, je-style (formulation A): the spin-matrix order parameter
     Delta_hat(r,k)=sum_a phi_a(k) A_a(r) e^{i m_a chi(r)} Shat_a keeps the analytic
@@ -766,6 +837,27 @@ def solve_lattice_sc_dvector(couplings: np.ndarray, temp: float, omega: np.ndarr
     the vortex lattice and vanishes at every core; a subdominant with a different winding
     (default m=0) nucleates in the cores -> the d-vector reorients across each core.
     Finite ``kappa`` adds the smooth London Doppler -v_F.A(r) (screening, je #2).
+    @param couplings: per-channel couplings lambda_a (a dominant + subdominant pair)
+    @param      temp: temperature k_B*T [eV]
+    @param     omega: positive Matsubara frequencies [Nw] (the -omega half is added internally)
+    @param  channels: spin channels as (label, phi(beta) callable, 2x2 spin matrix) tuples (None =
+                      _default_dvector_channels: p_x(e_x) + p_y(e_z))
+    @param  windings: phase winding m_a of each channel (default (1, 0): the dominant winds, the subdominant
+                      is core-localized)
+    @param     field: B/Hc2 of the periodic vortex lattice
+    @param   lattice: 'square' or 'triangular' (Abrikosov ground state)
+    @param        Ng: grid points per cell axis
+    @param     nbeta: number of trajectory directions over the full circle
+    @param       hvf: hbar |v_F| (length unit; physics depends only on x/xi)
+    @param        fs: FS dict (build_model_fs / build_wannier_fs); None = isotropic model cylinder
+    @param     kappa: Ginzburg-Landau parameter lambda/xi (None = extreme type-II, no London screening)
+    @param    Lchord: trajectory (chord) length in units of xi
+    @param     ds_xi: Riccati integration step along the chord in units of xi
+    @param       eps: convergence tolerance of the self-consistency loop
+    @param    itemax: maximum number of self-consistency iterations
+    @param       mix: linear-mixing factor for the self-consistency update
+    @param  anderson: use Anderson/Pulay acceleration of the self-consistency
+    @param     m_and: number of Anderson history vectors
     @return state dict (X,Y,A[nc,Ng,Ng],chi,Dbulk[nc],xi,geom,kappa,...) for lattice_dos_sc_dvector
     """
     import libs.plibs._eilenberger_vortex as _eilenberger_vortex
@@ -897,11 +989,18 @@ def lattice_dos_sc_dvector(state: dict, wlist: np.ndarray, delta: float | None =
                            hvf: float = 1.0, fs: dict | None = None, Lchord: float = 6.0,
                            ds_xi: float = 0.3) -> np.ndarray:
     """
-    @fn lattice_dos_sc_dvector
     @brief Spatially-averaged DOS N(w)/N0 of the self-consistent d-vector periodic
     lattice (state from solve_lattice_sc_dvector): per-grid-point anchored 2x2 matrix
     Riccati on the retarded axis (z=delta-i*w), N(w)/N0 = <(1/2) Tr Re g(anchor)>_{grid,FS},
     with the same Abrikosov winding and (finite kappa) London Doppler as the solver.
+    @param  state: converged state dict from solve_lattice_sc_dvector
+    @param  wlist: real-frequency grid [Nw]
+    @param  delta: retarded broadening [eV] (None = 0.03 x the largest bulk gap)
+    @param  nbeta: number of trajectory directions over the full circle
+    @param    hvf: hbar |v_F| (length unit; physics depends only on x/xi)
+    @param     fs: FS dict (build_model_fs / build_wannier_fs); None = isotropic model cylinder
+    @param Lchord: trajectory (chord) length in units of xi
+    @param  ds_xi: Riccati integration step along the chord in units of xi
     @return N(w)/N0 [Nw]
     """
     import libs.plibs._eilenberger_vortex as _eilenberger_vortex
@@ -960,7 +1059,6 @@ def calc_vortex_dvector(coupling: float, temp: float, wc: float, kb: float = 1.0
                         nbeta: int = 16, sub_ratio: float = 0.95, field: float = 0.0, fs: dict | None = None,
                         bdir: np.ndarray | None = None) -> tuple:
     """
-    @fn calc_vortex_dvector
     @brief Driver: self-consistent d-vector order parameter of a triplet superconductor
     around an isolated vortex (field=0) or on the circular-cell vortex LATTICE
     (field=B/Hc2>0, with the supercurrent Doppler shift) -- dominant p_x(e_x) +
@@ -968,6 +1066,18 @@ def calc_vortex_dvector(coupling: float, temp: float, wc: float, kb: float = 1.0
     pair-broken in the core; the subdominant is relatively enhanced there, so the net
     d-vector tilt theta_d(r) = atan2(|A_pz|,|A_px|) reorients across the core.  Reports
     the radial texture (along +x) and writes 'vortex_dvector.dat'.
+    @param  coupling: dimensionless separable pairing coupling lambda
+    @param      temp: temperature k_B*T [eV]
+    @param        wc: Matsubara cutoff energy [eV]
+    @param        kb: Boltzmann constant [eV/K] for K-unit reporting
+    @param       Lxi: cell half width in units of the coherence length xi (isolated vortex)
+    @param     ngrid: grid points per axis
+    @param     nbeta: number of trajectory directions over the full circle
+    @param sub_ratio: lambda_py / lambda_px (subdominant strength)
+    @param     field: B/Hc2 (0 = isolated vortex; >0 = circular-cell vortex lattice)
+    @param        fs: prebuilt FS dict with Fermi velocities (None = isotropic cylinder)
+    @param      bdir: field / vortex-line direction (need not be normalized; None = c axis)
+    @return (xg, A): grid axis and channel amplitude fields [nc, ngrid, ngrid]
     """
     omega = _eilenberger.matsubara(temp, wc)
     couplings = (coupling, coupling * sub_ratio)
@@ -1008,7 +1118,6 @@ def calc_vortex_chiral(coupling: float, temp: float, wc: float, ell: int = 1, m_
                        kb: float = 1.0, Lxi: float = 8.0, ngrid: int = 41, nbeta: int = 24, fs: dict | None = None,
                        eps: float = 4.0e-3, itemax: int = 100, bdir: np.ndarray | None = None) -> tuple:
     """
-    @fn calc_vortex_chiral
     @brief Driver: self-consistent isolated vortex of a CHIRAL equal-spin triplet
     (p+ip for ell=1, d+id for ell=2), via the multi-component spin-matrix Riccati.
 
@@ -1029,11 +1138,21 @@ def calc_vortex_chiral(coupling: float, temp: float, wc: float, ell: int = 1, m_
     0.0003 at the core to 0.98 at the edge, and the induced opposite chirality peaks at
     |A_-|/Db = 0.073 around r = 3 xi, vanishing both at the core (winding 3 -> rho^3) and
     in the bulk.
-    @param     ell: chirality (1 = p+ip, 2 = d+id)
-    @param   m_dom: winding of the dominant component (+1 parallel to the chirality,
-                    -1 antiparallel); the induced one follows chiral_windings
-    @param    dvec: equal-spin direction, 'z' or 'x' (see chiral_channels)
-    @param      fs: model / Wannier FS dict (None = isotropic cylinder)
+    @param coupling: dimensionless separable pairing coupling lambda
+    @param     temp: temperature k_B*T [eV]
+    @param       wc: Matsubara cutoff energy [eV]
+    @param      ell: chirality (1 = p+ip, 2 = d+id)
+    @param    m_dom: winding of the dominant component (+1 parallel to the chirality,
+                     -1 antiparallel); the induced one follows chiral_windings
+    @param     dvec: equal-spin direction, 'z' or 'x' (see chiral_channels)
+    @param       kb: Boltzmann constant [eV/K] for K-unit reporting
+    @param      Lxi: cell half width in units of the coherence length xi (isolated vortex)
+    @param    ngrid: grid points per axis
+    @param    nbeta: number of trajectory directions over the full circle
+    @param       fs: model / Wannier FS dict (None = isotropic cylinder)
+    @param      eps: convergence tolerance of the self-consistency loop
+    @param   itemax: maximum number of self-consistency iterations
+    @param     bdir: field / vortex-line direction (need not be normalized; None = c axis)
     @return (xg, A): grid axis and the complex amplitudes [2, ngrid, ngrid]
     """
     omega = _eilenberger.matsubara(temp, wc)
@@ -1083,13 +1202,24 @@ def calc_vortex_lattice_sc_dvector(coupling: float, temp: float, wc: float, kb: 
                                    lattice: str = 'square', Ng: int = 12, nbeta: int = 10, sub_ratio: float = 0.92,
                                    kappa: float | None = None, fs: dict | None = None) -> tuple | None:
     """
-    @fn calc_vortex_lattice_sc_dvector
     @brief Driver: self-consistent d-vector triplet on the TRUE periodic vortex lattice
     (je-style formulation A, square/triangular cell) -- dominant p_x(e_x) winding with
     the Abrikosov lattice (node at every core) + subdominant p_y(e_z) that nucleates,
     core-localized, where the dominant is suppressed (the d-vector texture).  Finite
     ``kappa`` adds the London screening Doppler.  Writes the converged fields to
     'lattice_dvector.dat'.
+    @param  coupling: dimensionless separable pairing coupling lambda
+    @param      temp: temperature k_B*T [eV]
+    @param        wc: Matsubara cutoff energy [eV]
+    @param        kb: Boltzmann constant [eV/K] for K-unit reporting
+    @param     field: B/Hc2 of the periodic vortex lattice
+    @param   lattice: 'square' or 'triangular' (Abrikosov ground state)
+    @param        Ng: grid points per cell axis
+    @param     nbeta: number of trajectory directions over the full circle
+    @param sub_ratio: lambda_py / lambda_px (subdominant strength)
+    @param     kappa: Ginzburg-Landau parameter lambda/xi (None = extreme type-II, no London screening)
+    @param        fs: prebuilt FS dict with Fermi velocities (None = isotropic cylinder)
+    @return st: state dict from solve_lattice_sc_dvector; None in the normal state
     """
     omega = _eilenberger.matsubara(temp, wc)
     couplings = (coupling, coupling * sub_ratio)

@@ -139,10 +139,9 @@ _WHITE_LIN = XYZ2RGB.dot(XYZ_WHITE)
 
 def srgb_gamma(c: np.ndarray) -> np.ndarray:
     """
-    @fn srgb_gamma
     @brief Apply the sRGB opto-electronic transfer function (linear -> encoded).
     @param  c: linear-light RGB in [0, 1]
-    @retval    gamma-encoded sRGB in [0, 1]
+    @return    gamma-encoded sRGB in [0, 1]
     """
     c = np.clip(c, 0.0, 1.0)
     return np.where(c <= 0.0031308, 12.92*c, 1.055*np.power(c, 1.0/2.4) - 0.055)
@@ -150,12 +149,11 @@ def srgb_gamma(c: np.ndarray) -> np.ndarray:
 
 def reflectivity_to_xyz(w: np.ndarray, refl: np.ndarray) -> tuple[np.ndarray, bool]:
     """
-    @fn reflectivity_to_xyz
     @brief Integrate a reflectivity spectrum against the CIE observer under D65.
     @param     w: photon energies [eV], strictly positive, any order
     @param  refl: the spectral factor on w, values in [0, 1]
-    @retval   XYZ: CIE 1931 tristimulus values (Y = 1 for a perfect mirror)
-    @retval  full: True if the input spectrum spans the whole 380-780 nm window;
+    @return   XYZ: CIE 1931 tristimulus values (Y = 1 for a perfect mirror)
+    @return  full: True if the input spectrum spans the whole 380-780 nm window;
                    when False, R is held constant beyond the computed range
                    (edge clamping) and the colour is only indicative.
     """
@@ -174,11 +172,10 @@ def reflectivity_to_xyz(w: np.ndarray, refl: np.ndarray) -> tuple[np.ndarray, bo
 
 def xyz_to_srgb(XYZ: np.ndarray) -> tuple[np.ndarray, bool]:
     """
-    @fn xyz_to_srgb
     @brief Convert CIE XYZ to gamma-encoded sRGB, reporting gamut clipping.
     @param  XYZ: CIE 1931 tristimulus values
-    @retval rgb: sRGB components in [0, 1]
-    @retval clipped: True if the colour fell outside the sRGB gamut (or above
+    @return rgb: sRGB components in [0, 1]
+    @return clipped: True if the colour fell outside the sRGB gamut (or above
                      white) and had to be clipped
     """
     lin = XYZ2RGB.dot(XYZ)/_WHITE_LIN
@@ -188,19 +185,18 @@ def xyz_to_srgb(XYZ: np.ndarray) -> tuple[np.ndarray, bool]:
 
 def spectrum_color(w: np.ndarray, spec: np.ndarray) -> dict:
     """
-    @fn spectrum_color
     @brief Perceived colour of a spectrum that leaves a sample towards the eye.
     @param     w: photon energies [eV], the w = 0 point may be included
     @param  spec: the spectral factor on w, in [0, 1] -- the reflectivity R(w)
                   of a metal, the transmittance T(w) of a slab, or the diffuse
                   reflectance R_inf(w) of a powder
-    @retval  dict with keys
+    @return  dict with keys
              'XYZ'  : CIE 1931 tristimulus values [3]
              'xy'   : CIE 1931 chromaticity coordinates [2]
              'Y'    : luminance factor (1 = perfect mirror / clear sample)
              'rgb'  : gamma-encoded sRGB in [0, 1] [3]
              'rgb255': the same as 8-bit integers [3]
-             'hex'  : '#rrggbb' string
+             'hex'  : '@#rrggbb' string
              'rgb_neg', 'rgb255_neg', 'hex_neg' : the photographic negative
                   (1 - rgb in encoded sRGB). Feed an absorptance A(w) and read
                   these to get the colour of the light that survives -- what a

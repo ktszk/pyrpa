@@ -15,16 +15,15 @@ __all__ = [
 
 def read_epa_output(filename: str) -> tuple[int, int, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    @fn read_epa_output
     @brief Read epa.x (job='egrid') output file and return EPA data arrays.
     @param filename: Path to the epa.x output file
-    @retval   ngrid: Number of energy grids (typically 2: valence, conduction)
-    @retval  nmodes: Number of phonon modes
-    @retval    edge: Grid edges [ngrid] (eV)
-    @retval    step: Grid steps [ngrid] (eV)
-    @retval    nbin: Number of bins per grid [ngrid] int64
-    @retval    wavg: Averaged phonon frequencies [nmodes] (eV)
-    @retval    gavg: EPA averaged |g|^2 [ngrid, nbin_max, nbin_max, nmodes] (eV^2)
+    @return   ngrid: Number of energy grids (typically 2: valence, conduction)
+    @return  nmodes: Number of phonon modes
+    @return    edge: Grid edges [ngrid] (eV)
+    @return    step: Grid steps [ngrid] (eV)
+    @return    nbin: Number of bins per grid [ngrid] int64
+    @return    wavg: Averaged phonon frequencies [nmodes] (eV)
+    @return    gavg: EPA averaged |g|^2 [ngrid, nbin_max, nbin_max, nmodes] (eV^2)
     """
     cm2ev = 1.23981e-4
     with open(filename) as f:
@@ -56,7 +55,6 @@ def read_epa_output(filename: str) -> tuple[int, int, np.ndarray, np.ndarray, np
 def _irr_to_full_kgrid(data_irr: np.ndarray, invk: np.ndarray, kmap: np.ndarray,
                        Nx: int, Ny: int, Nz: int) -> np.ndarray:
     """
-    @fn _irr_to_full_kgrid
     @brief Expand data from irreducible k-points to the full BZ using TRS symmetry.
     @param data_irr: (..., Nk_irr) complex128
     @param     invk: [Nkall, 3] int64 — col-0: Fortran 1-based irr-k index, col-1: 0=direct / !=0=TRS conjugate
@@ -79,13 +77,12 @@ def _irr_to_full_kgrid(data_irr: np.ndarray, invk: np.ndarray, kmap: np.ndarray,
 def _wannier_all_nonzero(data_full: np.ndarray, Nx: int, Ny: int, Nz: int,
                          N_cut: int, zero_tol: float) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn _wannier_all_nonzero
     @brief IFFT over k-axes, apply zero_tol zeroing, return all R-vectors with non-zero components.
     @param data_full: (Norb, Norb, Nw, Nx, Ny, Nz) complex128
     @param     N_cut: number of Matsubara frequencies to retain
     @param  zero_tol: Re/Im below zero_tol * global_max are set to 0
-    @retval data_out: (Norb, Norb, N_cut, Nr_nonzero) complex128
-    @retval rvec_kept: (Nr_nonzero, 3) int64 — centered R-vector coordinates
+    @return data_out: (Norb, Norb, N_cut, Nr_nonzero) complex128
+    @return rvec_kept: (Nr_nonzero, 3) int64 — centered R-vector coordinates
     """
     N_cut_use = min(N_cut, data_full.shape[2])
     # IFFT over k-mesh (last 3 axes) to obtain Wannier R-space representation
@@ -111,7 +108,6 @@ def _wannier_all_nonzero(data_full: np.ndarray, Nx: int, Ny: int, Nz: int,
 def _write_wannier_dat(fname: str, data_out: np.ndarray, rvec_kept: np.ndarray, iw_grid: np.ndarray,
                        Nw_orig: int, label: str, mu: float | None = None, temp: float | None = None) -> None:
     """
-    @fn _write_wannier_dat
     @brief Write Wannier-R Matsubara data as text in extended ham_r.dat format.
     @param    fname: output file path (without .dat)
     @param data_out: (Norb, Norb, N_cut, Nr) complex128
@@ -157,7 +153,6 @@ def output_self_wannier(sigmak: np.ndarray, mu_self: float, kmap: np.ndarray, in
                         Nx: int, Ny: int, Nz: int, Nw: int, temp: float, N_cut: int = 64,
                         zero_tol: float = 1e-5, fname: str = 'self_en_wannier') -> None:
     """
-    @fn output_self_wannier
     @brief Convert self-energy Sigma(k, iw_n) -> Sigma(R, iw_n) in Wannier-real-space format.
     R-vectors are all grid points with at least one non-zero (orbital, Matsubara) component
     after zero_tol zeroing. Writes fname.npz (binary) and fname.dat (text).
@@ -171,8 +166,13 @@ def output_self_wannier(sigmak: np.ndarray, mu_self: float, kmap: np.ndarray, in
     @param  mu_self: chemical potential with self-energy correction (eV)
     @param     kmap: [Nkall, 3] int64 — FFT grid indices from gen_irr_k_TRS
     @param     invk: [Nkall, 3] int64 — irr-k mapping with TRS flag from gen_irr_k_TRS
+    @param       Nx: k-mesh size along x
+    @param       Ny: k-mesh size along y
+    @param       Nz: k-mesh size along z
+    @param       Nw: number of positive Matsubara frequencies
+    @param     temp: temperature k_B*T [eV]
     @param    N_cut: number of leading Matsubara frequencies to keep (default 64)
-    @param  zero_tol: Re/Im components below zero_tol * max|Sigma| are set to 0 (default 1e-5)
+    @param zero_tol: Re/Im components below zero_tol * max|Sigma| are set to 0 (default 1e-5)
     @param    fname: output file base name
     """
     sigma_full = _irr_to_full_kgrid(sigmak, invk, kmap, Nx, Ny, Nz)
@@ -198,7 +198,6 @@ GAP_ORB_CONV = 'Delta_ab'   # orbital-order stamp written into gap_wannier.npz (
 
 def gap_orb_ab(gap_R: np.ndarray, npz: np.lib.npyio.NpzFile, fname: str = '') -> np.ndarray:
     """
-    @fn gap_orb_ab
     @brief Return a stored Delta(R) with its orbital pair in the PHYSICAL order,
     gap[a, b] = Delta_ab, whichever convention the file was written in.
     Exports carrying the 'orb_conv' stamp are already in that order (output_gap_wannier
@@ -220,7 +219,6 @@ def gap_orb_ab(gap_R: np.ndarray, npz: np.lib.npyio.NpzFile, fname: str = '') ->
 def output_gap_wannier(gap: np.ndarray, kmap: np.ndarray, invk: np.ndarray, Nx: int, Ny: int, Nz: int, Nw: int,
                        temp: float, N_cut: int = 64, zero_tol: float = 1e-5, fname: str = 'gap_wannier') -> None:
     """
-    @fn output_gap_wannier
     @brief Convert gap function Delta(k, iw_n) -> Delta(R, iw_n) in Wannier-real-space format.
     R-vectors are all grid points with at least one non-zero (orbital, Matsubara) component
     after zero_tol zeroing. Writes fname.npz (binary) and fname.dat (text).
@@ -236,8 +234,13 @@ def output_gap_wannier(gap: np.ndarray, kmap: np.ndarray, invk: np.ndarray, Nx: 
     @param      gap: [Norb, Norb, Nw, Nk_irr or Nkall] complex128, gap[a,b] = Delta_ba
     @param     kmap: [Nkall, 3] int64 — FFT grid indices from gen_irr_k_TRS
     @param     invk: [Nkall, 3] int64 — irr-k mapping with TRS flag from gen_irr_k_TRS
+    @param       Nx: k-mesh size along x
+    @param       Ny: k-mesh size along y
+    @param       Nz: k-mesh size along z
+    @param       Nw: number of positive Matsubara frequencies
+    @param     temp: temperature k_B*T [eV]
     @param    N_cut: number of leading Matsubara frequencies to keep (default 64)
-    @param  zero_tol: Re/Im components below zero_tol * max|Delta| are set to 0 (default 1e-5)
+    @param zero_tol: Re/Im components below zero_tol * max|Delta| are set to 0 (default 1e-5)
     @param    fname: output file base name
     """
     gap = gap.swapaxes(0, 1)     # -> Delta_ab, the order stored in the file
@@ -283,7 +286,6 @@ def _UJ_to_matrix(vals: list, label: str, fname: str) -> np.ndarray:
 
 def read_UJ(material: str, dirname: str = 'UJ') -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn read_UJ
     @brief Read an orbital-dependent Coulomb parameter set (e.g. cRPA U/J of the Fe-based
     superconductors) and return it as the Umat/Jmat matrices used when orb_dep=True.
     Looked up in this order: material given as a .json path; {dirname}/{material}.json
@@ -293,8 +295,8 @@ def read_UJ(material: str, dirname: str = 'UJ') -> tuple[np.ndarray, np.ndarray]
     @param material: material name, e.g. 'FeSe', or a path to a .json file
     @param  dirname: directory holding the per-material files, or a multi-material
                      .json file (default 'UJ')
-    @retval    Umat: intra-/inter-orbital Coulomb matrix [Norb, Norb] float64 (eV), Fortran-contiguous
-    @retval    Jmat: Hund coupling matrix [Norb, Norb] float64 (eV), Fortran-contiguous
+    @return    Umat: intra-/inter-orbital Coulomb matrix [Norb, Norb] float64 (eV), Fortran-contiguous
+    @return    Jmat: Hund coupling matrix [Norb, Norb] float64 (eV), Fortran-contiguous
     """
     import glob
     import json

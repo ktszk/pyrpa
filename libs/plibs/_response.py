@@ -123,7 +123,6 @@ def _solve_phi_path(qlist: np.ndarray, wlist: np.ndarray, olist: np.ndarray, phi
 def get_conductivity(mu: float, temp: float, eig: np.ndarray, vk: np.ndarray, Nw: int, Emax: float,
                      idelta: float = 1.e-3) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    @fn get_conductivity
     @brief Compute transport coefficients L11, L12, L22 as a function of frequency using the Kubo formula.
     @param      mu: Chemical potential in eV
     @param    temp: Temperature in eV
@@ -132,10 +131,10 @@ def get_conductivity(mu: float, temp: float, eig: np.ndarray, vk: np.ndarray, Nw
     @param      Nw: Number of frequency points
     @param    Emax: Maximum frequency in eV
     @param  idelta: Broadening parameter (Lorentzian width) in eV
-    @retval    L11: Charge conductivity spectrum array [Nw, 3, 3]
-    @retval    L12: Thermoelectric coefficient spectrum array [Nw, 3, 3]
-    @retval    L22: Thermal conductivity spectrum array [Nw, 3, 3]
-    @retval  wlist: Frequency mesh array [Nw]
+    @return    L11: Charge conductivity spectrum array [Nw, 3, 3]
+    @return    L12: Thermoelectric coefficient spectrum array [Nw, 3, 3]
+    @return    L22: Thermal conductivity spectrum array [Nw, 3, 3]
+    @return  wlist: Frequency mesh array [Nw]
     """
     wlist = np.linspace(0, Emax, Nw)
     ffermi = flibs.get_ffermi(eig, mu, temp)
@@ -147,7 +146,6 @@ def chis_spectrum(mu: float, temp: float, Smat: np.ndarray, klist: np.ndarray, q
                   olist: np.ndarray, eig: np.ndarray, uni: np.ndarray, Nw: int, Emax: float,
                   idelta: float = 1.e-3) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    @fn chis_spectrum
     @brief Compute the spin susceptibility chi_s spectrum along a q-path and write results to 'chi0.dat'.
     @param      mu: Chemical potential in eV
     @param    temp: Temperature in eV
@@ -160,9 +158,9 @@ def chis_spectrum(mu: float, temp: float, Smat: np.ndarray, klist: np.ndarray, q
     @param      Nw: Number of frequency points
     @param    Emax: Maximum frequency in eV
     @param  idelta: Broadening parameter (Lorentzian width) in eV
-    @retval   chisq: Spin susceptibility trace at each q-point [Nq, Nw]
-    @retval chis_orbq: Orbital-resolved spin susceptibility [Nq, ...]
-    @retval   wlist: Frequency mesh array [Nw]
+    @return   chisq: Spin susceptibility trace at each q-point [Nq, Nw]
+    @return chis_orbq: Orbital-resolved spin susceptibility [Nq, ...]
+    @return   wlist: Frequency mesh array [Nw]
     """
     ffermi = flibs.get_ffermi(eig, mu, temp)
     wlist = np.linspace(0, Emax, Nw)
@@ -179,7 +177,6 @@ def chis_q_point(q: np.ndarray, eig: np.ndarray, uni: np.ndarray, Emax: float,
                  Nw: int, mu: float, temp: float, Smat: np.ndarray, klist: np.ndarray,
                  olist: np.ndarray, idelta: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    @fn chis_q_point
     @brief Compute the spin susceptibility chi_s at a single q-point across a frequency mesh.
     @param       q: Single q-vector in fractional coordinates [3]
     @param     eig: Eigenvalues array [Nk, Nband]
@@ -192,9 +189,9 @@ def chis_q_point(q: np.ndarray, eig: np.ndarray, uni: np.ndarray, Emax: float,
     @param   klist: k-point list [Nk, 3]
     @param   olist: Orbital index list for susceptibility calculation
     @param  idelta: Broadening parameter (Lorentzian width) in eV
-    @retval  trchis: Trace of spin susceptibility chi_s [Nw]
-    @retval chis_orb: Orbital-resolved spin susceptibility
-    @retval   wlist: Frequency mesh array [Nw]
+    @return  trchis: Trace of spin susceptibility chi_s [Nw]
+    @return chis_orb: Orbital-resolved spin susceptibility
+    @return   wlist: Frequency mesh array [Nw]
     """
     qlist = np.asarray([q], dtype=np.float64)
     ffermi = flibs.get_ffermi(eig, mu, temp)
@@ -213,7 +210,6 @@ def chis_q_point_sc(q: np.ndarray, hamk: np.ndarray, delta_k: np.ndarray, mu: fl
                     klist: np.ndarray, olist: np.ndarray, idelta: float,
                     sw_spsym: bool = False) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    @fn chis_q_point_sc
     @brief Compute the spin susceptibility chi_s at a single q-point in the superconducting state.
     Builds the BdG Hamiltonian from hamk and the gap function delta_k, diagonalizes it,
     and calls get_chi_irr_sc to evaluate the irreducible susceptibility.
@@ -231,9 +227,9 @@ def chis_q_point_sc(q: np.ndarray, hamk: np.ndarray, delta_k: np.ndarray, mu: fl
     @param sw_spsym: spin channel. False = the Yosida-suppressed one (singlet, or a
                      field parallel to the triplet d-vector); True = the one preserved
                      at T=0 (field perpendicular to d, e.g. in-plane for d||z)
-    @retval  trchis: Trace of spin susceptibility chi_s [Nw] complex128
-    @retval chis_orb: Orbital-resolved spin susceptibility
-    @retval   wlist: Frequency mesh [Nw] float64
+    @return  trchis: Trace of spin susceptibility chi_s [Nw] complex128
+    @return chis_orb: Orbital-resolved spin susceptibility
+    @return   wlist: Frequency mesh [Nw] float64
     """
     qlist = np.asarray([q], dtype=np.float64)
     wlist = np.linspace(0, Emax, Nw)
@@ -247,7 +243,6 @@ def chis_spectrum_sc(mu: float, temp: float, Smat: np.ndarray, hamk: np.ndarray,
                      olist: np.ndarray, Nw: int, Emax: float, idelta: float = 1.e-3,
                      sw_spsym: bool = False) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    @fn chis_spectrum_sc
     @brief Compute the spin susceptibility chi_s spectrum along a q-path in the superconducting state.
     The BdG Hamiltonian is built and diagonalized once before the q-loop.
     Results are also written to 'chi0_sc.dat'.
@@ -265,9 +260,9 @@ def chis_spectrum_sc(mu: float, temp: float, Smat: np.ndarray, hamk: np.ndarray,
     @param sw_spsym: spin channel. False = the Yosida-suppressed one (singlet, or a
                      field parallel to the triplet d-vector); True = the one preserved
                      at T=0 (field perpendicular to d, e.g. in-plane for d||z)
-    @retval   chisq: Spin susceptibility trace at each q-point [Nq, Nw] complex128
-    @retval chis_orbq: Orbital-resolved spin susceptibility [Nq, ...]
-    @retval   wlist: Frequency mesh [Nw] float64
+    @return   chisq: Spin susceptibility trace at each q-point [Nq, Nw] complex128
+    @return chis_orbq: Orbital-resolved spin susceptibility [Nq, ...]
+    @return   wlist: Frequency mesh [Nw] float64
     """
     wlist = np.linspace(0, Emax, Nw)
     chi0_builder = _prepare_sc_chi0_builder(hamk, delta_k, mu, temp, klist, olist, wlist, idelta, sw_spsym)
@@ -279,26 +274,25 @@ def chis_qmap(Nx: int, Ny: int, Ecut: float, mu: float, temp: float, Smat: np.nd
               klist: np.ndarray, olist: np.ndarray, eig: np.ndarray, uni: np.ndarray,
               idelta: float = 1.e-3) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    @fn chis_qmap
     @brief Compute the spin susceptibility chi_s map on the qx-qy plane at a fixed energy cutoff.
     @param     Nx: Number of q-points along qx
     @param     Ny: Number of q-points along qy
     @param   Ecut: Energy cutoff for the susceptibility integration in eV
     @param     mu: Chemical potential in eV
     @param   temp: Temperature in eV
-    @param   Smat: Stoner interaction matrix [Norb, Norb]
+    @param   Smat: Stoner interaction matrix [Nchi, Nchi]
     @param  klist: k-point list [Nk, 3]
-    @param  olist: Orbital index list for susceptibility calculation
+    @param  olist: Orbital-pair list of chi [Nchi, 2] int64 (1-based, from get_chi_orb_list)
     @param    eig: Eigenvalues array [Nk, Nband]
     @param    uni: Eigenvectors array [Nk, Norb, Nband]
     @param idelta: Broadening parameter (Lorentzian width) in eV
-    @retval  chis: Spin susceptibility map [Nx, Ny]
-    @retval  chi0: Bare susceptibility map [Nx, Ny]
-    @retval    qx: qx coordinate mesh [Nx, Ny]
-    @retval    qy: qy coordinate mesh [Nx, Ny]
+    @return  chis: Spin susceptibility map [Nx, Ny]
+    @return  chi0: Bare susceptibility map [Nx, Ny]
+    @return    qx: qx coordinate mesh [Nx, Ny]
+    @return    qy: qy coordinate mesh [Nx, Ny]
     """
     ffermi = flibs.get_ffermi(eig, mu, temp)
-    chis, chi0 = flibs.chis_qmap(uni, eig, ffermi, klist, Smat, olist, Nx, Ny, temp, Ecut, idelta)
+    chis, chi0 = flibs.chiq_map(uni, eig, ffermi, klist, Smat, olist, Nx, Ny, temp, Ecut, idelta)
     x0 = np.linspace(0, 1, Nx, False)
     y0 = np.linspace(0, 1, Ny, False)
     # indexing='ij' so qx,qy have shape [Nx,Ny] matching the chi maps (chi[ix,iy])
@@ -310,7 +304,6 @@ def phi_spectrum(mu: float, temp: float, klist: np.ndarray, qlist: np.ndarray, o
                  eig: np.ndarray,   uni: np.ndarray, Nw: int, Emax: float,
                  idelta: float = 1.e-3) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    @fn phi_spectrum
         @brief Compute the pairing susceptibility phi spectrum along a q-path (anomalous susceptibility).
             Results are also written to 'phi0.dat'.
     @param      mu: Chemical potential in eV
@@ -323,9 +316,9 @@ def phi_spectrum(mu: float, temp: float, klist: np.ndarray, qlist: np.ndarray, o
     @param      Nw: Number of frequency points
     @param    Emax: Maximum frequency in eV
     @param  idelta: Broadening parameter (Lorentzian width) in eV
-    @retval    phiq: Pairing susceptibility trace at each q-point [Nq, Nw]
-    @retval phi_orbq: Orbital-resolved pairing susceptibility [Nq, ...]
-    @retval   wlist: Frequency mesh array [Nw]
+    @return    phiq: Pairing susceptibility trace at each q-point [Nq, Nw]
+    @return phi_orbq: Orbital-resolved pairing susceptibility [Nq, ...]
+    @return   wlist: Frequency mesh array [Nw]
     """
     ffermi = flibs.get_ffermi(eig, mu, temp)
     wlist = np.linspace(0, Emax, Nw)
@@ -343,7 +336,6 @@ def phi_q_point(q: np.ndarray, eig: np.ndarray, uni: np.ndarray, Emax: float,
                 Nw: int, mu: float, temp: float, klist: np.ndarray,
                 olist: np.ndarray, idelta: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    @fn phi_q_point
     @brief Compute the pairing susceptibility phi at a single q-point across a frequency mesh.
     @param       q: Single q-vector in fractional coordinates [3]
     @param     eig: Eigenvalues array [Nk, Nband]
@@ -355,9 +347,9 @@ def phi_q_point(q: np.ndarray, eig: np.ndarray, uni: np.ndarray, Emax: float,
     @param   klist: k-point list [Nk, 3]
     @param   olist: Orbital index list for phi calculation
     @param  idelta: Broadening parameter (Lorentzian width) in eV
-    @retval   trphi: Trace of pairing susceptibility phi [Nw]
-    @retval phi_orb: Orbital-resolved pairing susceptibility
-    @retval   wlist: Frequency mesh array [Nw]
+    @return   trphi: Trace of pairing susceptibility phi [Nw]
+    @return phi_orb: Orbital-resolved pairing susceptibility
+    @return   wlist: Frequency mesh array [Nw]
     """
     qlist = np.asarray([q], dtype=np.float64)
     ffermi = flibs.get_ffermi(eig, mu, temp)
@@ -375,7 +367,6 @@ def phi_qmap(Nx: int, Ny: int, Ecut: float, mu: float, temp: float, klist: np.nd
              olist: np.ndarray, eig: np.ndarray, uni: np.ndarray, idelta: float = 1.e-3,
              sw_omega: bool = True) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    @fn phi_qmap
     @brief Compute the pairing susceptibility phi map on the qx-qy plane at a fixed energy cutoff.
     @param      Nx: Number of q-points along qx
     @param      Ny: Number of q-points along qy
@@ -383,17 +374,17 @@ def phi_qmap(Nx: int, Ny: int, Ecut: float, mu: float, temp: float, klist: np.nd
     @param      mu: Chemical potential in eV
     @param    temp: Temperature in eV
     @param   klist: k-point list [Nk, 3]
-    @param   olist: Orbital index list for phi calculation
+    @param   olist: Orbital-pair list of phi [Nchi, 2] int64 (1-based, from get_chi_orb_list)
     @param     eig: Eigenvalues array [Nk, Nband]
     @param     uni: Eigenvectors array [Nk, Norb, Nband]
     @param  idelta: Broadening parameter (Lorentzian width) in eV
     @param sw_omega: If True, integrate over Matsubara frequencies; if False, use static limit
-    @retval    phi: Pairing susceptibility map [Nx, Ny]
-    @retval     qx: qx coordinate mesh [Nx, Ny]
-    @retval     qy: qy coordinate mesh [Nx, Ny]
+    @return    phi: Pairing susceptibility map [Nx, Ny]
+    @return     qx: qx coordinate mesh [Nx, Ny]
+    @return     qy: qy coordinate mesh [Nx, Ny]
     """
     ffermi = flibs.get_ffermi(eig, mu, temp)
-    phi = flibs.phi_qmap(uni, eig, ffermi, klist, olist, Nx, Ny, mu, temp, Ecut, idelta, sw_omega)
+    phi = flibs.phiq_map(uni, eig, ffermi, klist, olist, Nx, Ny, mu, temp, Ecut, idelta, sw_omega)
     x0 = np.linspace(0, 1, Nx, False)
     y0 = np.linspace(0, 1, Ny, False)
     # indexing='ij' so qx,qy have shape [Nx,Ny] matching the phi map (phi[ix,iy])
@@ -403,14 +394,13 @@ def phi_qmap(Nx: int, Ny: int, Ecut: float, mu: float, temp: float, klist: np.nd
 
 def get_chi_orb_list(Norb: int, site_prof: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn get_chi_orb_list
     @brief Generate the orbital index pair list for susceptibility calculation from site profile.
     @param    Norb: Total number of orbitals in the Hamiltonian
     @param site_prof: Array of orbital counts per site (e.g. [3, 3] for two 3-orbital sites)
-    @retval chiolist: Array of orbital index pairs (1-based) [Npairs, 2] int64, FORTRAN-contiguous:
+    @return chiolist: Array of orbital index pairs (1-based) [Npairs, 2] int64, FORTRAN-contiguous:
                       the Fortran vertex/chi routines declare it as ol(Nchi,2) and read it in
                       column-major order, so a C-contiguous list would be silently transposed
-    @retval    site: Array of site indices corresponding to each orbital pair [Npairs]
+    @return    site: Array of site indices corresponding to each orbital pair [Npairs]
     """
     if (len(site_prof) == 1):
         tmp = np.arange(Norb)+1
@@ -442,7 +432,6 @@ def get_chi_orb_list(Norb: int, site_prof: np.ndarray) -> tuple[np.ndarray, np.n
 def expand_UJ_sites(Umat: np.ndarray, Jmat: np.ndarray, Norb: int,
                     site_prof: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn expand_UJ_sites
     @brief Bring an orbital-dependent U/J pair into the Norb x Norb form the vertex
     routines index with the GLOBAL orbital number, replicating a per-site matrix on
     every site when one site worth of orbitals is given.
@@ -453,7 +442,7 @@ def expand_UJ_sites(Umat: np.ndarray, Jmat: np.ndarray, Norb: int,
     @param      Jmat: same shape as Umat
     @param      Norb: total number of orbitals of the hamiltonian
     @param site_prof: orbital counts per site, e.g. [5,5]; [Norb] or [1] for a single site
-    @retval Umat,Jmat: [Norb,Norb] float64, FORTRAN-contiguous, i.e. Umat[a,b] is the
+    @return Umat,Jmat: [Norb,Norb] float64, FORTRAN-contiguous, i.e. Umat[a,b] is the
                       Umat(a+1,b+1) the Fortran vertex routines read (immaterial for the
                       symmetric U/J of a Kanamori interaction, but the declared convention)
     """
@@ -492,12 +481,11 @@ def expand_UJ_sites(Umat: np.ndarray, Jmat: np.ndarray, Norb: int,
 
 def site_block_mask(Norb: int, site_prof: np.ndarray) -> np.ndarray:
     """
-    @fn site_block_mask
     @brief Boolean [Norb,Norb] mask of the orbital pairs living on one site, i.e. exactly
     the elements of Umat/Jmat the on-site interaction vertices read.
     @param      Norb: total number of orbitals
     @param site_prof: orbital counts per site
-    @retval     mask: [Norb,Norb] bool
+    @return     mask: [Norb,Norb] bool
     """
     mask = np.zeros((Norb, Norb), dtype=bool)
     if len(site_prof) < 2:
@@ -567,7 +555,6 @@ _HARM_RVEC = None
 
 def set_harmonic_lattice(avec: np.ndarray | None = None, rvec: np.ndarray | None = None) -> None:
     """
-    @fn set_harmonic_lattice
     @brief Register the lattice that gap_symms uses to build its harmonics in the
     CARTESIAN basis (see lattice_harmonic).  main.py calls this once; with nothing
     registered gap_symms falls back to the fractional-coordinate formulas, which carry
@@ -590,7 +577,6 @@ def _seed_rcut(kind: str, avec: np.ndarray) -> float:
 def lattice_harmonic(klist: np.ndarray, avec: np.ndarray, rvec: np.ndarray, kind: str,
                      rms: float = None, rcut: float = None) -> np.ndarray:
     """
-    @fn lattice_harmonic
     @brief Symmetrized plane-wave harmonic phi(k) = sum_R K(R_hat) exp(i k.R) with K a
     CARTESIAN harmonic of the direction of R_cart = n . avec.  Periodic in the
     reciprocal lattice by construction and correct in any Bravais lattice, so the gap
@@ -667,7 +653,6 @@ def _cart_gap_row(klist: np.ndarray, gap_sym: int, avec: np.ndarray,
 def gap_symms(klist: np.ndarray, Norb: int, gap_sym: int,
               avec: np.ndarray = None, rvec: np.ndarray = None) -> np.ndarray:
     """
-    @fn gap_symms
     @brief Pairing form factor phi(k) for one gap symmetry index, tiled over orbitals.
 
     The form factor depends only on k, so a single row is built and broadcast to
@@ -752,11 +737,12 @@ def gap_symms(klist: np.ndarray, Norb: int, gap_sym: int,
 def get_initial_gap(klist: np.ndarray, Norb: int, gap_sym: int,
                     avec: np.ndarray = None, rvec: np.ndarray = None) -> np.ndarray:
     """
-    @fn get_initial_gap
     @brief Generate an initial gap function with the specified pairing symmetry for gap equation iteration.
     @param   klist: k-point list in fractional coordinates [Nk, 3]
     @param    Norb: Number of orbitals in the Hamiltonian
     @param gap_sym: Symmetry index: 0=s, 1=dx2-y2, 2=s+-, 3=dxy, 4=dxz, 5=dyz, -1=px, -2=py, -3=p+ip
+    @param    avec: primitive translation vectors as rows [AA]
+    @param    rvec: R-vectors [Nr, 3]
     @return init_gap: Initial gap function array [Norb, Nk]
     """
     if gap_sym >= 0:

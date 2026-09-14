@@ -29,20 +29,19 @@ def maxent_trace_spectrum(Gk_mats: np.ndarray, wn: np.ndarray, wlist: np.ndarray
                           noise_level: float = 1.0e-4, alpha_determination: str = 'chi2kink',
                           verbose: bool = False, **kwargs) -> np.ndarray:
     """
-    @fn maxent_trace_spectrum
     @brief MaxEnt analytic continuation of Tr G(k,iw_n) -> -Im Tr G(k,w+i0+), one
     k-point at a time. Replaces flibs.pade_with_trace when the Thiele continued
     fraction produces spurious poles over wide frequency/k windows: MaxEnt is a
     regularized (entropy-penalized) fit rather than an exact interpolant, so it
     does not chase numerical noise into extra real-axis structure.
-    @param Gk_mats: Matsubara Green's function [Norb, Norb, Niw, Nk] complex128
-                    (same layout as flibs.pade_with_trace's arrayin); only the
-                    orbital-diagonal elements are used (their sum is Tr G, itself
-                    a causal quantity with a positive spectral function)
-    @param       wn: Matsubara frequencies [Niw] float64, e.g. (2n+1)*pi*temp
-    @param    wlist: Real-frequency grid [Nw] float64 (no broadening term needed;
-                     unlike Pade, MaxEnt does not require w+i*delta)
-    @param     temp: Temperature in eV (beta = 1/temp)
+    @param     Gk_mats: Matsubara Green's function [Norb, Norb, Niw, Nk] complex128
+                        (same layout as flibs.pade_with_trace's arrayin); only the
+                        orbital-diagonal elements are used (their sum is Tr G, itself
+                        a causal quantity with a positive spectral function)
+    @param          wn: Matsubara frequencies [Niw] float64, e.g. (2n+1)*pi*temp
+    @param       wlist: Real-frequency grid [Nw] float64 (no broadening term needed;
+                        unlike Pade, MaxEnt does not require w+i*delta)
+    @param        temp: Temperature in eV (beta = 1/temp)
     @param noise_level: Assumed relative noise of the input data (fraction of
                     max|Tr G|), used as the MaxEnt stdev; there is no actual
                     measurement error for FLEX/RPA output, so this stands in for
@@ -50,7 +49,8 @@ def maxent_trace_spectrum(Gk_mats: np.ndarray, wn: np.ndarray, wlist: np.ndarray
                     finite k/Matsubara mesh). Larger -> stronger regularization.
     @param alpha_determination: MaxEnt alpha-selection method (see ana_cont);
                     'chi2kink' is the library's recommended default.
-    @param  verbose: forwarded to ana_cont (per-k, per-alpha-step logging)
+    @param     verbose: forwarded to ana_cont (per-k, per-alpha-step logging)
+    @param      kwargs: further keyword arguments forwarded to ana_cont's problem.solve
     @return      Gk: -Im Tr G(k, w) [Nk, Nw] float64, same sign/scale convention
                      as -flibs.pade_with_trace(...).imag
     """

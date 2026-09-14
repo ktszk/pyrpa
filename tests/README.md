@@ -8,13 +8,15 @@
 # 推奨: pytest (リポジトリルートから; pytest.ini が tests/ を拾う)
 pytest                        # 全テスト
 pytest -k chi0                # 名前でフィルタ
-pytest --runslow              # @pytest.mark.slow 付きも実行
+pytest --runslow              # slow マーカー付き (_tools.slow) も実行
 
 # pytest が無い環境 (クラスタ等): 各ファイルは単体実行できる
 python tests/test_rpa_flex.py           # 1ファイル
 python tests/test_rpa_flex.py chi0      # 名前に 'chi0' を含むテストのみ
+python tests/test_eilenberger.py --runslow   # slow マーカー付きも実行
 python tests/run_all.py                 # 全ファイル一括 + サマリ表
 python tests/run_all.py rpa trans -q    # ファイル名フィルタ + 静音
+python tests/run_all.py --runslow       # slow マーカー付きも含めて全部
 ```
 
 ## ファイル構成
@@ -51,7 +53,8 @@ python tests/run_all.py rpa trans -q    # ファイル名フィルタ + 静音
 - **その他**
   - `fermi / bose / fermionic_matsubara / bosonic_matsubara` — オーバーフロー安全な分布関数
   - `silence()` — Fortran ラッパの進捗出力を抑制するコンテキストマネージャ
-  - `run_standalone(globals())` — 各ファイル末尾の `__main__` ランナー共通化 (tmp_path 対応, 引数で名前フィルタ)
+  - `run_standalone(globals())` — 各ファイル末尾の `__main__` ランナー共通化 (tmp_path 対応, 引数で名前フィルタ, `--runslow`)
+  - `slow` — 時間のかかるテストに付けるデコレータ (下記)
 
 ## 新しいテストを書くときの型
 
@@ -74,4 +77,7 @@ if __name__ == '__main__':
     sys.exit(T.run_standalone(globals()))
 ```
 
-時間のかかるテストは `@pytest.mark.slow` を付ける (pytest では `--runslow` 指定時のみ実行; 単体実行では常に走る)。
+時間のかかるテストは `@T.slow` (`_tools.slow`) を付ける。pytest・単体実行・`run_all.py` のいずれでも既定では
+スキップされ、`--runslow` を付けたときだけ実行される (pytest の無い環境でも使える)。
+現在は `test_eilenberger.py` の4本が対象。これだけでファイル全体の実行時間の約7割を占めるので、
+既定の実行はおおよそ半分以下になる (実測例: 全57本 854 s → 既定53本 394 s)。

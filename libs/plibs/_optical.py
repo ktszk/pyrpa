@@ -36,10 +36,9 @@ c_light = scconst.c             # speed of light [m/s]
 
 def refractive_index(eps: np.ndarray) -> np.ndarray:
     """
-    @fn refractive_index
     @brief Complex refractive index N = n + i*kappa from the dielectric function.
     @param eps: complex dielectric function, any shape
-    @retval     N on the passive branch (Im N >= 0), same shape as eps
+    @return     N on the passive branch (Im N >= 0), same shape as eps
     """
     N = np.sqrt(np.asarray(eps, dtype=complex))
     return np.where(N.imag < 0.0, -N, N)
@@ -47,21 +46,19 @@ def refractive_index(eps: np.ndarray) -> np.ndarray:
 
 def reflectivity(N: np.ndarray) -> np.ndarray:
     """
-    @fn reflectivity
     @brief Normal-incidence (vacuum/sample) Fresnel reflectivity from N.
     @param N: complex refractive index
-    @retval    R = |(N-1)/(N+1)|^2, real, in [0, 1]
+    @return    R = |(N-1)/(N+1)|^2, real, in [0, 1]
     """
     return (np.abs((N - 1.0)/(N + 1.0))**2).real
 
 
 def absorption_coefficient(w: np.ndarray, N: np.ndarray) -> np.ndarray:
     """
-    @fn absorption_coefficient
     @brief Beer-Lambert absorption coefficient alpha = 2*w*kappa/(hbar*c).
     @param w: photon energies [eV]; broadcast against the leading axes of N
     @param N: complex refractive index (kappa = Im N)
-    @retval    alpha [1/m], same shape as N
+    @return    alpha [1/m], same shape as N
     """
     N = np.asarray(N)
     w = np.asarray(w, dtype=float)
@@ -72,13 +69,12 @@ def absorption_coefficient(w: np.ndarray, N: np.ndarray) -> np.ndarray:
 
 def transmittance(R: np.ndarray, alpha: np.ndarray, d: float) -> np.ndarray:
     """
-    @fn transmittance
     @brief Slab transmittance including both surfaces and incoherent multiple
            internal reflections: T = (1-R)^2 e^-ad / (1 - R^2 e^-2ad).
     @param     R: normal-incidence reflectivity
     @param alpha: absorption coefficient [1/m]
     @param     d: sample thickness [m]
-    @retval       T in [0, 1]; for alpha = 0 it reduces to (1-R)/(1+R)
+    @return       T in [0, 1]; for alpha = 0 it reduces to (1-R)/(1+R)
     """
     e = np.exp(-np.clip(np.asarray(alpha)*d, 0.0, 700.0))   # no overflow to 0*inf
     den = 1.0 - (R*e)**2
@@ -89,12 +85,11 @@ def transmittance(R: np.ndarray, alpha: np.ndarray, d: float) -> np.ndarray:
 
 def kubelka_munk(alpha: np.ndarray, ell: float) -> np.ndarray:
     """
-    @fn kubelka_munk
     @brief Diffuse reflectance of an optically thick scattering layer (powder,
            pigment) in the Kubelka-Munk two-flux model, with K/S = alpha*ell.
     @param alpha: absorption coefficient [1/m]
     @param   ell: effective scattering length [m] (the model's free parameter)
-    @retval       R_inf in [0, 1]: 1 for a non-absorbing powder, 0 for a black one
+    @return       R_inf in [0, 1]: 1 for a non-absorbing powder, 0 for a black one
     """
     ks = np.clip(np.asarray(alpha)*ell, 0.0, None)
     return 1.0 + ks - np.sqrt(ks*(ks + 2.0))

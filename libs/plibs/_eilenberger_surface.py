@@ -20,7 +20,7 @@ x = 0; no explicit boundary condition is then needed beyond the bulk inflow at
 x = +infinity.
 
 Pairing is the same separable model as the bulk solver, Delta(x, p) =
-phi(p) * Delta_amp(x), with phi normalized to <phi^2>_FS = 1.  The Fermi surface
+phi(p) * Delta_amp(x), with phi normalized to @<phi^2@>_FS = 1.  The Fermi surface
 is an isotropic 2D cylinder (v_F || k); the surface orientation enters through
 the form-factor angle ``beta_surf`` (0 = [100], pi/4 = [110] for d_{x^2-y^2}).
 Feeding the real band's Fermi velocities is a later step; the model FS isolates
@@ -42,7 +42,6 @@ __all__ = [
 def _surface_chords(Damp: np.ndarray, phi_out: np.ndarray, phi_in: np.ndarray, om: np.ndarray, hvf: float, dx: float,
                     cosb: np.ndarray, sigf: np.ndarray | None = None) -> tuple:
     """
-    @fn _surface_chords
     @brief Solve g, f on ALL unfolded surface trajectories at once (one batched
     Fortran riccati_chords call), the single chord kernel for every surface solver.
 
@@ -88,7 +87,7 @@ def _beta_grid(Nbeta: int, cos_min: float = 0.02) -> np.ndarray:
     sliver (|cos beta| < cos_min); the incoming partners are pi - beta.
 
     The exclusion must stay thin: over the full (-pi/2, pi/2) range 2*beta spans a
-    whole period so <cos^2 2beta> = <sin^2 2beta> = 1/2 and the analytic sqrt(2)
+    whole period so @<cos^2 2beta@> = @<sin^2 2beta@> = 1/2 and the analytic sqrt(2)
     normalization of the form factor is orientation independent.  Truncating too
     much biases the half-range average and makes the bulk gap depend on the
     surface orientation.  The unconditionally stable analytic integrator tolerates
@@ -119,29 +118,31 @@ def solve_surface(coupling: float, temp: float, omega: np.ndarray, gap_sym: str,
                   imp_gamma: float = 0.0, imp_c: float = 1.0e8,
                   eps: float = 1.0e-4, itemax: int = 300, mix: float = 0.3) -> tuple[np.ndarray, np.ndarray, float]:
     """
-    @fn solve_surface
     @brief Self-consistently solve the gap profile Delta_amp(x) near a specular
     surface (Matsubara axis), optionally with non-magnetic T-matrix impurities.
 
     With impurities the self-energy is *local*: at each depth x the renormalized
     frequency w_tilde(x) and the additive pair self-energy Sigma_f(x) are built
-    from the local Fermi-surface averages <g(x)>, <f(x)> and fed back into the
+    from the local Fermi-surface averages @<g(x)@>, @<f(x)@> and fed back into the
     Riccati trajectories.  The gap Delta(x), w_tilde(x) and Sigma_f(x) are relaxed
     together in one fixed-point loop.
 
-    @param coupling: dimensionless separable pairing coupling lambda
-    @param     temp: temperature [eV]
-    @param    omega: positive Matsubara frequencies [Nw]
-    @param  gap_sym: 's', 'd', or 'dxy'
+    @param  coupling: dimensionless separable pairing coupling lambda
+    @param      temp: temperature [eV]
+    @param     omega: positive Matsubara frequencies [Nw]
+    @param   gap_sym: 's', 'd', or 'dxy'
     @param beta_surf: surface orientation (d-wave: 0=[100], pi/4=[110])
-    @param    Dbulk: bulk gap amplitude [eV]; if None it is computed self-consistently
-                     (with impurity if imp_gamma>0) from the homogeneous gap equation
-    @param    Nbeta: number of outgoing trajectory angles
-    @param      Lxi: domain length in units of the coherence length xi=hvf/(pi*Dbulk)
-    @param     nper: x-grid points per xi
-    @param      hvf: hbar |v_F| (length unit; physics depends only on x/xi)
+    @param     Dbulk: bulk gap amplitude [eV]; if None it is computed self-consistently
+                      (with impurity if imp_gamma>0) from the homogeneous gap equation
+    @param     Nbeta: number of outgoing trajectory angles
+    @param       Lxi: domain length in units of the coherence length xi=hvf/(pi*Dbulk)
+    @param      nper: x-grid points per xi
+    @param       hvf: hbar |v_F| (length unit; physics depends only on x/xi)
     @param imp_gamma: normal-state impurity scattering rate Gamma_N [eV] (0=clean)
-    @param    imp_c: T-matrix cot(delta0) (large=Born, 0=unitary)
+    @param     imp_c: T-matrix cot(delta0) (large=Born, 0=unitary)
+    @param       eps: convergence tolerance of the self-consistency loop
+    @param    itemax: maximum number of self-consistency iterations
+    @param       mix: linear-mixing factor for the self-consistency update
     @return (x, Damp, Dbulk): x grid [Ngrid], gap profile [Ngrid], bulk gap
     """
     beta = _beta_grid(Nbeta)
@@ -263,8 +264,7 @@ def surface_ldos(Damp: np.ndarray, x: np.ndarray, wlist: np.ndarray, gap_sym: st
                  imp_gamma: float = 0.0, imp_c: float = 1.0e8, h: float = 0.0,
                  eps: float = 1.0e-4, itemax: int = 200, mix: float = 0.5) -> np.ndarray:
     """
-    @fn surface_ldos
-    @brief Local density of states N(x,w)/N0 = Re<g(x,w)> at grid index ix (default
+    @brief Local density of states N(x,w)/N0 = Re@<g(x,w)@> at grid index ix (default
     the surface x=0) from the converged gap profile, via the retarded Riccati
     equation (iw_n -> w + i*delta).
 
@@ -279,16 +279,20 @@ def surface_ldos(Damp: np.ndarray, x: np.ndarray, wlist: np.ndarray, gap_sym: st
     sigma=+-1 scalar sectors, so N = (1/2) sum_sigma N(w - sigma h).  This splits
     the d[110] zero-energy surface bound state into a peak at +-h.
 
-    @param   Damp: converged gap profile [Ngrid] (from solve_surface)
-    @param      x: x grid [Ngrid]
-    @param  wlist: real-frequency grid [Nw]
+    @param            Damp: converged gap profile [Ngrid] (from solve_surface)
+    @param               x: x grid [Ngrid]
+    @param           wlist: real-frequency grid [Nw]
     @param gap_sym,beta_surf: pairing / surface orientation (as in solve_surface)
-    @param     ix: grid index at which to evaluate the LDOS (0 = surface)
-    @param  delta: retarded broadening [eV] (default 0.02*Dbulk)
-    @param  Dbulk: bulk gap (for the default broadening)
-    @param  Nbeta: number of outgoing angles
+    @param              ix: grid index at which to evaluate the LDOS (0 = surface)
+    @param           delta: retarded broadening [eV] (default 0.02*Dbulk)
+    @param           Dbulk: bulk gap (for the default broadening)
+    @param           Nbeta: number of outgoing angles
+    @param             hvf: hbar |v_F| (length unit; physics depends only on x/xi)
     @param imp_gamma,imp_c: impurity scattering rate and T-matrix c (0=clean)
-    @param      h: Zeeman (Maki) energy mu*B (spin splitting of the LDOS)
+    @param               h: Zeeman (Maki) energy mu*B (spin splitting of the LDOS)
+    @param             eps: convergence tolerance of the self-consistency loop
+    @param          itemax: maximum iterations of the impurity self-energy loop (a single pass when clean)
+    @param             mix: linear-mixing factor for the self-consistency update
     @return  ldos: N(x,w)/N0 [Nw]
     """
     if delta is None:
@@ -339,19 +343,26 @@ def calc_surface(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
                  fs_kind: str = None, fs_params: tuple | None = None, fs: dict | None = None,
                  Nbeta: int = 30, Lxi: float = 8.0, nper: int = 16) -> tuple:
     """
-    @fn calc_surface
     @brief Driver: solve the self-consistent gap profile Delta(x) at a specular
     surface and (optionally) the surface LDOS, writing results to files.
 
-    @param coupling: separable pairing coupling lambda
-    @param     temp: temperature [eV]
-    @param       wc: Matsubara cutoff energy [eV]
-    @param  gap_sym: 's', 'd' (d_{x^2-y^2}), or 'dxy'
-    @param beta_surf: surface orientation (d-wave: 0=[100], pi/4=[110])
-    @param       kb: Boltzmann constant [eV/K] for K-unit reporting
-    @param  sw_ldos: also compute the real-frequency surface LDOS (the bound state)
+    @param        coupling: separable pairing coupling lambda
+    @param            temp: temperature [eV]
+    @param              wc: Matsubara cutoff energy [eV]
+    @param         gap_sym: 's', 'd' (d_{x^2-y^2}), or 'dxy'
+    @param       beta_surf: surface orientation (d-wave: 0=[100], pi/4=[110])
+    @param              kb: Boltzmann constant [eV/K] for K-unit reporting
+    @param         sw_ldos: also compute the real-frequency surface LDOS (the bound state)
     @param imp_gamma,imp_c: non-magnetic impurity scattering rate [eV] and T-matrix
                             c (0=clean, large=Born, 0=unitary)
+    @param               h: Zeeman (Maki) energy mu*B [eV] (spin splitting of the surface LDOS)
+    @param         fs_kind: model FS name for build_model_fs (None = isotropic cylinder unless fs is given)
+    @param       fs_params: parameters passed to build_model_fs together with fs_kind
+    @param              fs: prebuilt FS dict (e.g. build_wannier_fs), overriding fs_kind
+    @param           Nbeta: number of outgoing trajectory angles
+    @param             Lxi: domain length in units of the coherence length xi
+    @param            nper: x-grid points per xi
+    @return (x, Damp): x grid and gap amplitude profile Delta(x)
     """
     omega = _eilenberger.matsubara(temp, wc)
     print("specular-surface quasiclassical Eilenberger (Riccati)", flush=True)
@@ -447,17 +458,21 @@ def _reflection_index(fs: dict) -> np.ndarray:
 def surface_ldos_fs(fs: dict, Damp: np.ndarray, x: np.ndarray, wlist: np.ndarray, gap_sym: int | str | None,
                     ix: int = 0, delta: float | None = None, Dbulk: float = 1.0, vmin_frac: float = 0.02) -> np.ndarray:
     """
-    @fn surface_ldos_fs
     @brief Specular-surface LDOS N(x,w)/N0 on a model Fermi surface with real Fermi
     velocities (clean limit), generalizing surface_ldos beyond the isotropic
     cylinder.  The trajectory runs along v_hat, the chord step scales as dx/|v_x|
     (v_x the velocity normal component, |v_F| included), the specular partner is the
     FS point at (-kx,ky), and the Fermi-surface average is nf-weighted.
 
-    @param   fs: model FS dict from build_model_fs (provides vx, nf, k-direction)
-    @param Damp: gap amplitude profile |Delta|(x) on the x grid [Ng]
-    @param gap_sym: pairing symmetry (form factor evaluated on the FS k-direction)
-    @param   ix: grid index for the LDOS (0 = surface)
+    @param        fs: model FS dict from build_model_fs (provides vx, nf, k-direction)
+    @param      Damp: gap amplitude profile |Delta|(x) on the x grid [Ng]
+    @param         x: x grid from solve_surface_fs [Ngrid]
+    @param     wlist: real-frequency grid [Nw]
+    @param   gap_sym: pairing symmetry (form factor evaluated on the FS k-direction)
+    @param        ix: grid index for the LDOS (0 = surface)
+    @param     delta: retarded broadening [eV] (None = 0.02*Dbulk)
+    @param     Dbulk: bulk gap [eV] (sets the default broadening)
+    @param vmin_frac: drop trajectories whose v_x is below this fraction of the maximum
     @return ldos: N(x_ix, w)/N0 [Nw]
     @note  There is no ``hvf`` here on purpose: the chord step is dx/|v_x| with the REAL
            velocity component, so the speed is already in the step and the chord kernel
@@ -487,7 +502,6 @@ def solve_surface_fs(coupling: float, temp: float, omega: np.ndarray, fs: dict, 
                      vmin_frac: float = 0.02, eps: float = 1.0e-4, itemax: int = 300,
                      mix: float = 0.3) -> tuple[np.ndarray, np.ndarray, float]:
     """
-    @fn solve_surface_fs
     @brief Self-consistent gap profile Delta_amp(x) at a specular surface on a model
     Fermi surface with real Fermi velocities (clean limit) -- the FS generalization
     of solve_surface.  Trajectory along v_hat, chord step ds=dx/|v_x|, specular
@@ -497,12 +511,25 @@ def solve_surface_fs(coupling: float, temp: float, omega: np.ndarray, fs: dict, 
 
     Dbulk (when not supplied) is solved on the SAME chord ensemble the kernel sums over,
     so the profile heals to it by construction -- see the comment in the body.
-    @param hvf: Fermi speed setting xi = hvf/(pi*Dbulk), i.e. the physical size of the
-                domain.  None (default) takes the FS value <|v_par|>_nf (fs_hvf).  It
-                must NOT be fed to the chord kernel as well: the step is already
-                dx/|v_x| with the real velocity, so the chords run at unit velocity.
-                Fixing hvf=1 on a real Fermi surface (the old behaviour) shrinks the box
-                by a factor <|v_F|> and the gap never heals to Dbulk at the far edge.
+    @param  coupling: dimensionless separable pairing coupling lambda
+    @param      temp: temperature k_B*T [eV]
+    @param     omega: positive Matsubara frequencies [Nw]
+    @param        fs: FS dict (build_model_fs / build_wannier_fs) with velocities 'vx' and weights 'nf'
+    @param   gap_sym: pairing symmetry: continuum label ('s', 'd', 'dxy', 'px', 'py', 'p+ip', ...) or gap_symms
+                      integer index
+    @param     Dbulk: bulk gap amplitude [eV] (None = computed from the homogeneous gap equation)
+    @param       Lxi: domain length in units of the coherence length xi
+    @param      nper: x-grid points per xi
+    @param       hvf: Fermi speed setting xi = hvf/(pi*Dbulk), i.e. the physical size of the
+                      domain.  None (default) takes the FS value <|v_par|>_nf (fs_hvf).  It
+                      must NOT be fed to the chord kernel as well: the step is already
+                      dx/|v_x| with the real velocity, so the chords run at unit velocity.
+                      Fixing hvf=1 on a real Fermi surface (the old behaviour) shrinks the box
+                      by a factor <|v_F|> and the gap never heals to Dbulk at the far edge.
+    @param vmin_frac: drop trajectories whose v_x is below this fraction of the maximum
+    @param       eps: convergence tolerance of the self-consistency loop
+    @param    itemax: maximum number of self-consistency iterations
+    @param       mix: linear-mixing factor for the self-consistency update
     @return (x, Damp, Dbulk)
     """
     phi = _eilenberger.fs_form_factor(fs, gap_sym)

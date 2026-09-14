@@ -13,6 +13,8 @@ limiting vs triplet immunity, and the surface / vortex-core d-vector textures.
 
 Runs standalone (no pytest needed):  python tests/test_eilenberger.py
 Also works under pytest if installed:  pytest tests/test_eilenberger.py
+The four longest tests (~10 min together) are marked slow and skipped by default;
+add --runslow (to either command) to run them as well.
 Requires the Fortran library libfmod.so (cd libs && make FC=ifx SL=MKL).
 """
 import os
@@ -26,6 +28,9 @@ import libs.plibs._eilenberger_surface as S
 import libs.plibs._eilenberger_vortex as V
 import libs.plibs._eilenberger_spin as SP
 import libs.flibs as F
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _tools
 
 
 # --------------------------------------------------------------------------- #
@@ -1186,6 +1191,7 @@ def test_superfluid_density_zz():
     assert aniso(a3) > aniso(a6) > 1.0
 
 
+@_tools.slow
 def test_free_energy_selects_the_chiral_partner():
     """The condensation energy is the only thing that can choose between the two members
     of a degenerate pair -- linear theory leaves them degenerate at Tc.  On a 3D FS the
@@ -1256,6 +1262,7 @@ def test_pauli_and_spin_accept_the_projected_gap():
         os.rmdir(tmp)
 
 
+@_tools.slow
 def test_surface_gap_heals_to_bulk():
     """The far edge of the surface slab MUST sit at the bulk gap: whatever the surface
     does to the order parameter, several coherence lengths away it has to be the
@@ -1368,6 +1375,7 @@ def test_matrix_riccati_complex_gap():
         assert abs(fa - D * np.exp(1j * b) / R) < 1e-9 * D / R, (bdeg, fa)
 
 
+@_tools.slow
 def test_chiral_vortex():
     """A CHIRAL vortex: the two components are e^{+-i l beta} on ONE spin matrix, so their
     relative phase IS the chirality -- exactly what the scalar real-amplitude solver
@@ -1455,6 +1463,7 @@ def test_field_direction_frame():
         raise AssertionError('an in-plane field on a 2D FS was accepted')
 
 
+@_tools.slow
 def test_vortex_in_plane_field():
     """The vortex itself with the field off the c axis.  The plane perpendicular to B has
     its two axes rescaled by their rms velocities, which is an affine (area-preserving) map,

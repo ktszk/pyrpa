@@ -35,7 +35,6 @@ _loader._lib.matrix_riccati_batch.restype = None
 def matrix_riccati_batch(om: np.ndarray, Dpath: np.ndarray, hvf: float, ds: float,
                          h: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn matrix_riccati_batch
     @brief 2x2 spin-matrix quasiclassical g, f along one inhomogeneous trajectory,
     batched over frequencies (Fortran).  Drop-in replacement for looping
     matrix_trajectory_gf over frequencies in the d-vector solvers.
@@ -69,7 +68,6 @@ _loader._lib.matrix_riccati_chords.restype = None
 def matrix_riccati_chords(om: np.ndarray, Dpath: np.ndarray, hvf: float, ds: float,
                           h: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn matrix_riccati_chords
     @brief 2x2 spin-matrix g, f along many chords, batched over frequencies (Fortran,
     OpenMP over chord x frequency).  For the 2D vortex d-vector solver: one call per FS
     direction.  omega may be position dependent (Doppler v_F.Q on the vortex lattice).
@@ -94,7 +92,6 @@ def matrix_riccati_chords(om: np.ndarray, Dpath: np.ndarray, hvf: float, ds: flo
 
 def riccati_chords(om: np.ndarray, dd: np.ndarray, hvf: float, ds: float) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn riccati_chords
     @brief Scalar quasiclassical g, f along many chords via the stable tanh-step
     Riccati (Fortran).  The single batched chord kernel for the surface / vortex /
     lattice solvers (forward gamma + backward gamma-tilde + g,f combine).
@@ -133,7 +130,6 @@ _loader._lib.riccati_chords_bc.restype = None
 def riccati_chords_bc(om: np.ndarray, dd: np.ndarray, hvf: float, ds: float, dom: np.ndarray | None = None,
                       row: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn riccati_chords_bc
     @brief Scalar Riccati chord integration with the frequency and the space
     dependence kept separate (Fortran): om_local = om[w] + dom[i,c] and a
     frequency-independent gap dd[i,c].  That is the structure of the clean vortex

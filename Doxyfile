@@ -1,0 +1,17 @@
+# Doxygen configuration for the pyrpa Python API (libs/plibs, libs/flibs).
+# Run from the repository root:  doxygen Doxyfile   ->  Doc/api/html/index.html
+PROJECT_NAME          = pyrpa
+INPUT                 = libs/plibs libs/flibs
+FILE_PATTERNS         = *.py
+RECURSIVE             = NO
+OUTPUT_DIRECTORY      = Doc/api
+# Required: without it doxygen shows docstrings as preformatted text and ignores
+# @brief / @param / @return.
+PYTHON_DOCSTRING      = NO
+OPTIMIZE_OUTPUT_JAVA  = YES
+EXTRACT_ALL           = YES
+GENERATE_HTML         = YES
+GENERATE_LATEX        = NO
+QUIET                 = YES
+WARN_IF_DOC_ERROR     = YES
+WARN_NO_PARAMDOC      = YES

@@ -56,7 +56,6 @@ def _cplx(value: int) -> np.ndarray:
 def bilinear_eval(field: np.ndarray, xg: np.ndarray, px: np.ndarray, py: np.ndarray,
                   fill: float = 0.0) -> np.ndarray:
     """
-    @fn bilinear_eval
     @brief Bilinear interpolation of a field on a uniform square grid at scattered
     points, vectorized over a trailing (frequency) axis (Fortran).  Drop-in for
     scipy RegularGridInterpolator(('linear'), bounds_error=False, fill_value=fill)
@@ -90,7 +89,6 @@ def bilinear_eval(field: np.ndarray, xg: np.ndarray, px: np.ndarray, py: np.ndar
 def bilinear_cell_eval(field: np.ndarray, px: np.ndarray, py: np.ndarray,
                        Dlx: float, Dly: float, zeta: float) -> np.ndarray:
     """
-    @fn bilinear_cell_eval
     @brief Periodic bilinear interpolation of a cell-centred field on the (oblique)
     magnetic unit cell at scattered Cartesian points (Fortran).  Grid point k sits
     at fractional coordinate (k+0.5)/ng-0.5; the Cartesian -> fractional map is the
@@ -116,7 +114,6 @@ def bilinear_cell_eval(field: np.ndarray, px: np.ndarray, py: np.ndarray,
 def abrikosov_z(px: np.ndarray, py: np.ndarray, Dlx: float, Dly: float, zeta: float,
                 nsum: int = 6) -> np.ndarray:
     """
-    @fn abrikosov_z
     @brief Abrikosov (lowest-Landau-level) quasi-periodic order parameter of a
     magnetic unit cell, at scattered points (Fortran).  Its phase carries the
     vortex winding and its modulus vanishes at every core.

@@ -194,7 +194,6 @@ def detect_symm_ops_auto_U(rvec: np.ndarray, ham_r: np.ndarray,
                            min_fraction: float = 0.9
                            ) -> list[tuple[np.ndarray, np.ndarray]]:
     """
-    @fn detect_symm_ops_auto_U
     @brief Detect point group symmetry operations and automatically determine the orbital
     transformation matrix U for each, including multi-orbital systems with orbital mixing
     (e.g. E_g representations with dxz/dyz mixing under C4 rotation).
@@ -206,7 +205,7 @@ def detect_symm_ops_auto_U(rvec: np.ndarray, ham_r: np.ndarray,
     @param candidate_S: Candidate 3×3 integer rotation matrices; uses standard ops if None
     @param       tol: Verification tolerance for H(SR) ≈ U H(R) U†
     @param min_fraction: Minimum fraction of R-vectors that must have their S-image present
-    @retval  sym_ops: List of valid (S, U) pairs; identity is always first
+    @return  sym_ops: List of valid (S, U) pairs; identity is always first
     """
     rv_int = np.round(rvec).astype(int)
     rvec_dict = {(int(r[0]), int(r[1]), int(r[2])): i for i, r in enumerate(rv_int)}
@@ -228,7 +227,6 @@ def detect_symm_ops(rvec: np.ndarray, ham_r: np.ndarray,
                     U_list: list[np.ndarray] | None = None,
                     tol: float = 1e-4) -> list[tuple[np.ndarray, np.ndarray]]:
     """
-    @fn detect_symm_ops
     @brief Detect point group symmetry operations that leave the Hamiltonian invariant.
     For each candidate (S, U) pair, checks H(S·R) ≈ U @ H(R) @ U† for all R in rvec.
     @param      rvec: R-vectors [Nr, 3] float64
@@ -237,7 +235,7 @@ def detect_symm_ops(rvec: np.ndarray, ham_r: np.ndarray,
     @param    U_list: Norb×Norb orbital transformation matrices paired with candidate_S;
                       defaults to identity (no orbital mixing) if None
     @param       tol: Element-wise tolerance for comparison
-    @retval  sym_ops: List of valid (S, U) pairs; identity is always first
+    @return  sym_ops: List of valid (S, U) pairs; identity is always first
     """
     rv_int = np.round(rvec).astype(int)
     rvec_dict = {(int(r[0]), int(r[1]), int(r[2])): i for i, r in enumerate(rv_int)}
@@ -271,7 +269,6 @@ def gen_irr_k_symm(Nx: int, Ny: int, Nz: int,
                    sym_ops: list[tuple[np.ndarray, np.ndarray]]
                    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    @fn gen_irr_k_symm
     @brief Generate the irreducible k-point list using a set of point group symmetry operations.
     Each S in sym_ops acts on integer k-indices [ix, iy, iz] as Sk = S @ [ix, iy, iz] mod [Nx, Ny, Nz].
     Operations that do not map the mesh onto itself are silently skipped.
@@ -279,9 +276,9 @@ def gen_irr_k_symm(Nx: int, Ny: int, Nz: int,
     @param    Ny: Number of k-points along ky
     @param    Nz: Number of k-points along kz
     @param sym_ops: List of (S, U) tuples from detect_symm_ops (identity must be first)
-    @retval klist_irr: Irreducible k-coordinates [Nk_irr, 3] float64 in [0, 1)
-    @retval    kmap: Full k-grid FFT indices [Nkall, 3] int64
-    @retval    invk: Mapping [Nkall, 2] int64 — col0: irr-k index (0-based), col1: sym op index
+    @return klist_irr: Irreducible k-coordinates [Nk_irr, 3] float64 in [0, 1)
+    @return    kmap: Full k-grid FFT indices [Nkall, 3] int64
+    @return    invk: Mapping [Nkall, 2] int64 — col0: irr-k index (0-based), col1: sym op index
     """
     N = np.array([Nx, Ny, Nz])
     Nkall = Nx * Ny * Nz
@@ -328,15 +325,17 @@ def expand_irr_to_full_symm(data_irr: np.ndarray, invk: np.ndarray,
                             Nx: int, Ny: int, Nz: int,
                             orb_axes: tuple[int, int] | None = None) -> np.ndarray:
     """
-    @fn expand_irr_to_full_symm
     @brief Expand data from irreducible k-points to the full BZ using symmetry operations.
     @param data_irr: Array whose last axis is Nk_irr.  Shape: [..., Nk_irr]
     @param     invk: [Nkall, 2] int64 — col0: irr-k index, col1: sym op index (from gen_irr_k_symm)
     @param     kmap: [Nkall, 3] int64 — FFT grid indices
     @param  sym_ops: List of (S, U) from detect_symm_ops
-    @param  orb_axes: (ax1, ax2) in data shape that are orbital indices for U-rotation.
-                      Pass None for scalar or already-diagonal data (e.g. eigenvalues).
-    @retval    full: Array with shape [..., Nx, Ny, Nz]
+    @param       Nx: k-mesh size along x
+    @param       Ny: k-mesh size along y
+    @param       Nz: k-mesh size along z
+    @param orb_axes: (ax1, ax2) in data shape that are orbital indices for U-rotation.
+                     Pass None for scalar or already-diagonal data (e.g. eigenvalues).
+    @return    full: Array with shape [..., Nx, Ny, Nz]
     """
     full = np.zeros(data_irr.shape[:-1] + (Nx, Ny, Nz), dtype=data_irr.dtype)
     ik_arr  = invk[:, 0]
@@ -364,7 +363,6 @@ def inversion_op(rvec: np.ndarray, ham_r: np.ndarray, plist: np.ndarray | None =
                  min_pair_fraction: float = 0.5
                  ) -> tuple[np.ndarray | None, np.ndarray | None, str, float | None]:
     """
-    @fn inversion_op
     @brief Determine the inversion operator in the orbital basis as a signed permutation,
     so that the k -> -k reconstruction used by the Eliashberg solvers,
 
@@ -386,12 +384,12 @@ def inversion_op(rvec: np.ndarray, ham_r: np.ndarray, plist: np.ndarray | None =
             diag(plist) residual to be considered meaningful.  Kept looser than
             min_fraction: truncated first-principles R-sets routinely lose ~10% of the
             partners at the edge of the R-shell, which says nothing about the symmetry.
-    @retval   sgn: Signs [Norb] float64, pass as plist (None if undetermined)
-    @retval  perm: 0-based orbital permutation [Norb] int64, pass as iperm (None if undetermined)
-    @retval status: 'diagonal' (plist is valid, perm = identity), 'monomial' (signed
+    @return   sgn: Signs [Norb] float64, pass as plist (None if undetermined)
+    @return  perm: 0-based orbital permutation [Norb] int64, pass as iperm (None if undetermined)
+    @return status: 'diagonal' (plist is valid, perm = identity), 'monomial' (signed
             permutation found), 'general' (inversion exists but mixes orbitals -> a
             constant signed permutation cannot represent it), 'none' (not found)
-    @retval    res: Relative residual of diag(plist) -- the quantity the decision is based on
+    @return    res: Relative residual of diag(plist) -- the quantity the decision is based on
             (None when plist is not supplied). The residual of the returned monomial itself is
             bounded by tol through detect_symm_ops_auto_U's own verification.
     """

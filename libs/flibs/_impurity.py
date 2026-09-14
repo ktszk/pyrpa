@@ -62,7 +62,6 @@ _loader._lib.solve_cpa_array.restype = None
 def gen_imp_ham(rvec: np.ndarray, ham_r: np.ndarray, ham_i: np.ndarray, ham_ri: np.ndarray,
                 rlist: np.ndarray, imp_list: np.ndarray, eps: float = 1.0e-5) -> np.ndarray:
     """
-    @fn gen_imp_ham
     @brief Construct the real-space supercell Hamiltonian for a host crystal with embedded impurities.
     @param     rvec: Real-space displacement vectors [Nr, 3] float64
     @param    ham_r: Host-host hopping blocks H_rr(R) [Nr, Norb, Norb] complex128
@@ -84,7 +83,6 @@ def gen_imp_ham(rvec: np.ndarray, ham_r: np.ndarray, ham_i: np.ndarray, ham_ri: 
 
 def dft_imp_ham(ham_imp: np.ndarray, klist: np.ndarray, rlist: np.ndarray) -> np.ndarray:
     """
-    @fn dft_imp_ham
     @brief Fourier-transform the real-space impurity Hamiltonian to k-space.
     @param  ham_imp: Real-space impurity Hamiltonian [Norb*Nsite, Norb*Nsite] complex128
     @param    klist: k-point list [Nk, 3] float64
@@ -102,7 +100,6 @@ def dft_imp_ham(ham_imp: np.ndarray, klist: np.ndarray, rlist: np.ndarray) -> np
 def get_imp_spectrum(uni: np.ndarray, eigs: np.ndarray, mu: float, wlist: np.ndarray,
                      klist: np.ndarray, rlist: np.ndarray, eta: float = 1.0e-3) -> np.ndarray:
     """
-    @fn get_imp_spectrum
     @brief Compute the k- and frequency-resolved impurity spectral function A(k, w).
     @param     uni: Eigenvectors of the impurity Hamiltonian [Norb*Nsite, Norb*Nsite] complex128
     @param    eigs: Eigenvalues of the impurity Hamiltonian [Norb*Nsite] float64
@@ -128,7 +125,6 @@ def solve_cpa(hamk: np.ndarray, VA: np.ndarray, VB: np.ndarray,
               maxiter: int = 500, tol: float = 1.0e-10,
               sigma_init: np.ndarray | None = None) -> np.ndarray:
     """
-    @fn solve_cpa
     @brief Run CPA self-consistent loop over an array of complex frequencies.
     @param   hamk: k-space Hamiltonian [Nk, Norb, Norb] complex128
     @param     VA: Onsite potential of species A [Norb, Norb] complex128

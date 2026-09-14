@@ -53,14 +53,13 @@ _loader._lib.get_vmat_soc_orb.restype = None
 
 def gen_SCmatrix(olist: np.ndarray, site: np.ndarray, U: float, J: float) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn gen_SCmatrix
     @brief Generate spin (Smat) and charge (Cmat) vertex interaction matrices from uniform U and J parameters.
-    @param  olist: Orbital index list [Nchi] int64
+    @param  olist: Orbital-pair list of chi [Nchi, 2] int64 (1-based)
     @param   site: Site indices for each orbital pair [Nchi] int64
     @param      U: Hubbard Coulomb repulsion in eV
     @param      J: Hund's coupling in eV
-    @retval  Smat: Spin interaction matrix [Nchi, Nchi] float64
-    @retval  Cmat: Charge interaction matrix [Nchi, Nchi] float64
+    @return  Smat: Spin interaction matrix [Nchi, Nchi] float64
+    @return  Cmat: Charge interaction matrix [Nchi, Nchi] float64
     """
     Nchi = len(olist)
     Smat = np.zeros((Nchi, Nchi), dtype=np.float64)
@@ -72,14 +71,13 @@ def gen_SCmatrix(olist: np.ndarray, site: np.ndarray, U: float, J: float) -> tup
 def gen_SCmatrix_orb(olist: np.ndarray, site: np.ndarray, Umat: np.ndarray,
                      Jmat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn gen_SCmatrix_orb
     @brief Generate spin (Smat) and charge (Cmat) interaction matrices using orbital-resolved U and J.
-    @param  olist: Orbital index list [Nchi] int64
+    @param  olist: Orbital-pair list of chi [Nchi, 2] int64 (1-based)
     @param   site: Site indices for each orbital pair [Nchi] int64
     @param   Umat: Orbital-resolved Coulomb matrix [Norb, Norb] float64
     @param   Jmat: Orbital-resolved Hund's coupling matrix [Norb, Norb] float64
-    @retval  Smat: Spin interaction matrix [Nchi, Nchi] float64
-    @retval  Cmat: Charge interaction matrix [Nchi, Nchi] float64
+    @return  Smat: Spin interaction matrix [Nchi, Nchi] float64
+    @return  Cmat: Charge interaction matrix [Nchi, Nchi] float64
     """
     Nchi = len(olist)
     Norb = len(Umat)
@@ -93,9 +91,8 @@ def gen_SCmatrix_orb(olist: np.ndarray, site: np.ndarray, Umat: np.ndarray,
 def gen_Vmatrix(olist: np.ndarray, slist: np.ndarray, site: np.ndarray, invs: np.ndarray,
                 U: float, J: float) -> np.ndarray:
     """
-    @fn gen_Vmatrix
     @brief Generate the SOC interaction matrix Vmat from uniform U and J parameters.
-    @param  olist: Orbital index list [Nchi] int64
+    @param  olist: Orbital-pair list of chi [Nchi, 2] int64 (1-based)
     @param  slist: Spin-orbit label for each orbital [Norb] int64
     @param   site: Site indices for each orbital pair [Nchi] int64
     @param   invs: Inverse spin index mapping [Norb] int64
@@ -113,9 +110,8 @@ def gen_Vmatrix(olist: np.ndarray, slist: np.ndarray, site: np.ndarray, invs: np
 def gen_Vmatrix_orb(olist: np.ndarray, slist: np.ndarray, site: np.ndarray, invs: np.ndarray,
                     Umat: np.ndarray, Jmat: np.ndarray) -> np.ndarray:
     """
-    @fn gen_Vmatrix_orb
     @brief Generate the SOC interaction matrix Vmat using orbital-resolved U and J parameters.
-    @param  olist: Orbital index list [Nchi] int64
+    @param  olist: Orbital-pair list of chi [Nchi, 2] int64 (1-based)
     @param  slist: Spin-orbit label for each orbital [Norb] int64
     @param   site: Site indices for each orbital pair [Nchi] int64
     @param   invs: Inverse spin index mapping [Norb] int64

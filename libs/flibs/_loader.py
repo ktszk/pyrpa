@@ -87,10 +87,18 @@ _lib = _load_library()
 
 
 def i64(value: int) -> object:
-    """byref-wrapped 64-bit integer scalar for ctypes Fortran calls."""
+    """
+    @brief byref-wrapped 64-bit integer scalar for ctypes Fortran calls.
+    @param value: integer passed to Fortran by reference
+    @return ctypes byref object pointing at a fresh c_int64
+    """
     return ctypes.byref(ctypes.c_int64(value))
 
 
-def dbl(value: int) -> object:
-    """byref-wrapped double scalar for ctypes Fortran calls."""
+def dbl(value: float) -> object:
+    """
+    @brief byref-wrapped double scalar for ctypes Fortran calls.
+    @param value: real number passed to Fortran by reference
+    @return ctypes byref object pointing at a fresh c_double
+    """
     return ctypes.byref(ctypes.c_double(value))

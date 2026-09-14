@@ -117,7 +117,6 @@ N_DELTA_MIN = 8.0
 
 def bcs_gap_ratio(temp: float, temp_c: float) -> float:
     """
-    @fn bcs_gap_ratio
     @brief BCS interpolation formula for the gap amplitude Delta(T)/Delta(0).
     Delta(T)/Delta(0) = tanh(1.74*sqrt(Tc/T - 1)); exact at T->0 and reproduces
     the mean-field sqrt(1-T/Tc) onset at Tc to better than 1% over the whole range.
@@ -136,7 +135,6 @@ def bcs_gap_ratio(temp: float, temp_c: float) -> float:
 
 def bcs_temp_c(delta_max: float) -> float:
     """
-    @fn bcs_temp_c
     @brief Weak-coupling estimate of Tc from the zero-temperature gap: kB*Tc = Delta(0)/1.764.
     @param delta_max: maximum gap amplitude Delta(0) in eV
     @return   temp_c: critical temperature in eV
@@ -150,7 +148,6 @@ def gap_from_eliashberg(klist: np.ndarray, fname: str = 'gap_wannier',
                         mu: float | None = None, gap_max: float | None = None,
                         verbose: bool = True) -> np.ndarray:
     """
-    @fn gap_from_eliashberg
     @brief Load a self-consistent RPA/FLEX/Eliashberg gap and return Delta(k) for the BdG bubble.
 
     Reads the Delta(R, iw_n) written by output_gap_wannier (LIN_ELIASHBERG /
@@ -264,7 +261,6 @@ def gap_from_eliashberg(klist: np.ndarray, fname: str = 'gap_wannier',
 def nmr_qmesh(Nx: int, Ny: int, Nz: int, Nqx: int, Nqy: int, Nqz: int = 1,
               sw_fold: bool = True) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn nmr_qmesh
     @brief Build the q-mesh for the 1/T1 Brillouin-zone sum, commensurate with the k-mesh.
 
     get_qshift resolves k+q by an exact hash lookup on the k-mesh, so every q must be
@@ -289,8 +285,8 @@ def nmr_qmesh(Nx: int, Ny: int, Nz: int, Nqx: int, Nqy: int, Nqz: int = 1,
     @param   sw_fold: fold q and -q together using chi(q)=chi(-q).  Exact for the
                       centrosymmetric + time-reversal-symmetric systems that mkBdGhamk
                       already assumes, and halves the cost.
-    @retval    qlist: q-points in fractional coordinates [Nq, 3] float64 (Gamma first)
-    @retval    qmult: multiplicity of each retained q-point [Nq] float64
+    @return    qlist: q-points in fractional coordinates [Nq, 3] float64 (Gamma first)
+    @return    qmult: multiplicity of each retained q-point [Nq] float64
     """
     def axis(N: int, Nq: int) -> np.ndarray:
         # The stride must DIVIDE N: otherwise the last interval of the sub-mesh is short
@@ -327,7 +323,6 @@ def nmr_qmesh(Nx: int, Ny: int, Nz: int, Nqx: int, Nqy: int, Nqz: int = 1,
 
 def hyperfine_form_factor(qlist: np.ndarray, hf_A: float = 1.0, hf_B: float = 0.0) -> np.ndarray:
     """
-    @fn hyperfine_form_factor
     @brief Squared hyperfine form factor |A(q)|^2 entering the 1/T1 momentum sum.
     Uses the standard on-site + transferred (4 in-plane neighbours) model
         A(q) = hf_A + 2*hf_B*(cos(2 pi qx) + cos(2 pi qy)),
@@ -362,7 +357,6 @@ def _nmr_observables(chisq: np.ndarray, weight: np.ndarray, w0: float) -> tuple[
 def fermi_surface_gap(eig: np.ndarray, mu: float, delta_k: np.ndarray,
                       window: float | None = None) -> tuple[float, float]:
     """
-    @fn fermi_surface_gap
     @brief Gap amplitude ON the Fermi surface, and the fraction of it that is left ungapped.
 
     max|Delta(k)| over the whole zone is the wrong scale for every NMR diagnostic: what
@@ -373,11 +367,11 @@ def fermi_surface_gap(eig: np.ndarray, mu: float, delta_k: np.ndarray,
     @param      mu: chemical potential in eV
     @param delta_k: gap in orbital basis [Nk, Norb, Norb] complex128
     @param  window: half-width in eV of the shell around E_F; default 2% of the bandwidth
-    @retval gap_fs: r.m.s. of ||Delta(k)||_F/sqrt(Norb) over k-points with a band in the
+    @return gap_fs: r.m.s. of ||Delta(k)||_F/sqrt(Norb) over k-points with a band in the
                     shell -- the scale to compare against idelta and against T
-    @retval gap_fs_max: largest gap on that shell (the antinodal value for a nodal gap).
+    @return gap_fs_max: largest gap on that shell (the antinodal value for a nodal gap).
                     THIS is the BCS scale that sets Tc, not the zone-wide max|Delta|
-    @retval  f_low: fraction of those k-points whose gap is below gap_fs/10 (nodal weight)
+    @return  f_low: fraction of those k-points whose gap is below gap_fs/10 (nodal weight)
     """
     e = np.asarray(eig, dtype=np.float64) - mu
     Norb = e.shape[1]
@@ -400,7 +394,6 @@ def fermi_surface_gap(eig: np.ndarray, mu: float, delta_k: np.ndarray,
 def nmr_scale_check(eig: np.ndarray, mu: float, idelta: float, gap0: float,
                     delta_k: np.ndarray | None = None, verbose: bool = True) -> dict:
     """
-    @fn nmr_scale_check
     @brief Verify the energy-scale hierarchy that 1/T1T from a real-frequency bubble requires.
 
     chi''(q,w0)/w0 is the most delicate quantity in this module, because the broadening
@@ -461,7 +454,7 @@ def nmr_scale_check(eig: np.ndarray, mu: float, idelta: float, gap0: float,
                     instead of the zone-wide maximum, which is the only version that
                     means anything for a nodal or strongly anisotropic gap
     @param verbose: print the hierarchy and any violation
-    @retval  scales: dict with 'dE_mesh','n_delta','idelta','gap0','gap_fs','f_ungapped',
+    @return  scales: dict with 'dE_mesh','n_delta','idelta','gap0','gap_fs','f_ungapped',
                      'bandwidth','ok'
     """
     e = np.asarray(eig, dtype=np.float64).ravel() - mu
@@ -514,18 +507,18 @@ def nmr_scale_check(eig: np.ndarray, mu: float, idelta: float, gap0: float,
 def nmr_cost_estimate(Nk: int, Nq: int, NT: int, Norb: int, Nchi: int,
                       verbose: bool = True) -> float:
     """
-    @fn nmr_cost_estimate
     @brief Rough wall-clock estimate of a full NMR temperature sweep, printed before the run.
     One SC bubble costs O(Nk * (2*Norb)^2 * Nchi^2) and was measured at 1.104 s for
     Nk=4096, Norb=5, Nchi=25 with 2 frequency points on 24 threads; the estimate scales
     that reference point.  The normal-state reference adds a further ~1/4 (Norb instead
     of 2*Norb bands).  Absolute numbers depend on the machine, but the SCALING is the
     point: the sweep is linear in Nq, so a q-mesh equal to the k-mesh is quadratic in Nk.
-    @param    Nk: number of k-points
-    @param    Nq: number of q-points (after folding)
-    @param    NT: number of temperatures
-    @param  Norb: number of orbitals
-    @param  Nchi: number of orbital pairs
+    @param      Nk: number of k-points
+    @param      Nq: number of q-points (after folding)
+    @param      NT: number of temperatures
+    @param    Norb: number of orbitals
+    @param    Nchi: number of orbital pairs
+    @param verbose: print progress / summary information
     @return t_est: estimated seconds
     """
     ref = 1.104 / (4096 * (2 * 5) ** 2 * 25 ** 2)     # s per (k-point * band-pair * Nchi^2)
@@ -548,7 +541,6 @@ def nmr_qconvergence(hamk: np.ndarray, delta_k0: np.ndarray, klist: np.ndarray,
                      sw_spsym: bool = False, hf_A: float = 1.0, hf_B: float = 0.0,
                      verbose: bool = True) -> dict:
     """
-    @fn nmr_qconvergence
     @brief Check the q-mesh convergence of the 1/T1T sum at a single temperature.
     Evaluates the sum on the requested q-mesh and on the mesh with half the points per
     axis, and reports the relative change.  Run this once (deep in the SC state, where
@@ -570,9 +562,27 @@ def nmr_qconvergence(hamk: np.ndarray, delta_k0: np.ndarray, klist: np.ndarray,
     against the analytic n=3.  The qualitative power law is robust from ~8 per axis on,
     but the exponent itself is only good to about +-0.5 -- quote it with that caveat, or
     push Nq much higher for the low-temperature points only.
-    @param ...: as nmr_sweep, plus the k-mesh dimensions and the requested q-mesh size
-    @param  qsize: requested [Nqx, Nqy, Nqz]
-    @retval result: dict with 'R_fine','R_coarse','rel_diff','Nq_fine','Nq_coarse'
+    @param      ...: as nmr_sweep, plus the k-mesh dimensions and the requested q-mesh size
+    @param     hamk: normal-state k-space Hamiltonian [Nk, Norb, Norb] complex128
+    @param delta_k0: zero-temperature gap in orbital basis [Nk, Norb, Norb] complex128
+    @param    klist: k-point list, periodic [0,1) mesh without endpoints [Nk, 3]
+    @param       Nx: k-mesh size along x
+    @param       Ny: k-mesh size along y
+    @param       Nz: k-mesh size along z
+    @param    qsize: requested [Nqx, Nqy, Nqz]
+    @param       mu: chemical potential [eV]
+    @param     temp: temperature k_B*T [eV]
+    @param   temp_c: critical temperature [eV] (sets Delta(T))
+    @param     Smat: Stoner interaction matrix [Nchi, Nchi] float64
+    @param    olist: orbital-pair basis of chi [Nchi, 2] int64
+    @param   idelta: Lorentzian broadening [eV]
+    @param       w0: NMR probe frequency [eV] (None = 0.5*idelta)
+    @param sw_spsym: spin channel: False = Yosida-suppressed (singlet, or field parallel to d), True =
+                     preserved at T=0 (field perpendicular to d)
+    @param     hf_A: on-site hyperfine coupling (arbitrary units, only ratios matter)
+    @param     hf_B: transferred hyperfine coupling to the 4 in-plane neighbours
+    @param  verbose: print progress / summary information
+    @return result: dict with 'R_fine','R_coarse','rel_diff','Nq_fine','Nq_coarse'
     """
     out = {}
     for tag, size in (('fine', qsize),
@@ -600,7 +610,6 @@ def nmr_sweep(hamk: np.ndarray, delta_k0: np.ndarray, klist: np.ndarray, qlist: 
               sw_spsym: bool = False, hf_weight: np.ndarray | None = None,
               verbose: bool = True, sw_scale_check: bool = True) -> dict:
     """
-    @fn nmr_sweep
     @brief Temperature sweep of the SC-state NMR observables (Knight shift and 1/T1T).
     For every temperature the gap is rescaled by the BCS interpolation
     Delta(T)=Delta(0)*tanh(1.74*sqrt(Tc/T-1)), the BdG Hamiltonian is diagonalised
@@ -628,7 +637,7 @@ def nmr_sweep(hamk: np.ndarray, delta_k0: np.ndarray, klist: np.ndarray, qlist: 
     @param sw_scale_check: run nmr_scale_check on the normal-state bands first.
                      Set False when the caller has already reported it (main.py does,
                      so the warning appears before the q-convergence probe, not after)
-    @retval  result: dict with keys
+    @return  result: dict with keys
                      'temp'      temperatures [NT] (eV)
                      't_red'     reduced temperature T/Tc [NT]
                      'gap_ratio' Delta(T)/Delta(0) [NT]
@@ -699,7 +708,6 @@ def nmr_sweep(hamk: np.ndarray, delta_k0: np.ndarray, klist: np.ndarray, qlist: 
 
 def write_nmr_dat(res: dict, fname: str = 'nmr_sc.dat') -> None:
     """
-    @fn write_nmr_dat
     @brief Write the NMR temperature sweep to a text file.
     @param   res: dict returned by nmr_sweep
     @param fname: output file name
@@ -721,7 +729,6 @@ def write_nmr_dat(res: dict, fname: str = 'nmr_sc.dat') -> None:
 
 def plot_nmr(res: dict, fname: str = 'nmr_sc.png') -> None:
     """
-    @fn plot_nmr
     @brief Two-panel summary plot of the NMR sweep.
     Left : K_s/K_n vs T/Tc (linear) -- Yosida curve for a singlet, finite residual
            for a triplet d||z.

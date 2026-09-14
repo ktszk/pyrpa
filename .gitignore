@@ -197,3 +197,6 @@ cython_debug/
 #.idea/
 # machine-specific cache of `sh libs/detect_arch.sh` (cluster node -> -march)
 libs/.arch_cache
+
+# doxygen output (doxygen Doxyfile)
+Doc/api/

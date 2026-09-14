@@ -101,7 +101,6 @@ def solve_vortex(coupling: float, temp: float, omega: np.ndarray, Dbulk: float =
                  Lxi: float = 8.0, ngrid: int = 81, ntheta: int = 48, hvf: float = 1.0,
                  eps: float = 1.0e-3, itemax: int = 100, mix: float = 0.3) -> tuple:
     """
-    @fn solve_vortex
     @brief Self-consistently solve the radial amplitude D(rho) of an isolated
     s-wave vortex (Matsubara, clean, extreme type-II).
 
@@ -113,6 +112,9 @@ def solve_vortex(coupling: float, temp: float, omega: np.ndarray, Dbulk: float =
     @param    ngrid: number of grid points per axis
     @param   ntheta: azimuthal samples for the FS / gap average
     @param      hvf: hbar |v_F| (length unit)
+    @param      eps: convergence tolerance of the self-consistency loop
+    @param   itemax: maximum number of self-consistency iterations
+    @param      mix: linear-mixing factor for the self-consistency update
     @return (rgrid, Dr, Dbulk, xi): radial grid, amplitude profile, bulk gap, xi
     """
     if Dbulk is None:
@@ -148,16 +150,19 @@ def vortex_ldos(Dr: np.ndarray, rgrid: np.ndarray, xi: float, wlist: np.ndarray,
                 Dbulk: float, delta: float = None, Lxi: float = 8.0, ngrid: int = 81,
                 ntheta: int = 48, hvf: float = 1.0, rho_list: np.ndarray = None) -> tuple:
     """
-    @fn vortex_ldos
     @brief Local density of states N(rho, w)/N0 from the converged vortex profile,
     via the retarded Riccati equation (iw_n -> w + i delta).  N(0, w) shows the
     zero-energy Caroli-de Gennes-Matricon core bound state (the STM zero-bias peak).
 
     @param Dr,rgrid,xi: converged radial profile from solve_vortex
-    @param   wlist: real-frequency grid [Nw]
-    @param   Dbulk: bulk gap (for the default broadening)
-    @param   delta: retarded broadening [eV] (default 0.02*Dbulk)
-    @param rho_list: radii at which to return N (default = rgrid)
+    @param       wlist: real-frequency grid [Nw]
+    @param       Dbulk: bulk gap (for the default broadening)
+    @param       delta: retarded broadening [eV] (default 0.02*Dbulk)
+    @param         Lxi: cell half width in units of the coherence length xi (isolated vortex)
+    @param       ngrid: grid points per axis
+    @param      ntheta: azimuthal samples for the angular average
+    @param         hvf: hbar |v_F| (length unit; physics depends only on x/xi)
+    @param    rho_list: radii at which to return N (default = rgrid)
     @return (rho_out, ldos): radii [Nr2] and N(rho, w)/N0 [Nr2, Nw]
     """
     if delta is None:
@@ -244,7 +249,6 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
                    field: float = 0.0, fs: dict = None, qprof: np.ndarray | None = None, eps: float = 2.0e-3,
                    itemax: int = 80, mix: float = 0.3, bdir: np.ndarray | None = None) -> tuple:
     """
-    @fn solve_vortex2d
     @brief Self-consistently solve the complex 2D order-parameter field Psi(r) of a
     vortex for an arbitrary pairing symmetry.  Delta(r, k_hat) = phi(beta) Psi(r).
 
@@ -266,19 +270,30 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
     With impurities (imp_gamma>0) the local non-magnetic T-matrix self-energy
     w_tilde(r,w_n), Sigma_f(r,w_n) is also relaxed together with Psi(r).
 
-    @param  gap_sym: 's','d','dxy','px','py' (chiral p+ip/p-ip: rejected, see
-                     _reject_chiral_ff -- use the d-vector solvers)
-    @param      Lxi: cell half width in xi (isolated vortex, field=0)
-    @param    ngrid,nbeta: grid points per axis / number of v_F directions
+    @param        coupling: dimensionless separable pairing coupling lambda
+    @param            temp: temperature k_B*T [eV]
+    @param           omega: positive Matsubara frequencies [Nw]
+    @param         gap_sym: 's','d','dxy','px','py' (chiral p+ip/p-ip: rejected, see
+                            _reject_chiral_ff -- use the d-vector solvers)
+    @param           Dbulk: bulk gap amplitude [eV] (None = computed from the homogeneous gap equation)
+    @param             Lxi: cell half width in xi (isolated vortex, field=0)
+    @param     ngrid,nbeta: grid points per axis / number of v_F directions
+    @param             hvf: hbar |v_F| of the isotropic cylinder (with fs the FS velocities are used)
     @param imp_gamma,imp_c: normal-state scattering rate [eV] and T-matrix c (0=clean)
-    @param    field: B/Hc2 (0 = isolated vortex; >0 = circular-cell vortex lattice)
-    @param     bdir: field / vortex-line direction (default c axis).  The vortex lines run
-                     along B, so the order parameter varies in the plane PERPENDICULAR to
-                     it and the problem stays 2D -- fs_field_frame supplies the trajectory
-                     set in that plane, rescaling its two axes by their rms velocities so a
-                     square grid still fits an elliptical core.  Needs a 3D Fermi surface
-                     for anything but B || c.  The returned grid is in those SCALED units;
-                     multiply axis i by fs_field_frame(...)['scale'][i] for real lengths.
+    @param           field: B/Hc2 (0 = isolated vortex; >0 = circular-cell vortex lattice)
+    @param              fs: FS dict (build_model_fs / build_wannier_fs); None = isotropic model cylinder
+    @param           qprof: radial vector-potential profile (rgrid, A_theta) for the Doppler shift (None = extreme
+                            type-II circular-cell form)
+    @param             eps: convergence tolerance of the self-consistency loop
+    @param          itemax: maximum number of self-consistency iterations
+    @param             mix: linear-mixing factor for the self-consistency update
+    @param            bdir: field / vortex-line direction (default c axis).  The vortex lines run
+                            along B, so the order parameter varies in the plane PERPENDICULAR to
+                            it and the problem stays 2D -- fs_field_frame supplies the trajectory
+                            set in that plane, rescaling its two axes by their rms velocities so a
+                            square grid still fits an elliptical core.  Needs a 3D Fermi surface
+                            for anything but B || c.  The returned grid is in those SCALED units;
+                            multiply axis i by fs_field_frame(...)['scale'][i] for real lengths.
     @return (xg, Psi, Dbulk, xi): grid axis, complex field [ngrid,ngrid], bulk gap, xi
     """
     _reject_chiral_ff(gap_sym, 'solve_vortex2d')
@@ -402,7 +417,6 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
                   bdir: np.ndarray | None = None, eps: float = 3.0e-3, itemax: int = 60,
                   mix: float = 0.5) -> np.ndarray:
     """
-    @fn vortex_ldos2d
     @brief 2D local density of states N(x,y,w)/N0 from a converged Psi field, via
     the retarded Riccati equation.  Reveals the fourfold d-wave core star; with
     impurities the retarded local T-matrix self-energy is solved self-consistently
@@ -410,8 +424,27 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
     vortices (Volovik); with Zeeman h the spin sectors split w -> w -+ h (for a
     unitary fixed-d gap, N = (1/2) sum_sigma N(w - sigma h)), splitting the core
     bound states.
-    @param field: B/Hc2 (0 = isolated vortex; >0 = circular-cell lattice Doppler shift)
-    @param     h: Zeeman (Maki) energy mu*B (spin splitting of the core LDOS)
+    @param       Psi: converged complex order parameter field [ngrid, ngrid] from solve_vortex2d
+    @param        xg: uniform grid axis shared by x and y [ngrid]
+    @param        xi: coherence length xi from solve_vortex2d
+    @param     wlist: real-frequency grid [Nw]
+    @param   gap_sym: pairing symmetry: continuum label ('s', 'd', 'dxy', 'px', 'py', 'p+ip', ...) or gap_symms
+                      integer index
+    @param     Dbulk: bulk gap from solve_vortex2d (fill value outside the grid, default broadening)
+    @param     delta: retarded broadening [eV] (None = 0.02*Dbulk)
+    @param     nbeta: number of trajectory directions over the full circle
+    @param       hvf: hbar |v_F| (length unit; physics depends only on x/xi)
+    @param imp_gamma: normal-state impurity scattering rate Gamma_N [eV] (0 = clean)
+    @param     imp_c: T-matrix cot(delta0) (large = Born, 0 = unitary)
+    @param     field: B/Hc2 (0 = isolated vortex; >0 = circular-cell lattice Doppler shift)
+    @param         h: Zeeman (Maki) energy mu*B (spin splitting of the core LDOS)
+    @param        fs: FS dict (build_model_fs / build_wannier_fs); None = isotropic model cylinder
+    @param     qprof: radial vector-potential profile (rgrid, A_theta) for the Doppler shift (None = extreme
+                      type-II circular-cell form)
+    @param      bdir: field / vortex-line direction (need not be normalized; None = c axis)
+    @param       eps: convergence tolerance of the self-consistency loop
+    @param    itemax: maximum iterations of the impurity self-energy loop (a single pass when clean)
+    @param       mix: linear-mixing factor for the self-consistency update
     @return ldos: N(x,y,w)/N0 [ngrid, ngrid, Nw]
     """
     if delta is None:
@@ -507,7 +540,6 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
 def vortex_field_profile(rgrid: np.ndarray, Dr: np.ndarray, Dbulk: float, xi: float, kappa: float,
                          omega: np.ndarray) -> tuple:
     """
-    @fn vortex_field_profile
     @brief Self-consistent (finite-kappa Maxwell) magnetic field profile B(rho) of
     an isolated vortex from the quasiclassical local superfluid density.
 
@@ -519,7 +551,13 @@ def vortex_field_profile(rgrid: np.ndarray, Dr: np.ndarray, Dbulk: float, xi: fl
         lambda(rho)^2 [-(1/rho) d/drho (rho dB/drho)] + B = const
     (Neumann BCs, cell-averaged flux fixed) is solved as one linear system; B(rho)
     is peaked at the core and screened over ~lambda away from it.
-    @return (rho_s_ratio, lam, Brel): all on rgrid; Brel = B(rho)/<B> (mean 1)
+    @param rgrid: radial grid from solve_vortex
+    @param    Dr: radial gap amplitude profile |Delta(rho)| from solve_vortex
+    @param Dbulk: bulk gap from solve_vortex (normalizes rho_s)
+    @param    xi: coherence length xi from solve_vortex
+    @param kappa: Ginzburg-Landau parameter lambda/xi
+    @param omega: positive Matsubara frequencies [Nw]
+    @return (rho_s_ratio, lam, Brel): all on rgrid; Brel = B(rho)/@<B@> (mean 1)
     """
     Nr = len(rgrid)
     w2 = omega[None, :] ** 2
@@ -562,23 +600,35 @@ def calc_vortex(coupling: float, temp: float, wc: float, gap_sym: str = 's', kb:
                 tilt_deg: float = 0.0, fs_kind: str = None, fs_params: tuple | None = None, fs: dict | None = None,
                 Lxi: float = 8.0, ngrid: int = 81, bdir: np.ndarray | None = None) -> tuple:
     """
-    @fn calc_vortex
     @brief Driver: self-consistent vortex profile and (optionally) LDOS.
     Clean s-wave at zero field/Zeeman uses the fast axisymmetric (radial) solver;
     any non-s pairing, finite impurity rate, finite field (field=B/Hc2>0,
     circular-cell vortex lattice), or finite Zeeman h uses the general 2D solver
     and writes the zero-energy LDOS map.
 
-    @param  gap_sym: 's','d','dxy','px','py','p+ip'/'p-ip'
-    @param  sw_ldos: also compute the real-frequency LDOS (core bound state)
+    @param        coupling: dimensionless separable pairing coupling lambda
+    @param            temp: temperature k_B*T [eV]
+    @param              wc: Matsubara cutoff energy [eV]
+    @param         gap_sym: 's','d','dxy','px','py','p+ip'/'p-ip'
+    @param              kb: Boltzmann constant [eV/K] for K-unit reporting
+    @param         sw_ldos: also compute the real-frequency LDOS (core bound state)
     @param imp_gamma,imp_c: non-magnetic impurity scattering rate [eV] and T-matrix c
-    @param    field: B/Hc2 (0 = isolated vortex; >0 = circular-cell vortex lattice)
-    @param        h: Zeeman (Maki) energy mu*B (spin splitting of the core LDOS)
-    @param tilt_deg: field tilt theta from the c-axis (quasi-2D).  The perpendicular
-                     component B_z=B cos(theta) keeps setting the orbital vortex
-                     (Doppler) ``field``, while the Zeeman couples to the total |B|,
-                     so the effective Maki energy is h/cos(theta) -- a knob for the
-                     Pauli/orbital ratio (Pauli-limiting / FFLO with tilt).
+    @param           field: B/Hc2 (0 = isolated vortex; >0 = circular-cell vortex lattice)
+    @param               h: Zeeman (Maki) energy mu*B (spin splitting of the core LDOS)
+    @param           kappa: Ginzburg-Landau parameter; > 0 also computes the finite-kappa field profile B(rho)
+    @param        tilt_deg: field tilt theta from the c-axis (quasi-2D).  The perpendicular
+                            component B_z=B cos(theta) keeps setting the orbital vortex
+                            (Doppler) ``field``, while the Zeeman couples to the total |B|,
+                            so the effective Maki energy is h/cos(theta) -- a knob for the
+                            Pauli/orbital ratio (Pauli-limiting / FFLO with tilt).
+    @param         fs_kind: model FS name for build_model_fs (None = isotropic cylinder unless fs is given)
+    @param       fs_params: parameters passed to build_model_fs together with fs_kind
+    @param              fs: prebuilt FS dict (e.g. build_wannier_fs), overriding fs_kind
+    @param             Lxi: cell half width in units of the coherence length xi (isolated vortex)
+    @param           ngrid: grid points per axis
+    @param            bdir: field / vortex-line direction (need not be normalized; None = c axis)
+    @return (rgrid, Dr) from the axisymmetric solver (clean s-wave at zero field and Zeeman); otherwise (xg,
+            Psi) from the 2D solver
     """
     h_eff = h / np.cos(np.radians(tilt_deg)) if tilt_deg else h
     if gap_sym != 's' or imp_gamma != 0.0 or field > 0.0 or h_eff != 0.0 or fs_kind is not None or fs is not None:
@@ -726,15 +776,24 @@ def calc_vortex_lattice(coupling: float, temp: float, wc: float, gap_sym: str = 
                         field_list: np.ndarray | None = None, kb: float = 1.0, imp_gamma: float = 0.0,
                         imp_c: float = 1.0e8, ngrid: int = 37, nbeta: int = 20) -> list:
     """
-    @fn calc_vortex_lattice
     @brief Sweep the field B/Hc2 (circular-cell vortex lattice) and report the
-    cell-averaged zero-energy density of states <N(0)>/N0(B), which distinguishes
+    cell-averaged zero-energy density of states @<N(0)@>/N0(B), which distinguishes
     the pairing state: s-wave grows ~linearly with B (core-dominated), d-wave grows
     ~sqrt(B) (Volovik effect, nodal-quasiparticle Doppler shift).  Writes
-    'vortex_lattice_dos.dat' and fits the power law <N(0)> ~ B^p.
+    'vortex_lattice_dos.dat' and fits the power law @<N(0)@> ~ B^p.
 
+    @param   coupling: dimensionless separable pairing coupling lambda
+    @param       temp: temperature k_B*T [eV]
+    @param         wc: Matsubara cutoff energy [eV]
+    @param    gap_sym: pairing symmetry: continuum label ('s', 'd', 'dxy', 'px', 'py', 'p+ip', ...) or
+                       gap_symms integer index
     @param field_list: list of B/Hc2 values (default a log-spaced set 0.03..0.5)
-    @return list of (field, <N(0)>/N0, Dbulk)
+    @param         kb: Boltzmann constant [eV/K] for K-unit reporting
+    @param  imp_gamma: normal-state impurity scattering rate Gamma_N [eV] (0 = clean)
+    @param      imp_c: T-matrix cot(delta0) (large = Born, 0 = unitary)
+    @param      ngrid: grid points per axis
+    @param      nbeta: number of trajectory directions over the full circle
+    @return list of (field, @<N(0)@>/N0, Dbulk)
     """
     omega = _eilenberger.matsubara(temp, wc)
     if field_list is None:
@@ -880,13 +939,26 @@ def solve_lattice(coupling: float, temp: float, omega: np.ndarray, gap_sym: str 
                   kappa: float = 5.0, lattice: str = 'square', Dbulk: float | None = None, Ng: int = 24,
                   nbeta: int = 18, hvf: float = 1.0, fs: dict | None = None, nflux: int = 1) -> dict | None:
     """
-    @fn solve_lattice
     @brief Build the periodic vortex-lattice state: lattice geometry, periodic
     supercurrent Q(r) and field B(r)/Bbar (London, finite kappa), and the amplitude
     |Delta(r)| (model Dbulk*tanh(d_nn/xi); self-consistency is a refinement that the
     DOS does not require).  Returns a state dict consumed by ``lattice_dos``.
     With a model FS (``fs``) the coherence length uses the representative velocity
     hvf_eff = <|v_F|>_nf so the geometry is |v_F|-consistent.
+    @param coupling: dimensionless separable pairing coupling lambda
+    @param     temp: temperature k_B*T [eV]
+    @param    omega: positive Matsubara frequencies [Nw]
+    @param  gap_sym: pairing symmetry: continuum label ('s', 'd', 'dxy', 'px', 'py', 'p+ip', ...) or gap_symms
+                     integer index
+    @param    field: B/Hc2 of the periodic vortex lattice
+    @param    kappa: Ginzburg-Landau parameter lambda/xi (London screening of the supercurrent)
+    @param  lattice: 'square' or 'triangular' (Abrikosov ground state)
+    @param    Dbulk: bulk gap amplitude [eV] (None = computed from the homogeneous gap equation)
+    @param       Ng: grid points per cell axis
+    @param    nbeta: number of trajectory directions over the full circle
+    @param      hvf: hbar |v_F| of the isotropic cylinder (with fs the FS velocities are used)
+    @param       fs: FS dict (build_model_fs / build_wannier_fs); None = isotropic model cylinder
+    @param    nflux: flux quanta (vortices) per cell
     @return dict (F1,F2,X,Y,absD,Qx,Qy,Brel,Minv,a1,a2,S,xi,Dbulk,acell,lam)
     """
     bfull = np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False)
@@ -920,12 +992,25 @@ def lattice_dos(state: dict, gap_sym: int | str | None, wlist: np.ndarray, coupl
                 nbeta: int = 24, hvf: float = 1.0, fs: dict | None = None, Ls_cell: float = 1.5, ds_xi: float = 0.3,
                 bdir: np.ndarray | None = None) -> np.ndarray:
     """
-    @fn lattice_dos
     @brief Spatially-averaged density of states N(w)/N0 of the vortex lattice from a
     converged state, via the retarded Doppler Riccati, averaged over trajectories
     (directions and offsets) -- which samples the whole cell.  With a model FS
     (``fs``) the trajectory direction is v_hat, the Riccati velocity is |v_F| per
     direction, the Doppler v_F.Q scales with |v_F|, and the FS average is nf-weighted.
+    @param    state: lattice state dict from solve_lattice
+    @param  gap_sym: pairing symmetry: continuum label ('s', 'd', 'dxy', 'px', 'py', 'p+ip', ...) or gap_symms
+                     integer index
+    @param    wlist: real-frequency grid [Nw]
+    @param coupling: dimensionless separable pairing coupling lambda (optional)
+    @param     temp: temperature k_B*T [eV] (optional)
+    @param    omega: positive Matsubara frequencies [Nw] (optional)
+    @param    delta: retarded broadening [eV] (None = 0.03*Dbulk)
+    @param    nbeta: number of trajectory directions over the full circle
+    @param      hvf: hbar |v_F| (length unit; physics depends only on x/xi)
+    @param       fs: FS dict (build_model_fs / build_wannier_fs); None = isotropic model cylinder
+    @param  Ls_cell: trajectory length in units of the cell size (at least 3 cells)
+    @param    ds_xi: Riccati integration step along the chord in units of xi
+    @param     bdir: field / vortex-line direction (need not be normalized; None = c axis)
     @return N(w)/N0 [Nw]
     """
     Dbulk = state['Dbulk']
@@ -992,13 +1077,29 @@ def calc_vortex_lattice_periodic(coupling: float, temp: float, wc: float, gap_sy
                                  fs_params: tuple | None = None, fs: dict | None = None, nflux: int = 1,
                                  bdir: np.ndarray | None = None) -> list:
     """
-    @fn calc_vortex_lattice_periodic
     @brief Driver: true periodic vortex lattice (Doppler/London, finite kappa).
     Sweeps B/Hc2, self-consistently solves |Delta(r)| and reports the spatially-
-    averaged zero-energy DOS <N(0)>/N0(B) (s-wave ~B cores; d-wave ~sqrt(B) Volovik),
+    averaged zero-energy DOS @<N(0)@>/N0(B) (s-wave ~B cores; d-wave ~sqrt(B) Volovik),
     and writes the field profile B(r)/Bbar for the largest field.  With ``fs_kind``
     (model FS) or a prebuilt ``fs`` (e.g. build_wannier_fs) the trajectories run on a
     Fermi surface with real Fermi velocities.
+    @param   coupling: dimensionless separable pairing coupling lambda
+    @param       temp: temperature k_B*T [eV]
+    @param         wc: Matsubara cutoff energy [eV]
+    @param    gap_sym: pairing symmetry: continuum label ('s', 'd', 'dxy', 'px', 'py', 'p+ip', ...) or
+                       gap_symms integer index
+    @param field_list: B/Hc2 values to sweep (None = the built-in default set)
+    @param      kappa: Ginzburg-Landau parameter lambda/xi (London screening of the supercurrent)
+    @param    lattice: 'square' or 'triangular' (Abrikosov ground state)
+    @param         kb: Boltzmann constant [eV/K] for K-unit reporting
+    @param         Ng: grid points per cell axis
+    @param      nbeta: number of trajectory directions over the full circle
+    @param    fs_kind: model FS name for build_model_fs (None = isotropic cylinder unless fs is given)
+    @param  fs_params: parameters passed to build_model_fs together with fs_kind
+    @param         fs: prebuilt FS dict (e.g. build_wannier_fs), overriding fs_kind
+    @param      nflux: flux quanta (vortices) per cell
+    @param       bdir: field / vortex-line direction (need not be normalized; None = c axis)
+    @return results: list of (B/Hc2, @<N(0)@>/N0)
     """
     omega = _eilenberger.matsubara(temp, wc)
     if field_list is None:
@@ -1053,13 +1154,20 @@ def calc_vortex_lattice_periodic(coupling: float, temp: float, wc: float, gap_sy
 def vortex_current2d(Psi: np.ndarray, xg: np.ndarray, xi: float, omega: np.ndarray, temp: float, gap_sym: str = 'd',
                      nbeta: int = 24, hvf: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn vortex_current2d
     @brief Equilibrium charge supercurrent density j(r) of a converged vortex order
     parameter, j(r) ~ 2 pi T sum_{w_n>0} < v_hat Im g(r,k_hat,iw_n) >_FS (arb. units;
     prefactor 2 e N0 v_F0 dropped).  g is recomputed at the Matsubara frequencies on
     the rotated chords (same machinery as solve_vortex2d) from the |Psi| amplitude and
     the analytic vortex winding.
-    @param Psi: converged complex order parameter field [ngrid,ngrid] (= A e^{i theta})
+    @param     Psi: converged complex order parameter field [ngrid,ngrid] (= A e^{i theta})
+    @param      xg: uniform grid axis shared by x and y [ngrid]
+    @param      xi: coherence length xi from solve_vortex2d
+    @param   omega: positive Matsubara frequencies [Nw]
+    @param    temp: temperature k_B*T [eV]
+    @param gap_sym: pairing symmetry: continuum label ('s', 'd', 'dxy', 'px', 'py', 'p+ip', ...) or gap_symms
+                    integer index
+    @param   nbeta: number of trajectory directions over the full circle
+    @param     hvf: hbar |v_F| (length unit; physics depends only on x/xi)
     @return (jx, jy): current-density components on the (x,y) grid [ngrid,ngrid]
     """
     ngrid = len(xg)
@@ -1093,9 +1201,12 @@ def vortex_current2d(Psi: np.ndarray, xg: np.ndarray, xi: float, omega: np.ndarr
 def vortex_current_profile(jx: np.ndarray, jy: np.ndarray, xg: np.ndarray,
                            ntheta: int = 72) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn vortex_current_profile
     @brief Azimuthal (circulating) supercurrent j_phi(rho) from the 2D current field,
     averaged on circles of radius rho: j_phi = < -jx sin(phi) + jy cos(phi) >_phi.
+    @param     jx: x component of the current density on the (xg, xg) grid, from vortex_current2d
+    @param     jy: y component of the current density on the (xg, xg) grid, from vortex_current2d
+    @param     xg: uniform grid axis shared by x and y [ngrid]
+    @param ntheta: azimuthal samples per circle
     @return (rho, jphi): radius grid and the azimuthal current [Nr]
     """
     R = 0.5 * (xg[-1] - xg[0])
@@ -1113,10 +1224,19 @@ def vortex_current_profile(jx: np.ndarray, jy: np.ndarray, xg: np.ndarray,
 def calc_vortex_current(coupling: float, temp: float, wc: float, gap_sym: str = 'd', kb: float = 1.0, Lxi: float = 8.0,
                         ngrid: int = 49, nbeta: int = 24) -> tuple:
     """
-    @fn calc_vortex_current
     @brief Driver: converge an isolated vortex and report its circulating charge
     supercurrent j_phi(rho) (arb. units), which vanishes at the core, peaks near a
     coherence length, and decays outward.  Writes 'vortex_current.dat'.
+    @param coupling: dimensionless separable pairing coupling lambda
+    @param     temp: temperature k_B*T [eV]
+    @param       wc: Matsubara cutoff energy [eV]
+    @param  gap_sym: pairing symmetry: continuum label ('s', 'd', 'dxy', 'px', 'py', 'p+ip', ...) or gap_symms
+                     integer index
+    @param       kb: Boltzmann constant [eV/K] for K-unit reporting
+    @param      Lxi: cell half width in units of the coherence length xi (isolated vortex)
+    @param    ngrid: grid points per axis
+    @param    nbeta: number of trajectory directions over the full circle
+    @return (rho, jphi): radius grid and azimuthal current; (xg, None) in the normal state
     """
     omega = _eilenberger.matsubara(temp, wc)
     print(f"vortex supercurrent (Riccati Eilenberger, {gap_sym}): T={temp/kb:.2f} K, "
@@ -1152,7 +1272,6 @@ def calc_vortex_maxwell(coupling: float, temp: float, wc: float, gap_sym: str = 
                         kappa: float = 2.0, kb: float = 1.0, Lxi: float = 8.0, ngrid: int = 41, nbeta: int = 24,
                         itemax_a: int = 6) -> tuple | None:
     """
-    @fn calc_vortex_maxwell
     @brief Circular-cell vortex with the SELF-CONSISTENT (finite-kappa Maxwell)
     vector potential A_theta(rho) -- the je 'A_renew' back-reaction.  Outer loop:
     (i) solve the order parameter with the supercurrent Doppler from the current
@@ -1160,8 +1279,22 @@ def calc_vortex_maxwell(coupling: float, temp: float, wc: float, gap_sym: str = 
     (finite-kappa London, vortex_field_profile) and integrate it to the new
     A_theta(rho)=(1/rho) int_0^rho B rho' drho'.  Finite kappa screens the
     supercurrent (A_theta below the extreme type-II rho/2Rc^2), reducing the
-    field-induced zero-energy DOS.  Reports <N(0)> for the self-consistent A and,
+    field-induced zero-energy DOS.  Reports @<N(0)@> for the self-consistent A and,
     for reference, the extreme type-II (kappa->infinity) result.  Writes 'vortex_maxwell.dat'.
+    @param coupling: dimensionless separable pairing coupling lambda
+    @param     temp: temperature k_B*T [eV]
+    @param       wc: Matsubara cutoff energy [eV]
+    @param  gap_sym: pairing symmetry: continuum label ('s', 'd', 'dxy', 'px', 'py', 'p+ip', ...) or gap_symms
+                     integer index
+    @param    field: B/Hc2 of the circular cell, radius Rc = sqrt(2/field) xi
+    @param    kappa: Ginzburg-Landau parameter lambda/xi of the Maxwell back-reaction
+    @param       kb: Boltzmann constant [eV/K] for K-unit reporting
+    @param      Lxi: cell half width in units of the coherence length xi (isolated vortex)
+    @param    ngrid: grid points per axis
+    @param    nbeta: number of trajectory directions over the full circle
+    @param itemax_a: outer iterations of the A_theta (Maxwell) update
+    @return (rgrid, aphi, n0_sc, n0_ex): radial grid, self-consistent A_theta(rho), and the zero-energy DOS
+            with it and in the extreme type-II limit; None in the normal state
     """
     omega = _eilenberger.matsubara(temp, wc)
     beta_full = np.linspace(0, 2 * np.pi, 180, endpoint=False)
@@ -1347,34 +1480,51 @@ def solve_lattice_sc(coupling: float, temp: float, omega: np.ndarray, gap_sym: s
                      self_consistent_A: bool = False, mixA: float = 0.3, shape: str | None = None,
                      theta0: float = 0.0) -> dict | None:
     """
-    @fn solve_lattice_sc
     @brief Self-consistent complex order parameter Psi(r)=|Psi|(r) e^{i chi(r)} of a
     true periodic vortex lattice, je-style: formulation A (phase kept in Delta) with
     the analytic Abrikosov winding chi(r), closed by per-grid-point anchored
     trajectories (the f-to-grid map is exact, not binned).
-    @param lattice: 'square' or 'triangular' (Abrikosov ground state; oblique cell).
-    @param Vw: vortex winding number / flux quanta per cell (1 = single vortex;
+    @param       coupling: dimensionless separable pairing coupling lambda
+    @param           temp: temperature k_B*T [eV]
+    @param          omega: positive Matsubara frequencies [Nw]
+    @param        gap_sym: pairing symmetry: continuum label ('s', 'd', 'dxy', 'px', 'py', 'p+ip', ...) or gap_symms
+                           integer index
+    @param          field: B/Hc2 of the periodic vortex lattice
+    @param        lattice: 'square' or 'triangular' (Abrikosov ground state; oblique cell).
+    @param             Ng: grid points per cell axis
+    @param          nbeta: number of trajectory directions over the full circle
+    @param            hvf: hbar |v_F| of the isotropic cylinder (with fs the FS velocities are used)
+    @param             fs: FS dict (build_model_fs / build_wannier_fs); None = isotropic model cylinder
+    @param             Vw: vortex winding number / flux quanta per cell (1 = single vortex;
+    @param         Lchord: trajectory (chord) length in units of xi
     Vw>1 = a multiply-quantized giant vortex, area scaled to hold Vw quanta).
-    @param kappa: None -> bare extreme limit (Doppler = analytic grad(chi)/2 only, no
+    @param          kappa: None -> bare extreme limit (Doppler = analytic grad(chi)/2 only, no
     uniform-A subtraction); finite -> the je finite-kappa back-reaction, where the
     smooth London vector potential A(r)=lowpass(grad chi/2) (_london_A) is subtracted
     as -v_F.A: the uniform vector potential is removed and the supercurrent is
     London-screened (lambda=kappa*xi), reducing the Volovik DOS.
     @param anderson,m_and: Anderson/Pulay acceleration of the self-consistency (m_and
     history vectors); falls back to linear ``mix`` for the first step / if disabled.
-    @param seed_profile: optional [Ng,Ng] starting amplitude in units of the bulk gap
+    @param   seed_profile: optional [Ng,Ng] starting amplitude in units of the bulk gap
     (e.g. a converged absD/Dbulk from a nearby field) for a warm start.
-    @param bdir: field / vortex-line direction (default c axis).  The vortex plane is the
-           plane perpendicular to B, with its two axes rescaled by their rms velocities;
-           the Doppler/supercurrent is form invariant there (see the derivation in
-           solve_vortex2d), so nothing else changes.  CAVEAT: a finite ``kappa`` uses
-           ONE London length lambda = kappa*xi.  The real penetration depth is
-           anisotropic too, so a tilted field with finite kappa screens isotropically
-           here -- exact in the extreme type-II limit (large kappa, where A is
-           negligible) and approximate otherwise.
+    @param           bdir: field / vortex-line direction (default c axis).  The vortex plane is the
+                     plane perpendicular to B, with its two axes rescaled by their rms velocities;
+                     the Doppler/supercurrent is form invariant there (see the derivation in
+                     solve_vortex2d), so nothing else changes.  CAVEAT: a finite ``kappa`` uses
+                     ONE London length lambda = kappa*xi.  The real penetration depth is
+                     anisotropic too, so a tilted field with finite kappa screens isotropically
+                     here -- exact in the extreme type-II limit (large kappa, where A is
+                     negligible) and approximate otherwise.
+    @param          ds_xi: Riccati integration step along the chord in units of xi
+    @param         itemax: maximum number of self-consistency iterations
+    @param            mix: linear-mixing factor for the self-consistency update
+    @param            eps: convergence tolerance of the self-consistency loop
     @param self_consistent_A: finite kappa only -- replace the analytic London A by the
+    @param           mixA: linear-mixing factor for the vector potential (self_consistent_A)
+    @param          shape: (zeta, ratio) of a general oblique cell (ratio = Dly/Dlx), overriding lattice
+    @param         theta0: rotation angle of the crystal (FS + gap) relative to the vortex lattice [rad]
     FULLY self-consistent vector potential (je A_renew): each step the actual
-    quasiclassical supercurrent j_s(r)=<v_F Im g> is computed and A(K)=j_{s,T}(K)/K^2
+    quasiclassical supercurrent j_s(r)=@<v_F Im g@> is computed and A(K)=j_{s,T}(K)/K^2
     (transverse, Coulomb gauge, _maxwell_A) is updated together with Delta (mixA).  This
     captures the spatial superfluid-density variation (current suppressed at cores) that
     the bare-grad(chi) London A misses; reduces to it when |Psi| is uniform.
@@ -1520,14 +1670,26 @@ def lattice_dos_sc(state: dict, gap_sym: int | str | None, wlist: np.ndarray, de
                    nbeta: int = 24, hvf: float = 1.0, fs: dict | None = None, bdir: np.ndarray | None = None,
                    Lchord: float = 6.0, ds_xi: float = 0.3, theta0: float | None = None) -> np.ndarray:
     """
-    @fn lattice_dos_sc
     @brief Spatially-averaged DOS N(w)/N0 of the je-style self-consistent periodic
     vortex lattice (formulation A): the same per-grid-point anchored trajectories as
     solve_lattice_sc, now on the retarded axis (z=delta-i*w).  The Volovik shift is
     carried by the winding phase of the complex Delta sampled along each chord, plus
     (finite kappa, from state['kappa']) the screening Doppler -v_F.A(r) from the smooth
     London vector potential (_london_A) -- consistent with solve_lattice_sc.
-    N(w)/N0 = <Re g(anchor)>_{grid, FS}.
+    N(w)/N0 = @<Re g(anchor)@>_{grid, FS}.
+    @param   state: converged state dict from solve_lattice_sc
+    @param gap_sym: pairing symmetry: continuum label ('s', 'd', 'dxy', 'px', 'py', 'p+ip', ...) or gap_symms
+                    integer index
+    @param   wlist: real-frequency grid [Nw]
+    @param   delta: retarded broadening [eV] (None = 0.03*Dbulk)
+    @param   nbeta: number of trajectory directions over the full circle
+    @param     hvf: hbar |v_F| (length unit; physics depends only on x/xi)
+    @param      fs: FS dict (build_model_fs / build_wannier_fs); None = isotropic model cylinder
+    @param    bdir: field / vortex-line direction (need not be normalized; None = c axis)
+    @param  Lchord: trajectory (chord) length in units of xi
+    @param   ds_xi: Riccati integration step along the chord in units of xi
+    @param  theta0: rotation angle of the crystal relative to the lattice [rad] (None = the angle stored in
+                    state)
     @return N(w)/N0 [Nw]
     """
     A = state['absD']; xi = state['xi']
@@ -1580,18 +1742,30 @@ def lattice_free_energy(state: dict, coupling: float, temp: float, omega: np.nda
                         nbeta: int = 24, hvf: float = 1.0, fs: dict | None = None, bdir: np.ndarray | None = None,
                         Lchord: float = 6.0, ds_xi: float = 0.3, theta0: float = 0.0) -> np.ndarray:
     """
-    @fn lattice_free_energy
     @brief Electronic (condensation) free energy of the converged formulation-A vortex
     lattice, in the quasiclassical Eilenberger functional of Ichioka-Machida
     (PRB 59, 8902; cond-mat/9704147 Eq. 10-12; cond-mat/0205012 Eq. 10-12):
         F_el/(N0 Delta0^2) = <|Psi(r)|^2>_r/(coupling Delta0^2)
                              - (2T/Delta0^2) sum_{wn>0} < I >_{r,FS},
         I = (Delta* f + Delta f^dag)/(1+g) = 2 Re(Delta* f)/(1+g)   (scalar: f^dag=conj f).
-    The magnetic-field term kappa^2<h^2> is omitted: in the extreme type-II limit B is
+    The magnetic-field term kappa^2@<h^2@> is omitted: in the extreme type-II limit B is
     uniform so it is identical for every lattice symmetry and cancels in the difference
     F(square)-F(triangular) -- which is what selects the vortex-lattice symmetry.
     1/(N0 V) = 1/coupling in pyrpa units.  Use the SAME numerical parameters for the two
     symmetries so the large common condensation cancels and the small anisotropy survives.
+    @param    state: converged state dict from solve_lattice_sc
+    @param coupling: dimensionless separable pairing coupling lambda
+    @param     temp: temperature k_B*T [eV]
+    @param    omega: positive Matsubara frequencies [Nw]
+    @param  gap_sym: pairing symmetry: continuum label ('s', 'd', 'dxy', 'px', 'py', 'p+ip', ...) or gap_symms
+                     integer index
+    @param    nbeta: number of trajectory directions over the full circle
+    @param      hvf: hbar |v_F| (length unit; physics depends only on x/xi)
+    @param       fs: FS dict (build_model_fs / build_wannier_fs); None = isotropic model cylinder
+    @param     bdir: field / vortex-line direction (need not be normalized; None = c axis)
+    @param   Lchord: trajectory (chord) length in units of xi
+    @param    ds_xi: Riccati integration step along the chord in units of xi
+    @param   theta0: rotation angle of the crystal (FS + gap) relative to the vortex lattice [rad]
     @return F_el/(N0 Delta0^2) (dimensionless)
     """
     A = state['absD']; g = state['geom']; xi = state['xi']; Dbulk = state['Dbulk']
@@ -1647,7 +1821,6 @@ def calc_vortex_lattice_symmetry(coupling: float, temp: float, wc: float, gap_sy
                                  fs: dict | None = None, n_ratio: int = 5, n_theta: int = 4,
                                  ratio_range: tuple = (0.5, None)) -> list:
     """
-    @fn calc_vortex_lattice_symmetry
     @brief Vortex-lattice SYMMETRY by minimizing the Eilenberger free energy
     (Ichioka-Machida functional) over the lattice geometry, the proper full-quasiclassical
     route (Nakai-Miranovic-Ichioka-Machida, PRL 89, 237004): for each field scan the
@@ -1661,6 +1834,19 @@ def calc_vortex_lattice_symmetry(coupling: float, temp: float, wc: float, gap_sy
     this to a real (iron-based) FS with the multiband-projected gap.
     Extreme type-II (kappa=None): the magnetic-field energy is uniform and cancels, so the
     electronic free energy selects the geometry.  Warm-started across the scan.
+    @param    coupling: dimensionless separable pairing coupling lambda
+    @param        temp: temperature k_B*T [eV]
+    @param          wc: Matsubara cutoff energy [eV]
+    @param     gap_sym: pairing symmetry: continuum label ('s', 'd', 'dxy', 'px', 'py', 'p+ip', ...) or
+                        gap_symms integer index
+    @param  field_list: B/Hc2 values to sweep (None = the built-in default set)
+    @param          kb: Boltzmann constant [eV/K] for K-unit reporting
+    @param          Ng: grid points per cell axis
+    @param       nbeta: number of trajectory directions over the full circle
+    @param          fs: prebuilt FS dict with Fermi velocities (None = isotropic cylinder)
+    @param     n_ratio: number of cell aspect ratios Dly/Dlx scanned
+    @param     n_theta: number of gap orientations theta0 scanned in [0, pi/4]
+    @param ratio_range: (min, max) of Dly/Dlx (max None = sqrt(3)/2, triangular)
     @return list of (field, best_ratio, best_apex_deg, best_theta0_deg, Fmin)
     """
     omega = _eilenberger.matsubara(temp, wc)
@@ -1703,17 +1889,28 @@ def calc_vortex_lattice_sc(coupling: float, temp: float, wc: float, gap_sym: str
                            Ng: int = 20, nbeta: int = 16, fs: dict | None = None, kappa: float | None = None,
                            Vw: int = 1, self_consistent_A: bool = False, bdir: np.ndarray | None = None) -> list:
     """
-    @fn calc_vortex_lattice_sc
     @brief Driver: je-style self-consistent PERIODIC vortex lattice (formulation A).
     Sweeps B/Hc2, self-consistently solves the complex order parameter Psi(r) (true
     node at every core, full Abrikosov-lattice supercurrent) and reports the
-    spatially-averaged zero-energy DOS <N(0)>/N0(B) (d-wave ~sqrt(B) Volovik).
-    @param lattice: 'square' or 'triangular' (Abrikosov ground state).
-    @param Vw: flux quanta per cell (1; Vw>1 = a multiply-quantized giant vortex).
-    @param kappa: None -> bare extreme limit; finite -> the je finite-kappa A(r)
+    spatially-averaged zero-energy DOS @<N(0)@>/N0(B) (d-wave ~sqrt(B) Volovik).
+    @param   coupling: dimensionless separable pairing coupling lambda
+    @param       temp: temperature k_B*T [eV]
+    @param         wc: Matsubara cutoff energy [eV]
+    @param    gap_sym: pairing symmetry: continuum label ('s', 'd', 'dxy', 'px', 'py', 'p+ip', ...) or gap_symms
+                       integer index
+    @param field_list: B/Hc2 values to sweep (None = the built-in default set)
+    @param    lattice: 'square' or 'triangular' (Abrikosov ground state).
+    @param         kb: Boltzmann constant [eV/K] for K-unit reporting
+    @param         Ng: grid points per cell axis
+    @param      nbeta: number of trajectory directions over the full circle
+    @param         fs: prebuilt FS dict with Fermi velocities (None = isotropic cylinder)
+    @param         Vw: flux quanta per cell (1; Vw>1 = a multiply-quantized giant vortex).
+    @param      kappa: None -> bare extreme limit; finite -> the je finite-kappa A(r)
     back-reaction (London-screened supercurrent, smooth vector potential), which
     removes the spurious uniform-A overcount and screens the Volovik DOS.
     @param self_consistent_A: finite kappa only -- use the fully self-consistent A from
+    @param       bdir: field / vortex-line direction (need not be normalized; None = c axis)
+    @return results: list of (B/Hc2, @<N(0)@>/N0)
     the actual quasiclassical current (je A_renew) instead of the analytic London A.
     Writes the converged |Psi|(r) for the largest field to lattice_sc_op.dat.
     """

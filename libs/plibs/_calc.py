@@ -119,7 +119,8 @@ def _auto_regrid_sigma_seed(temp: float, Nw: int, path: str = 'sigma.bin') -> No
 def regrid_sigma_bin(temp_old: float = None, temp_new: float = None, Norb: int = None,
                      Nw_old: int = None, Nw_new: int = None, w_scale: float = None,
                      path: str = 'sigma.bin', out_path: str = None) -> tuple:
-    """Re-grid the FLEX self-energy seed sigma.bin from the Matsubara mesh at
+    """
+    @brief Re-grid the FLEX self-energy seed sigma.bin from the Matsubara mesh at
     temp_old onto the mesh at temp_new (T-annealing helper for sw_in_self).
 
     Sigma(k, i w_n) is interpolated along the imaginary axis by a cubic spline
@@ -322,13 +323,12 @@ def calc_path_spectrum(kind: str, mu: float, temp: float, klist: np.ndarray, qli
                        eig: np.ndarray, uni: np.ndarray, spa_length: np.ndarray, Nw: int, Emax: float, delta: float,
                        Smat: np.ndarray | None = None) -> tuple:
     """
-    @fn calc_path_spectrum
     @brief Compute a susceptibility spectrum along a symmetry line and write it out.
 
     Thin driver over _response.chis_spectrum / phi_spectrum: it runs the solver,
-    writes the trace to '<kind>.dat' as (path length, omega, Im chi) blocks
+    writes the trace to '@<kind@>.dat' as (path length, omega, Im chi) blocks
     separated by a blank line (gnuplot pm3d layout), and for 'chis' additionally
-    writes the per-orbital decomposition to 'chis_<i>.dat'.  A failed write is
+    writes the per-orbital decomposition to 'chis_@<i@>.dat'.  A failed write is
     reported and skipped, not raised, so a long run is never lost to a full disk.
 
     @param    kind: 'chis' (spin susceptibility) or 'phi' (pairing susceptibility)
@@ -395,7 +395,6 @@ def calc_path_spectrum(kind: str, mu: float, temp: float, klist: np.ndarray, qli
 def hall_coefficient(K0: np.ndarray, Shall: np.ndarray, Vuc: float, wsum: float,
                      gsp: float) -> np.ndarray:
     """
-    @fn hall_coefficient
     @brief Hall coefficient for the three field directions from the full
     conductivity and Hall-kernel tensors.
 
@@ -440,7 +439,6 @@ def hall_coefficient(K0: np.ndarray, Shall: np.ndarray, Vuc: float, wsum: float,
 
 def hall_carrier_density(Rh: np.ndarray, eC: float) -> tuple[np.ndarray, list]:
     """
-    @fn hall_carrier_density
     @brief Convert R_H into a POSITIVE carrier density plus the carrier sign.
 
     n_H = 1/(e|R_H|).  The single-band relations are R_H = -1/(n_e e) for
@@ -467,7 +465,6 @@ def hall_carrier_density(Rh: np.ndarray, eC: float) -> tuple[np.ndarray, list]:
 
 def _periodic_components(mask: np.ndarray) -> list:
     """
-    @fn _periodic_components
     @brief Connected components of a 3-D boolean k-space mask under PERIODIC
     boundaries, each tagged with its volume fraction and whether it spans the zone.
 
@@ -527,11 +524,10 @@ def _periodic_components(mask: np.ndarray) -> list:
 def fs_carrier_density(eig: np.ndarray, mu: float, Vuc: float, gsp: float = 2.0,
                        mesh: tuple | None = None) -> dict:
     """
-    @fn fs_carrier_density
     @brief Carrier density from the LUTTINGER VOLUME of every closed Fermi-surface
     pocket -- the quantity an experimental carrier density is actually compared to.
 
-    Each band's occupied region (e<mu) and unoccupied region (e>=mu) are split
+    Each band's occupied region (e@<mu) and unoccupied region (e@>=mu) are split
     into connected components under periodic boundary conditions.  A CLOSED
     occupied component is an electron pocket holding gsp*frac/Vuc carriers; a
     CLOSED unoccupied component is a hole pocket holding the same of the opposite
@@ -608,7 +604,6 @@ def fs_carrier_density(eig: np.ndarray, mu: float, Vuc: float, gsp: float = 2.0,
 def report_band_filling(kmesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, mu: float,
                         Arot: np.ndarray) -> None:
     """
-    @fn report_band_filling
     @brief Print, for each band, the fraction of the mesh lying above and below mu.
 
     The unoccupied fraction is the hole-like side of that band and the occupied
@@ -646,7 +641,6 @@ def report_band_filling(kmesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np
 def get_mu(ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray, Arot: np.ndarray, temp: float, fill: float,
            kmesh: int = 40) -> float:
     """
-    @fn get_mu
     @brief Chemical potential of the normal state on a cubic kmesh^3 mesh.
 
     Convenience wrapper around get_emesh + calc_mu for the callers that only need
@@ -679,7 +673,6 @@ def get_mu(ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray, Arot: np.ndarra
 def gap_extrapolate_w0(gap: np.ndarray, temp: float, n_points: int = 4,
                        order: int = 1) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn gap_extrapolate_w0
     @brief Extrapolate the gap function Delta(k,iw_n) to the w_n->0 limit along the
     imaginary axis, by a low-order polynomial fit in w_n^2 using the n_points lowest
     fermionic Matsubara points. w_n=(2n+1)*pi*temp is never exactly zero, so this
@@ -696,8 +689,8 @@ def gap_extrapolate_w0(gap: np.ndarray, temp: float, n_points: int = 4,
     @param n_points: number of lowest Matsubara points used in the fit (>= order+1)
     @param  order: polynomial order in w_n^2 (1: Delta0 + c*w_n^2, the leading-order
                   correction implied by the even-in-w_n symmetry above)
-    @retval  gap0: extrapolated Delta(k,w_n->0) [Norb, Norb, Nk] complex128
-    @retval  bias: |gap0 - Delta(iw_0)| / max|gap0|, the O((pi*temp)^2) correction
+    @return  gap0: extrapolated Delta(k,w_n->0) [Norb, Norb, Nk] complex128
+    @return  bias: |gap0 - Delta(iw_0)| / max|gap0|, the O((pi*temp)^2) correction
                   that reading Delta(iw_0) directly misses, per component but
                   normalized by the PEAK gap [Norb, Norb, Nk] float64. Normalizing
                   by the global peak (not the per-point value) keeps near-nodal /
@@ -731,10 +724,9 @@ def output_gap_function(invk: np.ndarray, kmap: np.ndarray, gap: np.ndarray, uni
                         temp: float | None = None, n_points: int = 4, order: int = 1,
                         iperm: np.ndarray | None = None) -> int:
     """
-    @fn output_gap_function
     @brief Convert the converged gap to the requested basis and write the kz=0 plane.
 
-    Writes one file per orbital pair, 'gap_<i><j>.dat', holding
+    Writes one file per orbital pair, 'gap_@<i@>@<j@>.dat', holding
     (kx index, ky index, Re Delta, Im Delta) for the kz = 0 slice, with a blank
     line after each kx row so gnuplot's pm3d reads it as a grid.  A failed write
     is reported and skipped rather than raised.
@@ -802,7 +794,6 @@ def calc_flex(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.nda
               eps: float = 1.0e-4, pp: float = 0.5, m_diis: int = 5, sw_rescale: bool = True, sw_tail: bool = False,
               sigma_scale: float = 1.0) -> None:
     """
-    @fn calc_flex
     @brief Solve the FLEX self-energy loop (no SOC) and optionally export it.
 
     Builds the irreducible-mesh Green's function and the static Coulomb vertex
@@ -856,7 +847,6 @@ def calc_flex_soc(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np
                   Jmat: np.ndarray | None = None, eps: float = 1.0e-4, pp: float = 0.5, m_diis: int = 5,
                   sw_rescale: bool = True, sigma_scale: float = 1.0) -> None:
     """
-    @fn calc_flex_soc
     @brief Solve the FLEX self-energy loop WITH spin-orbit coupling.
 
     Same loop as calc_flex, but the spin-resolved basis makes the spin and charge
@@ -910,7 +900,6 @@ def calc_lin_eliashberg_eq(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray
                            sw_gap_extrapolate: bool = False, iperm: np.ndarray | None = None,
                            gap_extrap_points: int = 4, gap_extrap_order: int = 1) -> None:
     """
-    @fn calc_lin_eliashberg_eq
     @brief Solve the linearized Eliashberg equation (no SOC) and report lambda.
 
     Runs the whole chain: k-space state -> Coulomb vertex -> Green's function
@@ -995,7 +984,6 @@ def calc_lin_eliash_soc(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S
                         sw_gap_extrapolate: bool = False, gap_extrap_points: int = 4,
                         gap_extrap_order: int = 1) -> None:
     """
-    @fn calc_lin_eliash_soc
     @brief Solve the linearized Eliashberg equation WITH spin-orbit coupling.
 
     Same chain as calc_lin_eliashberg_eq, but in the spin-resolved basis: one SOC
@@ -1086,11 +1074,52 @@ def calc_eliashberg_eq(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_
                        sigma_scale: float = 1.0, sw_gap_extrapolate: bool = False, gap_extrap_points: int = 4,
                        gap_extrap_order: int = 1, iperm: np.ndarray | None = None) -> None:
     """
+    @brief Solve the nonlinear Eliashberg equation (no SOC), seeded by the linearized solution.
+
+    The linearized problem is solved first, both as a cheap physical gate and as the
+    source of a symmetry-correct initial gap.  The run stops before the expensive
+    nonlinear loop when the Stoner factor >= 1 (SDW/CDW instability), when
+    lambda_eliash < 1 (T >= Tc: no superconducting instability at this temperature),
+    or when sw_check_only is set.  Otherwise only the SHAPE of the linearized
+    eigenvector is kept: it is rescaled to the weak-coupling amplitude BCS_RATIO*temp
+    and handed to flibs.nonlinear_eliashberg, which iterates the gap (and, with
+    sw_self, the self-energy) to self-consistency.
+
+    Side effects: the gap is written by output_gap_function, and with sw_out_self also
+    as 'gap.npy' plus the mesh-independent Wannier form.  Returns early (without
+    writing) when the self-energy could not be prepared.
+
+    @param Nx, Ny, Nz: k-mesh size
+    @param      Nw: number of positive Matsubara frequencies
+    @param   ham_r: hopping matrix H(R) [Nr, Norb, Norb] complex128
+    @param     S_r: overlap matrix S(R); [] for an orthogonal basis
+    @param    rvec: R-vectors [Nr, 3]
+    @param chiolist: orbital-pair basis of chi [Nchi, 2] int64
+    @param    site: site index of each orbital [Norb] int64
+    @param   plist: parity sign (+1/-1) per orbital [Norb] float64
+    @param      mu: chemical potential [eV]
+    @param    temp: temperature k_B*T [eV]
+    @param gap_sym: symmetry index of the initial gap; its sign selects singlet/triplet
+    @param sw_self: True includes the FLEX self-energy (also inside the nonlinear loop),
+                    False uses the bare Green's function
+    @param orb_dep: True uses the orbital-dependent Umat/Jmat, False the scalar U/J
+    @param    U, J: on-site Hubbard U and Hund J [eV]
+    @param    fill: band filling
+    @param sw_from_file: read the self-energy from disk instead of solving FLEX
+    @param sw_out_self: write the self-energy and the gap to disk
+    @param sw_in_self: seed the FLEX loop from the stored self-energy
+    @param Umat, Jmat: orbital-resolved U and J [Norb, Norb] (orb_dep only)
+    @param eps, pp, m_diis, sw_rescale, sw_tail, sigma_scale: FLEX loop controls, see
+                    calc_flex; eps and m_diis also control the nonlinear loop
     @param sw_check_only: If True, stop after the linearized Eliashberg solve (before the
                           nonlinear loop) and report the Stoner factor and lambda_eliash.
                           The calculation also stops early (regardless of this flag) when
                           the Stoner factor >= 1 (SDW/CDW instability) or lambda_eliash < 1
                           (T >= Tc; no superconducting instability at this temperature).
+    @param sw_gap_extrapolate: extrapolate Delta(iw_n) -> Delta(0) before output
+    @param gap_extrap_points: number of Matsubara slices used by that extrapolation
+    @param gap_extrap_order: polynomial order of that fit
+    @param   iperm: orbital permutation of the inversion operator (None = identity)
     """
     state = _prepare_kspace_state(Nx, Ny, Nz, ham_r, S_r, rvec, need_ham=True)
     Smat, Cmat = _prepare_normal_interaction(chiolist, site, orb_dep, U, J, Umat, Jmat)

@@ -109,7 +109,6 @@ _loader._lib.calc_tau_epa.restype = None
 def calc_Lij(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float, w: float,
              idelta: float, temp: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    @fn calc_Lij
     @brief Evaluate the generalized thermoelectric transport tensors L11, L12, L22 at a given frequency.
     @param    eig: Eigenvalues [Nk, Norb] float64
     @param     vk: Group velocities [Nk, Norb, 3] complex128
@@ -118,9 +117,9 @@ def calc_Lij(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float, w: 
     @param      w: Frequency in eV
     @param idelta: Lorentzian broadening parameter in eV
     @param   temp: Temperature in eV
-    @retval   L11: Charge conductivity tensor [3, 3] complex128
-    @retval   L12: Thermoelectric tensor [3, 3] complex128
-    @retval   L22: Thermal conductivity tensor [3, 3] complex128
+    @return   L11: Charge conductivity tensor [3, 3] complex128
+    @return   L12: Thermoelectric tensor [3, 3] complex128
+    @return   L22: Thermal conductivity tensor [3, 3] complex128
     """
     Nk = len(eig)
     Norb = eig.shape[1]
@@ -138,7 +137,6 @@ def calc_Lij_wl(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float,
                 wl: np.ndarray, idelta: float, temp: float
                 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    @fn calc_Lij_wl
     @brief Evaluate L11, L12, L22 for all frequencies wl in a single Fortran call.
     @param    eig: Eigenvalues [Nk, Norb] float64
     @param     vk: Group velocities [Nk, Norb, Norb, 3] complex128
@@ -147,9 +145,9 @@ def calc_Lij_wl(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float,
     @param     wl: Frequency mesh [Nw] float64
     @param idelta: Lorentzian broadening parameter in eV
     @param   temp: Temperature in eV
-    @retval   L11: [Nw, 3, 3] complex128
-    @retval   L12: [Nw, 3, 3] complex128
-    @retval   L22: [Nw, 3, 3] complex128
+    @return   L11: [Nw, 3, 3] complex128
+    @return   L12: [Nw, 3, 3] complex128
+    @return   L22: [Nw, 3, 3] complex128
     """
     Nk = len(eig)
     Norb = eig.shape[1]
@@ -169,7 +167,6 @@ def calc_Lij_wl(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float,
 def calc_Kn(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray, temp: float,
             mu: float, tau: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    @fn calc_Kn
     @brief Compute Boltzmann transport coefficients K0, K1, K2 for conductivity and thermopower.
     @param    eig: Eigenvalues [Nk, Norb] float64
     @param  veloc: Group velocities [Nk, Norb, 3] float64
@@ -177,9 +174,9 @@ def calc_Kn(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray, temp: float
     @param   temp: Temperature in eV
     @param     mu: Chemical potential in eV
     @param    tau: Relaxation time [Nk, Norb] float64
-    @retval    K0: Charge transport tensor [3, 3] float64
-    @retval    K1: Thermoelectric transport tensor [3, 3] float64
-    @retval    K2: Thermal transport tensor [3, 3] float64
+    @return    K0: Charge transport tensor [3, 3] float64
+    @return    K1: Thermoelectric transport tensor [3, 3] float64
+    @return    K2: Thermal transport tensor [3, 3] float64
     """
     Nk = len(eig)
     Norb = eig.shape[1]
@@ -195,7 +192,6 @@ def calc_sigma_hall(eig: np.ndarray, veloc: np.ndarray, imass: np.ndarray,
                     kweight: np.ndarray, tau: np.ndarray, temp: float,
                     mu: float) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn calc_sigma_hall
     @brief Weak-field Boltzmann Hall kernel for all three field directions, band
     resolved and antisymmetrized in the two current indices:
 
@@ -221,8 +217,8 @@ def calc_sigma_hall(eig: np.ndarray, veloc: np.ndarray, imass: np.ndarray,
     @param     tau: Relaxation time [Nk, Norb] float64
     @param    temp: Temperature in eV
     @param      mu: Chemical potential in eV
-    @retval Shall: Hall kernel [Norb, 3, 3, 3] float64, indexed [n, a, b, g]
-    @retval  Sabs: sum of |contribution|, same shape
+    @return Shall: Hall kernel [Norb, 3, 3, 3] float64, indexed [n, a, b, g]
+    @return  Sabs: sum of |contribution|, same shape
     """
     Nk = len(eig)
     Norb = eig.shape[1]
@@ -236,7 +232,6 @@ def calc_sigma_hall(eig: np.ndarray, veloc: np.ndarray, imass: np.ndarray,
 def calc_k0_band(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray,
                  temp: float, mu: float, tau: np.ndarray) -> np.ndarray:
     """
-    @fn calc_k0_band
     @brief Per-band charge transport kernel K0n[n,i,j] = sum_k v_i v_j tau (-df/de) w_k.
 
     calc_Kn returns only the band sum; the per-band split is what allows the
@@ -261,7 +256,6 @@ def calc_k0_band(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray,
 def calc_tdf(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray,
              tau: np.ndarray, Nw: int) -> np.ndarray:
     """
-    @fn calc_tdf
     @brief Compute the transport distribution function (TDF) tensor as a function of energy.
 
     The energy grid is the Nw bin CENTRES E_i = min(eig) + (i-1/2)*dw,
@@ -285,7 +279,6 @@ def calc_tdf(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray,
 
 def get_tau(tauw: np.ndarray, eig: np.ndarray, tau_max: float, tau_mode: int, eps: float = 1.0e-4) -> np.ndarray:
     """
-    @fn get_tau
     @brief Estimate k-resolved relaxation time tau(k) from frequency-dependent scattering weights.
     @param    tauw: Frequency-dependent scattering weight [Nw] float64
     @param     eig: Eigenvalues [Nk, Norb] float64
@@ -307,7 +300,6 @@ def calc_tau_epa(eig: np.ndarray, gavg: np.ndarray, wavg: np.ndarray,
                  edge: np.ndarray, step: np.ndarray, nbin: np.ndarray,
                  mu: float, temp: float) -> np.ndarray:
     """
-    @fn calc_tau_epa
     @brief Compute EPA relaxation time from epa.x (job='egrid') output, using the
     energy-conserving EPA rate (Samsonidze-Kozinsky):
     1/tau(e) = 2*pi*sum_nu { g2(e,e+w)[nB+f(e+w)]rho(e+w) + g2(e,e-w)[nB+1-f(e-w)]rho(e-w) },

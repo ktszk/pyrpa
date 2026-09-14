@@ -5,7 +5,7 @@ import libs.flibs._loader as _loader
 # Public API of this submodule; keeps `from ._x import *` in __init__.py from
 # re-exporting numpy, scipy, ctypes and the sibling packages imported above.
 __all__ = [
-    'get_chi0_conv', 'get_chi_irr', 'chis_qmap', 'get_tr_chi', 'get_phi_irr', 'phi_qmap', 'get_tr_phi', 'get_chis',
+    'get_chi0_conv', 'get_chi_irr', 'chiq_map', 'get_tr_chi', 'get_phi_irr', 'phiq_map', 'get_tr_phi', 'get_chis',
     'get_chi0', 'get_chi0_tail', 'get_chi0_soc', 'get_chis_chic_soc', 'get_chis_chic', 'get_chi_irr_sc',
     'get_eig_or_tr_chi'
 ]
@@ -254,7 +254,6 @@ def _get_chi_map(olist: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 def get_chi0_conv(Gk: np.ndarray, kmap: np.ndarray, invk: np.ndarray, olist: np.ndarray,
                   temp: float, Nx: int, Ny: int, Nz: int) -> np.ndarray:
     """
-    @fn get_chi0_conv
     @brief Compute the irreducible susceptibility chi0 by convolution of Green's functions over the full BZ.
     Same as get_chi0 but without the interaction matrices (no Stoner-factor check/print).
     @param     Gk: Green's function tensor [Norb, Norb, Nw, Nk] complex128
@@ -282,13 +281,12 @@ def get_chi0_conv(Gk: np.ndarray, kmap: np.ndarray, invk: np.ndarray, olist: np.
 def get_chi_irr(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, qshift: np.ndarray,
                 olist: np.ndarray, wlist: np.ndarray, idelta: float, temp: float) -> np.ndarray:
     """
-    @fn get_chi_irr
     @brief Compute the irreducible (bare bubble) susceptibility chi0(q, w) for a given momentum shift.
     @param     uni: Eigenvector matrices [Nk, Norb, Norb] complex128
     @param     eig: Eigenvalues [Nk, Norb] float64
     @param  ffermi: Fermi-Dirac occupations [Nk, Norb] float64
     @param  qshift: Index of k+q for each k-point [Nk] int64 (from get_qshift)
-    @param   olist: Orbital index list [Nchi] int64
+    @param   olist: Orbital-pair list of chi [Nchi, 2] int64 (1-based)
     @param   wlist: Real-frequency mesh [Nw] float64
     @param  idelta: Lorentzian broadening parameter in eV
     @param    temp: Temperature in eV
@@ -304,25 +302,24 @@ def get_chi_irr(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, qshift: np
     return chi
 
 
-def chis_qmap(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, klist: np.ndarray,
+def chiq_map(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, klist: np.ndarray,
               Smat: np.ndarray, olist: np.ndarray, Nx: int, Ny: int, temp: float,
               ecut: float, idelta: float) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn chis_qmap
     @brief Compute spin susceptibility and bare susceptibility maps on the qx-qy plane.
     @param     uni: Eigenvector matrices [Nk, Norb, Norb] complex128
     @param     eig: Eigenvalues [Nk, Norb] float64
     @param  ffermi: Fermi-Dirac occupations [Nk, Norb] float64
     @param   klist: k-point list [Nk, 3] float64
     @param    Smat: Spin interaction matrix [Nchi, Nchi] float64
-    @param   olist: Orbital index list [Nchi] int64
+    @param   olist: Orbital-pair list of chi [Nchi, 2] int64 (1-based)
     @param      Nx: Number of q-points along qx
     @param      Ny: Number of q-points along qy
     @param    temp: Temperature in eV
     @param    ecut: Energy cutoff for the BZ summation in eV
     @param  idelta: Lorentzian broadening parameter in eV
-    @retval   chis: Spin susceptibility map [Nx, Ny] complex128
-    @retval    chi: Irreducible susceptibility map [Nx, Ny] complex128
+    @return   chis: Spin susceptibility map [Nx, Ny] complex128
+    @return    chi: Irreducible susceptibility map [Nx, Ny] complex128
     """
     Nk = len(eig)
     Norb, Nchi = eig.shape[1], len(olist)
@@ -339,14 +336,13 @@ def chis_qmap(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, klist: np.nd
 def get_tr_chi(chis: np.ndarray, chi0: np.ndarray,
                olist: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    @fn get_tr_chi
     @brief Compute orbital-resolved traces of the interacting and bare susceptibilities.
     @param    chis: Interacting spin susceptibility [Nw, Nchi, Nchi] complex128
     @param    chi0: Irreducible susceptibility [Nw, Nchi, Nchi] complex128
-    @param   olist: Orbital index list [Nchi] int64
-    @retval trchis: Trace of interacting chi_s [Nw] complex128
-    @retval trchi0: Trace of bare chi0 [Nw] complex128
-    @retval chis_orb: Orbital-indexed chi_s [Nw, Norb+2] complex128
+    @param   olist: Orbital-pair list of chi [Nchi, 2] int64 (1-based)
+    @return trchis: Trace of interacting chi_s [Nw] complex128
+    @return trchi0: Trace of bare chi0 [Nw] complex128
+    @return chis_orb: Orbital-indexed chi_s [Nw, Norb+2] complex128
     """
     Nchi, Nw, Norb = len(olist), len(chi0), olist.max()
     trchis = np.zeros(Nw, dtype=np.complex128)
@@ -361,13 +357,12 @@ def get_phi_irr(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, qshift: np
                 olist: np.ndarray, wlist: np.ndarray, idelta: float, mu: float,
                 temp: float) -> np.ndarray:
     """
-    @fn get_phi_irr
     @brief Compute the irreducible pairing susceptibility phi0(q, w) in the particle-particle channel.
     @param     uni: Eigenvector matrices [Nk, Norb, Norb] complex128
     @param     eig: Eigenvalues [Nk, Norb] float64
     @param  ffermi: Fermi-Dirac occupations [Nk, Norb] float64
     @param  qshift: Index of k+q for each k-point [Nk] int64 (from get_qshift)
-    @param   olist: Orbital index list [Nchi] int64
+    @param   olist: Orbital-pair list of phi [Nchi, 2] int64 (1-based)
     @param   wlist: Frequency mesh [Nw] float64
     @param  idelta: Lorentzian broadening parameter in eV
     @param      mu: Chemical potential in eV
@@ -385,17 +380,16 @@ def get_phi_irr(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, qshift: np
     return phi
 
 
-def phi_qmap(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, klist: np.ndarray,
+def phiq_map(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, klist: np.ndarray,
              olist: np.ndarray, Nx: int, Ny: int, mu: float, temp: float, ecut: float,
              idelta: float, sw_omega: bool) -> np.ndarray:
     """
-    @fn phi_qmap
     @brief Compute the pairing susceptibility map on the qx-qy plane at a given energy cutoff.
     @param      uni: Eigenvector matrices [Nk, Norb, Norb] complex128
     @param      eig: Eigenvalues [Nk, Norb] float64
     @param   ffermi: Fermi-Dirac occupations [Nk, Norb] float64
     @param    klist: k-point list [Nk, 3] float64
-    @param    olist: Orbital index list [Nchi] int64
+    @param    olist: Orbital-pair list of phi [Nchi, 2] int64 (1-based)
     @param       Nx: Number of q-points along qx
     @param       Ny: Number of q-points along qy
     @param       mu: Chemical potential in eV
@@ -418,12 +412,11 @@ def phi_qmap(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray, klist: np.nda
 
 def get_tr_phi(phi: np.ndarray, olist: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn get_tr_phi
     @brief Compute orbital-resolved trace of the pairing susceptibility phi.
     @param     phi: Pairing susceptibility [Nw, Nchi, Nchi] complex128
-    @param   olist: Orbital index list [Nchi] int64
-    @retval  trphi: Trace of phi [Nw] complex128
-    @retval phi_orb: Orbital-indexed phi [Nw, Norb+2] complex128
+    @param   olist: Orbital-pair list of phi [Nchi, 2] int64 (1-based)
+    @return  trphi: Trace of phi [Nw] complex128
+    @return phi_orb: Orbital-indexed phi [Nw, Norb+2] complex128
     """
     Nchi, Nw, Norb = len(olist), len(phi), olist.max()
     trphi = np.zeros(Nw, dtype=np.complex128)
@@ -435,7 +428,6 @@ def get_tr_phi(phi: np.ndarray, olist: np.ndarray) -> tuple[np.ndarray, np.ndarr
 
 def get_chis(chi0: np.ndarray, Smat: np.ndarray) -> np.ndarray:
     """
-    @fn get_chis
     @brief Compute the RPA-corrected spin susceptibility chi_s from chi0 and the Stoner matrix.
     @param  chi0: Irreducible susceptibility [Nw, Nchi, Nchi] complex128
     @param  Smat: Spin interaction matrix [Nchi, Nchi] float64
@@ -450,12 +442,11 @@ def get_chis(chi0: np.ndarray, Smat: np.ndarray) -> np.ndarray:
 def get_chi0(Smat: np.ndarray, Cmat: np.ndarray, Gk: np.ndarray, olist: np.ndarray,
              kmap: np.ndarray, invk: np.ndarray, temp: float, Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, float]:
     """
-    @fn get_chi0
     @brief Compute the irreducible susceptibility chi0 on the irreducible q-grid using the full BZ Green's function.
     @param   Smat: Spin interaction matrix [Nchi, Nchi] float64
     @param   Cmat: Charge interaction matrix [Nchi, Nchi] float64
     @param     Gk: Green's function on full k-grid [Norb, Norb, Nw, Nkall] complex128
-    @param  olist: Orbital index list [Nchi] int64
+    @param  olist: Orbital-pair list of chi [Nchi, 2] int64 (1-based)
     @param   kmap: Full-to-reduced k-point mapping [Nkall] int64
     @param   invk: Inverse k-point mapping [Nkall] int64
     @param   temp: Temperature in eV
@@ -480,7 +471,6 @@ def get_chi0_tail(Smat: np.ndarray, Cmat: np.ndarray, Gk: np.ndarray, eig: np.nd
                   uni: np.ndarray, olist: np.ndarray, kmap: np.ndarray, invk: np.ndarray,
                   mu: float, temp: float, Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, float]:
     """
-    @fn get_chi0_tail
     @brief Tail-corrected variant of get_chi0: chi0 = conv[G] - conv[G0] + analytic
     reference bubble.  By bilinearity the sharp-cutoff FFT convolution only acts on
     the fast-decaying residual G-G0 (~1/w^2), while the slowly decaying 1/(iw)
@@ -517,11 +507,10 @@ def get_chi0_soc(Vmat: np.ndarray, Gk: np.ndarray, olist: np.ndarray, slist: np.
                  kmap: np.ndarray, invk: np.ndarray, invs: np.ndarray, temp: float,
                  Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    @fn get_chi0_soc
     @brief Compute the SOC-aware irreducible susceptibility chi0 and auxiliary spin-sign matrices.
     @param   Vmat: SOC interaction matrix [Nchi, Nchi] float64
     @param     Gk: Green's function on full k-grid [Norb, Norb, Nw, Nkall] complex128
-    @param  olist: Orbital index list [Nchi] int64
+    @param  olist: Orbital-pair list of chi [Nchi, 2] int64 (1-based)
     @param  slist: Spin-orbit label for each orbital [Norb] int64
     @param   kmap: Full-to-reduced k-point mapping [Nkall] int64
     @param   invk: Inverse k-point mapping [Nkall] int64
@@ -530,10 +519,10 @@ def get_chi0_soc(Vmat: np.ndarray, Gk: np.ndarray, olist: np.ndarray, slist: np.
     @param     Nx: Number of k-points along kx
     @param     Ny: Number of k-points along ky
     @param     Nz: Number of k-points along kz
-    @retval    chi: Irreducible susceptibility [Nchi, Nchi, Nw, Nk] complex128
-    @retval sgnsig: Sign matrix [Norb, Norb] float64
-    @retval sgnsig2: Sign matrix for chi orbital mapping [Nchi, Nchi] float64
-    @retval invschi: Inverse chi orbital mapping [Nchi] int64
+    @return    chi: Irreducible susceptibility [Nchi, Nchi, Nw, Nk] complex128
+    @return sgnsig: Sign matrix [Norb, Norb] float64
+    @return sgnsig2: Sign matrix for chi orbital mapping [Nchi, Nchi] float64
+    @return invschi: Inverse chi orbital mapping [Nchi] int64
     """
     Norb, Nchi = len(slist), len(olist)
     Nkall, Nk, Nw = len(kmap), len(Gk[0, 0, 0]), len(Gk[0, 0])
@@ -551,17 +540,16 @@ def get_chi0_soc(Vmat: np.ndarray, Gk: np.ndarray, olist: np.ndarray, slist: np.
 def get_chis_chic_soc(chi: np.ndarray, Vmat: np.ndarray, olist: np.ndarray, slist: np.ndarray,
                       invs: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    @fn get_chis_chic_soc
     @brief Decompose the SOC susceptibility into charge (chic), longitudinal
     spin (chiszz) and transverse (chispm) channels.
     @param    chi: Full susceptibility [Nchi, Nchi, Nk, Nw] complex128
     @param   Vmat: SOC interaction matrix [Nchi, Nchi] float64
-    @param  olist: Orbital index list [Nchi] int64
+    @param  olist: Orbital-pair list of chi [Nchi, 2] int64 (1-based)
     @param  slist: Spin-orbit label for each orbital [Norb] int64
     @param   invs: Inverse spin index mapping [Norb] int64
-    @retval  chic: Charge susceptibility [Nchi/4, Nchi/4, Nk] complex128
-    @retval chiszz: Longitudinal spin susceptibility [Nchi/4, Nchi/4, Nk] complex128
-    @retval chispm: Transverse spin susceptibility [Nchi/4, Nchi/4, Nk] complex128
+    @return  chic: Charge susceptibility [Nchi/4, Nchi/4, Nk] complex128
+    @return chiszz: Longitudinal spin susceptibility [Nchi/4, Nchi/4, Nk] complex128
+    @return chispm: Transverse spin susceptibility [Nchi/4, Nchi/4, Nk] complex128
     """
     def get_orb_list(olist: np.ndarray, slist: np.ndarray, invs: np.ndarray) -> np.ndarray:
         orb_list = np.zeros(Nchi, dtype=np.int64)
@@ -590,13 +578,12 @@ def get_chis_chic_soc(chi: np.ndarray, Vmat: np.ndarray, olist: np.ndarray, slis
 
 def get_chis_chic(chi: np.ndarray, Smat: np.ndarray, Cmat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
-    @fn get_chis_chic
     @brief Compute RPA-corrected spin susceptibility chis and charge susceptibility chic from chi0.
     @param   chi: Irreducible susceptibility [Nchi, Nchi, Nk, Nw] complex128
     @param  Smat: Spin interaction matrix [Nchi, Nchi] float64
     @param  Cmat: Charge interaction matrix [Nchi, Nchi] float64
-    @retval chis: Interacting spin susceptibility [Nchi, Nchi, Nk] complex128
-    @retval chic: Interacting charge susceptibility [Nchi, Nchi, Nk] complex128
+    @return chis: Interacting spin susceptibility [Nchi, Nchi, Nk] complex128
+    @return chic: Interacting charge susceptibility [Nchi, Nchi, Nk] complex128
     """
     Nk, Nw, Nchi = len(chi[0, 0, 0]), len(chi[0, 0]), len(Smat)
     chis = np.zeros((Nchi, Nchi, Nk), dtype=np.complex128)
@@ -610,7 +597,6 @@ def get_chi_irr_sc(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray,
                    qshift: np.ndarray, ol: np.ndarray, wlist: np.ndarray,
                    idelta: float, temp: float, sw_spsym: bool) -> np.ndarray:
     """
-    @fn get_chi_irr_sc
     @brief Compute the irreducible susceptibility in the superconducting state using BdG eigenstates.
     @param      uni: BdG eigenvector matrices [Nk, 2*Norb, 2*Norb] complex128
     @param      eig: BdG eigenvalues [Nk, 2*Norb] float64
@@ -641,7 +627,6 @@ def get_chi_irr_sc(uni: np.ndarray, eig: np.ndarray, ffermi: np.ndarray,
 
 def get_eig_or_tr_chi(chi: np.ndarray, invk: np.ndarray, sw_eig: bool) -> np.ndarray:
     """
-    @fn get_eig_or_tr_chi
     @brief Compute either the leading eigenvalue or the trace of the susceptibility on the full k-grid.
     @param    chi: Susceptibility [Nchi, Nchi, Nk] complex128
     @param   invk: Inverse k-point mapping [Nkall] int64

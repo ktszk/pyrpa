@@ -168,10 +168,9 @@ _loader._lib.get_parity_prop.restype = None
 
 def omp_params() -> tuple[int, bool]:
     """
-    @fn omp_params
     @brief Query the underlying Fortran library for OpenMP configuration.
-    @retval num_threads: Maximum number of OpenMP threads the Fortran code will use
-    @retval  valid_flag: True if OpenMP was initialized correctly
+    @return num_threads: Maximum number of OpenMP threads the Fortran code will use
+    @return  valid_flag: True if OpenMP was initialized correctly
     """
     omp_num = ctypes.c_int64()
     omp_check = ctypes.c_bool()
@@ -182,14 +181,13 @@ def omp_params() -> tuple[int, bool]:
 def gen_ham(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
             Ovl_r: np.ndarray | None = None) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     """
-    @fn gen_ham
     @brief Compute the k-space Hamiltonian by Fourier-transforming real-space hopping blocks.
     @param  klist: k-point list in fractional coordinates [Nk, 3]
     @param  ham_r: Real-space Hamiltonian blocks [Nr, Norb, Norb] complex128
     @param   rvec: Real-space displacement vectors [Nr, 3]
     @param  Ovl_r: Optional overlap matrix blocks [Nr, Norb, Norb]; if given, also returns Ovlk
-    @retval  hamk: k-space Hamiltonian [Nk, Norb, Norb] complex128
-    @retval  Ovlk: k-space overlap matrix [Nk, Norb, Norb] complex128 (only when Ovl_r is given)
+    @return  hamk: k-space Hamiltonian [Nk, Norb, Norb] complex128
+    @return  Ovlk: k-space overlap matrix [Nk, Norb, Norb] complex128 (only when Ovl_r is given)
     """
     Nk, Nr = len(klist), len(rvec)
     assert ham_r.ndim == 3, "ham_r must be a 3‑D array"
@@ -209,13 +207,12 @@ def gen_ham(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
 def get_eig(hamk: np.ndarray, Ovlk: np.ndarray | None = None,
             sw: bool = True) -> tuple[np.ndarray, np.ndarray] | np.ndarray:
     """
-    @fn get_eig
     @brief Diagonalize the k-space Hamiltonian, optionally solving the generalized eigenvalue problem.
     @param  hamk: k-space Hamiltonian [Nk, Norb, Norb] complex128
     @param  Ovlk: Overlap matrices [Nk, Norb, Norb] complex128; if given, solves generalized EVP
     @param    sw: If True, return both eigenvalues and eigenvectors; if False, return only eigenvalues
-    @retval  eig: Eigenvalues [Nk, Norb] float64
-    @retval  uni: Eigenvectors [Nk, Norb, Norb] complex128 (only returned when sw=True)
+    @return  eig: Eigenvalues [Nk, Norb] float64
+    @return  uni: Eigenvectors [Nk, Norb, Norb] complex128 (only returned when sw=True)
     """
     Nk = len(hamk)
     Norb = hamk.shape[1]
@@ -235,7 +232,6 @@ def get_eig(hamk: np.ndarray, Ovlk: np.ndarray | None = None,
 
 def get_ffermi(eig: np.ndarray, mu: float, temp: float) -> np.ndarray:
     """
-    @fn get_ffermi
     @brief Compute Fermi-Dirac occupation numbers from eigenvalues.
     @param    eig: Eigenvalues [Nk, Norb] float64
     @param     mu: Chemical potential in eV
@@ -252,7 +248,6 @@ def get_ffermi(eig: np.ndarray, mu: float, temp: float) -> np.ndarray:
 
 def get_vlm0(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray) -> np.ndarray:
     """
-    @fn get_vlm0
     @brief Compute unrotated band velocity matrices in orbital basis from real-space Hamiltonian.
     @param  klist: k-point list [Nk, 3] float64
     @param  ham_r: Real-space Hamiltonian blocks [Nr, Norb, Norb] complex128
@@ -270,7 +265,6 @@ def get_vlm0(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray) -> np.ndarr
 def get_vk(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray,
            sk0: np.ndarray | None = None, eig: np.ndarray | None = None) -> np.ndarray:
     """
-    @fn get_vk
     @brief Transform orbital-basis velocity matrices to band-basis velocity expectation values.
     @param   vk0: Unrotated velocity matrices dH/dk [Nk, Norb, Norb, 3] complex128
     @param  mrot: Rotation matrix (lattice-to-Cartesian) [3, 3] float64
@@ -296,7 +290,6 @@ def get_vnm(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray,
             sk0: np.ndarray | None = None, eig: np.ndarray | None = None,
             Ovlk: np.ndarray | None = None) -> np.ndarray:
     """
-    @fn get_vnm
     @brief Compute inter-band velocity matrix elements v_{nm}(k) for all band pairs and Cartesian directions.
     @param   vk0: Unrotated velocity matrices dH/dk [Nk, Norb, Norb, 3] complex128
     @param  mrot: Rotation matrix (lattice-to-Cartesian) [3, 3] float64
@@ -334,7 +327,6 @@ def get_vnmk(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
              mrot: np.ndarray, uni: np.ndarray, S_r: np.ndarray | None = None,
              eig: np.ndarray | None = None) -> np.ndarray:
     """
-    @fn get_vnmk
     @brief Convenience wrapper: compute inter-band velocity matrix elements by composing get_vlm0 and get_vnm.
     @param  klist: k-point list [Nk, 3] float64
     @param  ham_r: Real-space Hamiltonian blocks [Nr, Norb, Norb] complex128
@@ -356,7 +348,6 @@ def get_veloc(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
               mrot: np.ndarray, uni: np.ndarray, S_r: np.ndarray | None = None,
               eig: np.ndarray | None = None) -> np.ndarray:
     """
-    @fn get_veloc
     @brief Convenience wrapper: compute band-diagonal velocity expectation values by composing get_vlm0 and get_vk.
     @param  klist: k-point list [Nk, 3] float64
     @param  ham_r: Real-space Hamiltonian blocks [Nr, Norb, Norb] complex128
@@ -374,7 +365,6 @@ def get_veloc(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
 
 def get_imass0(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray) -> np.ndarray:
     """
-    @fn get_imass0
     @brief Compute the unrotated inverse effective mass tensor in orbital basis.
     @param   klist: k-point list [Nk, 3] float64
     @param   ham_r: Real-space Hamiltonian blocks [Nr, Norb, Norb] complex128
@@ -393,7 +383,6 @@ def get_imassk(imass0: np.ndarray, mrot: np.ndarray, uni: np.ndarray,
                vk0: np.ndarray, eig: np.ndarray,
                smass0: np.ndarray | None = None, sk0: np.ndarray | None = None) -> np.ndarray:
     """
-    @fn get_imassk
     @brief Rotate the inverse effective mass tensor from orbital basis into band basis,
            including the interband (2nd-order perturbation) term
            2 sum_{m!=n} Re[H~^a_nm H~^b_mn]/(eps_n-eps_m), which needs dH/dk and eig.
@@ -423,7 +412,6 @@ def get_mass(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray, mrot: np.nd
              uni: np.ndarray, sw_imass: bool = False, S_r: np.ndarray | None = None,
              eig: np.ndarray | None = None) -> np.ndarray:
     """
-    @fn get_mass
     @brief Compute the effective mass tensor or its inverse for all bands at each k-point.
     @param    klist: k-point list [Nk, 3] float64
     @param    ham_r: Real-space Hamiltonian blocks [Nr, Norb, Norb] complex128
@@ -454,7 +442,6 @@ def get_mass(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray, mrot: np.nd
 
 def get_qshift(klist: np.ndarray, qpoint: np.ndarray) -> np.ndarray:
     """
-    @fn get_qshift
     @brief For each k-point, find the index of k+q within the k-mesh (forward momentum shift).
     @param   klist: k-point list [Nk, 3] float64
     @param  qpoint: Momentum transfer vector [3] float64
@@ -468,7 +455,6 @@ def get_qshift(klist: np.ndarray, qpoint: np.ndarray) -> np.ndarray:
 
 def get_iqshift(klist: np.ndarray, qpoint: np.ndarray) -> np.ndarray:
     """
-    @fn get_iqshift
     @brief For each k-point, find the index of k-q within the k-mesh (backward momentum shift).
     @param   klist: k-point list [Nk, 3] float64
     @param  qpoint: Momentum transfer vector [3] float64
@@ -482,14 +468,13 @@ def get_iqshift(klist: np.ndarray, qpoint: np.ndarray) -> np.ndarray:
 
 def gen_irr_k_TRS(Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    @fn gen_irr_k_TRS
     @brief Generate the irreducible k-point list for a time-reversal symmetric lattice.
     @param     Nx: Number of k-points along kx
     @param     Ny: Number of k-points along ky
     @param     Nz: Number of k-points along kz
-    @retval  klist: Irreducible k-point coordinates [Nk, 3] float64
-    @retval   kmap: Full k-grid to irreducible mapping [Nkall, 3] int64
-    @retval invk_ft_list: Inverse k-point list for Fortran FFT routines [Nkall, 3] int64
+    @return  klist: Irreducible k-point coordinates [Nk, 3] float64
+    @return   kmap: Full k-grid to irreducible mapping [Nkall, 3] int64
+    @return invk_ft_list: Inverse k-point list for Fortran FFT routines [Nkall, 3] int64
     """
     Nkall = Nx * Ny * Nz
     if Nkall % 2 == 0:
@@ -511,7 +496,6 @@ def gen_irr_k_TRS(Nx: int, Ny: int, Nz: int) -> tuple[np.ndarray, np.ndarray, np
 
 def gen_kpoint_weight(invk: np.ndarray, Nk: int) -> np.ndarray:
     """
-    @fn gen_kpoint_weight
     @brief Compute k-point weights for the irreducible BZ by counting degeneracy from the full k-grid mapping.
     @param  invk: Inverse k-point mapping [Nkall] int64
     @param    Nk: Number of irreducible k-points
@@ -525,7 +509,6 @@ def gen_kpoint_weight(invk: np.ndarray, Nk: int) -> np.ndarray:
 
 def mkBdGhamk(hamk: np.ndarray, delta: np.ndarray) -> np.ndarray:
     """
-    @fn mkBdGhamk
     @brief Build the Bogoliubov-de Gennes Hamiltonian from the normal-state Hamiltonian and gap function.
     @param   hamk: Normal-state k-space Hamiltonian [Nk, Norb, Norb] complex128
     @param  delta: Anomalous (pairing) potential [Nk, Norb, Norb] complex128
@@ -540,7 +523,6 @@ def mkBdGhamk(hamk: np.ndarray, delta: np.ndarray) -> np.ndarray:
 
 def get_plist(rvec: np.ndarray, ham_r: np.ndarray) -> np.ndarray:
     """
-    @fn get_plist
     @brief Determine the parity eigenvalues of each orbital from the Hamiltonian's inversion symmetry properties.
     @param  rvec: Real-space displacement vectors [Nr, 3] float64
     @param ham_r: Real-space Hamiltonian blocks [Nr, Norb, Norb] complex128
