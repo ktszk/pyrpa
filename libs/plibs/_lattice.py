@@ -11,7 +11,8 @@ import scipy.linalg as sclin
 # re-exporting numpy, scipy, ctypes and the sibling packages imported above.
 __all__ = [
     'RY_TO_EV', 'import_hoppings', 'import_MLO_hoppings', 'read_HamRsMLO', 'get_bvec', 'gen_rlist',
-    'gen_klist_with_kmap', 'gen_klist', 'mk_klist', 'mk_qlist', 'get_ptv', 'get_symm_line', 'BZedge'
+    'gen_klist_with_kmap', 'gen_klist', 'mk_klist', 'mk_qlist', 'get_ptv', 'get_symm_line', 'BZedge',
+    'bz_faces', 'bz_face_planes', 'fold_to_bz'
 ]
 
 RY_TO_EV = 13.6          # Rydberg -> eV conversion for the MLO (ecalj) importers
@@ -475,43 +476,169 @@ def BZedge(bvec: np.ndarray, ax: object | None = None) -> np.ndarray:
     @param   ax: matplotlib Axes3D; uses plt.gca() if None
     @return  the BZ corner points [Nv,3] in Cartesian k, for setting the axis ranges
     """
-    import itertools
     import matplotlib.pyplot as plt
-    import scipy.spatial as scspatial
 
     if ax is None:
         ax = plt.gca()
 
-    # Generate reciprocal lattice points in Cartesian coordinates
-    idx = range(-2, 3)
-    pts = np.array([i*bvec[0] + j*bvec[1] + k*bvec[2]
-                    for i, j, k in itertools.product(idx, repeat=3)])
+    corners = []
+    for face in bz_faces(bvec):
+        poly = np.vstack([face, face[0]])
+        ax.plot(poly[:, 0], poly[:, 1], poly[:, 2], color='black', lw=0.5)
+        corners.append(face)
+    return np.vstack(corners) if corners else np.zeros((0, 3))
 
+
+def _order_bz_polygon(verts: np.ndarray) -> np.ndarray:
+    """
+    @brief Sort the vertices of a planar polygon by azimuth around its centre, so that
+           consecutive vertices are the edges of the polygon.
+    @param verts: polygon vertices [Nv,3] in arbitrary order
+    @return     : the same vertices, ordered along the polygon
+    """
+    c = verts.mean(axis=0)
+    u = verts[0] - c
+    u /= np.linalg.norm(u)
+    v = None
+    for i in range(1, len(verts)):
+        n = np.cross(u, verts[i] - c)
+        if np.linalg.norm(n) > 1e-10:
+            v = np.cross(n / np.linalg.norm(n), u)
+            break
+    if v is None:
+        return verts
+    angles = np.arctan2([(p-c).dot(v) for p in verts], [(p-c).dot(u) for p in verts])
+    return verts[np.argsort(angles)]
+
+
+def bz_faces(bvec: np.ndarray, nshell: int = 2) -> list:
+    """
+    @brief Faces of the 1st Brillouin zone, i.e. of the Wigner-Seitz cell of the
+           reciprocal lattice, from the Voronoi cell of the origin.
+    @param   bvec: reciprocal lattice vectors as rows, shape (3,3), in Angstrom^-1
+    @param nshell: shell of reciprocal lattice points used for the Voronoi construction
+    @return      : list of faces, each an ordered vertex array [Nv,3] in Cartesian k
+    """
+    import itertools
+    import scipy.spatial as scspatial
+
+    bv = np.asarray(bvec, dtype=float)
+    idx = range(-nshell, nshell+1)
+    pts = np.array([i*bv[0] + j*bv[1] + k*bv[2] for i, j, k in itertools.product(idx, repeat=3)])
     vor = scspatial.Voronoi(pts)
     origin_idx = np.argmin(np.linalg.norm(pts, axis=1))
-
-    def _order_polygon(verts: np.ndarray) -> np.ndarray:
-        c = verts.mean(axis=0)
-        u = verts[0] - c
-        u /= np.linalg.norm(u)
-        v = None
-        for i in range(1, len(verts)):
-            n = np.cross(u, verts[i] - c)
-            if np.linalg.norm(n) > 1e-10:
-                v = np.cross(n / np.linalg.norm(n), u)
-                break
-        if v is None:
-            return verts
-        angles = np.arctan2([(p-c).dot(v) for p in verts], [(p-c).dot(u) for p in verts])
-        return verts[np.argsort(angles)]
-
-    corners = []
+    faces = []
     for ridge_pts, ridge_verts in zip(vor.ridge_points, vor.ridge_vertices):
         if origin_idx not in ridge_pts or -1 in ridge_verts:
             continue
-        verts_cart = vor.vertices[ridge_verts]
-        ordered = _order_polygon(verts_cart)
-        poly = np.vstack([ordered, ordered[0]])
-        ax.plot(poly[:, 0], poly[:, 1], poly[:, 2], color='black', lw=0.5)
-        corners.append(ordered)
-    return np.vstack(corners) if corners else np.zeros((0, 3))
+        faces.append(_order_bz_polygon(vor.vertices[ridge_verts]))
+    return faces
+
+
+def bz_face_planes(bvec: np.ndarray, nshell: int = 2) -> tuple[np.ndarray, np.ndarray]:
+    """
+    @brief Half-space representation of the 1st BZ: k is inside iff k.n_i <= d_i for every
+           face i. Face i is the perpendicular bisector of a reciprocal lattice vector G_i,
+           so n_i = G_i/|G_i| and d_i = |G_i|/2; G is a face iff its own midpoint G/2 is not
+           already cut off by the bisector of another G'.
+    @param   bvec: reciprocal lattice vectors as rows, shape (3,3), in Angstrom^-1
+    @param nshell: shell of reciprocal lattice vectors scanned for zone faces
+    @return  nvec: outward unit normals of the zone faces [Nface,3]
+    @return  dist: distance of each face from Gamma [Nface]
+    """
+    import itertools
+
+    bv = np.asarray(bvec, dtype=float)
+    gv = np.array([g for g in itertools.product(range(-nshell, nshell+1), repeat=3)
+                   if g != (0, 0, 0)], dtype=float).dot(bv)
+    half = .5*(gv*gv).sum(axis=1)                        # |G|^2/2 = G.(G/2)
+    tol = 1.e-10*half.max()
+    proj = (.5*gv).dot(gv.T)
+    np.fill_diagonal(proj, -np.inf)                      # G.(G/2) = |G|^2/2 is the plane itself
+    # strict inequality: a bisector that only touches the cell along an edge or at a corner
+    # (G=(1,1,0) for a cubic lattice, say) cuts nothing off and is not a face
+    isface = (proj < half[None, :]-tol).all(axis=1)
+    faces = gv[isface]
+    dist = .5*np.linalg.norm(faces, axis=1)
+    return faces/(2.*dist[:, None]), dist
+
+
+def _clip_half_space(poly: np.ndarray, nvec: np.ndarray, dist: float, eps: float) -> np.ndarray | None:
+    """
+    @brief Sutherland-Hodgman clip of a convex polygon by the half space k.n <= d.
+    @param  poly: polygon vertices [Nv,3], ordered along the polygon
+    @param  nvec: unit normal of the clipping plane
+    @param  dist: distance of the clipping plane from the origin
+    @param   eps: tolerance on the signed distance
+    @return     : the clipped polygon, or None if nothing (or only a sliver) is left
+    """
+    s = poly.dot(nvec)-dist
+    if (s <= eps).all():
+        return poly
+    if (s > eps).all():
+        return None
+    out = []
+    for i in range(len(poly)):
+        si, sj = s[i], s[(i+1) % len(poly)]
+        if si <= eps:
+            out.append(poly[i])
+        if (si < -eps and sj > eps) or (si > eps and sj < -eps):   # the edge crosses the plane
+            out.append(poly[i] + si/(si-sj)*(poly[(i+1) % len(poly)]-poly[i]))
+    return np.array(out) if len(out) >= 3 else None
+
+
+def fold_to_bz(polys: np.ndarray, bvec: np.ndarray, nshell: int = 2) -> list:
+    """
+    @brief Fold triangles sampled on the primitive reciprocal cell -- the parallelepiped
+           k_frac in [-1/2,1/2]^3 -- into the 1st BZ, the Wigner-Seitz cell drawn by BZedge.
+           For a primitive (P) lattice the two cells coincide and the triangles come back
+           untouched, but for a centred lattice (body/face/base centred, and any skewed
+           cell) they do not: the part of the sheet outside the zone has to be translated by
+           a reciprocal lattice vector and cut at the zone faces, otherwise the Fermi surface
+           sticks out of the BZ frame.
+           The translates of the parallelepiped tile k-space, so every interior point of the
+           zone is covered exactly once and no part of the sheet is duplicated or lost.
+    @param  polys: triangles [Ntri,3,3] in Cartesian k [Angstrom^-1]
+    @param   bvec: reciprocal lattice vectors as rows, shape (3,3), in Angstrom^-1
+    @param nshell: shell of reciprocal lattice vectors scanned for zone faces
+    @return      : list of convex polygons [Nv,3] (Nv>=3), all inside the zone
+    """
+    import itertools
+
+    tris = np.asarray(polys, dtype=float)
+    if tris.size == 0:
+        return list(tris)
+    bv = np.asarray(bvec, dtype=float)
+    nvec, dist = bz_face_planes(bv, nshell)
+    eps = 1.e-9*dist.max()
+    if (tris.dot(nvec.T)-dist <= eps).all():
+        # Nothing sticks out, and then nothing is waiting outside to be folded in either:
+        # what would fill the part of the zone the parallelepiped misses is the translate
+        # of the sheet in the part of the parallelepiped outside the zone, which is empty.
+        return list(tris)
+    # a point at fractional k is covered by the translate G = rint(k_frac), and the
+    # per-component extremes of the (convex) zone are reached at its corners
+    corners = np.vstack(bz_faces(bv, nshell))
+    nmax = max(1, int(np.ceil(np.abs(corners.dot(sclin.inv(bv))).max())))
+    tlo, thi = tris.reshape(-1, 3).min(axis=0), tris.reshape(-1, 3).max(axis=0)
+    zlo, zhi = corners.min(axis=0), corners.max(axis=0)
+    out = []
+    for gfrac in itertools.product(range(-nmax, nmax+1), repeat=3):
+        g = np.array(gfrac, dtype=float).dot(bv)
+        if (tlo+g > zhi+eps).any() or (thi+g < zlo-eps).any():   # this image misses the zone
+            continue
+        s = (tris+g).dot(nvec.T)-dist                  # signed distances [Ntri,3,Nface]
+        keep = ~(s > eps).all(axis=1).any(axis=1)      # drop what a single face cuts off entirely
+        if not keep.any():
+            continue
+        full = (s <= eps).all(axis=(1, 2))
+        out.extend(tris[full]+g)
+        for tri in tris[keep & ~full]+g:               # only the triangles on the zone faces
+            poly = tri
+            for n, d in zip(nvec, dist):
+                poly = _clip_half_space(poly, n, d, eps)
+                if poly is None:
+                    break
+            if poly is not None:
+                out.append(poly)
+    return out

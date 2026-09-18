@@ -1213,7 +1213,7 @@ def find_extremal_kz(kz_arr: np.ndarray, S_arr: np.ndarray, band_idx: int,
 
 def gen_3d_surf_points(mesh: int, rvec: np.ndarray, ham_r: np.ndarray,
                        S_r: np.ndarray, mu: float, kscale: float = 1.0,
-                       bvec: np.ndarray | None = None) -> tuple[list, list, list]:
+                       bvec: np.ndarray | None = None, sw_fold: bool = True) -> tuple[list, list, list]:
     """
     @brief This function obtains 3d fermi wave-numbers
     @param   mesh: k-mesh
@@ -1225,8 +1225,15 @@ def gen_3d_surf_points(mesh: int, rvec: np.ndarray, ham_r: np.ndarray,
     @param   bvec: reciprocal lattice vectors as rows [Angstrom^-1]. If given, the
                    surface vertices are returned in Cartesian k (same frame as BZedge);
                    otherwise they stay in 2pi*fractional units of the reciprocal cell.
-    @return fspolys: triangles of each Fermi sheet (Cartesian if bvec is given)
-    @return fscenters: triangle centers in FRACTIONAL coordinates (always), because
+    @param sw_fold: fold the sheets into the Wigner-Seitz cell (the 1st BZ that BZedge
+                   draws). Marching cubes runs on the parallelepiped k_frac in
+                   [-1/2,1/2]^3, which IS the 1st BZ only for a primitive lattice; on a
+                   centred (bcc/fcc/base-centred) or skewed cell the sheet would otherwise
+                   stick out of the zone. Needs bvec, and only applies at kscale=1
+                   (kscale != 1 is a deliberate request for another k-window).
+    @return fspolys: polygons of each Fermi sheet (Cartesian if bvec is given; triangles
+                   unless folding had to cut them at the zone faces)
+    @return fscenters: polygon centers in FRACTIONAL coordinates (always), because
                    they are fed back to get_eigs/get_colors, which take fractional k
     @return fsband: band index of each sheet
     """
@@ -1247,9 +1254,21 @@ def gen_3d_surf_points(mesh: int, rvec: np.ndarray, ham_r: np.ndarray,
             verts = verts-ks*np.pi
             # k_frac in [-ks/2, ks/2]; klist fed to get_eigs uses the same fractional units
             kfrac = verts*.5/np.pi
-            # Cartesian k = sum_i k_frac_i * b_i, so that the sheet and BZedge(bvec) share a frame
-            fspolys.append((kfrac.dot(bvec) if bvec is not None else verts)[faces])
-            fscenters.append(kfrac[faces].mean(axis=1))
+            if bvec is None:
+                fspolys.append(verts[faces])
+                fscenters.append(kfrac[faces].mean(axis=1))
+            else:
+                # Cartesian k = sum_i k_frac_i * b_i, so that the sheet and BZedge(bvec) share a frame
+                tris = kfrac.dot(bvec)[faces]
+                if sw_fold and np.allclose(ks, 1.):
+                    tris = _lattice.fold_to_bz(tris, bvec)
+                    # H(k+G) = H(k) exactly in the Wannier convention, so the colors do not
+                    # care which image a polygon was folded to -- take the folded center so
+                    # that the scatter overlay lands on the sheet that is actually drawn
+                    fscenters.append(np.array([p.mean(axis=0) for p in tris]).dot(sclin.inv(bvec)))
+                else:
+                    fscenters.append(kfrac[faces].mean(axis=1))
+                fspolys.append(tris)
             fsband.append(i)
     return fspolys, fscenters, fsband
 

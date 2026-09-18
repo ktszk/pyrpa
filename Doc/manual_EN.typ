@@ -177,7 +177,11 @@ Draws the Fermi surface in the $k_x$-$k_y$ plane at a specified $k_z$ slice (def
 
 == option=3: 3D Fermi Surface (`FERMI_3D`)
 
-Renders the three-dimensional Fermi surface as a polygon mesh using the Marching Cubes algorithm. The display scale along each axis can be adjusted with `kscale`. With `color_option=ColorMode.GAP` (3), the surface is colored by $"Re"[phi(bold(k))]$, the *same* pairing form factor that drives the Eilenberger calculations (`gap_sym`/`delta0`, or `eil_gap_orbital`/`eil_gap_file` if set) — a quick way to check the actual gap (sign, nodes, anisotropy) on the real 3D Wannier Fermi surface (all sheets/$k_z$, not just the fixed-$k_z$ cut used by the vortex/surface solvers).
+Renders the three-dimensional Fermi surface as a polygon mesh using the Marching Cubes algorithm. The display scale along each axis can be adjusted with `kscale`.
+
+The isosurface is extracted on the parallelepiped $k_("frac") in [-1\/2, 1\/2]^3$, i.e. on the *primitive cell* of the reciprocal lattice. For a primitive lattice that cell is the first Brillouin zone (the Wigner-Seitz cell drawn as the BZ frame), but for a centred (body/face/base) or skewed lattice it is not, and the Fermi surface would stick out of the zone. At `kscale=1` (the default) the part of the sheet outside the zone is therefore translated by a reciprocal lattice vector and cut at the zone faces, folding it back into the first BZ (the translates of the parallelepiped tile $bold(k)$-space, so no area is duplicated or lost). With `kscale` set to anything else you are deliberately looking at another $bold(k)$-window, and the sheet is left where the sampling put it.
+
+With `color_option=ColorMode.GAP` (3), the surface is colored by $"Re"[phi(bold(k))]$, the *same* pairing form factor that drives the Eilenberger calculations (`gap_sym`/`delta0`, or `eil_gap_orbital`/`eil_gap_file` if set) — a quick way to check the actual gap (sign, nodes, anisotropy) on the real 3D Wannier Fermi surface (all sheets/$k_z$, not just the fixed-$k_z$ cut used by the vortex/surface solvers).
 
 == option=4: Spectral Function (`SPECTRUM`)
 
@@ -580,7 +584,7 @@ Two caveats remain. The shell of a chiral pair is shared between its two partner
 
 - `kz` (float, in reduced coordinates): The $k_z$ value for the 2D Fermi surface plot (option=2). Ranges from 0 to 0.5 ($k_z = 0$: $Gamma$-plane, $k_z = 0.5$: zone boundary plane).
 
-- `kscale` (list or float): Display scale for each axis in the 3D Fermi surface plot (option=3). Example: `kscale=[1.0, 1.0, 0.5]` compresses the $k_z$ direction by half.
+- `kscale` (list or float): Display scale for each axis in the 3D Fermi surface plot (option=3). Example: `kscale=[1.0, 1.0, 0.5]` compresses the $k_z$ direction by half. The Fermi surface is folded into the first BZ (the Wigner-Seitz cell) only at the default `[1.0, 1.0, 1.0]`.
 
 - `k_sets` (list of lists): Coordinates of symmetry line endpoints in reduced units (0 to 1). Define this to specify a custom symmetry path instead of the auto-generated one. Example: `k_sets=[[0,0,0],[0.5,0,0],[0.5,0.5,0]]`
 

@@ -21,8 +21,8 @@ brav: choose primitive translation vector S,FC,BC etc
 else: monoclinic
 """
 
-fname, ftype, brav, sw_soc = 'inputs/Cu', 4, 6, False        # ecalj job_mlo binaries (abc=[3.597]*3, fill=5.5)
-
+#fname, ftype, brav, sw_soc = 'inputs/Cu', 4, 6, False        # ecalj job_mlo binaries (abc=[3.597]*3, fill=5.5)
+fname, ftype, brav, sw_soc = 'inputs/00010.input', 1, 2, False        # ecalj job_mlo binaries (abc=[3.597]*3, fill=5.5)
 sw_dec_axis = False
 
 
@@ -122,7 +122,7 @@ MODES_NEED_PARITY   = frozenset({M.FLEX, M.LIN_ELIASHBERG, M.NONLIN_ELIASHBERG, 
 del M
 
 # option=CalcMode.CHIS_QPOINT_SC
-option = CalcMode.CONDUCTIVITY_PT  # calculation mode to run (see the CalcMode enum above; 0-23 RPA/FLEX/transport, 24-26 Eilenberger superconductivity, 27 NMR in the SC state)
+option = CalcMode.FERMI_3D  # calculation mode to run (see the CalcMode enum above; 0-23 RPA/FLEX/transport, 24-26 Eilenberger superconductivity, 27 NMR in the SC state)
 color_option = ColorMode.ORBITAL  # band/FS coloring (option 0,2,3): MONO=black, ORBITAL=olist weights->RGB, VELOCITY=|v(k)|, GAP=Re[phi(k)] from gap_sym/delta0/eil_gap_orbital/eil_gap_file (option 3 only) -- check the Eilenberger pairing gap on the real 3D FS
 
 # Nx,Ny,Nz,Nw=256,256,4,200 #k and energy(or matsubara freq.) mesh size
@@ -132,8 +132,8 @@ kscale = [1.0, 1.0, 1.0]  # per-axis display scale for the 3D Fermi-surface plot
 kz = 0.0  # reduced kz of the 2D Fermi-surface cut (option 2): 0=Gamma plane, 0.5=zone-boundary plane
 # RotMat=[[0,0,1],[0,1,0],[1,0,0]]
 
-# abc=[3.96*0.70711,3.96*0.70711,13.02*.5]
-abc = [3.597, 3.597, 3.597]  # lattice constants a,b,c [Angstrom] (group velocities & symmetry-path lengths)
+abc=[3.96,3.96,13.02]
+#abc = [3.597, 3.597, 3.597]  # lattice constants a,b,c [Angstrom] (group velocities & symmetry-path lengths)
 # alpha_beta_gamma=[90.,90.,90]  #lattice angles alpha,beta,gamma [deg] (default 90,90,90 if undefined)
 # temp=2.0e-2 #2.59e-2   #directly set k_B*T [eV]; if defined it overrides tempK
 tempK = 200  # Kelvin        #temperature [K] (converted internally to temp=k_B*tempK [eV])
@@ -582,6 +582,26 @@ def plot_FS(fscolors: list, klist: np.ndarray, color_option: int) -> None:
     plt.show()
 
 
+def poly_vertices(polys: list) -> np.ndarray:
+    """
+    @brief Collect every vertex of a (possibly per-band nested) polygon collection.
+           The polygons are ragged once the sheets are folded into the BZ -- clipping a
+           triangle at a zone face leaves 3 to 6 vertices -- so they cannot simply be
+           cast to one array.
+    @param polys: polygons, or lists of polygons, with vertices in the last axis
+    @return     : all vertices as one [N,3] array
+    """
+    out = []
+    stack = list(polys)
+    while stack:
+        p = stack.pop()
+        if isinstance(p, np.ndarray) and p.ndim >= 2 and p.shape[-1] == 3:
+            out.append(p.reshape(-1, 3))
+        else:
+            stack.extend(list(p))
+    return np.vstack(out) if out else np.zeros((0, 3))
+
+
 def plot_3d_surf(fspolys: list, fscenters: np.ndarray, fscolors: list, surface_opt: int, kscale: float,
                  bvec: np.ndarray) -> None:
     import mpl_toolkits.mplot3d.axes3d as axes3d
@@ -619,9 +639,8 @@ def plot_3d_surf(fspolys: list, fscenters: np.ndarray, fscolors: list, surface_o
     bzv = plibs.BZedge(bvec, ax)
     # Sheets and BZ edges are both Cartesian k [A^-1] now, so one range fits both.
     # (kscale>1 samples beyond the 1st BZ, hence taking the max of the two extents.)
-    kmax = np.maximum(np.abs(bzv).max(axis=0),
-                      np.abs(np.concatenate([np.asarray(p).reshape(-1, 3)
-                                             for p in fspolys])).max(axis=0)) if len(fspolys) \
+    verts = poly_vertices(fspolys)
+    kmax = np.maximum(np.abs(bzv).max(axis=0), np.abs(verts).max(axis=0)) if len(verts) \
         else np.abs(bzv).max(axis=0)
     ax.set_xlim(-kmax[0], kmax[0])
     ax.set_ylim(-kmax[1], kmax[1])
