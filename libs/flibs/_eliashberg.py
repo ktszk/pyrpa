@@ -6,7 +6,8 @@ import libs.flibs._loader as _loader
 # re-exporting numpy, scipy, ctypes and the sibling packages imported above.
 __all__ = [
     'linearized_eliashberg', 'linearized_eliashberg_soc', 'nonlinear_eliashberg', 'conv_delta_orb_to_band',
-    'conv_delta_orb_to_band_soc', 'gen_Fk', 'gen_Fk_soc', 'get_initial_delta', 'get_band_to_orb_delta', 'remap_gap'
+    'conv_delta_orb_to_band_soc', 'gen_Fk', 'gen_Fk_soc', 'get_initial_delta', 'get_band_to_orb_delta', 'remap_gap',
+    'get_vdelta_nosym', 'linearized_eliashberg_nosym', 'conv_delta_orb_to_band_nosym'
 ]
 
 # --- ctypes signatures: set once at import.
@@ -60,6 +61,42 @@ _loader._lib.lin_eliash_soc.argtypes = [
     ctypes.POINTER(ctypes.c_double)                             # lambda_out (out)
 ]
 _loader._lib.lin_eliash_soc.restype = None
+_loader._lib.get_vdelta_nosym.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi (inout: chi0 -> V_Delta)
+    np.ctypeslib.ndpointer(dtype=np.float64),     # Vmat
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nkall, Nw
+    ctypes.POINTER(ctypes.c_int64)                              # Nchi
+]
+_loader._lib.get_vdelta_nosym.restype = None
+_loader._lib.lin_eliash_nosym.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # delta (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # Vdelta (in)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # Gk
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # init_delta
+    np.ctypeslib.ndpointer(dtype=np.float64),     # Vmat
+    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
+    np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
+    np.ctypeslib.ndpointer(dtype=np.int64),       # iQ
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),         # temp, eps
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nkall, Nw
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nchi, Norb
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nx, Ny
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nz, itemax
+    ctypes.POINTER(ctypes.c_int64),                             # arnoldi_m
+    ctypes.POINTER(ctypes.c_double)                             # lambda_out (out)
+]
+_loader._lib.lin_eliash_nosym.restype = None
+_loader._lib.conv_delta_orb_to_band_nosym.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # deltab (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # delta
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
+    np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
+    np.ctypeslib.ndpointer(dtype=np.int64),       # iQ
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Norb, Nkall
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, Nx
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Ny, Nz
+]
+_loader._lib.conv_delta_orb_to_band_nosym.restype = None
 _loader._lib.eliashberg.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.complex128),              # delta (inout)
     np.ctypeslib.ndpointer(dtype=np.complex128),              # sigmak (out/inout)
@@ -102,7 +139,8 @@ _loader._lib.conv_delta_orb_to_band_soc.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.int64),       # invs
     np.ctypeslib.ndpointer(dtype=np.int64),       # slist
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Norb, Nkall
-    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nk, Nw
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nk, Nw
+    ctypes.POINTER(ctypes.c_int64)                              # gap_sym
 ]
 _loader._lib.conv_delta_orb_to_band_soc.restype = None
 _loader._lib.mkfk_trs_nsoc_.argtypes = [
@@ -245,6 +283,76 @@ def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, 
     return delta, lambda_out.value
 
 
+def get_vdelta_nosym(chi: np.ndarray, Vmat: np.ndarray) -> np.ndarray:
+    """
+    @brief Turn chi0 (from get_chi0_nosym) into the pairing interaction V_Delta = -V + V chi_RPA IN PLACE.
+    V_Delta does not depend on the pair momentum Q, so one call serves every Q of an FFLO scan.
+    @param   chi: Irreducible susceptibility [Nchi, Nchi, Nw, Nkall] complex128 (overwritten)
+    @param  Vmat: SOC-type interaction matrix [Nchi, Nchi] float64 (gen_Vmatrix / gen_Vmatrix_orb)
+    @return  chi: The same array, now holding V_Delta
+    """
+    Nchi, Nw, Nkall = len(chi), len(chi[0, 0]), len(chi[0, 0, 0])
+    _loader._lib.get_vdelta_nosym(chi, Vmat, _loader.i64(Nkall), _loader.i64(Nw), _loader.i64(Nchi))
+    return chi
+
+
+def linearized_eliashberg_nosym(Vdelta: np.ndarray, Gk: np.ndarray, init_delta: np.ndarray, Vmat: np.ndarray,
+                                olist: np.ndarray, kmap: np.ndarray, Nx: int, Ny: int, Nz: int, temp: float,
+                                iQ: tuple | np.ndarray = (0, 0, 0), eps: float = 1.0e-5, itemax: int = 300,
+                                arnoldi_m: int = 30) -> tuple[np.ndarray, float]:
+    """
+    @brief Solve the linearized Eliashberg equation without any symmetry (no TRS/inversion, full BZ,
+    spin-orbital basis) for pairs (k+Q,-k) with a fixed pair momentum Q on the k-mesh.
+    No singlet/triplet projection is applied: the leading eigenvalue of the full kernel is returned.
+    @param     Vdelta: Pairing interaction from get_vdelta_nosym [Nchi, Nchi, Nw, Nkall] complex128 (read only)
+    @param         Gk: Green's function on the full k-grid [Norb, Norb, Nw, Nkall] complex128
+    @param init_delta: Orbital-basis initial gap, frequency independent [Norb, Norb, Nkall] complex128
+    @param       Vmat: SOC-type interaction matrix [Nchi, Nchi] float64
+    @param      olist: Orbital-pair list of chi [Nchi, 2] int64 (1-based)
+    @param       kmap: Integer mesh coordinates of each k-point [Nkall, 3] int64
+    @param   Nx,Ny,Nz: k-grid dimensions
+    @param       temp: Temperature in eV
+    @param         iQ: Pair momentum in integer mesh units, Q=(iQ0/Nx, iQ1/Ny, iQ2/Nz); (0,0,0)=uniform pairing
+    @param        eps: Convergence tolerance
+    @param     itemax: Maximum number of iterations (power method)
+    @param  arnoldi_m: Krylov subspace dimension (0 = power method, >0 = Arnoldi). A small leading
+                       eigenvalue may need m >~ 60 for 1e-6 accuracy.
+    @return     delta: Linearized gap function [Norb, Norb, Nw, Nkall] complex128 (w_n > 0)
+    @return lambda_eliash: Physical (largest real part) Eliashberg eigenvalue (>1 means T<Tc)
+    """
+    Norb, Nchi = len(Gk), len(olist)
+    Nkall, Nw = len(kmap), len(Gk[0, 0])
+    delta = np.zeros((Norb, Norb, Nw, Nkall), dtype=np.complex128)
+    lambda_out = ctypes.c_double(0.0)
+    init = np.ascontiguousarray(init_delta, dtype=np.complex128)
+    _loader._lib.lin_eliash_nosym(delta, Vdelta, Gk, init, Vmat, olist, kmap, np.asarray(iQ, dtype=np.int64),
+                                  _loader.dbl(temp), _loader.dbl(eps), _loader.i64(Nkall), _loader.i64(Nw),
+                                  _loader.i64(Nchi), _loader.i64(Norb), _loader.i64(Nx), _loader.i64(Ny),
+                                  _loader.i64(Nz), _loader.i64(itemax), _loader.i64(arnoldi_m),
+                                  ctypes.byref(lambda_out))
+    return delta, lambda_out.value
+
+
+def conv_delta_orb_to_band_nosym(delta: np.ndarray, uni: np.ndarray, kmap: np.ndarray, Nx: int, Ny: int, Nz: int,
+                                 iQ: tuple | np.ndarray = (0, 0, 0)) -> np.ndarray:
+    """
+    @brief Convert the lowest-w_n gap to the band basis without symmetry: Delta_band(k) = U^+(k+Q) Delta(k) U^*(-k).
+    Row n is band n at k+Q, column n' is band n' at -k.
+    @param   delta: Gap function in orbital basis [Norb, Norb, Nw, Nkall] complex128
+    @param     uni: Eigenvector matrices on the full k-grid [Nkall, Norb, Norb] complex128
+    @param    kmap: Integer mesh coordinates of each k-point [Nkall, 3] int64
+    @param Nx,Ny,Nz: k-grid dimensions
+    @param      iQ: Pair momentum in integer mesh units
+    @return deltab: Gap function in band basis [Norb, Norb, Nkall] complex128
+    """
+    Nkall, Nw, Norb = len(kmap), len(delta[0, 0]), len(delta)
+    deltab = np.zeros((Norb, Norb, Nkall), dtype=np.complex128)
+    _loader._lib.conv_delta_orb_to_band_nosym(deltab, delta, uni, kmap, np.asarray(iQ, dtype=np.int64),
+                                              _loader.i64(Norb), _loader.i64(Nkall), _loader.i64(Nw),
+                                              _loader.i64(Nx), _loader.i64(Ny), _loader.i64(Nz))
+    return deltab
+
+
 def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarray,
                          Smat: np.ndarray, Cmat: np.ndarray,
                          olist: np.ndarray, plist: np.ndarray, kmap: np.ndarray,
@@ -349,20 +457,24 @@ def conv_delta_orb_to_band(delta: np.ndarray, uni: np.ndarray, invk: np.ndarray,
 
 
 def conv_delta_orb_to_band_soc(delta: np.ndarray, uni: np.ndarray, invk: np.ndarray,
-                               invs: np.ndarray, slist: np.ndarray) -> np.ndarray:
+                               invs: np.ndarray, slist: np.ndarray, gap_sym: int = 1) -> np.ndarray:
     """
     @brief Convert the superconducting gap function from orbital basis to band basis with SOC.
+    Each band is paired with its Kramers partner; for a triplet (gap_sym<0, except -10) the d_z
+    (Sz=0) component is returned, matching the triplet seed of linearized_eliashberg_soc.
     @param   delta: Gap function in orbital basis [Norb, Norb, Nw, Nkall] complex128
     @param     uni: Eigenvector matrices [Nk, Norb, Norb] complex128
     @param    invk: Inverse k-point mapping [Nkall] int64
     @param    invs: Inverse spin index mapping [Norb] int64
     @param   slist: Spin-orbit label for each orbital [Norb] int64
+    @param gap_sym: Gap symmetry index; its sign selects singlet/triplet (default 1 = singlet)
     @return deltab: Gap function in band basis [Norb, Norb, Nkall] complex128
     """
     Nkall, Nk, Nw, Norb = len(invk), len(uni), len(delta[0, 0]), len(delta)
     deltab = np.zeros((Norb, Norb, Nkall), dtype=np.complex128)
     _loader._lib.conv_delta_orb_to_band_soc(deltab, delta, uni, invk, invs, slist, _loader.i64(Norb),
-                                            _loader.i64(Nkall), _loader.i64(Nk), _loader.i64(Nw))
+                                            _loader.i64(Nkall), _loader.i64(Nk), _loader.i64(Nw),
+                                            _loader.i64(gap_sym))
     return deltab
 
 

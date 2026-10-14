@@ -767,7 +767,7 @@ def output_gap_function(invk: np.ndarray, kmap: np.ndarray, gap: np.ndarray, uni
             gapb = flibs.remap_gap(gap[:, :, 0, :], plist, invk, gap_sym, iperm=iperm)
     else:
         if soc:
-            gapb = flibs.conv_delta_orb_to_band_soc(gap, uni, invk, invs, slist)
+            gapb = flibs.conv_delta_orb_to_band_soc(gap, uni, invk, invs, slist, gap_sym)
         else:
             gapb = flibs.conv_delta_orb_to_band(gap, uni, invk, plist, gap_sym, iperm=iperm)
     print('output gap function', flush=True)

@@ -7,7 +7,7 @@ import libs.flibs._loader as _loader
 __all__ = [
     'get_chi0_conv', 'get_chi_irr', 'chiq_map', 'get_tr_chi', 'get_phi_irr', 'phiq_map', 'get_tr_phi', 'get_chis',
     'get_chi0', 'get_chi0_tail', 'get_chi0_soc', 'get_chis_chic_soc', 'get_chis_chic', 'get_chi_irr_sc',
-    'get_eig_or_tr_chi'
+    'get_eig_or_tr_chi', 'get_chi0_nosym'
 ]
 
 # --- ctypes signatures: set once at import.
@@ -165,6 +165,17 @@ _loader._lib.get_chi0_soc.argtypes = [
     ctypes.POINTER(ctypes.c_int64)                              # Norb
 ]
 _loader._lib.get_chi0_soc.restype = None
+_loader._lib.get_chi0_nosym.argtypes = [
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi (out)
+    np.ctypeslib.ndpointer(dtype=np.complex128),  # Gk
+    np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
+    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int64),          # temp, Nx
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Ny, Nz
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, Nkall
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Norb, Nchi
+]
+_loader._lib.get_chi0_nosym.restype = None
 _loader._lib.get_chis_chic_soc.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.complex128),  # chic (out)
     np.ctypeslib.ndpointer(dtype=np.complex128),  # chiszz (out)
@@ -535,6 +546,30 @@ def get_chi0_soc(Vmat: np.ndarray, Gk: np.ndarray, olist: np.ndarray, slist: np.
                               _loader.i64(Nz), _loader.i64(Nw), _loader.i64(Nk),
                               _loader.i64(Nkall), _loader.i64(Nchi), _loader.i64(Norb))
     return chi, sgnsig, sgnsig2, invschi
+
+
+def get_chi0_nosym(Gk: np.ndarray, olist: np.ndarray, kmap: np.ndarray, temp: float,
+                   Nx: int, Ny: int, Nz: int) -> np.ndarray:
+    """
+    @brief Compute the irreducible susceptibility chi0 on the FULL BZ without any symmetry (no TRS/inversion).
+    Only Hermiticity chi(q,-iv) = chi(q,iv)^+ is used, so it is valid with Zeeman fields / magnetic order.
+    @param     Gk: Green's function on the full k-grid [Norb, Norb, Nw, Nkall] complex128 (spin-orbital basis)
+    @param  olist: Orbital-pair list of chi [Nchi, 2] int64 (1-based)
+    @param   kmap: Integer mesh coordinates of each k-point [Nkall, 3] int64
+    @param   temp: Temperature in eV
+    @param     Nx: Number of k-points along kx
+    @param     Ny: Number of k-points along ky
+    @param     Nz: Number of k-points along kz
+    @return   chi: Irreducible susceptibility [Nchi, Nchi, Nw, Nkall] complex128 (v_n >= 0)
+    """
+    Norb, Nchi = len(Gk), len(olist)
+    Nkall, Nw = len(kmap), len(Gk[0, 0])
+    chi = np.zeros((Nchi, Nchi, Nw, Nkall), dtype=np.complex128)
+    _loader._lib.get_chi0_nosym(chi, Gk, kmap, olist, _loader.dbl(temp),
+                                _loader.i64(Nx), _loader.i64(Ny), _loader.i64(Nz),
+                                _loader.i64(Nw), _loader.i64(Nkall), _loader.i64(Norb),
+                                _loader.i64(Nchi))
+    return chi
 
 
 def get_chis_chic_soc(chi: np.ndarray, Vmat: np.ndarray, olist: np.ndarray, slist: np.ndarray,

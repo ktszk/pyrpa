@@ -241,6 +241,13 @@ sw_in_self = False  # True: load the previous self-energy from sigma.bin as the 
 sigma_in_scale = 1.0  # factor multiplying the sigma seed loaded via sw_in_self; for U-annealing set (U_new/U_old)**2 (Sigma ~ U^2)
 sw_from_file = False  # True: read the self-energy from sigma.bin and skip FLEX (solve Eliashberg with it directly)
 sw_check_only = False  # True: stop after linear Eliashberg (also stops if Stoner factor>=1 or lambda<1)
+# ----- symmetry-free linearized Eliashberg (option 15 with sw_nosym): Zeeman field / FFLO -----
+sw_nosym = False  # True: option 15 solves the gap equation on the full BZ with NO TRS/inversion (bare G, RPA);
+# a spinless model (sw_soc=False) is spin-doubled automatically. No singlet/triplet projection: gap_sym only seeds
+zeeman_h = [0.0, 0.0, 0.0]  # Zeeman field (hx,hy,hz) [eV] added as H_Z = h.sigma (g*mu_B*B/2 absorbed) (sw_nosym only)
+fflo_q = [[0, 0, 0]]  # pair momenta Q in integer k-mesh units, Q=(iQx/Nx,iQy/Ny,iQz/Nz); lambda(Q) -> lambda_Q.dat
+# e.g. [[q, 0, 0] for q in range(5)] scans along kx. chi0/V_Delta are computed once and reused for every Q
+nosym_arnoldi_m = 60  # Krylov dimension of the nosym solver (small lambda may need >~60 for 1e-6 accuracy)
 # ----- EILENBERGER (homogeneous quasiclassical) parameters -----
 eil_coupling = 0.3  # dimensionless separable pairing coupling lambda (with <phi^2>_FS=1)
 eil_wc = 0.5  # fixed Matsubara cutoff energy [eV] (sets the pairing scale / Tc)
@@ -2191,6 +2198,24 @@ def main() -> None:
             plibs.write_nmr_dat(res)
             plibs.plot_nmr(res)
             print('wrote nmr_sc.dat and nmr_sc.png', flush=True)
+    elif option == CalcMode.LIN_ELIASHBERG and sw_nosym:  # symmetry-free gap equation (Zeeman / FFLO)
+        if sw_self or sw_from_file:
+            print('Warning: sw_nosym has no FLEX self-energy (TRS-free FLEX not implemented); using bare G', flush=True)
+        if sw_soc:
+            try:
+                slist
+            except NameError:
+                Norb = len(ham_r[0])
+                slist = np.ones(Norb, dtype=np.int64)
+                slist[(Norb+1)//2:] = -1
+            try:
+                invs
+            except NameError:
+                invs = np.concatenate([np.arange((Norb+1)//2, Norb), np.arange((Norb+1)//2)])+1
+        plibs.calc_lin_eliash_nosym(Nx, Ny, Nz, Nw, ham_r, S_r, rvec, mu, temp, chiolist, site, orb_dep, U, J,
+                                    gap_sym, sw_soc, slist if sw_soc else None, invs if sw_soc else None,
+                                    Umat if orb_dep else None, Jmat if orb_dep else None,
+                                    hvec=zeeman_h, qlist=fflo_q, arnoldi_m=nosym_arnoldi_m)
     elif option in MODES_FLEX_ELIASH:  # flex/eliashberg calculations
         if sw_soc:  # with soc
             try:

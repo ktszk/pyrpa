@@ -11,6 +11,7 @@ Functions are organized in submodules by physical topic:
   _nmr        : NMR observables in the SC state (Knight shift, 1/T1T) from chi_s
   _wannier_io : EPA output reading, U/J parameter sets, Wannier-R space file I/O
   _maxent     : MaxEnt analytic continuation (optional 'ana_cont' dependency)
+  _eliash_nosym: Linearized Eliashberg without TRS/inversion (Zeeman field, FFLO pair momentum Q)
 """
 from ._symmetry import *
 from ._lattice import *
@@ -22,6 +23,7 @@ from ._nmr import *
 from ._wannier_io import *
 from ._maxent import *
 from ._calc import *
+from ._eliash_nosym import *
 from ._eilenberger import *          # homogeneous solver + model Fermi surface (build_model_fs, ...)
 from ._eilenberger_surface import *  # specular surface (gap profile, LDOS)
 from ._eilenberger_vortex import *   # isolated vortex + periodic vortex lattice

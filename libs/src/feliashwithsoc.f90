@@ -44,7 +44,7 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,ol
   complex(c_double),intent(out),dimension(Nkall,Nw,Norb,Norb):: delta
   complex(c_double),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
 
-  integer(c_int32_t) i_iter,i_eig,count,i
+  integer(c_int32_t) i_iter,i_eig,count,i,l,m
   integer(c_int32_t),parameter:: eig_max=2
   real(c_double) norm,inorm,norm2,weight,lambda_rq,vec_err
   complex(c_double),dimension(Nkall,Nw,Norb,Norb):: newdelta,fk
@@ -56,6 +56,19 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,ol
   ! After the 1st eigenvalue is found, norm2 is set to its norm for deflation (shift-deflation).
   norm2=0.0d0
   call get_V_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
+  ! pairing vertex V_Delta = -V/2 + V chi V: get_V_soc_flex returns -V + V chi V (the form the
+  ! self-energy uses), but in the gap equation the antisymmetrized bare vertex is both the direct
+  ! and the exchange term and both orderings F_{l2 m1} of the pair are summed, so -V would count
+  ! the bare term twice (the RPA ladder V chi V is direct-channel only).  With 1/2 the singlet
+  ! channel of a spin-conserving system reduces to (S+C)/2 + 3/2 S chi_s S - 1/2 C chi_c C,
+  ! i.e. lin_eliash.  The w_n->inf slot in mkdelta_soc is -Vmat/2 accordingly.
+  !$omp parallel do private(l,m)
+  do l=1,int(Nchi,c_int32_t)
+     do m=1,int(Nchi,c_int32_t)
+        chi(:,:,m,l)=chi(:,:,m,l)+0.5d0*Vmat(m,l)
+     end do
+  end do
+  !$omp end parallel do
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
   if(arnoldi_m>0)then !--- Arnoldi solver
@@ -67,6 +80,7 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,ol
      iter_loop:do i_iter=1, itemax !iteration
         call mkfk_trs_soc(fk,Gk,delta,sgnsig,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym)
         call mkdelta_soc(newdelta,fk,chi,Vmat,sgnsig,sgnsig2,kmap,invk,invs,invschi,olist,slist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,gap_sym)
+        call project_parity(newdelta)
         !$omp parallel workshare
         newdelta(:,:,:,:)=-newdelta(:,:,:,:)*weight+delta(:,:,:,:)*norm2
         !$omp end parallel workshare
@@ -117,6 +131,40 @@ subroutine lin_eliash_soc(delta,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,ol
   !$omp end parallel workshare
   end if
 contains
+  subroutine project_parity(d)
+    !> Project onto the parity of the seed: Delta_ab(k) <- [Delta_ab(k) + p prt_a prt_b Delta_ab(-k)]/2,
+    !> p=+1 singlet (gap_sym>0), p=-1 triplet (gap_sym<0); skipped for parity mixing (gap_sym=-10).
+    !> The kernel preserves parity exactly, but Delta is stored on the full BZ with no parity rule, so
+    !> round-off of the other parity is amplified by Arnoldi/power iteration (e.g. a p-wave triplet
+    !> drifting to an even-parity odd-frequency triplet).  lin_eliash builds -k from parity instead.
+    complex(c_double),intent(inout),dimension(Nkall,Nw,Norb,Norb):: d
+    integer(c_int32_t) ii,jj,a,b
+    real(c_double) p
+    complex(c_double),allocatable,dimension(:,:,:,:):: dm
+    if(gap_sym==0 .or. gap_sym==-10)return
+    p=merge(1.0d0,-1.0d0,gap_sym>0)
+    allocate(dm(Nkall,Nw,Norb,Norb))
+    !$omp parallel do private(a)
+    do b=1,Norb
+       do a=1,Norb
+          dm(:,:,a,b)=d(:,:,a,b)
+       end do
+    end do
+    !$omp end parallel do
+    !$omp parallel do collapse(2) private(ii,jj)
+    do b=1,Norb
+       do a=1,Norb
+          do jj=1,Nw
+             do ii=1,Nkall
+                d(ii,jj,a,b)=0.5d0*(dm(ii,jj,a,b)+p*prt(a)*prt(b)*dm(invk(3,ii),jj,a,b))
+             end do
+          end do
+       end do
+    end do
+    !$omp end parallel do
+    deallocate(dm)
+  end subroutine project_parity
+
   subroutine get_norm(norm,func)
     complex(c_double),intent(in),dimension(Nkall,Nw,Norb,Norb):: func
     real(c_double),intent(out):: norm
@@ -402,6 +450,7 @@ contains
     complex(c_double),intent(out),dimension(Nkall,Nw,Norb,Norb):: w_out
     call mkfk_trs_soc(fk,Gk,v_in,sgnsig,slist,invk,invs,Nkall,Nk,Nw,Norb,gap_sym)
     call mkdelta_soc(w_out,fk,chi,Vmat,sgnsig,sgnsig2,kmap,invk,invs,invschi,olist,slist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,gap_sym)
+    call project_parity(w_out)
     !$omp parallel workshare
       w_out(:,:,:,:)=-w_out(:,:,:,:)*weight
     !$omp end parallel workshare
@@ -564,7 +613,7 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,kmap,invk,invs,
                        ! V(-q)_{ml} = s_{m1}s_{m2}s_{l1}s_{l2} * V(q)_{invschi(l),invschi(m)}  (TRS+SOC)
                        tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=sgnsig2(m,l)*Vdelta(invk(1,i),1,invschi(l),invschi(m)) !V^ml(-q,0)=V^lm(q,0)
                     end if
-                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=-Vmat(m,l) !Nw+1 consider w_n=>inf limit
+                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=-0.5d0*Vmat(m,l) !Nw+1 consider w_n=>inf limit (bare -V/2)
                  end do
                  !$omp end do
                  !$omp do private(i,j)
@@ -694,6 +743,7 @@ subroutine get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,invs,Nkall
   complex(c_double),intent(out),dimension(Nkall,Nw,Norb,Norb):: delta
 
   integer(c_int32_t) i,j,k,l,m,n
+  integer(c_int64_t),parameter:: par_mix=-10
   real(c_double) norm
   complex(c_double),dimension(Norb,Norb):: matL,matR,tmpm
 
@@ -720,6 +770,18 @@ subroutine get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,invs,Nkall
         call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),matL,Norb,matR,Norb,(0.0d0,0.0d0),delta(i,1,:,:),Norb)
      else
         delta(i,1,:,:)=0.0d0
+     end if
+
+     ! The Kramers-partner pairing above is a (pseudo)spin SINGLET, U f (i sigma_y) U^T, and its -k half
+     ! is filled with the even-parity singlet rule, whatever the parity of init_delta.  For a triplet
+     ! seed turn it into d_z: sigma_z (i sigma_y) = real-spin sign on the row index, and give the -k half
+     ! odd parity.  Otherwise a p-wave seed is an even-parity singlet, and the triplet symmetrization in
+     ! mkdelta_soc turns it into an even-parity (odd-frequency) triplet.
+     if(gap_sym<0 .and. gap_sym/=par_mix)then
+        do m=1,Norb
+           delta(i,1,m,:)=slist(m)*delta(i,1,m,:)
+        end do
+        if(invk(2,i)==1)delta(i,1,:,:)=-delta(i,1,:,:)
      end if
 
      if(gap_sym>0)then
@@ -757,8 +819,13 @@ subroutine get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,invs,Nkall
   !$omp end parallel
 end subroutine get_initial_delta_soc
 
-subroutine conv_delta_orb_to_band_soc(deltab,delta,uni,invk,invs,slist,Norb,Nkall,Nk,Nw) bind(C)
+subroutine conv_delta_orb_to_band_soc(deltab,delta,uni,invk,invs,slist,Norb,Nkall,Nk,Nw,gap_sym) bind(C)
   !> This function transform orbital basis gap function into band basis gap function
+  !> Band n at k is paired with its Kramers partner (inverse of get_initial_delta_soc), so the result is
+  !> gauge covariant for a (pseudo)spin singlet.  A triplet (gap_sym<0, except parity mixing -10) is
+  !> first brought to singlet form by sigma_z on the row index (sigma_z sigma_z i sigma_y = i sigma_y);
+  !> the output is then its d_z (Sz=0) component in the band basis.  No extra sign on the -k half
+  !> (unlike the seed): the -k half then shows d_z(-k) = -d_z(k), i.e. the physical odd parity.
   !!@param deltab,out: band basis gap function
   !!@param   delta,in: orbital basis gap function
   !!@param     uni,in: unitary matrix
@@ -767,9 +834,10 @@ subroutine conv_delta_orb_to_band_soc(deltab,delta,uni,invk,invs,slist,Norb,Nkal
   !!@param   Nkall,in: Number of all k-points
   !!@param      Nk,in: Number of irreducible k-points
   !!oparam      Nw,in: Number of Matsubara frequencies
+  !!@param gap_sym,in: gap symmetry number (sign selects singlet/triplet)
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(c_int64_t),intent(in):: Nw,Norb,Nk,Nkall
+  integer(c_int64_t),intent(in):: Nw,Norb,Nk,Nkall,gap_sym
   integer(c_int64_t),intent(in),dimension(Norb):: slist,invs
   integer(c_int64_t),intent(in),dimension(3,Nkall):: invk
   complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
@@ -777,9 +845,10 @@ subroutine conv_delta_orb_to_band_soc(deltab,delta,uni,invk,invs,slist,Norb,Nkal
   complex(c_double),intent(out),dimension(Nkall,Norb,Norb):: deltab
 
   integer(c_int32_t) i,k,l,n
-  complex(c_double),dimension(Norb,Norb):: matL,matR,tmpm
+  integer(c_int64_t),parameter:: par_mix=-10
+  complex(c_double),dimension(Norb,Norb):: matL,matR,tmpm,dtmp
 
-  !$omp parallel do private(i,k,l,n,matL,matR,tmpm)
+  !$omp parallel do private(i,k,l,n,matL,matR,tmpm,dtmp)
   do i=1,Nkall
      k=invk(1,i)
      if(invk(2,i)==0)then
@@ -797,7 +866,13 @@ subroutine conv_delta_orb_to_band_soc(deltab,delta,uni,invk,invs,slist,Norb,Nkal
         cycle
      end if
 
-     call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),matL,Norb,delta(i,1,:,:),Norb,(0.0d0,0.0d0),tmpm,Norb)
+     dtmp(:,:)=delta(i,1,:,:)
+     if(gap_sym<0 .and. gap_sym/=par_mix)then !triplet d_z -> singlet form: sigma_z on the row index
+        do n=1,Norb
+           dtmp(n,:)=slist(n)*dtmp(n,:)
+        end do
+     end if
+     call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),matL,Norb,dtmp,Norb,(0.0d0,0.0d0),tmpm,Norb)
      call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),tmpm,Norb,matR,Norb,(0.0d0,0.0d0),deltab(i,:,:),Norb)
   end do
   !$omp end parallel do
