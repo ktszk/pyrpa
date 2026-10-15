@@ -67,13 +67,13 @@ def _spin_half(U):
     return slist, invs, olist, site, F.gen_Vmatrix(olist, slist, site, invs, U, 0.0)
 
 
-def _nosym_lambda(Gk, olist, Vmat, kmap, Nx, Ny, temp, iQ=(0, 0, 0), m=60, seed=0):
+def _nosym_lambda(Gk, olist, Vmat, kmap, Nx, Ny, temp, slist, iQ=(0, 0, 0), m=60, seed=0):
     """chi0 -> V_Delta -> leading lambda of the nosym kernel (random complex seed)."""
     rng = np.random.default_rng(seed)
     Norb, Nkall = Gk.shape[0], Gk.shape[3]
     init = rng.standard_normal((Norb, Norb, Nkall)) + 1j*rng.standard_normal((Norb, Norb, Nkall))
     with T.silence():
-        Vd = F.get_vdelta_nosym(F.get_chi0_nosym(Gk, olist, kmap, temp, Nx, Ny, 1), Vmat)
+        Vd = F.get_vdelta_nosym(F.get_chi0_nosym(Gk, olist, kmap, temp, Nx, Ny, 1), Vmat, olist, slist)
         return F.linearized_eliashberg_nosym(Vd, Gk, init, Vmat, olist, kmap, Nx, Ny, 1, temp, iQ=iQ,
                                              eps=1e-10, arnoldi_m=m)[1]
 
@@ -209,7 +209,7 @@ def test_nosym_chi0_and_kernel_match_bruteforce_without_symmetry():
         ev = np.linalg.eigvals(K)
         lam_ref = ev[np.argmax(ev.real)]
         assert abs(lam_ref.imag) < 1e-12
-        lam = _nosym_lambda(Gk, olist, Vmat, kmap, Nx, Ny, temp, iQ=(*iQ, 0), m=80)
+        lam = _nosym_lambda(Gk, olist, Vmat, kmap, Nx, Ny, temp, slist, iQ=(*iQ, 0), m=80)
         assert abs(lam - lam_ref.real) < 1e-11, (iQ, lam, lam_ref)
 
 
@@ -334,49 +334,64 @@ def test_multiorbital_triplet_is_exact_eigenpair_nosoc_and_soc():
         assert abs(lam - np.linalg.eigvals(B.conj().T @ K @ B).real.max()) < 1e-9, (t4, J, lam)
 
 
-def test_soc_with_spin_orbit_is_exact_eigenpair_in_parity_sector():
-    """Genuine SOC (L_z s_z on dxz/dyz): lin_eliash_soc must give the leading eigenpair of the exact
-    spin-orbital kernel in its parity sector -- even (gap_sym=+1) / odd (-1) parity with Delta on the
-    irreducible k-points and no singlet/triplet spin structure imposed (with SOC they mix), and the
-    whole kernel for parity mixing (-10, full BZ).  Imposing D_ud = -/+ D_du gave 0.054 instead of
-    0.186 for +1; the complex Arnoldi gave 0.42 for -10."""
-    N, Nw, temp, mu, U, J, lso = 4, 4, 0.1, 0.35, 1.0, 0.3, 0.2
+def test_soc_branch_tracking_follows_the_nosoc_singlet_and_triplet():
+    """With SOC a parity sector holds both the (pseudospin singlet, even omega) and the
+    (pseudospin triplet, odd omega) pairing, so gap_sym=+-1 must follow the branch of that spin
+    character instead of the largest eigenvalue of the sector: taking the largest made lambda jump
+    at infinitesimal SOC (0.0511 -> 0.1871 for +1, 0.0078 -> 0.1024 for -1) rather than going over
+    to the singlet / triplet of lin_eliash.  Each result must still be an exact eigenpair of the
+    full spin-orbital kernel with the right parity, and gap_sym=-10 still takes the leading state
+    of the whole kernel."""
+    N, Nw, temp, mu, U, J = 4, 4, 0.1, 0.35, 1.0, 0.3
     rvec, ham_r = _two_orbital_dxz_dyz()
-    ham2, _, slist, invs = P.spin_double_model(ham_r, [])
+    ham0, _, slist, invs = P.spin_double_model(ham_r, [])
     r0 = [i for i, r in enumerate(rvec) if not r.any()][0]
-    ham2 = ham2.copy()
-    ham2[r0] += 0.5*lso*np.kron(np.diag([1, -1]), np.array([[0, -1j], [1j, 0]]))
     olist, site = P.get_chi_orb_list(2, [2])
     ol2, site2 = P.spin_double_chiolist(olist, site, 2)
     klist, kmap, invk = F.gen_irr_k_TRS(N, N, 1)
-    eig, uni = P.get_eigs(klist, ham2, [], rvec)
-    Gk = F.gen_Green0(eig, uni, mu, temp, Nw)
     Vmat = F.gen_Vmatrix(ol2, slist, site2, invs, U, J)
-    ef, uf = P.get_eigs(kmap/np.array([N, N, 1]), ham2, [], rvec)
-    Gf = F.gen_Green0(ef, uf, mu, temp, Nw)
-    _, K = _bruteforce_chi0_kernel(Gf.transpose(3, 2, 1, 0), Vmat.T, ol2, temp, kmap, N, N, (0, 0))
     Nkall = len(kmap)
     flat = {tuple(k): i for i, k in enumerate(kmap.tolist())}
     km = np.array([flat[tuple(((-k) % np.array([N, N, 1])).tolist())] for k in kmap])
-    for gs in (1, -1, -10):
-        with T.silence():
-            chis, sg, sg2, isc = F.get_chi0_soc(Vmat, Gk, ol2, slist, kmap, invk, invs, temp, N, N, 1)
-            d, lam = F.linearized_eliashberg_soc(chis, Gk, uni, P.get_initial_gap(klist, 4, 1 if gs > 0 else -1),
-                                                 Vmat, sg, sg2, np.ones(4), slist, ol2, kmap, invk, invs, isc,
-                                                 N, N, 1, temp, gs, eps=1e-12, arnoldi_m=200)
-        x = np.asarray(d).transpose(3, 2, 1, 0).reshape(-1)
-        if gs == -10:
-            B = np.eye(K.shape[0])
-        else:                                       # parity sector, no spin structure
-            p = 1 if gs > 0 else -1
-            Pm = np.array([(0.5*(e.reshape(Nkall, Nw, 4, 4) + p*e.reshape(Nkall, Nw, 4, 4)[km])).reshape(-1)
-                           for e in np.eye(K.shape[0])]).T
-            u, sv, _ = np.linalg.svd(Pm)
-            B = u[:, sv > 0.5]
+
+    def singlet_weight(X):
+        ud, du = X[:, :, :2, 2:], X[:, :, 2:, :2]
+        ws = np.linalg.norm(ud - du)**2
+        return ws/(ws + np.linalg.norm(ud + du)**2
+                   + 2*np.linalg.norm(X[:, :, :2, :2])**2 + 2*np.linalg.norm(X[:, :, 2:, 2:])**2)
+
+    lam = {}
+    for lso in (0.0, 1e-8, 0.2):
+        ham2 = ham0.copy()
+        ham2[r0] = ham2[r0] + 0.5*lso*np.kron(np.diag([1, -1]), np.array([[0, -1j], [1j, 0]]))
+        eig, uni = P.get_eigs(klist, ham2, [], rvec)
+        Gk = F.gen_Green0(eig, uni, mu, temp, Nw)
+        ef, uf = P.get_eigs(kmap/np.array([N, N, 1]), ham2, [], rvec)
+        Gf = F.gen_Green0(ef, uf, mu, temp, Nw)
+        _, K = _bruteforce_chi0_kernel(Gf.transpose(3, 2, 1, 0), Vmat.T, ol2, temp, kmap, N, N, (0, 0))
+        for gs in (1, -1, -10):
+            with T.silence():
+                chis, sg, sg2, isc = F.get_chi0_soc(Vmat, Gk, ol2, slist, kmap, invk, invs, temp, N, N, 1)
+                d, lm = F.linearized_eliashberg_soc(chis, Gk, uni, P.get_initial_gap(klist, 4, 1 if gs > 0 else -1),
+                                                    Vmat, sg, sg2, np.ones(4), slist, ol2, kmap, invk, invs, isc,
+                                                    N, N, 1, temp, gs, eps=1e-12, arnoldi_m=200)
+            lam[lso, gs] = lm
+            x = np.asarray(d).transpose(3, 2, 1, 0).reshape(-1)
+            assert np.linalg.norm(K @ x - lm*x) < 1e-10*np.linalg.norm(K @ x), (lso, gs)   # exact eigenpair
             X = x.reshape(Nkall, Nw, 4, 4)
-            assert np.linalg.norm(X - p*X[km]) < 1e-12*np.linalg.norm(X)
-        assert abs(lam - np.linalg.eigvals(B.conj().T @ K @ B).real.max()) < 1e-9, (gs, lam)
-        assert np.linalg.norm(K @ x - lam*x) < 1e-10*np.linalg.norm(K @ x), gs
+            if gs == -10:
+                assert abs(lm - np.linalg.eigvals(K).real.max()) < 1e-9, (lso, lm)
+            else:
+                p = 1 if gs > 0 else -1
+                assert np.linalg.norm(X - p*X[km]) < 1e-12*np.linalg.norm(X), (lso, gs)    # parity
+                w = singlet_weight(X)                                                      # spin character
+                assert (w > 0.5) == (gs > 0), (lso, gs, w)
+    for gs in (1, -1):
+        assert abs(lam[0.0, gs] - lam[1e-8, gs]) < 1e-7, (gs, lam[0.0, gs], lam[1e-8, gs])  # continuous
+    # and the SOC-free limit is the singlet / triplet of lin_eliash itself
+    for gs in (1, -1):
+        lam_n, _, _ = _trs_solvers(rvec, ham_r, N, N, Nw, temp, mu, U, J, gs=gs, eps=1e-12, m=200)
+        assert abs(lam[0.0, gs] - lam_n) < 1e-9, (gs, lam[0.0, gs], lam_n)
 
 
 def test_soc_band_gap_is_gauge_covariant_with_physical_parity():
@@ -415,8 +430,9 @@ def test_fflo_pair_momentum_obeys_gauge_shift():
         eig, uni = F.get_eig(_rashba_zeeman_hk(klist, tp=-0.25, alpha=0.3, h=(0, 0, 0.1), shift=shift))
         G[lab] = F.gen_Green0(eig, uni, mu, temp, Nw)
     for Q in ((0, 0), (1, 1)):
-        la = _nosym_lambda(G['HA'], olist, Vmat, kmap, Nx, Ny, temp, iQ=(*Q, 0), m=80)
-        lb = _nosym_lambda(G['H'], olist, Vmat, kmap, Nx, Ny, temp, iQ=(Q[0] + 2*A[0], Q[1] + 2*A[1], 0), m=80)
+        la = _nosym_lambda(G['HA'], olist, Vmat, kmap, Nx, Ny, temp, slist, iQ=(*Q, 0), m=80)
+        lb = _nosym_lambda(G['H'], olist, Vmat, kmap, Nx, Ny, temp, slist,
+                           iQ=(Q[0] + 2*A[0], Q[1] + 2*A[1], 0), m=80)
         assert abs(la - lb) < 1e-9, (Q, la, lb)
 
 

@@ -364,25 +364,67 @@ subroutine get_vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi)
   !$omp end parallel do
 end subroutine get_vsigma_flex_nosoc
 
-subroutine get_V_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
+subroutine get_V_soc_flex(chi,Vmat,olist,slist,Nk,Nw,Nchi,sw_dcsub)
+  !> RPA fluctuation propagator with SOC, -V + V*chi with chi = (I+chi0*V)^{-1}*chi0*V,
+  !> in place (in: chi0, out: the vertex).  Serves BOTH the pairing and the self-energy channel:
+  !> in the spin-resolved basis they are the same bubble and only the index contraction differs,
+  !> which is why there is one routine here and not two as in the no-SOC code.
+  !>
+  !> sw_dcsub selects the channel's counting:
+  !>   .false. (pairing)      the series is used as it stands; lin_eliash_soc / get_vdelta_nosym
+  !>                          only add back the bare +V/2.
+  !>   .true.  (self-energy)  subtract the second-order double-counting term.  The RPA matrix
+  !>                          series reaches the second-order self-energy diagram through two spin
+  !>                          channels, so one copy has to go; without SOC that counterterm reads
+  !>                          -1/4 (S+C) chi0 (S+C) (get_vsigma_flex_nosoc), and (S+C)/2 is exactly
+  !>                          the opposite-spin block V^{(a s,b s),(c -s,d -s)} of Vmat (verified
+  !>                          identically for one and two orbitals, J = 0 and J /= 0).  Its
+  !>                          spin-resolved image is therefore dV = V_od * chi0 * V_od, built from
+  !>                          the BARE chi0 just as the no-SOC counterterm is.
+  !> Leaving it .false. for the self-energy overestimates Sigma (2x for one orbital, 1.5x for two
+  !> orbitals at J=0); with it on, a model without SOC reproduces mkself exactly.
+  !> olist and slist are referenced only when sw_dcsub is .true.
+  !!@param   chi,inout: in chi0, out the vertex
+  !!@param     Vmat,in: bare spin-orbital interaction
+  !!@param    olist,in: orbital-pair list of chi
+  !!@param    slist,in: spin of each spin-orbital
+  !!@param sw_dcsub,in: subtract the second-order double counting (self-energy channel)
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nk,Nw,Nchi
-  real(c_double),intent(in),dimension(Nchi,Nchi)::sgnsig2
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  integer(c_int64_t),intent(in),dimension(*):: slist   ! assumed size: called with implicit interface
+  logical(1),intent(in):: sw_dcsub
   real(c_double),intent(in),dimension(Nchi,Nchi):: Vmat
   complex(c_double),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
 
-  integer(c_int32_t) i,j,l,info
+  integer(c_int32_t) i,j,l,m,info
   integer(c_int32_t),dimension(Nchi):: ipiv
-  complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmatv,neg_cmatv
+  complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,cmat5,cmatv,Vod
 
   cmatv(:,:)=cmplx(Vmat(:,:),0.0d0,kind=c_double)
-  neg_cmatv(:,:)=-cmatv(:,:)
+  ! V_od: the elements joining a same-spin pair to the opposite same-spin pair
+  Vod(:,:)=(0.0d0,0.0d0)
+  if(sw_dcsub)then
+     do l=1,int(Nchi,c_int32_t)
+        if(slist(olist(l,1))/=slist(olist(l,2)))cycle          ! l must be a same-spin pair
+        do m=1,int(Nchi,c_int32_t)
+           if(slist(olist(m,1))/=slist(olist(m,2)))cycle       ! m too
+           if(slist(olist(l,1))==slist(olist(m,1)))cycle       ! and of the opposite spin to l
+           Vod(l,m)=cmatv(l,m)
+        end do
+     end do
+  end if
 
-  ! SOC-RPA pairing vertex: V_Δ = -V + V·χ,  χ = (I+χ₀·V)^{-1}·χ₀·V
-  !$omp parallel do collapse(2) private(i,cmat1,cmat2,cmat3,ipiv,info,l)
+  !$omp parallel do collapse(2) private(i,cmat1,cmat2,cmat3,cmat4,cmat5,ipiv,info,l)
   wloop:do j=1,Nw
      qloop:do i=1,Nk
+        if(sw_dcsub)then     ! counterterm from the BARE chi0, before chi is overwritten
+           call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),Vod,Nchi,chi(i,j,:,:),Nchi,(0.0d0,0.0d0),cmat5,Nchi)
+           call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),cmat5,Nchi,Vod,Nchi,(0.0d0,0.0d0),cmat4,Nchi)
+        else
+           cmat4(:,:)=(0.0d0,0.0d0)
+        end if
         call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),chi(i,j,:,:),Nchi,cmatv,Nchi,(0.0d0,0.0d0),cmat1,Nchi) !chi0V
         cmat2(:,:)=cmat1(:,:) !chi0V (RHS for zgesv)
         do l=1,Nchi
@@ -390,9 +432,9 @@ subroutine get_V_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
         end do
         call zgesv(Nchi,Nchi,cmat1,Nchi,ipiv,cmat2,Nchi,info) !(I+chi0V)X=chi0V -> cmat2=chi (RPA)
         if(info/=0)then; print*,'zgesv failed: info=',info; stop; end if
-        cmat3(:,:)=neg_cmatv(:,:)   !start from -V
+        cmat3(:,:)=-cmatv(:,:)   !start from -V
         call zgemm('N','N',Nchi,Nchi,Nchi,(1.0d0,0.0d0),cmatv,Nchi,cmat2,Nchi,(1.0d0,0.0d0),cmat3,Nchi) !-V + V*chi
-        chi(i,j,:,:)=cmat3(:,:)
+        chi(i,j,:,:)=cmat3(:,:)-cmat4(:,:)
      end do qloop
   end do wloop
   !$omp end parallel do

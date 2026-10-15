@@ -81,7 +81,7 @@ subroutine get_chi0_nosym(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nkall,Norb,Nchi) bi
   !!@param  Nkall,in: Number of all k-points
   !!@param   Norb,in: Number of orbitals (spin included)
   !!@param   Nchi,in: Number of chi index
-  use numerics, only:drop_roundoff
+  use numerics, only:drop_roundoff,reverse_index
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nx,Ny,Nz
@@ -99,22 +99,7 @@ subroutine get_chi0_nosym(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nkall,Norb,Nchi) bi
   weight=temp/dble(Nkall)
   allocate(tmp(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmpgk13(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmpgk42(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw))
   ! ii,ij,ik,iw: index of -r and -tau (iw also maps v_n -> -v_n on the bosonic grid)
-  ii(0)=0
-  ij(0)=0
-  ik(0)=0
-  iw(1)=1
-  do i=1,Nx-1
-     ii(i)=Nx-i
-  end do
-  do i=1,Ny-1
-     ij(i)=Ny-i
-  end do
-  do i=1,Nz-1
-     ik(i)=Nz-i
-  end do
-  do i=2,2*Nw
-     iw(i)=2*Nw-i+2
-  end do
+  call reverse_index(ii,ij,ik,iw,Nx,Ny,Nz,Nw)
   call init_fft_plans(tmpgk13,tmp,Nx,Ny,Nz,2*Nw)
   l_loop:do l=1,Nchi
      m_loop:do m=1,l
@@ -365,9 +350,13 @@ subroutine get_initial_delta_nosym(delta,init_delta,Nkall,Nw,Norb)
   !$omp end parallel workshare
 end subroutine get_initial_delta_nosym
 
-subroutine get_vdelta_nosym(chi,Vmat,Nkall,Nw,Nchi) bind(C)
-  !> pairing interaction V_Delta = -V/2 + V chi_RPA from chi0, in place (Q independent:
-  !> compute once and reuse for every pair momentum)
+subroutine get_vdelta_nosym(chi,Vmat,olist,slist,Nkall,Nw,Nchi,sw_dcsub) bind(C)
+  !> interaction from chi0, in place (Q independent: compute once and reuse for every Q).
+  !> Same two channels as the SOC code, since both use the same spin-orbital vertex Vmat:
+  !>   sw_dcsub=.false. pairing     V_Delta = -V/2 + V chi_RPA          (the usual use, hence the name)
+  !>   sw_dcsub=.true.  self-energy V_sigma = -V + V chi_RPA - V_od chi0 V_od
+  !> The -V/2 vs -V and the double-counting subtraction are exactly the difference between
+  !> lin_eliash_soc and mkself_soc; see get_V_soc_flex.  This solver itself only does pairing.
   !> The bare term carries 1/2: the antisymmetrized bare vertex is both the direct and the
   !> exchange term, and the gap equation sums over both orderings F_{l2 m1} of the pair, so
   !> -V alone would count it twice, whereas the RPA ladder V chi V is direct-channel only.
@@ -379,26 +368,31 @@ subroutine get_vdelta_nosym(chi,Vmat,Nkall,Nw,Nchi) bind(C)
   !!@param  Nkall,in: Number of all k-points
   !!@param     Nw,in: Number of Matsubara frequencies
   !!@param   Nchi,in: Number of chi index
-  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_bool
   implicit none
   integer(c_int64_t),intent(in):: Nkall,Nw,Nchi
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  integer(c_int64_t),intent(in),dimension(*):: slist
+  logical(c_bool),intent(in):: sw_dcsub
   real(c_double),intent(in),dimension(Nchi,Nchi):: Vmat
   complex(c_double),intent(inout),dimension(Nkall,Nw,Nchi,Nchi):: chi
 
   integer(c_int64_t) l,m
-  real(c_double),dimension(Nchi,Nchi):: sgn_dummy
+  logical(1) dcsub
 
-  sgn_dummy(:,:)=1.0d0 !get_V_soc_flex does not use its sgnsig2 argument
-  call get_V_soc_flex(chi,Vmat,sgn_dummy,Nkall,Nw,Nchi)
-  !$omp parallel do private(l,m)
-  do l=1,Nchi
-     do m=1,Nchi
-        chi(:,:,m,l)=chi(:,:,m,l)+0.5d0*Vmat(m,l) !-V -> -V/2: bare term counted once
+  dcsub=logical(sw_dcsub,1)
+  call get_V_soc_flex(chi,Vmat,olist,slist,Nkall,Nw,Nchi,dcsub)
+  if(.not.dcsub)then   ! pairing only: -V -> -V/2, the bare term counted once
+     !$omp parallel do private(l,m)
+     do l=1,Nchi
+        do m=1,Nchi
+           chi(:,:,m,l)=chi(:,:,m,l)+0.5d0*Vmat(m,l)
+        end do
      end do
-  end do
-  !$omp end parallel do
-  print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
-  print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
+     !$omp end parallel do
+  end if
+  print'(A15,2E16.8)','V max is ',maxval(dble(chi)),maxval(aimag(chi))
+  print'(A15,2E16.8)','V min is ',minval(dble(chi)),minval(aimag(chi))
 end subroutine get_vdelta_nosym
 
 subroutine lin_eliash_nosym(delta,chi,Gk,init_delta,Vmat,olist,kmap,iQ,temp,eps,&

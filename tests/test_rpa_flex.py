@@ -508,6 +508,67 @@ def test_mkself_sw_tail_smoke():
     assert np.abs(sg1-sg2).max() < 0.6*smax    # a correction, not a different answer
 
 
+def test_mkself_soc_reproduces_the_nosoc_selfenergy():
+    """The SOC FLEX self-energy vertex needs the second-order double-counting subtraction that the
+    no-SOC vertex has always had: the RPA matrix series reaches that diagram through two spin
+    channels, and get_V_soc_flex keeps both unless told otherwise (its sw_dcsub argument is what
+    selects the self-energy channel over the pairing one, where there is no double counting).
+    Without the subtraction Sigma came out too large by a factor set by the interaction structure
+    (2x for one orbital, 1.5x for two orbitals at J=0).  A spinful model with no SOC must therefore
+    reproduce mkself exactly, here also at U=0.5 so the agreement is not just second order."""
+    import _tools as T
+    N, Nw, temp, fill = 4, 8, 0.1, 0.8
+    m = T.one_orbital_square(Nx=N, Ny=N, Nw=Nw, temp=temp, mu=0.0, tx=1.0, ty=1.0)
+    ham2, _, slist, invs = P.spin_double_model(m['ham_r'], [])
+    ol2, site2 = P.spin_double_chiolist(m['olist'], m['site'], 1)
+    e2, u2 = P.get_eigs(m['klist'], ham2, [], m['rvec'])
+    h2 = np.ascontiguousarray(np.array([u.conj().T @ np.diag(e) @ u for e, u in zip(e2, u2)]))
+    for U in (0.05, 0.5):
+        Smat, Cmat = F.gen_SCmatrix(m['olist'], m['site'], U=U, J=0.0)
+        Vmat = F.gen_Vmatrix(ol2, slist, site2, invs, U, 0.0)
+        with _silence_stdout():
+            a, mua = F.mkself(Smat, Cmat, m['kmap'], m['invk'], m['olist'], m['hamk'], m['eig'],
+                              m['uni'], 0.0, fill, temp, Nw, N, N, 1, False, False,
+                              eps=1e-10, scf_loop=400)
+            b, mub = F.mkself_soc(Vmat, m['kmap'], m['invk'], invs, ol2, slist, h2, e2, u2, 0.0,
+                                  2*fill, temp, Nw, N, N, 1, False, False, eps=1e-10, scf_loop=400)
+        assert np.abs(b[:1, :1] - a).max() < 1e-9*np.abs(a).max(), U
+        assert abs(mub - mua) < 1e-9, U
+        assert np.abs(b[0, 1]).max() == 0.0 and np.abs(b[1, 0]).max() == 0.0   # no spin flip
+        assert np.abs(b[0, 0] - b[1, 1]).max() < 1e-12*np.abs(b).max()         # up-up = down-down
+
+
+def test_mkself_soc_runs_and_matches_a_pinned_reference():
+    """mkself_soc had no test at all, so the shared FLEX pieces (flex_scf: solve_mu, mix_sigma)
+    are pinned here, for the SOC entry point and the no-SOC one that shares them.  The two now
+    agree to ~1e-12 on this spin-doubled SOC-free model, which is the point of the pin.  A spin-doubled spinless model has no SOC, so the SOC
+    path must also keep sigma spin-diagonal with equal up-up and down-down blocks."""
+    import _tools as T
+    N, Nw, U, fill = 4, 8, 1.0, 0.8
+    m = T.one_orbital_square(Nx=N, Ny=N, Nw=Nw, temp=0.1, mu=0.0, tx=1.0, ty=1.0)
+    Smat, Cmat = F.gen_SCmatrix(m['olist'], m['site'], U=U, J=0.0)
+    with _silence_stdout():
+        sg, mu = F.mkself(Smat, Cmat, m['kmap'], m['invk'], m['olist'], m['hamk'], m['eig'],
+                          m['uni'], 0.0, fill, m['temp'], Nw, N, N, 1, False, False,
+                          eps=1e-10, scf_loop=400)
+    assert abs(mu - 1.977272296185317) < 1e-9, mu
+    assert abs(np.abs(sg).max() - 3.898676976567121e-02) < 1e-11, np.abs(sg).max()
+
+    ham2, _, slist, invs = P.spin_double_model(m['ham_r'], [])
+    ol2, site2 = P.spin_double_chiolist(m['olist'], m['site'], 1)
+    eig2, uni2 = P.get_eigs(m['klist'], ham2, [], m['rvec'])
+    hamk2 = np.ascontiguousarray(np.array([u.conj().T @ np.diag(e) @ u for e, u in zip(eig2, uni2)]))
+    Vmat = F.gen_Vmatrix(ol2, slist, site2, invs, U, 0.0)
+    with _silence_stdout():
+        sg2, mu2 = F.mkself_soc(Vmat, m['kmap'], m['invk'], invs, ol2, slist, hamk2, eig2, uni2,
+                                0.0, 2*fill, m['temp'], Nw, N, N, 1, False, False,
+                                eps=1e-10, scf_loop=400)
+    assert abs(mu2 - 1.977272296185655) < 1e-9, mu2
+    assert abs(np.abs(sg2).max() - 3.898676976166533e-02) < 1e-11, np.abs(sg2).max()
+    assert np.abs(sg2[0, 1]).max() == 0.0 and np.abs(sg2[1, 0]).max() == 0.0   # no spin flip
+    assert np.abs(sg2[0, 0] - sg2[1, 1]).max() < 1e-12*np.abs(sg2).max()       # up-up = down-down
+
+
 def test_regrid_sigma_bin_roundtrip_and_reseed(tmp_path):
     """plibs.regrid_sigma_bin (T-annealing helper): the scipy reader/writer is
     binary-compatible with io_sigma, an identity re-grid reproduces the stored

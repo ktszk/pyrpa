@@ -1,3 +1,41 @@
+! Linearized Eliashberg equation WITH spin-orbit coupling, using TRS and (optionally) inversion.
+!
+! Basis and storage
+!   Norb counts SPIN-orbitals: slist(a) = +-1 is the spin of a, invs(a) its opposite-spin partner.
+!   Gk and the pairing vertex chi live on the Nk irreducible TRS k-points; the gap lives on the
+!   Ndk points chosen by get_delta_kmap_soc, and idk/ipk say where each full-BZ point i went:
+!     inversion is a symmetry (gap_sym /= gap_unit, par_mix)
+!         parity is good, so Delta(-k) = pp P Delta(k) P is REBUILT instead of stored:
+!         Ndk = Nk, idk = invk(1,:), ipk = invk(2,:) (=1 on the rebuilt -k half)
+!     parity mixing (gap_sym = par_mix)
+!         nothing relates k and -k: Ndk = Nkall, idk = identity, ipk = 0
+!   lin_eliash_soc expands the result back onto the full BZ in delta_full, so callers see no
+!   difference.  Only w_n > 0 is stored; w_n < 0 comes from Pauli, F(k,-w) = -F^T(-k,w).
+!   pp = +-1 is the parity EIGENVALUE of the gap (from gap_sym), prt(a) = +-1 the parity of
+!   orbital a: Delta_ab(-k) = pp prt(a) prt(b) Delta_ab(k).  (Unlike lin_eliash there is no iprm,
+!   so inversion must not permute the orbitals; use par_mix for cells where it does.)
+!
+! What gap_sym fixes
+!   Its SIGN is the inversion parity of the gap (>0 even, <0 odd) and its magnitude picks the
+!   band-basis seed (get_initial_delta_soc).  It is NOT a singlet/triplet switch: with SOC a parity
+!   sector holds BOTH the (pseudospin singlet, even w) and the (pseudospin triplet, odd w) pairing,
+!   and no exact symmetry separates them.  Two mechanisms keep the result meaningful:
+!     project_spin   only when G is SU(2) invariant (no SOC, no Zeeman; detected at run time by
+!                    is_spin_rotation_invariant).  There singlet and triplet ARE separate sectors,
+!                    so the seed's one is kept and round-off into the other removed, and the
+!                    singlet/triplet of lin_eliash are reproduced exactly.
+!     select_branch  with SOC, Arnoldi returns the largest eigenvalue whose Ritz vector carries the
+!                    spin character of gap_sym rather than the largest of the parity sector, so
+!                    lambda stays continuous as the SOC strength goes to zero.
+!   The power method (arnoldi_m = 0) has no branch tracking and converges to the dominant state of
+!   the sector, so use Arnoldi when SOC is present.
+!
+! Real-linear kernel
+!   mkfk_trs_soc and mkdelta_soc compute part of F/Delta and fill the rest by conjugation
+!   (TRS: Delta_uu = -Delta_dd^+, Delta_ud Hermitian), so apply_op is linear over the REALS only.
+!   Arnoldi therefore uses a real inner product (get_inner) and real Ritz coefficients (real_ritz);
+!   a complex Krylov space mixes the two and silently returns wrong eigenvalues.
+
 subroutine lin_eliash_soc(delta_full,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,olist,slist,kmap,invk,invs,invschi,&
      temp,eps,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,arnoldi_m,lambda_out) bind(C)
   !> calculate linearized eliashberg equations with soc and TRS
@@ -25,8 +63,11 @@ subroutine lin_eliash_soc(delta_full,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,p
   !!@param         Ny,in: Number of ky mesh
   !!@param         Nz,in: Number of kz mesh
   !!@param     itemax,in: maximum iteration of power method
-  !!@param    gap_sym,in: gap symmetry number
+  !!@param    gap_sym,in: gap symmetry number.  Its SIGN is the inversion parity of the gap
+  !!                      (>0 even, <0 odd) and its magnitude picks the seed; 0 = unit-matrix seed,
+  !!                      -10 = parity mixing.  See the notes at the top of this file.
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  use eliash_krylov
   implicit none
   integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym
   integer(c_int64_t),intent(in):: arnoldi_m  !! Krylov subspace dimension (0=power method, >0=Arnoldi)
@@ -48,11 +89,18 @@ subroutine lin_eliash_soc(delta_full,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,p
 
   integer(c_int32_t) i_iter,i_eig,count,i,l,m
   integer(c_int32_t),parameter:: eig_max=2
+  !! special values of gap_sym (its sign is the parity of the gap, see the notes at the top)
+  logical(1),parameter:: no_dcsub=.false.     !! pairing channel: see get_V_soc_flex
+  integer(c_int64_t),parameter:: gap_unit=0   !! unit-matrix seed: no parity and no spin projection
+  integer(c_int64_t),parameter:: par_mix=-10  !! parity mixing: no parity, gap kept on the full BZ
   integer(c_int64_t) Ndk
   integer(c_int64_t),dimension(Nkall):: idk,ipk
   real(c_double) norm,inorm,norm2,weight,lambda_rq,vec_err,pp
   logical su2
   complex(c_double),allocatable,dimension(:,:,:,:):: delta,newdelta,fk
+  !> vector geometry for the shared Krylov routines (idk says which stored point carries each
+  !> full-BZ point, so norms and inner products still run over the whole BZ)
+  type(kspace) ks
 
   lambda_out=0.0d0
   ! Δ is stored on Ndk points: idk(i) = stored index of full k-point i, ipk(i)=1 if Δ(k_i) is
@@ -60,11 +108,12 @@ subroutine lin_eliash_soc(delta_full,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,p
   call get_delta_kmap_soc(idk,ipk,Ndk,invk,Nkall,Nk,gap_sym)
   pp=merge(1.0d0,-1.0d0,gap_sym>0)
   allocate(delta(Ndk,Nw,Norb,Norb),newdelta(Ndk,Nw,Norb,Norb),fk(Ndk,Nw,Norb,Norb))
+  call kspace_init(ks,idk,Nkall,Ndk,Nw,Norb)
   ! Without SOC (G spin-diagonal and spin-independent) singlet and triplet are separate sectors:
   ! the kernel keeps the seed's spin structure, but round-off would grow the other sector, so it
   ! is projected out (project_spin).  With SOC they mix and only the parity is imposed.
   su2=is_spin_rotation_invariant()
-  if(gap_sym/=0 .and. gap_sym/=-10)then
+  if(gap_sym/=gap_unit .and. gap_sym/=par_mix)then
      if(su2)then
         print'(A)','no SOC: gap restricted to the seed spin sector (singlet / S_z=0 triplet)'
      else
@@ -76,7 +125,7 @@ subroutine lin_eliash_soc(delta_full,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,p
   ! converges to (λ + norm2)*delta, so true eigenvalue λ = Rayleigh quotient - norm2.
   ! After the 1st eigenvalue is found, norm2 is set to its norm for deflation (shift-deflation).
   norm2=0.0d0
-  call get_V_soc_flex(chi,Vmat,sgnsig2,Nk,Nw,Nchi)
+  call get_V_soc_flex(chi,Vmat,olist,slist,Nk,Nw,Nchi,no_dcsub)   !pairing: no double-counting subtraction
   ! pairing vertex V_Delta = -V/2 + V chi V: get_V_soc_flex returns -V + V chi V (the form the
   ! self-energy uses), but in the gap equation the antisymmetrized bare vertex is both the direct
   ! and the exchange term and both orderings F_{l2 m1} of the pair are summed, so -V would count
@@ -92,8 +141,15 @@ subroutine lin_eliash_soc(delta_full,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,p
   !$omp end parallel do
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
-  if(arnoldi_m>0)then !--- Arnoldi solver
-     call solve_arnoldi(arnoldi_m)
+  if(arnoldi_m>0)then !--- Arnoldi solver (shared with lin_eliash, see module eliash_krylov)
+     call get_initial_delta_soc(newdelta,init_delta,uni,kmap,slist,invk,invs,idk,ipk,&
+          Nkall,Nk,Ndk,Nw,Norb,gap_sym)
+     if(gap_sym==gap_unit .or. gap_sym==par_mix)then
+        call arnoldi_two_pass(lambda_out,delta,newdelta,ks,arnoldi_m,apply_op)
+     else
+        ! with SOC the parity sector holds two branches, so the solver is told which one to take
+        call arnoldi_two_pass(lambda_out,delta,newdelta,ks,arnoldi_m,apply_op,classify_branch)
+     end if
   else !--- Power method
      eigenval_loop:do i_eig=1,eig_max !solve eig_val using power method, 1st eig is usually large negative value
      call get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,invs,idk,ipk,Nkall,Nk,Ndk,Nw,Norb,gap_sym)
@@ -107,7 +163,7 @@ subroutine lin_eliash_soc(delta_full,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,p
         !$omp parallel workshare
         newdelta(:,:,:,:)=-newdelta(:,:,:,:)*weight+delta(:,:,:,:)*norm2
         !$omp end parallel workshare
-        call get_norm(norm,newdelta)
+        norm=kv_norm(ks,newdelta)
         if(norm <= 0.0d0)then
            print*,'Error: norm <= 0 in iter_loop'
            stop
@@ -115,9 +171,9 @@ subroutine lin_eliash_soc(delta_full,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,p
         inorm=1.0d0/norm
         ! Rayleigh quotient: lambda_rq = Re(<delta, newdelta>) assuming ||delta||=1
         ! shift is +norm2, so true eigenvalue = lambda_rq - norm2
-        call get_rayleigh(lambda_rq,delta,newdelta)
+        lambda_rq=kv_dot(ks,delta,newdelta)
         ! Vector convergence: ||newdelta/norm - delta||
-        call get_vec_err(vec_err,newdelta,delta,inorm)
+        vec_err=kv_err(ks,newdelta,delta,inorm)
         if(abs(lambda_rq-norm2)>=1.0d2 .or. abs(lambda_rq-norm2)<1.0d-6)then
            print'(I3,A13,2E16.8)',i_iter,' lambda_elsh=',lambda_rq-norm2
         else
@@ -147,7 +203,7 @@ subroutine lin_eliash_soc(delta_full,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,p
      end if
      norm2=norm
   end do eigenval_loop
-  call get_norm(norm,newdelta)
+  norm=kv_norm(ks,newdelta)
   inorm=1.0d0/norm
   !$omp parallel workshare
   delta(:,:,:,:)=newdelta(:,:,:,:)*inorm
@@ -169,10 +225,10 @@ contains
     !> Impose the parity of the seed where it is not built in: Δ(-k) of the other k-points is
     !> rebuilt from parity (Δ(-k) = pp·P Δ(k) P), but a k=-k point (TRIM) is stored once, so there
     !> Δ_ab(K) <- [1 + pp·prt_a·prt_b]/2 · Δ_ab(K).  Without it an odd-parity triplet keeps a
-    !> spurious TRIM component.  Skipped for parity mixing (gap_sym=-10), stored on the full BZ.
+    !> spurious TRIM component.  Skipped for parity mixing, which is stored on the full BZ.
     complex(c_double),intent(inout),dimension(Ndk,Nw,Norb,Norb):: d
     integer(c_int32_t) ii,a,b
-    if(gap_sym==0 .or. gap_sym==-10)return
+    if(gap_sym==gap_unit .or. gap_sym==par_mix)return
     !$omp parallel do private(a,b)
     do ii=1,int(Nkall,c_int32_t)
        if(ipk(ii)==0 .and. invk(3,ii)==ii)then
@@ -213,7 +269,7 @@ contains
     complex(c_double),intent(inout),dimension(Ndk,Nw,Norb,Norb):: d
     integer(c_int32_t) a,b
     real(c_double) sgs
-    if(.not.su2 .or. gap_sym==0 .or. gap_sym==-10)return
+    if(.not.su2 .or. gap_sym==gap_unit .or. gap_sym==par_mix)return
     sgs=merge(-1.0d0,1.0d0,gap_sym>0)
     !$omp parallel do private(a)
     do b=1,int(Norb,c_int32_t)
@@ -228,352 +284,61 @@ contains
     !$omp end parallel do
   end subroutine project_spin
 
-  subroutine get_norm(norm,func)
-    complex(c_double),intent(in),dimension(Ndk,Nw,Norb,Norb):: func
-    real(c_double),intent(out):: norm
-
-    integer(c_int32_t) i,j,l,m
-    real(c_double) tmp
-
-    tmp=0.0d0
-    !$omp parallel
-    do l=1,Norb
-       do m=1,Norb
-          !$omp do private(i,j),reduction(+:tmp)
-          do j=1,Nw
-             do i=1,Nkall
-                tmp=tmp+abs(func(idk(i),j,m,l))*abs(func(idk(i),j,m,l))
-             end do
-          end do
-          !$omp end do
-       end do
-    end do
-    !$omp end parallel
-    norm=sqrt(2.0d0*tmp)
-  end subroutine get_norm
-
-  subroutine get_rayleigh(rq,del,newdel)
-    !> Rayleigh quotient: rq = Re(<del, newdel>) assuming ||del||=1
-    complex(c_double),intent(in),dimension(Ndk,Nw,Norb,Norb):: del,newdel
-    real(c_double),intent(out):: rq
-
-    integer(c_int32_t) i,j,l,m
-    real(c_double) tmp
-
-    tmp=0.0d0
-    !$omp parallel
-    do l=1,Norb
-       do m=1,Norb
-          !$omp do private(i,j),reduction(+:tmp)
-          do j=1,Nw
-             do i=1,Nkall
-                tmp=tmp+dble(conjg(del(idk(i),j,m,l))*newdel(idk(i),j,m,l))
-             end do
-          end do
-          !$omp end do
-       end do
-    end do
-    !$omp end parallel
-    rq=2.0d0*tmp
-  end subroutine get_rayleigh
-
-  subroutine get_vec_err(verr,newdel,del,inrm)
-    !> Vector convergence: min(||newdel*inrm - del||, ||newdel*inrm + del||)
-    !> Taking the minimum handles sign-flipping convergence for negative eigenvalues
-    complex(c_double),intent(in),dimension(Ndk,Nw,Norb,Norb):: newdel,del
-    real(c_double),intent(in):: inrm
-    real(c_double),intent(out):: verr
-
-    integer(c_int32_t) i,j,l,m
-    real(c_double) tmp_pos,tmp_neg
-
-    tmp_pos=0.0d0
-    tmp_neg=0.0d0
-    !$omp parallel
-    do l=1,Norb
-       do m=1,Norb
-          !$omp do private(i,j),reduction(+:tmp_pos,tmp_neg)
-          do j=1,Nw
-             do i=1,Nkall
-                tmp_pos=tmp_pos+abs(newdel(idk(i),j,m,l)*inrm-del(idk(i),j,m,l))**2
-                tmp_neg=tmp_neg+abs(newdel(idk(i),j,m,l)*inrm+del(idk(i),j,m,l))**2
-             end do
-          end do
-          !$omp end do
-       end do
-    end do
-    !$omp end parallel
-    verr=sqrt(2.0d0*min(tmp_pos,tmp_neg))
-  end subroutine get_vec_err
-
-  subroutine solve_arnoldi(m_arnoldi)
-    !> Two-pass Arnoldi: pass 1 (no shift) finds lambda_-, pass 2 (shift+deflation) finds lambda_+.
-    !>
-    !> Algorithm sketch (Arnoldi factorization of operator A := apply_op):
-    !>   - Build orthonormal Krylov basis V_m = [v_0, v_1, ..., v_{m-1}] with v_0 = initial Δ.
-    !>   - Each step: w = A v_j, modified Gram-Schmidt against V(:,0..j) -> H_mat(:,j+1),
-    !>                beta = ||w_residual||, v_{j+1} = w/beta.
-    !>   - Result satisfies A V_m = V_m H_m + beta v_m e_m^T  (H_m: m x m upper Hessenberg).
-    !>   - Diagonalize H_m via ZGEEV; eigenvalues = Ritz values (approx eigenvalues of A),
-    !>     Ritz vector = V_m * y where H_m y = theta y.
-    !>   - Pass 2 replaces A with (A + shift*I) and projects out delta1 each step,
-    !>     making lambda_+ the dominant Ritz value.
-    integer(c_int64_t),intent(in):: m_arnoldi
-    integer(c_int32_t) :: m_dim,ip,j,ii,m_act,idx,lwork,info
-    real(c_double) :: beta,shift,lambda1
-    complex(c_double) :: hij
-    ! V         : Krylov basis (last index = basis vector number 0..m-1)
-    ! delta1    : Pass-1 Ritz vector for lambda_-, used as deflation direction in Pass 2
-    ! H_mat     : (m+1) x m upper Hessenberg matrix from Arnoldi factorization
-    ! A_mat     : working copy of H_mat(1:m,1:m) for ZGEEV (destroyed on output)
-    ! eigenvals : Ritz values (eigenvalues of A_mat)
-    ! VR        : right eigenvectors of A_mat (coefficients of Ritz vectors in V basis)
-    ! m_act     : actual Krylov dimension reached (may be < m_dim on lucky breakdown)
-    complex(c_double),allocatable :: V(:,:,:,:,:),delta1(:,:,:,:)
-    complex(c_double),allocatable :: H_mat(:,:),A_mat(:,:),eigenvals(:)
-    complex(c_double),allocatable :: VL_dum(:,:),VR(:,:),zwork(:)
-    real(c_double),allocatable :: rwork(:)
-
-    m_dim=int(m_arnoldi,c_int32_t)
-    lwork=max(64,2*m_dim)
-    allocate(V(Ndk,Nw,Norb,Norb,0:m_dim-1),delta1(Ndk,Nw,Norb,Norb))
-    allocate(H_mat(m_dim+1,m_dim))
-    allocate(A_mat(m_dim,m_dim),eigenvals(m_dim))
-    allocate(VL_dum(1,1),VR(m_dim,m_dim),zwork(lwork),rwork(2*m_dim))
-
-    ! ===== Pass 1: no shift, find lambda_- =====================================
-    H_mat=(0.0d0,0.0d0)
-    ! v_0: normalized initial gap function (already unit-norm from get_initial_delta_soc)
-    call get_initial_delta_soc(V(:,:,:,:,0),init_delta,uni,kmap,slist,invk,invs,idk,ipk,Nkall,Nk,Ndk,Nw,Norb,gap_sym)
-    print'(A,I4,A)','Arnoldi pass 1 (no shift): Krylov dim =',m_dim,' ...'
-    m_act=m_dim
-    ! ----- Arnoldi iteration: extend the Krylov basis one vector per step -----
-    do j=0,m_dim-1
-       call apply_op(newdelta,V(:,:,:,:,j))                ! w = A v_j
-       ! modified Gram-Schmidt: orthogonalize w against v_0..v_j
-       do ii=0,j
-          call get_inner(hij,V(:,:,:,:,ii),newdelta)        ! H_{ii,j} = <v_ii, w>
-          H_mat(ii+1,j+1)=hij
-          !$omp parallel workshare
-          newdelta(:,:,:,:)=newdelta(:,:,:,:)-hij*V(:,:,:,:,ii)  ! w := w - H_{ii,j} v_ii
-          !$omp end parallel workshare
-       end do
-       call get_norm(beta,newdelta)                         ! beta = ||w_residual||
-       H_mat(j+2,j+1)=cmplx(beta,0.0d0,c_double)            ! sub-diagonal entry H_{j+1,j}
-       ! lucky breakdown: residual is essentially zero -> K_{j+1} is invariant
-       if(beta<1.0d-14)then; m_act=j+1; exit; end if
-       if(j<m_dim-1)then
-          !$omp parallel do
-          do ip=1,int(Ndk,c_int32_t)
-             V(ip,:,:,:,j+1)=newdelta(ip,:,:,:)*(1.0d0/beta)   ! v_{j+1} = w / beta
-          end do
-          !$omp end parallel do
-       end if
-    end do
-    ! ----- diagonalize the m_act x m_act Hessenberg block -----
-    A_mat(1:m_act,1:m_act)=H_mat(1:m_act,1:m_act)           ! ZGEEV destroys input, copy first
-    call zgeev('N','V',m_act,A_mat,m_dim,eigenvals,VL_dum,1,VR,m_dim,zwork,lwork,rwork,info)
-    if(info/=0)then; print*,'ZGEEV failed pass 1: info=',info; stop; end if
-    print'(A)','Pass 1 Ritz values (real):'
-    do ii=1,m_act
-       print'(I4,F14.6)',ii,dble(eigenvals(ii))
-    end do
-    idx=minloc(dble(eigenvals(1:m_act)),1)                  ! pick most negative Ritz value
-    lambda1=dble(eigenvals(idx))
-    call real_ritz(VR(1:m_act,idx),m_act)
-    print'(A,F12.6)','  lambda_- =',lambda1
-    ! early exit: if Pass 1 already resolved a sufficiently positive Ritz value,
-    ! it is the physical eliashberg eigenvalue lambda_+ — skip Pass 2.
-    if(maxval(dble(eigenvals(1:m_act)))>=0.1d0)then
-       idx=maxloc(dble(eigenvals(1:m_act)),1)
-       print'(A,F12.6)','  eliash   =',dble(eigenvals(idx))
-       lambda_out=dble(eigenvals(idx))
-       call real_ritz(VR(1:m_act,idx),m_act)
-       ! reconstruct Ritz vector x = sum_ii VR(ii,idx) * v_{ii-1}
-       !$omp parallel workshare
-       delta(:,:,:,:)=(0.0d0,0.0d0)
-       !$omp end parallel workshare
-       do ii=1,m_act
-          !$omp parallel workshare
-          delta(:,:,:,:)=delta(:,:,:,:)+VR(ii,idx)*V(:,:,:,:,ii-1)
-          !$omp end parallel workshare
-       end do
-       call get_norm(beta,delta)
-       !$omp parallel workshare
-       delta(:,:,:,:)=delta(:,:,:,:)*(1.0d0/beta)            ! normalize result
-       !$omp end parallel workshare
-       deallocate(V,delta1,H_mat,A_mat,eigenvals,VL_dum,VR,zwork,rwork)
-       return
-    end if
-    ! build delta1 = Ritz vector for lambda_- (= V_m * y_-), store for deflation in Pass 2
-    !$omp parallel do
-    do ip=1,int(Ndk,c_int32_t)
-       delta1(ip,:,:,:)=(0.0d0,0.0d0)
-    end do
-    !$omp end parallel do
-    do ii=1,m_act
-       !$omp parallel do
-       do ip=1,int(Ndk,c_int32_t)
-          delta1(ip,:,:,:)=delta1(ip,:,:,:)+VR(ii,idx)*V(ip,:,:,:,ii-1)
-       end do
-       !$omp end parallel do
-    end do
-    call get_norm(beta,delta1)
-    !$omp parallel do
-    do ip=1,int(Ndk,c_int32_t)
-       delta1(ip,:,:,:)=delta1(ip,:,:,:)*(1.0d0/beta)         ! normalize deflation vector
-    end do
-    !$omp end parallel do
-
-    ! ===== Pass 2: shift + deflation, find lambda_+ ============================
-    ! Operator: B := (A + shift*I) restricted to span{delta1}^perp.
-    ! Spectrum mapping: eigenvalue lambda_i of A -> lambda_i + shift for B.
-    ! With shift = -lambda_-, lambda_+ + shift becomes the largest-magnitude eigenvalue,
-    ! so Arnoldi converges to it preferentially.
-    shift=-lambda1   ! shift = |lambda_-| > 0; all eigenvalues become lambda_i + shift
-    H_mat=(0.0d0,0.0d0)
-    call get_initial_delta_soc(V(:,:,:,:,0),init_delta,uni,kmap,slist,invk,invs,idk,ipk,Nkall,Nk,Ndk,Nw,Norb,gap_sym)
-    ! orthogonalize initial vector against delta1, then renormalize -> v_0 in delta1^perp
-    call get_inner(hij,delta1,V(:,:,:,:,0))
-    !$omp parallel do
-    do ip=1,int(Ndk,c_int32_t)
-       V(ip,:,:,:,0)=V(ip,:,:,:,0)-hij*delta1(ip,:,:,:)
-    end do
-    !$omp end parallel do
-    call get_norm(beta,V(:,:,:,:,0))
-    !$omp parallel do
-    do ip=1,int(Ndk,c_int32_t)
-       V(ip,:,:,:,0)=V(ip,:,:,:,0)*(1.0d0/beta)
-    end do
-    !$omp end parallel do
-    print'(A,F10.6,A,I4,A)','Arnoldi pass 2 (shift=',shift,'): Krylov dim =',m_dim,' ...'
-    m_act=m_dim
-    ! ----- Arnoldi iteration with operator B = P_{delta1^perp} (A + shift*I) -----
-    do j=0,m_dim-1
-       ! Step (1): w = A v_j
-       call apply_op(newdelta,V(:,:,:,:,j))
-       ! Step (2): w := w + shift * v_j  (apply spectral shift)
-       !$omp parallel workshare
-       newdelta(:,:,:,:)=newdelta(:,:,:,:)+shift*V(:,:,:,:,j)   !shift
-       !$omp end parallel workshare
-       ! Step (3): project out delta1 (deflate lambda_- direction) -> w in delta1^perp
-       call get_inner(hij,delta1,newdelta)                       !deflation
-       !$omp parallel workshare
-       newdelta(:,:,:,:)=newdelta(:,:,:,:)-hij*delta1(:,:,:,:)
-       !$omp end parallel workshare
-       ! Step (4): modified Gram-Schmidt against v_0..v_j (same as Pass 1)
-       do ii=0,j  !Gram-Schmidt
-          call get_inner(hij,V(:,:,:,:,ii),newdelta)
-          H_mat(ii+1,j+1)=hij
-          !$omp parallel workshare
-          newdelta(:,:,:,:)=newdelta(:,:,:,:)-hij*V(:,:,:,:,ii)
-          !$omp end parallel workshare
-       end do
-       call get_norm(beta,newdelta)
-       H_mat(j+2,j+1)=cmplx(beta,0.0d0,c_double)
-       if(beta<1.0d-14)then; m_act=j+1; exit; end if   ! lucky breakdown
-       if(j<m_dim-1)then
-          !$omp parallel do
-          do ip=1,int(Ndk,c_int32_t)
-             V(ip,:,:,:,j+1)=newdelta(ip,:,:,:)*(1.0d0/beta)        ! v_{j+1} = w / beta
-          end do
-          !$omp end parallel do
-       end if
-    end do
-    ! ----- diagonalize the deflated/shifted Hessenberg matrix -----
-    A_mat(1:m_act,1:m_act)=H_mat(1:m_act,1:m_act)
-    call zgeev('N','V',m_act,A_mat,m_dim,eigenvals,VL_dum,1,VR,m_dim,zwork,lwork,rwork,info)
-    if(info/=0)then; print*,'ZGEEV failed pass 2: info=',info; stop; end if
-    ! physical eigenvalue = Ritz value - shift (undo the shift to get original spectrum of A)
-    print'(A)','Pass 2 Ritz values - physical (real):'
-    do ii=1,m_act
-       print'(I4,F14.6)',ii,dble(eigenvals(ii))-shift
-    end do
-    idx=maxloc(dble(eigenvals(1:m_act)),1)                ! largest Ritz value -> lambda_+ + shift
-    print'(A,F12.6)','  eliash   =',dble(eigenvals(idx))-shift
-    lambda_out=dble(eigenvals(idx))-shift
-    call real_ritz(VR(1:m_act,idx),m_act)
-    ! reconstruct Ritz vector for lambda_+: delta = V_m * y_+
-    !$omp parallel workshare
-    delta(:,:,:,:)=(0.0d0,0.0d0)
-    !$omp end parallel workshare
-    do ii=1,m_act
-       !$omp parallel workshare
-       delta(:,:,:,:)=delta(:,:,:,:)+VR(ii,idx)*V(:,:,:,:,ii-1)
-       !$omp end parallel workshare
-    end do
-    call get_norm(beta,delta)
-    !$omp parallel workshare
-    delta(:,:,:,:)=delta(:,:,:,:)*(1.0d0/beta)               ! normalize gap function
-    !$omp end parallel workshare
-    ! y above is an eigenvector of the deflated P A P (P = 1 - delta1 delta1^T), not of A:
-    ! A y = lambda_+ y + c delta1 with c = <delta1, A y>, so x = y + c/(lambda_+ - lambda_-) delta1
-    call apply_op(newdelta,delta)
-    call get_inner(hij,delta1,newdelta)
-    if(abs(lambda_out-lambda1)>1.0d-12)then     ! lambda_+ = lambda_- (e.g. V=0): nothing to undo
-       hij=hij/(lambda_out-lambda1)
-       !$omp parallel workshare
-       delta(:,:,:,:)=delta(:,:,:,:)+hij*delta1(:,:,:,:)
-       !$omp end parallel workshare
-       call get_norm(beta,delta)
-       !$omp parallel workshare
-       delta(:,:,:,:)=delta(:,:,:,:)*(1.0d0/beta)
-       !$omp end parallel workshare
-    end if
-
-    deallocate(V,delta1,H_mat,A_mat,eigenvals,VL_dum,VR,zwork,rwork)
-  end subroutine solve_arnoldi
-
   subroutine apply_op(w_out,v_in)
-    !> apply Eliashberg operator: w_out = (T/Nkall)*K*v_in; uses host fk as scratch
-    complex(c_double),intent(in),dimension(Ndk,Nw,Norb,Norb):: v_in
-    complex(c_double),intent(out),dimension(Ndk,Nw,Norb,Norb):: w_out
+    !> one application of the Eliashberg kernel, w_out = (T/Nkall)*K*v_in; uses host fk as scratch.
+    !> Flat dummies: the shared driver stores Krylov vectors as plain vectors, and the rank-4
+    !> routines below pick up the (Ndk,Nw,Norb,Norb) shape by sequence association.
+    complex(c_double),intent(in):: v_in(*)
+    complex(c_double),intent(out):: w_out(*)
+    integer(c_int32_t) q
     call mkfk_trs_soc(fk,Gk,v_in,sgnsig,slist,invk,invs,idk,ipk,Nkall,Nk,Ndk,Nw,Norb,gap_sym)
     call mkdelta_soc(w_out,fk,chi,Vmat,sgnsig,sgnsig2,prt,kmap,invk,invs,invschi,olist,slist,idk,ipk,&
          Nkall,Nk,Ndk,Nw,Nchi,Norb,Nx,Ny,Nz,gap_sym)
     call project_parity(w_out)
     call project_spin(w_out)
-    !$omp parallel workshare
-      w_out(:,:,:,:)=-w_out(:,:,:,:)*weight
-    !$omp end parallel workshare
+    !$omp parallel do private(q)
+    do q=1,ks%nvec
+       w_out(q)=-w_out(q)*weight
+    end do
+    !$omp end parallel do
   end subroutine apply_op
 
-  subroutine get_inner(h,u,v)
-    !> real inner product h = 2*Re<u,v> summed over full BZ.  mkfk_trs_soc/mkdelta_soc fill
-    !> components by conjugation (TRS: D_uu=-D_dd^+, D_ud Hermitian), so apply_op is only
-    !> real-linear and Arnoldi must run over the real vector space it acts on.
-    complex(c_double),intent(in),dimension(Ndk,Nw,Norb,Norb):: u,v
-    complex(c_double),intent(out):: h
-    integer(c_int32_t) i,j,l,m
-    real(c_double) tmp_r,tmp_i
-    tmp_r=0.0d0
-    tmp_i=0.0d0
-    !$omp parallel
-    do l=1,Norb
-       do m=1,Norb
-          !$omp do private(i,j),reduction(+:tmp_r,tmp_i)
-          do j=1,Nw
-             do i=1,Nkall
-                tmp_r=tmp_r+dble(conjg(u(idk(i),j,m,l))*v(idk(i),j,m,l))
-                tmp_i=tmp_i+aimag(conjg(u(idk(i),j,m,l))*v(idk(i),j,m,l))
-             end do
-          end do
-          !$omp end do
+  subroutine classify_branch(ok,x)
+    !> Branch test handed to the shared Arnoldi driver: does x have the spin character gap_sym
+    !> asks for?  With SOC a parity sector holds both the (pseudospin singlet, even w) and the
+    !> (pseudospin triplet, odd w) pairing and no exact symmetry separates them, so without this
+    !> the solver would return whichever is larger and lambda would jump as SOC goes to zero.
+    complex(c_double),intent(in):: x(*)
+    logical,intent(out):: ok
+    real(c_double) ws,wt
+    call get_spin_weight(ws,wt,x)
+    ok=merge(ws>wt,wt>ws,gap_sym>0)
+  end subroutine classify_branch
+
+  subroutine get_spin_weight(ws,wt,d)
+    !> Split |Delta|^2 into its spin-singlet weight ws and spin-triplet weight wt, by projecting
+    !> the opposite-spin block on Delta_du = -Delta_ud (singlet) and Delta_du = +Delta_ud (S_z=0
+    !> triplet); the equal-spin blocks are the S_z=+-1 triplet and go to wt.  Only ws vs wt is
+    !> used (which one dominates), so the overall normalisation does not matter.
+    complex(c_double),intent(in),dimension(Ndk,Nw,Norb,Norb):: d
+    real(c_double),intent(out):: ws,wt
+    integer(c_int32_t) a,b
+    ws=0.0d0
+    wt=0.0d0
+    do b=1,int(Norb,c_int32_t)
+       do a=1,int(Norb,c_int32_t)
+          if(slist(a)/=slist(b))then
+             if(slist(a)==1)then
+                ws=ws+sum(abs(d(:,:,a,b)-d(:,:,invs(a),invs(b)))**2)
+                wt=wt+sum(abs(d(:,:,a,b)+d(:,:,invs(a),invs(b)))**2)
+             end if
+          else
+             wt=wt+2.0d0*sum(abs(d(:,:,a,b))**2)   ! equal spin: S_z=+-1 triplet
+          end if
        end do
     end do
-    !$omp end parallel
-    h=cmplx(2.0d0*tmp_r,0.0d0,c_double)
-  end subroutine get_inner
+  end subroutine get_spin_weight
 
-  subroutine real_ritz(y,n)
-    !> Ritz coefficients y of the real Hessenberg matrix: fix the arbitrary ZGEEV phase so that
-    !> y is real (exact for a real Ritz value), keeping the Ritz vector in the TRS-real space
-    integer(c_int32_t),intent(in):: n
-    complex(c_double),intent(inout):: y(n)
-    complex(c_double) ph
-    ph=y(maxloc(abs(y),1))
-    y(:)=cmplx(dble(y(:)*conjg(ph)/abs(ph)),0.0d0,c_double)
-  end subroutine real_ritz
 end subroutine lin_eliash_soc
 
 subroutine mkfk_trs_soc(fk,Gk,delta,sgnsig,slist,invk,invs,idk,ipk,Nkall,Nk,Ndk,Nw,Norb,gap_sym)
@@ -712,8 +477,12 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,prt,kmap,invk,i
                  !$omp do private(i,j,sp,sm)
                  do j=1,Nw
                     do i=1,Nkall
-                       sp=merge(pp*prt(olist(l,2))*prt(olist(m,1)),1.0d0,ipk(i)==1)        !F(k) from stored point
-                       sm=merge(pp*prt(olist(l,2))*prt(olist(m,1)),1.0d0,ipk(invk(3,i))==1) !F(-k) from stored point
+                       ! ipk=1 marks a k-point whose F is not stored but rebuilt from its partner
+                       ! by parity, F_ab(k) = pp*prt(a)*prt(b)*F_ab(-k); sp does that for F(k) and
+                       ! sm for the F(-k) that supplies the negative frequency.  ipk is 0 for every
+                       ! point in the parity-mixing mode, where both factors are 1.
+                       sp=merge(pp*prt(olist(l,2))*prt(olist(m,1)),1.0d0,ipk(i)==1)
+                       sm=merge(pp*prt(olist(l,2))*prt(olist(m,1)),1.0d0,ipk(invk(3,i))==1)
                        tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),j)=sp*delta(idk(i),j,olist(l,2),olist(m,1))
                        tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=-sm*delta(idk(invk(3,i)),j,olist(m,1),olist(l,2)) !F(k,-ω)=-F^T(-k,ω): anomalous GF Matsubara symmetry
                     end do
@@ -900,9 +669,10 @@ subroutine get_delta_kmap_soc(idk,ipk,Ndk,invk,Nkall,Nk,gap_sym)
   integer(c_int64_t),intent(out),dimension(Nkall):: idk,ipk
   integer(c_int64_t),intent(out):: Ndk
 
+  integer(c_int64_t),parameter:: gap_unit=0,par_mix=-10
   integer(c_int64_t) i
 
-  if(gap_sym/=0 .and. gap_sym/=-10)then
+  if(gap_sym/=gap_unit .and. gap_sym/=par_mix)then
      Ndk=Nk
      idk(:)=invk(1,:)
      ipk(:)=invk(2,:)

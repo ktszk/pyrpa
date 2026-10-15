@@ -64,8 +64,11 @@ _loader._lib.lin_eliash_soc.restype = None
 _loader._lib.get_vdelta_nosym.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.complex128),  # chi (inout: chi0 -> V_Delta)
     np.ctypeslib.ndpointer(dtype=np.float64),     # Vmat
+    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
+    np.ctypeslib.ndpointer(dtype=np.int64),       # slist
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nkall, Nw
-    ctypes.POINTER(ctypes.c_int64)                              # Nchi
+    ctypes.POINTER(ctypes.c_int64),                             # Nchi
+    ctypes.POINTER(ctypes.c_bool)                               # sw_dcsub
 ]
 _loader._lib.get_vdelta_nosym.restype = None
 _loader._lib.lin_eliash_nosym.argtypes = [
@@ -286,16 +289,24 @@ def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, 
     return delta, lambda_out.value
 
 
-def get_vdelta_nosym(chi: np.ndarray, Vmat: np.ndarray) -> np.ndarray:
+def get_vdelta_nosym(chi: np.ndarray, Vmat: np.ndarray, olist: np.ndarray, slist: np.ndarray,
+                     sw_dcsub: bool = False) -> np.ndarray:
     """
-    @brief Turn chi0 (from get_chi0_nosym) into the pairing interaction V_Delta = -V + V chi_RPA IN PLACE.
-    V_Delta does not depend on the pair momentum Q, so one call serves every Q of an FFLO scan.
-    @param   chi: Irreducible susceptibility [Nchi, Nchi, Nw, Nkall] complex128 (overwritten)
-    @param  Vmat: SOC-type interaction matrix [Nchi, Nchi] float64 (gen_Vmatrix / gen_Vmatrix_orb)
-    @return  chi: The same array, now holding V_Delta
+    @brief Turn chi0 (from get_chi0_nosym) into the interaction IN PLACE.
+    The result does not depend on the pair momentum Q, so one call serves every Q of an FFLO scan.
+    @param      chi: Irreducible susceptibility [Nchi, Nchi, Nw, Nkall] complex128 (overwritten)
+    @param     Vmat: SOC-type interaction matrix [Nchi, Nchi] float64 (gen_Vmatrix / gen_Vmatrix_orb)
+    @param    olist: Orbital-pair list of chi [Nchi, 2] int64 (1-based)
+    @param    slist: Spin label of each spin-orbital [Norb] int64
+    @param sw_dcsub: False (default) gives the pairing vertex V_Delta = -V/2 + V chi_RPA, which is
+                     what the nosym Eliashberg solver needs.  True gives the self-energy vertex
+                     V_sigma = -V + V chi_RPA - V_od chi0 V_od instead: same two channels as the
+                     SOC code, since both are built from the same Vmat.  See get_V_soc_flex.
+    @return     chi: The same array, now holding the interaction
     """
     Nchi, Nw, Nkall = len(chi), len(chi[0, 0]), len(chi[0, 0, 0])
-    _loader._lib.get_vdelta_nosym(chi, Vmat, _loader.i64(Nkall), _loader.i64(Nw), _loader.i64(Nchi))
+    _loader._lib.get_vdelta_nosym(chi, Vmat, olist, slist, _loader.i64(Nkall), _loader.i64(Nw),
+                                  _loader.i64(Nchi), ctypes.byref(ctypes.c_bool(sw_dcsub)))
     return chi
 
 

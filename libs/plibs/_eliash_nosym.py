@@ -239,7 +239,7 @@ def calc_lin_eliash_nosym(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray,
     if stoner >= 1.0:
         print('Warning: Stoner factor >= 1, the RPA normal state is magnetically unstable; '
               'lambda below is not meaningful', flush=True)
-    Vdelta = flibs.get_vdelta_nosym(chi, Vmat)  # in place: chi now holds V_Delta
+    Vdelta = flibs.get_vdelta_nosym(chi, Vmat, olist, slist)  # pairing channel; in place
     init = nosym_initial_gap(klist, slist, invs, gap_sym) if init_delta is None else init_delta
 
     lambdas, best = [], None

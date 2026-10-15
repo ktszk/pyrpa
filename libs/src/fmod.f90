@@ -34,7 +34,769 @@ contains
     end do
     !$omp end parallel do
   end subroutine drop_roundoff
+
+  subroutine reverse_index(ii,ij,ik,iw,Nx,Ny,Nz,Nw)
+    !> Index tables for the reflections used by every FFT convolution here:
+    !> ii/ij/ik send a real-space mesh point to -r (0 -> 0, i -> N-i) and iw sends a Matsubara
+    !> index on the 2*Nw circular grid to -tau / -v_n (1 -> 1, i -> 2*Nw-i+2).
+    !> Same table in fchi, fchi0withsoc, ffeliash and f_eliash_nosym, hence shared.
+    use,intrinsic:: iso_c_binding, only:c_int64_t,c_int32_t
+    integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nw
+    integer(c_int32_t),intent(out):: ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(2*Nw)
+    integer(c_int32_t) i
+    ii(0)=0
+    ij(0)=0
+    ik(0)=0
+    iw(1)=1
+    do i=1,int(Nx,c_int32_t)-1
+       ii(i)=int(Nx,c_int32_t)-i
+    end do
+    do i=1,int(Ny,c_int32_t)-1
+       ij(i)=int(Ny,c_int32_t)-i
+    end do
+    do i=1,int(Nz,c_int32_t)-1
+       ik(i)=int(Nz,c_int32_t)-i
+    end do
+    do i=2,2*int(Nw,c_int32_t)
+       iw(i)=2*int(Nw,c_int32_t)-i+2
+    end do
+  end subroutine reverse_index
 end module numerics
+
+module eliash_krylov
+  !> Krylov machinery shared by the two TIME-REVERSAL-SYMMETRIC linearized Eliashberg solvers,
+  !> lin_eliash (feliash.f90, no SOC) and lin_eliash_soc (feliashwithsoc.f90).
+  !>
+  !> Both build only part of the gap function and fill the rest by conjugation (Delta is Hermitian
+  !> in the TRS gauge; with SOC also Delta_uu = -Delta_dd^+), so their kernels are linear over the
+  !> REALS only: K(i*Delta) /= i*K(Delta).  Everything here is therefore built on a REAL inner
+  !> product (kv_dot) with REAL Ritz coefficients (real_ritz).  A complex Krylov space silently
+  !> mixes the two halves and returns wrong eigenvalues, which is why this is shared rather than
+  !> written out twice.  f_eliash_nosym.f90 has NO time-reversal symmetry, its kernel is genuinely
+  !> complex-linear, and it keeps its own complex Arnoldi -- do not route it through this module.
+  !>
+  !> A gap-function vector is an array (nd,Nw,Norb,Norb) of stored k-points; which k-points are
+  !> stored differs between the solvers (irreducible list, or the full BZ), so the geometry is
+  !> carried by a kspace and the arrays are taken as flat assumed-size dummies.
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
+  implicit none
+  private
+  public:: kspace,kspace_init,kv_norm,kv_dot,kv_err,real_ritz,arnoldi_two_pass
+  public:: eliash_op_if,eliash_class_if
+
+  type:: kspace
+     !> Shape of one gap-function vector, plus how its stored k-points cover the full BZ.
+     integer(c_int32_t):: nd=0     !< number of stored k-points (first array dimension)
+     integer(c_int32_t):: nrest=0  !< Nw*Norb*Norb, i.e. everything after the k index
+     integer(c_int32_t):: nvec=0   !< nd*nrest, the length of one vector
+     !> wk(p) = how many full-BZ points are represented by stored point p.  Sums and norms must
+     !> run over the whole BZ even though only nd points are kept, so every term is weighted
+     !> with wk; a solver that stores the full BZ simply has wk = 1 everywhere.
+     real(c_double),allocatable:: wk(:)
+  end type kspace
+
+  abstract interface
+     subroutine eliash_op_if(w_out,v_in)
+       !> one application of the linearized Eliashberg kernel, w_out = (T/Nkall) K v_in
+       import:: c_double
+       complex(c_double),intent(in):: v_in(*)
+       complex(c_double),intent(out):: w_out(*)
+     end subroutine eliash_op_if
+
+     subroutine eliash_class_if(ok,x)
+       !> does the eigenvector x belong to the solution branch the caller asked for?
+       import:: c_double
+       complex(c_double),intent(in):: x(*)
+       logical,intent(out):: ok
+     end subroutine eliash_class_if
+  end interface
+contains
+
+  subroutine kspace_init(ks,idk,nkall,nd,nw,norb)
+    !> Set up the vector geometry.  idk(i) is the stored index of full-BZ point i, so counting how
+    !> often each stored index appears gives the multiplicity wk.
+    type(kspace),intent(out):: ks
+    integer(c_int64_t),intent(in):: nkall,nd,nw,norb
+    integer(c_int64_t),intent(in):: idk(nkall)
+    integer(c_int64_t) i
+    ks%nd=int(nd,c_int32_t)
+    ks%nrest=int(nw*norb*norb,c_int32_t)
+    ks%nvec=ks%nd*ks%nrest
+    allocate(ks%wk(ks%nd))
+    ks%wk(:)=0.0d0
+    do i=1,nkall
+       ks%wk(idk(i))=ks%wk(idk(i))+1.0d0
+    end do
+  end subroutine kspace_init
+
+  real(c_double) function kv_dot(ks,u,v)
+    !> Real inner product 2*Re<u,v>, summed over the full BZ (weight wk) and over the stored
+    !> w_n>0 half; the factor 2 accounts for the w_n<0 half that is not stored.
+    !> Real, not complex: see the note at the top of the module.
+    type(kspace),intent(in):: ks
+    complex(c_double),intent(in):: u(*),v(*)
+    integer(c_int32_t) r,p,o
+    real(c_double) s
+    s=0.0d0
+    !$omp parallel do private(r,p,o) reduction(+:s)
+    do r=1,ks%nrest
+       o=(r-1)*ks%nd            ! start of the (w_n,orbital,orbital) block r
+       do p=1,ks%nd
+          s=s+ks%wk(p)*dble(conjg(u(o+p))*v(o+p))
+       end do
+    end do
+    !$omp end parallel do
+    kv_dot=2.0d0*s
+  end function kv_dot
+
+  real(c_double) function kv_norm(ks,x)
+    !> norm induced by kv_dot
+    type(kspace),intent(in):: ks
+    complex(c_double),intent(in):: x(*)
+    kv_norm=sqrt(max(kv_dot(ks,x,x),0.0d0))
+  end function kv_norm
+
+  real(c_double) function kv_err(ks,xnew,xold,inrm)
+    !> Vector convergence of the power iteration: min(||xnew*inrm - xold||, ||xnew*inrm + xold||).
+    !> The minimum of the two signs handles an eigenvector that flips sign every iteration, which
+    !> is what a negative eigenvalue does.
+    type(kspace),intent(in):: ks
+    complex(c_double),intent(in):: xnew(*),xold(*)
+    real(c_double),intent(in):: inrm
+    integer(c_int32_t) r,p,o
+    real(c_double) sp,sm
+    sp=0.0d0
+    sm=0.0d0
+    !$omp parallel do private(r,p,o) reduction(+:sp,sm)
+    do r=1,ks%nrest
+       o=(r-1)*ks%nd
+       do p=1,ks%nd
+          sp=sp+ks%wk(p)*abs(xnew(o+p)*inrm-xold(o+p))**2
+          sm=sm+ks%wk(p)*abs(xnew(o+p)*inrm+xold(o+p))**2
+       end do
+    end do
+    !$omp end parallel do
+    kv_err=sqrt(2.0d0*min(sp,sm))
+  end function kv_err
+
+  subroutine real_ritz(y,n)
+    !> Rotate the Ritz coefficients y of a real Hessenberg matrix to be real, which for a real
+    !> Ritz value only removes the arbitrary phase ZGEEV leaves behind.  Necessary because the
+    !> operator is real-linear: a complex y would combine the Krylov vectors in a way the operator
+    !> does not reproduce, so the "eigenvector" would not be one.
+    integer(c_int32_t),intent(in):: n
+    complex(c_double),intent(inout):: y(n)
+    complex(c_double) ph
+    ph=y(maxloc(abs(y),1))
+    y(:)=cmplx(dble(y(:)*conjg(ph)/abs(ph)),0.0d0,c_double)
+  end subroutine real_ritz
+
+  subroutine ritz_vector(x,V,y,ks,m_act)
+    !> x = sum_ii y(ii) * v_{ii-1}, the Ritz vector in the original space
+    type(kspace),intent(in):: ks
+    integer(c_int32_t),intent(in):: m_act
+    complex(c_double),intent(in):: V(ks%nvec,0:*),y(*)
+    complex(c_double),intent(out):: x(*)
+    integer(c_int32_t) ii,p
+    !$omp parallel do private(p)
+    do p=1,ks%nvec
+       x(p)=(0.0d0,0.0d0)
+    end do
+    !$omp end parallel do
+    do ii=1,m_act
+       !$omp parallel do private(p)
+       do p=1,ks%nvec
+          x(p)=x(p)+y(ii)*V(p,ii-1)
+       end do
+       !$omp end parallel do
+    end do
+  end subroutine ritz_vector
+
+  subroutine pick_branch(idx,x,eigenvals,VR,ldvr,V,ks,m_act,shift,classify)
+    !> Choose which Ritz pair to return and leave its (normalized) Ritz vector in x.
+    !>
+    !> Without a classify callback this is simply the largest physical eigenvalue.  With one, it
+    !> is the largest eigenvalue whose eigenvector the caller accepts: with SOC a parity sector
+    !> holds both the (pseudospin singlet, even w) and the (pseudospin triplet, odd w) pairing and
+    !> no exact symmetry separates them, so the largest eigenvalue of the sector need not be the
+    !> branch that was asked for, and lambda would jump as the SOC strength goes to zero.
+    !>
+    !> idx=0 means no Ritz value is positive at all; the caller decides what to do.
+    type(kspace),intent(in):: ks
+    integer(c_int32_t),intent(out):: idx
+    integer(c_int32_t),intent(in):: m_act
+    integer(c_int32_t),intent(in):: ldvr   !< leading dimension of VR as the caller allocated it;
+                                           !< m_act can be smaller (early stop), so it must be
+                                           !< passed rather than assumed equal to m_act
+    complex(c_double),intent(in):: eigenvals(*),VR(ldvr,*),V(ks%nvec,0:*)
+    complex(c_double),intent(out):: x(*)
+    real(c_double),intent(in):: shift
+    procedure(eliash_class_if),optional:: classify
+    integer(c_int32_t),parameter:: ncand=50   ! Ritz vectors built at most; each is cheap next to
+                                              ! one apply_op, but not free
+    integer(c_int32_t) ii,jj,n,itry,itmp
+    integer(c_int32_t),dimension(m_act):: iord
+    complex(c_double),dimension(m_act):: y    ! Ritz coefficients of the candidate, phase fixed
+    logical ok
+
+    ! candidates: a physical eigenvalue must be positive (lambda<0 is a repulsive solution)
+    n=0
+    do ii=1,m_act
+       if(dble(eigenvals(ii))-shift>0.0d0)then; n=n+1; iord(n)=ii; end if
+    end do
+    idx=0
+    if(n==0)return
+    ! order them by descending eigenvalue (selection sort: m_act is at most a few hundred)
+    do ii=1,n-1
+       do jj=ii+1,n
+          if(dble(eigenvals(iord(jj)))>dble(eigenvals(iord(ii))))then
+             itmp=iord(ii); iord(ii)=iord(jj); iord(jj)=itmp
+          end if
+       end do
+    end do
+
+    ! the Ritz coefficients must be made real before the Ritz vector is formed: with a
+    ! real-linear operator a complex combination of the Krylov vectors is not an eigenvector
+    do itry=1,merge(min(n,ncand),1,present(classify))
+       idx=iord(itry)
+       y(1:m_act)=VR(1:m_act,idx)
+       call real_ritz(y,m_act)
+       call ritz_vector(x,V,y,ks,m_act)
+       if(.not.present(classify))exit
+       call classify(ok,x)
+       if(ok)then
+          if(itry>1)print'(A,I0,A,F12.6)','  branch: took Ritz ',itry,' of the sector, below ',&
+               dble(eigenvals(iord(1)))-shift
+          exit
+       end if
+       if(itry==min(n,ncand))then
+          print'(A)','  WARNING(pick_branch): no Ritz vector of the requested branch; taking the largest'
+          idx=iord(1)
+          y(1:m_act)=VR(1:m_act,idx)
+          call real_ritz(y,m_act)
+          call ritz_vector(x,V,y,ks,m_act)
+       end if
+    end do
+  end subroutine pick_branch
+
+  subroutine arnoldi_two_pass(lambda,x,seed,ks,m_arnoldi,apply_op,classify)
+    !> Two-pass Arnoldi for the physical (largest positive) Eliashberg eigenvalue.
+    !>
+    !> The kernel's dominant eigenvalue is a large NEGATIVE one, so a plain Arnoldi converges to
+    !> the wrong end of the spectrum.  Pass 1 therefore finds lambda_- (most negative) and its
+    !> eigenvector; pass 2 runs (A + |lambda_-|) deflated against that eigenvector, which makes
+    !> lambda_+ the dominant eigenvalue of the shifted operator.
+    !>
+    !> Arnoldi factorization used in both passes: with an orthonormal Krylov basis V_m built from
+    !> v_0 = seed, A V_m = V_m H_m + beta v_m e_m^T with H_m upper Hessenberg; the eigenpairs
+    !> (theta, y) of H_m give the Ritz pairs (theta, V_m y).  All inner products are real
+    !> (kv_dot) because the operator is only real-linear -- see the note at the top of the module.
+    !!@param  lambda,out: physical eigenvalue
+    !!@param       x,out: its eigenvector, normalized
+    !!@param      seed,in: starting vector (v_0), need not be normalized
+    !!@param        ks,in: vector geometry
+    !!@param m_arnoldi,in: Krylov dimension
+    !!@param  apply_op,in: one application of the kernel
+    !!@param  classify,in: optional branch test, see pick_branch
+    type(kspace),intent(in):: ks
+    integer(c_int64_t),intent(in):: m_arnoldi
+    real(c_double),intent(out):: lambda
+    complex(c_double),intent(out):: x(*)
+    complex(c_double),intent(in):: seed(*)
+    procedure(eliash_op_if):: apply_op
+    procedure(eliash_class_if),optional:: classify
+
+    integer(c_int32_t) m_dim,j,ii,p,m_act,idx,lwork,info
+    real(c_double) beta,shift,lambda1,hij
+    complex(c_double),allocatable:: V(:,:),w(:),x1(:),yd(:)
+    complex(c_double),allocatable:: H_mat(:,:),A_mat(:,:),eigenvals(:)
+    complex(c_double),allocatable:: VL_dum(:,:),VR(:,:),zwork(:)
+    real(c_double),allocatable:: rwork(:)
+
+    m_dim=int(m_arnoldi,c_int32_t)
+    lwork=max(64,2*m_dim)
+    allocate(V(ks%nvec,0:m_dim-1),w(ks%nvec),x1(ks%nvec),yd(m_dim))
+    allocate(H_mat(m_dim+1,m_dim),A_mat(m_dim,m_dim),eigenvals(m_dim))
+    allocate(VL_dum(1,1),VR(m_dim,m_dim),zwork(lwork),rwork(2*m_dim))
+
+    ! ===== Pass 1: no shift, find lambda_- ==================================
+    print'(A,I4,A)','Arnoldi pass 1 (no shift): Krylov dim =',m_dim,' ...'
+    call set_v0(seed)
+    call arnoldi_loop(0.0d0,.false.)
+    call diagonalize('pass 1')
+    idx=minloc(dble(eigenvals(1:m_act)),1)        ! most negative Ritz value
+    lambda1=dble(eigenvals(idx))
+    print'(A,F12.6)','  lambda_- =',lambda1
+    ! early exit: if pass 1 already resolved the wanted branch at a clearly positive Ritz value,
+    ! that is lambda_+ and the shifted pass is unnecessary
+    call pick_branch(idx,x,eigenvals,VR,m_dim,V,ks,m_act,0.0d0,classify)
+    if(idx>0)then
+       if(dble(eigenvals(idx))>=0.1d0)then
+          lambda=dble(eigenvals(idx))
+          print'(A,F12.6)','  eliash   =',lambda
+          call normalize(x)
+          return
+       end if
+    end if
+    ! deflation direction x1 = Ritz vector of lambda_-
+    idx=minloc(dble(eigenvals(1:m_act)),1)
+    yd(1:m_act)=VR(1:m_act,idx)
+    call real_ritz(yd,m_act)
+    call ritz_vector(x1,V,yd,ks,m_act)
+    call normalize(x1)
+
+    ! ===== Pass 2: shift + deflation, find lambda_+ =========================
+    ! B = (A + shift) restricted to the complement of x1; eigenvalue lambda_i -> lambda_i + shift,
+    ! so with shift = -lambda_- the wanted lambda_+ becomes the dominant eigenvalue of B.
+    shift=-lambda1
+    print'(A,F10.6,A,I4,A)','Arnoldi pass 2 (shift=',shift,'): Krylov dim =',m_dim,' ...'
+    call set_v0(seed)
+    call deflate(V(1,0))
+    call normalize(V(1,0))
+    call arnoldi_loop(shift,.true.)
+    call diagonalize('pass 2')
+    call pick_branch(idx,x,eigenvals,VR,m_dim,V,ks,m_act,shift,classify)
+    if(idx==0)then
+       idx=maxloc(dble(eigenvals(1:m_act)),1)     ! nothing positive: largest Ritz value
+       yd(1:m_act)=VR(1:m_act,idx)
+       call real_ritz(yd,m_act)
+       call ritz_vector(x,V,yd,ks,m_act)
+    end if
+    lambda=dble(eigenvals(idx))-shift
+    print'(A,F12.6)','  eliash   =',lambda
+    call normalize(x)
+    ! x solves the DEFLATED operator P A P (P = 1 - x1 x1^T), not A itself:
+    ! A x = lambda x + c x1 with c = <x1, A x>, so the eigenvector of A is x + c/(lambda_+ - lambda_-) x1
+    if(abs(lambda-lambda1)>1.0d-12)then    ! lambda_+ = lambda_- (e.g. V=0): nothing to undo
+       call apply_op(w,x)
+       hij=kv_dot(ks,x1,w)/(lambda-lambda1)
+       !$omp parallel do private(p)
+       do p=1,ks%nvec
+          x(p)=x(p)+hij*x1(p)
+       end do
+       !$omp end parallel do
+       call normalize(x)
+    end if
+    deallocate(V,w,x1,yd,H_mat,A_mat,eigenvals,VL_dum,VR,zwork,rwork)
+  contains
+    subroutine set_v0(s)
+      !> v_0 = normalized seed
+      complex(c_double),intent(in):: s(*)
+      integer(c_int32_t) q
+      !$omp parallel do private(q)
+      do q=1,ks%nvec
+         V(q,0)=s(q)
+      end do
+      !$omp end parallel do
+      call normalize(V(1,0))
+    end subroutine set_v0
+
+    subroutine normalize(y)
+      complex(c_double),intent(inout):: y(*)
+      integer(c_int32_t) q
+      real(c_double) nrm
+      nrm=kv_norm(ks,y)
+      if(nrm<=0.0d0)then; print*,'Error(arnoldi_two_pass): zero vector'; stop; end if
+      !$omp parallel do private(q)
+      do q=1,ks%nvec
+         y(q)=y(q)*(1.0d0/nrm)
+      end do
+      !$omp end parallel do
+    end subroutine normalize
+
+    subroutine deflate(y)
+      !> remove the x1 component, so the iteration stays in the complement of lambda_-
+      complex(c_double),intent(inout):: y(*)
+      integer(c_int32_t) q
+      real(c_double) c
+      c=kv_dot(ks,x1,y)
+      !$omp parallel do private(q)
+      do q=1,ks%nvec
+         y(q)=y(q)-c*x1(q)
+      end do
+      !$omp end parallel do
+    end subroutine deflate
+
+    subroutine arnoldi_loop(shft,sw_deflate)
+      !> build the Krylov basis: w = (A + shft) v_j, optionally deflated, then modified
+      !> Gram-Schmidt against v_0..v_j
+      real(c_double),intent(in):: shft
+      logical,intent(in):: sw_deflate
+      integer(c_int32_t) jj,kk,q
+      real(c_double) hjj
+      H_mat=(0.0d0,0.0d0)
+      m_act=m_dim
+      do jj=0,m_dim-1
+         call apply_op(w,V(1,jj))
+         if(shft/=0.0d0)then
+            !$omp parallel do private(q)
+            do q=1,ks%nvec
+               w(q)=w(q)+shft*V(q,jj)
+            end do
+            !$omp end parallel do
+         end if
+         if(sw_deflate)call deflate(w)
+         do kk=0,jj
+            hjj=kv_dot(ks,V(1,kk),w)
+            H_mat(kk+1,jj+1)=cmplx(hjj,0.0d0,c_double)
+            !$omp parallel do private(q)
+            do q=1,ks%nvec
+               w(q)=w(q)-hjj*V(q,kk)
+            end do
+            !$omp end parallel do
+         end do
+         beta=kv_norm(ks,w)
+         H_mat(jj+2,jj+1)=cmplx(beta,0.0d0,c_double)
+         if(beta<1.0d-14)then                   ! lucky breakdown: the Krylov space is invariant
+            m_act=jj+1
+            print'(A,I5)','  Krylov space closed early at dim =',m_act
+            exit
+         end if
+         if(jj<m_dim-1)then
+            !$omp parallel do private(q)
+            do q=1,ks%nvec
+               V(q,jj+1)=w(q)*(1.0d0/beta)
+            end do
+            !$omp end parallel do
+         end if
+      end do
+    end subroutine arnoldi_loop
+
+    subroutine diagonalize(tag)
+      !> Ritz values and coefficients of the m_act x m_act Hessenberg block
+      character(*),intent(in):: tag
+      integer(c_int32_t) kk
+      A_mat(1:m_act,1:m_act)=H_mat(1:m_act,1:m_act)   ! ZGEEV destroys its input
+      call zgeev('N','V',m_act,A_mat,m_dim,eigenvals,VL_dum,1,VR,m_dim,zwork,lwork,rwork,info)
+      if(info/=0)then; print*,'ZGEEV failed ',tag,': info=',info; stop; end if
+      print'(A,A,A)','Ritz values (',tag,', real):'
+      do kk=1,m_act
+         print'(I4,F14.6)',kk,dble(eigenvals(kk))
+      end do
+    end subroutine diagonalize
+  end subroutine arnoldi_two_pass
+end module eliash_krylov
+
+module flex_scf
+  !> Pieces of the FLEX self-consistency loop shared by mkself (fself.f90, no SOC) and
+  !> mkself_soc (fselfwithsoc.f90).  The two drivers differ in how G, chi and Sigma are built,
+  !> but the chemical-potential search around them is the same algorithm, so it lives here
+  !> instead of being copied (it was, and the copies had already started to drift).
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
+  implicit none
+  private
+  public:: flex_rn_if,solve_mu
+  public:: diis_state,diis_init,diis_free,mix_sigma
+
+  abstract interface
+     subroutine flex_rn_if(rn,rmu)
+       !> electron number per k-point at chemical potential rmu, for the current Sigma
+       import:: c_double
+       real(c_double),intent(out):: rn
+       real(c_double),intent(in):: rmu
+     end subroutine flex_rn_if
+  end interface
+
+  type:: diis_state
+     !> Pulay (DIIS) history for a self-consistency loop on a (Nk,Nw,Norb,Norb) field:
+     !> the last m outputs and their residuals, in a circular buffer.
+     integer(c_int32_t):: m=0        !< history length
+     integer(c_int32_t):: i_hist=0   !< slot written last
+     integer(c_int32_t):: n_hist=0   !< slots filled so far (<= m)
+     complex(c_double),allocatable:: xout(:,:,:,:,:),res(:,:,:,:,:)
+     real(c_double),allocatable:: B(:,:),rhs(:)
+     integer(c_int32_t),allocatable:: ipiv(:)
+  end type diis_state
+
+contains
+
+  subroutine diis_init(st,m,Nk,Nw,Norb)
+    type(diis_state),intent(out):: st
+    integer(c_int64_t),intent(in):: m,Nk,Nw,Norb
+    st%m=int(m,c_int32_t)
+    st%i_hist=0
+    st%n_hist=0
+    allocate(st%xout(Nk,Nw,Norb,Norb,m),st%res(Nk,Nw,Norb,Norb,m))
+    allocate(st%B(m+1,m+1),st%rhs(m+1),st%ipiv(m+1))
+  end subroutine diis_init
+
+  subroutine diis_free(st)
+    type(diis_state),intent(inout):: st
+    if(allocated(st%xout))deallocate(st%xout,st%res,st%B,st%rhs,st%ipiv)
+    st%m=0
+    st%i_hist=0
+    st%n_hist=0
+  end subroutine diis_free
+
+  subroutine mix_sigma(st,sigmak,sigmak0,esterr,pp,eps_sgm,invk,kmap,Nk,Nkall,Nw,Norb)
+    !> One DIIS (Pulay) update of the FLEX self-energy, plus the convergence estimate.
+    !>
+    !> Pulay: with residuals r_i = Sigma_out_i - Sigma_in_i, solve [B 1; 1^T 0][c; lambda] = [0; 1]
+    !> for B_ij = Re<r_i,r_j> and extrapolate Sigma = sum_i c_i Sigma_out_i.  The first step (or
+    !> m_diis=1) has nothing to extrapolate from and falls back to linear mixing with rate pp,
+    !> and so does a singular B (dgesv failure), which weights the most recent entry only.
+    !>
+    !> esterr is the largest relative change of any Sigma element above eps_sgm; elements below
+    !> that are skipped so that near-zero components do not dominate the convergence test.
+    !!@param          st,inout: DIIS history
+    !!@param      sigmak,inout: in: Sigma_out of this iteration; out: the mixed Sigma
+    !!@param       sigmak0,in: Sigma_in of this iteration
+    !!@param        esterr,out: largest relative change, i.e. the convergence measure
+    !!@param            pp,in: linear-mixing rate used when DIIS cannot extrapolate yet
+    !!@param       eps_sgm,in: ignore elements smaller than this in esterr
+    !!@param invk,kmap,in: k-point tables, used only to label the worst element in the printout
+    type(diis_state),intent(inout):: st
+    integer(c_int64_t),intent(in):: Nk,Nkall,Nw,Norb
+    integer(c_int64_t),intent(in),dimension(3,Nkall):: invk,kmap
+    complex(c_double),intent(inout),dimension(Nk,Nw,Norb,Norb):: sigmak
+    complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: sigmak0
+    real(c_double),intent(out):: esterr
+    real(c_double),intent(in):: pp,eps_sgm
+
+    integer(c_int32_t) i,j,l,m,kerr,iwerr,lerr,merr,ih,jh,idx_i,idx_j,info,n_cur
+    real(c_double) est,eps_reg
+    complex(c_double) cksigm
+    complex(c_double),dimension(Nk,Nw,Norb,Norb):: sigma_diis
+
+    ! --- store this iteration's output and residual in the circular buffer ---
+    st%i_hist=mod(st%i_hist,st%m)+1
+    st%n_hist=min(st%n_hist+1,st%m)
+    st%xout(:,:,:,:,st%i_hist)=sigmak(:,:,:,:)
+    st%res(:,:,:,:,st%i_hist)=sigmak(:,:,:,:)-sigmak0(:,:,:,:)
+    n_cur=st%n_hist
+
+    ! --- Pulay matrix B of size (n_cur+1 x n_cur+1), last row/column the Lagrange constraint ---
+    st%B(1:n_cur+1,1:n_cur+1)=0.0d0
+    do ih=1,n_cur
+       idx_i=modulo(st%i_hist-n_cur+ih-1,st%m)+1
+       do jh=1,n_cur
+          idx_j=modulo(st%i_hist-n_cur+jh-1,st%m)+1
+          st%B(ih,jh)=dble(sum(conjg(st%res(:,:,:,:,idx_i))*st%res(:,:,:,:,idx_j)))
+       end do
+       st%B(ih,n_cur+1)=1.0d0
+       st%B(n_cur+1,ih)=1.0d0
+    end do
+    eps_reg=1.0d-12                      ! regularize the diagonal against exact singularity
+    if(n_cur>0)then
+       do ih=1,n_cur
+          st%B(ih,ih)=st%B(ih,ih)+eps_reg
+       end do
+    end if
+    st%rhs(1:n_cur)=0.0d0
+    st%rhs(n_cur+1)=1.0d0                ! sum c_i = 1
+    call dgesv(n_cur+1,1,st%B(1:n_cur+1,1:n_cur+1),n_cur+1, &
+               st%ipiv(1:n_cur+1),st%rhs(1:n_cur+1),n_cur+1,info)
+    if(info/=0)then
+       print*,'DIIS: dgesv failed (info=',info,'), fallback to most-recent entry'
+       st%rhs(1:n_cur)=0.0d0
+       if(n_cur>=1) st%rhs(n_cur)=1.0d0
+    end if
+
+    ! --- extrapolation sigma_diis = sum_i c_i * xout_i ---
+    sigma_diis(:,:,:,:)=0.0d0
+    do ih=1,n_cur
+       idx_i=modulo(st%i_hist-n_cur+ih-1,st%m)+1
+       sigma_diis=sigma_diis+st%rhs(ih)*st%xout(:,:,:,:,idx_i)
+    end do
+
+    ! --- convergence estimate and mixing ---
+    esterr=0.0d0
+    est=100.0d0
+    kerr=1; iwerr=1; lerr=1; merr=1      ! defaults in case every |sigma| < eps_sgm
+    do l=1,Norb
+       do m=1,Norb
+          do j=1,Nw
+             do i=1,Nk
+                cksigm=sigma_diis(i,j,m,l)
+                if(abs(cksigm)>eps_sgm)then
+                   est=abs((sigmak0(i,j,m,l)-cksigm)/cksigm)
+                   if(est>esterr)then
+                      esterr=est
+                      kerr=i
+                      iwerr=j
+                      lerr=l
+                      merr=m
+                   end if
+                end if
+                if(n_cur>=2)then         ! DIIS active: keep the extrapolation as it is
+                   sigmak(i,j,m,l)=cksigm
+                else                     ! nothing to extrapolate from yet: linear mixing
+                   sigmak(i,j,m,l)=pp*cksigm+(1.0d0-pp)*sigmak0(i,j,m,l)
+                end if
+             end do
+          end do
+       end do
+    end do
+    do i=1,Nkall
+       if(invk(1,i)==kerr)then
+          print '(A7,E9.2,A14,3(1X,I3),I5,2I3,I5)','esterr=',esterr,' at k,iw,m,l=', &
+               & kmap(1,i),kmap(2,i),kmap(3,i),iwerr,merr,lerr,kerr
+          exit
+       end if
+    end do
+  end subroutine mix_sigma
+
+  subroutine solve_mu(mu,mu_OLD,bracket_valid,muS_cache,muL_cache,rfill,esterr,get_rn)
+    !> Move the chemical potential so that get_rn(mu) = rfill.
+    !>
+    !> Two stages: widen [muS,muL] until it brackets the target (reusing the bracket cached from
+    !> the previous call when it is still valid, which is the common case once the loop settles),
+    !> then Brent's method (inverse quadratic interpolation with a bisection fallback) on
+    !> get_rn(mu) - rfill.  The tolerance follows esterr, the current Sigma convergence error:
+    !> there is no point solving mu far more accurately than Sigma itself is converged.
+    !!@param          mu,inout: chemical potential, updated in place
+    !!@param      mu_OLD,inout: previous mu; sets the initial bracket width
+    !!@param bracket_valid,inout: whether muS_cache/muL_cache hold a usable bracket
+    !!@param muS_cache,muL_cache,inout: cached bracket
+    !!@param           rfill,in: target electron number
+    !!@param          esterr,in: current Sigma convergence error, sets the mu tolerance
+    !!@param          get_rn,in: electron number at a given mu
+    real(c_double),intent(inout):: mu,mu_OLD,muS_cache,muL_cache
+    logical,intent(inout):: bracket_valid
+    real(c_double),intent(in):: rfill,esterr
+    procedure(flex_rn_if):: get_rn
+
+    integer(c_int32_t) i_iter
+    integer(c_int32_t),parameter:: itemax=100
+    logical flag
+    logical bracket_found
+    real(c_double) rnS,rnL,rnc,rnM,muc,mud,muL,muS,muM,eps,dmu
+
+      if(esterr>1.0d-2)then
+         eps= 1.0d-8
+      else
+         eps= esterr*1.0d-1
+      end if
+      dmu= abs(mu-mu_OLD)*2.0d0
+      if (dmu<eps*4.0d0) dmu= eps*4.0d0
+      mu_OLD=mu
+
+      bracket_found=.false.
+      if(bracket_valid)then
+         call get_rn(rnS,muS_cache)
+         call get_rn(rnL,muL_cache)
+         if(rnS<rfill .and. rnL>rfill)then
+            muS=muS_cache
+            muL=muL_cache
+            bracket_found=.true.
+            print'(A)','[mu] cached bracket valid'
+         else
+            print'(A)','[mu] cached bracket invalid, re-searching'
+         end if
+      end if
+
+      if(.not.bracket_found)then
+         muL= mu+dmu
+         muS= mu-dmu
+         upper_lim: do i_iter=1,itemax
+            mu=muL
+            rnL=0.0d0
+            call get_rn(rnL,mu)
+            if(rnL<rfill)then
+               if(abs(rfill-rnL)>0.5d0)then
+                  muL=muL+1.0d0
+               else if(abs(rfill-rnL)>dmu)then
+                  muL=muL+0.5d0
+               else
+                  muL= muL +dmu
+               end if
+            else
+               exit
+            end if
+            if(i_iter==itemax)then
+               print*,'Too many'
+               stop
+            end if
+         end do upper_lim
+
+         lower_lim: do i_iter=1,itemax
+            mu=muS
+            rnS=0.0d0
+            call get_rn(rnS,mu)
+            if(rnS>rfill)then
+               if(abs(rnS-rfill)>0.5d0)then
+                  muS=muS-1.0d0
+               else if(abs(rnS-rfill)>dmu)then
+                  muS=muS-0.5d0
+               else
+                  muS=muS-dmu
+               end if
+            else
+               exit
+            end if
+            if(i_iter==itemax)then
+               print*,'Too many'
+               stop
+            end if
+         end do lower_lim
+      end if
+
+      ! save wide bracket before Brent narrows it
+      muS_cache=muS
+      muL_cache=muL
+      bracket_valid=.true.
+
+      rnL=rnL-rfill
+      rnS=rnS-rfill
+      rnc=rnS
+      muc=muS
+      mud=0.0d0
+      flag=.false.
+      brent_loop: do i_iter=1,itemax
+         if(rnc/=rnS .and. rnc/=rnL)then
+            muM=(muL*rnS*rnc*(rnS-rnc)+muS*rnL*rnc*(rnc-rnL)+muc*rnL*rnS*(rnL-rnS))&
+                 /((rnL-rnS)*(rnc-rnL)*(rnc-rnS))
+         else
+            muM=muL-rnL*(muL-muS)/(rnL-rnS)
+         end if
+         if((0.25d0*(3.0d0*muS+muL) > muM .or. muM > muL) .or. &
+              (flag .and. abs(muM-muL) >= abs(muL-muc)*0.5d0) .or. &
+              (flag .eqv. .false. .and. abs(muM-muL) >= abs(muc-mud)*0.5d0) .or. &
+              (flag .and. abs(muL-muc)<1.0d-8) .or. &
+              (flag.eqv. .false. .and. abs(muc-mud)<1.0d-8))then
+            muM= (muL+muS)*0.5d0
+            flag=.true.
+         else
+            flag=.false.
+         end if
+         if(abs(muL-muM)<eps)exit
+         mu=muM
+         rnM=0
+         call get_rn(rnM,muM)
+         !print '(1x,a,2f22.16,l2)','muM,rnM=   ',muM,rnM,flag
+         mud=muc
+         muc=muL
+         rnc=rnL
+         if(rnS*(rnM-rfill)<0)then
+            muL=muM
+            rnL=rnM-rfill
+         else
+            muS=muM
+            rnS=rnM-rfill
+         end if
+         if(abs(rnS)<abs(rnL))then
+            muM=muL
+            muL=muS
+            muS=muM
+            rnM=rnL
+            rnL=rnS
+            rnS=rnM
+         end if
+         if(i_iter==itemax)then
+            print *,'Too many loop!'
+            stop
+         end if
+      end do brent_loop
+      if(rnL==rnS)then
+         mu=(muS+muL)*0.5d0
+      else
+         mu= (muS*rnL-muL*rnS)/(rnL-rnS)
+      end if
+      call get_rn(rnM,mu)
+      mu_OLD=mu
+      print'(A4,F8.4,A10,F8.4)','mu  =',mu,' filling =',rnM
+  end subroutine solve_mu
+end module flex_scf
 
 module occupation
   !> Smooth Lindhard occupation factor shared by the susceptibility kernels

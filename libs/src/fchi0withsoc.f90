@@ -1,6 +1,94 @@
+subroutine get_invschi_soc(invschi,olist,invs,Nchi)
+  !> invschi(l): the chi index whose orbital pair is the spin-flipped partner of pair l.
+  !> Shared by get_chi0_soc and mkself_soc, which both need it (the no-SOC side already shares
+  !> its equivalents the same way, cf. ckchi_impl).
+  !!@param invschi,out: spin-flipped chi index for each chi index
+  !!@param   olist,in: orbital-pair list of chi
+  !!@param    invs,in: opposite-spin partner of each spin-orbital
+  !!@param    Nchi,in: Number of chi indices
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_int32_t
+  implicit none
+  integer(c_int64_t),intent(in):: Nchi
+  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
+  integer(c_int64_t),intent(in),dimension(*):: invs
+  integer(c_int64_t),intent(out),dimension(Nchi):: invschi
+
+  integer(c_int32_t) l,m,i,j
+  invschi(:)=0
+  do l=1,Nchi
+     i=invs(olist(l,1))
+     j=invs(olist(l,2))
+     do m=1,Nchi
+        if(i==olist(m,1) .and. j==olist(m,2))then
+           invschi(l)=m
+           exit
+        end if
+     end do
+  end do
+end subroutine get_invschi_soc
+
+subroutine ckchi_soc_impl(chi,Vmat,kmap,invk,Nk,Nkall,Nchi,Nw,maxchi0_out)
+  !> Stoner check with SOC: largest eigenvalue of -chi0*V over the irreducible q, and the q where
+  !> it occurs.  SOC counterpart of ckchi_impl (fchi.f90), shared by get_chi0_soc and mkself_soc.
+  !!@param         chi,in: chi0 (only the w=0 slice is used)
+  !!@param        Vmat,in: bare spin-orbital interaction
+  !!@param maxchi0_out,out: the largest eigenvalue found
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  implicit none
+  integer(c_int64_t),intent(in):: Nk,Nkall,Nchi,Nw
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
+  real(c_double),intent(in),dimension(Nchi,Nchi):: Vmat
+  complex(c_double),intent(in),dimension(Nk,Nw,Nchi,Nchi):: chi
+  real(c_double),intent(out):: maxchi0_out
+
+  integer(c_int32_t) i,l,m,n,info,chik,chikall,Nchi_i,lwork
+  real(c_double) maxchi0,maxchi02
+  real(c_double),dimension(2*Nchi):: rwork
+  complex(c_double),dimension(Nchi*Nchi*4+1):: work
+  complex(c_double),dimension(Nchi):: eigc
+  complex(c_double),dimension(Nchi,Nchi):: chi0,tmp,tmp1
+
+  Nchi_i=int(Nchi,c_int32_t)
+  lwork=int(Nchi*Nchi*4+1,c_int32_t)
+  chik=1
+  maxchi02=-1.0d5
+  do i=1,Nk
+     !$omp parallel
+     !$omp workshare
+     chi0(:,:)=0.0d0
+     !$omp end workshare
+     !$omp do private(l,m,n)
+     do l=1,Nchi
+        do m=1,Nchi
+           do n=1,Nchi
+              chi0(m,l)=chi0(m,l)-chi(i,1,m,n)*Vmat(n,l)
+           end do
+        end do
+     end do
+     !$omp end do
+     !$omp end parallel
+     call zgeev('N','N',Nchi_i,chi0,Nchi_i,eigc,tmp1,Nchi_i,tmp,Nchi_i,work,lwork,rwork,info)
+     if(info/=0)then; print*,'zgeev failed: info=',info; stop; end if
+     maxchi0=maxval(dble(eigc))
+     if(maxchi0>maxchi02)then
+        chik=i
+        maxchi02=maxchi0
+     end if
+  end do
+  chikall=1
+  do i=1,Nkall
+     if(invk(2,i)==0 .and. invk(1,i)==chik)then
+        chikall=i
+        exit
+     end if
+  end do
+  print'(A7,3I4,F12.8)','SDW/CDW',kmap(:,chikall),maxchi02
+  maxchi0_out=maxchi02
+end subroutine ckchi_soc_impl
+
 subroutine get_chi0_conv_soc(chi,Gk,kmap,invk,invs,irr_chi,chi_map,olist,&
      sgnsig,sgnsig2,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
-  use numerics, only:drop_roundoff
+  use numerics, only:drop_roundoff,reverse_index
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
@@ -21,32 +109,7 @@ subroutine get_chi0_conv_soc(chi,Gk,kmap,invk,invs,irr_chi,chi_map,olist,&
   complex(c_double),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmp,tmpgk13,tmpgk42
    
   weight=temp/dble(Nkall)
-  ii(0)=0
-  ij(0)=0
-  ik(0)=0
-  iw(1)=1
-  !$omp parallel
-  !$omp do
-  do i=1,Nx-1
-     ii(i)=Nx-i
-  end do
-  !$omp end do
-  !$omp do
-  do i=1,Ny-1
-     ij(i)=Ny-i
-  end do
-  !$omp end do
-  !$omp do
-  do i=1,Nz-1
-     ik(i)=Nz-i
-  end do
-  !$omp end do
-  !$omp do
-  do i=2,2*Nw
-     iw(i)=2*Nw-i+2
-  end do
-  !$omp end do
-  !$omp end parallel
+  call reverse_index(ii,ij,ik,iw,Nx,Ny,Nz,Nw)
   orb_loop:do iorb=1,Nchi*(Nchi+1)/2
      l=irr_chi(iorb,1)
      m=irr_chi(iorb,2)
@@ -126,12 +189,13 @@ subroutine get_chi0_soc(chi,sgnsig,sgnsig2,invschi,Vmat,Gk,kmap,invk,invs,olist,
 
   integer(c_int32_t),dimension(Nchi,Nchi,2)::chi_map
   integer(c_int32_t),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
+  real(c_double) maxchi0_dummy   ! this entry only prints the Stoner factor
 
-  call get_invschi()
+  call get_invschi_soc(invschi,olist,invs,Nchi)
   call get_sgnsig()
   call get_chi_map_soc(chi_map,irr_chi,olist,invs,Nchi,Norb)
   call get_chi0_conv_soc(chi,Gk,kmap,invk,invs,irr_chi,chi_map,olist,sgnsig,sgnsig2,temp,Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
-  call ckchi()
+  call ckchi_soc_impl(chi,Vmat,kmap,invk,Nk,Nkall,Nchi,Nw,maxchi0_dummy)
 contains
   subroutine get_sgnsig()
     ! sgnsig(i,j)  = s_i * s_j  (orbital spin signature for TRS G(-k) relation)
@@ -153,64 +217,7 @@ contains
     end do
   end subroutine get_sgnsig
 
-    subroutine ckchi()
-    integer(c_int32_t) i,l,m,n,info,chik,chikall,iorb
-    integer(c_int32_t) Nchi_i,lwork
-    real(c_double) maxchi0,maxchi02
-    real(c_double),dimension(2*Nchi):: rwork
-    complex(c_double),dimension(Nchi*Nchi*4+1):: work
-    complex(c_double),dimension(Nchi):: eigc
-    complex(c_double),dimension(Nchi,Nchi):: chi0,tmp,tmp1
 
-    Nchi_i=int(Nchi,c_int32_t)
-    lwork=int(Nchi*Nchi*4+1,c_int32_t)
-    maxchi02=-1.0d5
-    do i=1,Nk
-       !$omp parallel
-       !$omp workshare
-       chi0(:,:)=0.0d0
-       !$omp end workshare
-       !$omp do private(l,m,n)
-       do l=1,Nchi
-          do m=1,Nchi
-             do n=1,Nchi
-                chi0(m,l)=chi0(m,l)-chi(i,1,m,n)*Vmat(n,l)
-             end do
-          end do
-       end do
-       !$omp end do
-       !$omp end parallel
-       call zgeev('N','N',Nchi_i,chi0,Nchi_i,eigc,tmp1,Nchi_i,tmp,Nchi_i,work,lwork,rwork,info)
-       if(info/=0)then; print*,'zgeev failed: info=',info; stop; end if
-       maxchi0=maxval(dble(eigc))
-       if(maxchi0>maxchi02)then
-          chik=i
-          maxchi02=maxchi0
-       end if
-    end do
-    do i=1,Nkall
-       if(invk(2,i)==0 .and. invk(1,i)==chik)then
-          chikall=i
-          exit
-       end if
-    end do
-    print'(A7,3I4,F12.8)','SDW/CDW',kmap(:,chikall),maxchi02
-  end subroutine ckchi
-
-  subroutine get_invschi()
-    integer(c_int32_t) l,m,i,j
-    invschi(:)=0
-    do l=1,Nchi
-       i=invs(olist(l,1))
-       j=invs(olist(l,2))
-       do m=1,Nchi
-          if(i==olist(m,1) .and. j==olist(m,2))then
-             invschi(l)=m
-             exit
-          end if
-       end do
-    end do
-  end subroutine get_invschi
 end subroutine get_chi0_soc
 
 subroutine get_chi_map_soc(chi_map,irr_chi,olist,invs,Nchi,Norb)

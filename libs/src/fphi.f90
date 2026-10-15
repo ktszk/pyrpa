@@ -1,8 +1,8 @@
 subroutine get_iqshift(qpoint,klist,qshift,Nk)
-  !>shift k to -k+q
+  !> index of -k+q on the k-list (thin wrapper, see get_qshift_impl in fchi.f90)
   !!@param  qpoint,in: q-vector
-  !!@param   klist,in: list of all k-point
-  !!@param qshift,out: list of footnote of klist that correspond to k+q shift
+  !!@param   klist,in: list of all k-points
+  !!@param qshift,out: index into klist of -k+q for each k
   !!@param      Nk,in: number of k-points
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double
   implicit none
@@ -10,89 +10,7 @@ subroutine get_iqshift(qpoint,klist,qshift,Nk)
   real(c_double),intent(in),dimension(3,Nk):: klist
   real(c_double),intent(in),dimension(3):: qpoint
   integer(c_int64_t),intent(out),dimension(Nk):: qshift
-  
-  integer(c_int64_t) i,j,k,ck
-  real(c_double) tmp
-  real(c_double),dimension(3,Nk):: kqlist
-  
-  integer(c_int64_t) :: scale_int, i1, i2, i3, j1, j2, j3
-  integer(c_int64_t), allocatable :: ht_key(:), ht_val(:)
-  integer(c_int64_t) :: m, h, step
-  integer(c_int64_t) :: jj
-  integer(c_int64_t) :: key, key_t
-  integer(c_int64_t) :: nmiss
-  logical :: found
-  real(c_double) :: tmpf(3)
-
-  scale_int=1048576_c_int64_t
-  m = max(3_c_int64_t, 2_c_int64_t*Nk + 3_c_int64_t)
-  allocate(ht_key(m))
-  allocate(ht_val(m))
-  ht_key(:) = -1_c_int64_t
-  ht_val(:) = -1_c_int64_t
-
-  ! build hash table from klist (single-threaded)
-  do jj=1,int(Nk)
-     i1 = int(klist(1,jj)*dble(scale_int)+0.5d0, c_int64_t)
-     i2 = int(klist(2,jj)*dble(scale_int)+0.5d0, c_int64_t)
-     i3 = int(klist(3,jj)*dble(scale_int)+0.5d0, c_int64_t)
-     i1 = mod(i1, scale_int)
-     i2 = mod(i2, scale_int)
-     i3 = mod(i3, scale_int)
-     key = i1 + i2*scale_int + i3*scale_int*scale_int
-     h = mod(abs(key), m) + 1_c_int64_t
-     step = 1_c_int64_t
-     do while(ht_key(h) /= -1_c_int64_t .and. ht_key(h) /= key)
-        h = h + step
-        if(h>m) h = h - m
-     end do
-     ht_key(h) = key
-     ht_val(h) = jj
-  end do
-
-  ! Lookup for -k+q: compute 1-k+q = (-k+q) mod 1 (folds into [0,1))
-  nmiss = 0
-  !$omp parallel do private(i1,i2,i3,key_t,h,step,tmpf,j1,j2,j3,found) reduction(+:nmiss)
-  do i=1,Nk
-     tmpf(:)=1.0d0-klist(:,i)+qpoint(:)
-     do j=1,3
-        if(tmpf(j)>=1.0d0) then
-           tmpf(j)=tmpf(j)-1.0d0
-        else if(tmpf(j)<0.0d0) then
-           tmpf(j)=tmpf(j)+1.0d0
-        end if
-     end do
-     j1 = int(tmpf(1)*dble(scale_int)+0.5d0, c_int64_t)
-     j2 = int(tmpf(2)*dble(scale_int)+0.5d0, c_int64_t)
-     j3 = int(tmpf(3)*dble(scale_int)+0.5d0, c_int64_t)
-     j1 = mod(j1, scale_int)
-     j2 = mod(j2, scale_int)
-     j3 = mod(j3, scale_int)
-     key_t = j1 + j2*scale_int + j3*scale_int*scale_int
-     h = mod(abs(key_t), m) + 1_c_int64_t
-     step = 1_c_int64_t
-     qshift(i) = 1
-     found = .false.
-     do while(ht_key(h) /= -1_c_int64_t)
-        if(ht_key(h) == key_t) then
-           qshift(i) = ht_val(h)
-           found = .true.
-           exit
-        end if
-        h = h + step
-        if(h>m) h = h - m
-     end do
-     if(.not. found) nmiss = nmiss + 1
-  end do
-  !$omp end parallel do
-  if(nmiss > 0)then
-     print'(A,I0,A,I0,A)','WARNING(get_iqshift): ',nmiss,' of ',Nk,' -k+q points not found on the k-mesh.'
-     print'(A)','  klist must be a periodic [0,1) mesh without endpoints (e.g. gen_klist with sw_pp=False).'
-     print'(A)','  Missing points fall back to index 1; the resulting chi/phi is unreliable.'
-  end if
-
-  deallocate(ht_key)
-  deallocate(ht_val)
+  call get_qshift_impl(qpoint,klist,qshift,Nk,-1_c_int64_t)
 end subroutine get_iqshift
 
 module calc_irr_phi

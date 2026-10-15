@@ -279,6 +279,7 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
      scf_loop,pp,eps,Nkall,Nk,Nw,Norb,Nchi,Nx,Ny,Nz,sub_sigma,sw_out,sw_in,m_diis,sw_rescale,&
      sw_tail,sigma_scale) bind(C)
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  use flex_scf, only:solve_mu,diis_state,diis_init,diis_free,mix_sigma
   implicit none
   integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz,scf_loop,m_diis
   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
@@ -301,10 +302,7 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   complex(c_double),dimension(Nk,Nw,Norb,Norb):: Gk,sigmak0
   complex(c_double),dimension(Nk,Nw,Nchi,Nchi):: chi
   ! DIIS
-  integer(c_int32_t):: n_hist,i_hist
-  complex(c_double),allocatable:: xout_hist(:,:,:,:,:),res_hist(:,:,:,:,:)
-  real(c_double),allocatable:: B_diis(:,:),rhs_diis(:)
-  integer(c_int32_t),allocatable:: ipiv_diis(:)
+  type(diis_state):: diis   !! Pulay history for the sigma mixing (module flex_scf)
   ! bracket cache for renew_mu
   real(c_double):: muS_cache,muL_cache
   logical:: bracket_valid
@@ -350,14 +348,8 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
      call gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb)
   end if
   call get_chi_map(chi_map,irr_chi,olist,Nchi)
-  allocate(xout_hist(Nk,Nw,Norb,Norb,m_diis))
-  allocate(res_hist (Nk,Nw,Norb,Norb,m_diis))
-  allocate(B_diis(m_diis+1,m_diis+1))
-  allocate(rhs_diis(m_diis+1))
-  allocate(ipiv_diis(m_diis+1))
+  call diis_init(diis,m_diis,Nk,Nw,Norb)
   allocate(eig_gkinv(Norb,Nk,Nw))
-  n_hist=0
-  i_hist=0
   bracket_valid=.false.
   muS_cache=0.0d0
   muL_cache=0.0d0
@@ -455,7 +447,7 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
         print'(A)','[FLEX]   chi_s is singular/negative there; the returned results are unreliable.'
      end if
   end if
-  deallocate(xout_hist,res_hist,B_diis,rhs_diis,ipiv_diis)
+  call diis_free(diis)
   if(sw_out)then
      call io_sigma(.true.)
   end if
@@ -463,241 +455,14 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   deallocate(eig_gkinv)
 contains
   subroutine compare_sigma()
-    integer(c_int32_t) i,j,l,m,kerr,iwerr,lerr,merr,ih,jh,idx_i,idx_j,info,n_cur
-    real(c_double) est, eps_reg
-    complex(c_double) cksigm
-    complex(c_double),dimension(Nk,Nw,Norb,Norb):: sigma_diis
-
-    ! --- Store current output and residual in circular buffer ---
-    i_hist=mod(i_hist,int(m_diis,c_int32_t))+1
-    n_hist=min(n_hist+1,int(m_diis,c_int32_t))
-    xout_hist(:,:,:,:,i_hist)=sigmak(:,:,:,:)
-    res_hist(:,:,:,:,i_hist)=sigmak(:,:,:,:)-sigmak0(:,:,:,:)
-    n_cur=n_hist
-
-    ! --- Build Pulay matrix B of size (n_cur+1 x n_cur+1) ---
-    B_diis(1:n_cur+1,1:n_cur+1)=0.0d0
-    do ih=1,n_cur
-       idx_i=modulo(i_hist-n_cur+ih-1,int(m_diis,c_int32_t))+1
-       do jh=1,n_cur
-          idx_j=modulo(i_hist-n_cur+jh-1,int(m_diis,c_int32_t))+1
-          B_diis(ih,jh)=real(sum(conjg(res_hist(:,:,:,:,idx_i))*res_hist(:,:,:,:,idx_j)),kind=c_double)
-       end do
-       B_diis(ih,n_cur+1)=1.0d0
-       B_diis(n_cur+1,ih)=1.0d0
-    end do
-
-    ! Regularize diagonal to improve numerical stability
-    eps_reg=1.0d-12
-    if(n_cur>0)then
-       do ih=1,n_cur
-          B_diis(ih,ih)=B_diis(ih,ih)+eps_reg
-       end do
-    end if
-
-    ! --- Right-hand side vector (Lagrange constraint: sum c_i = 1) ---
-    rhs_diis(1:n_cur)=0.0d0
-    rhs_diis(n_cur+1)=1.0d0
-
-    ! --- Solve B*c = rhs via LAPACK dgesv ---
-    call dgesv(n_cur+1,1,B_diis(1:n_cur+1,1:n_cur+1),n_cur+1, &
-               ipiv_diis(1:n_cur+1),rhs_diis(1:n_cur+1),n_cur+1,info)
-    ! If dgesv fails (singular matrix), fall back to using most-recent vector
-    if(info/=0)then
-       print*,'DIIS: dgesv failed (info=',info,'), fallback to most-recent entry'
-       rhs_diis(1:n_cur)=0.0d0
-       if(n_cur>=1) then
-          rhs_diis(n_cur)=1.0d0
-       end if
-    end if
-
-    ! --- DIIS extrapolation: sigma_diis = sum_i c_i * xout_hist_i ---
-    sigma_diis(:,:,:,:)=0.0d0
-    do ih=1,n_cur
-       idx_i=modulo(i_hist-n_cur+ih-1,int(m_diis,c_int32_t))+1
-       sigma_diis=sigma_diis+rhs_diis(ih)*xout_hist(:,:,:,:,idx_i)
-    end do
-
-    ! --- Convergence check and mixing ---
-    ! n_cur=1 (first step or m_diis=1): fall back to linear mixing
-    ! n_cur>=2 (DIIS active): use sigma_diis directly to preserve optimal extrapolation
-    esterr=0.0d0
-    est=100.0d0
-    kerr=1; iwerr=1; lerr=1; merr=1  ! defaults in case all |sigma| < eps_sgm
-    do l=1,Norb
-       do m=1,Norb
-          do j=1,Nw
-             do i=1,Nk
-                cksigm=sigma_diis(i,j,m,l)
-                if(abs(cksigm)>eps_sgm)then
-                   est=abs((sigmak0(i,j,m,l)-cksigm)/cksigm)
-                   if(est>esterr)then
-                      esterr=est
-                      kerr=i
-                      iwerr=j
-                      lerr=l
-                      merr=m
-                   end if
-                end if
-                if(n_cur>=2)then
-                   sigmak(i,j,m,l)=cksigm
-                else
-                   sigmak(i,j,m,l)=pp*cksigm+(1.0d0-pp)*sigmak0(i,j,m,l)
-                end if
-             end do
-          end do
-       end do
-    end do
-    do i=1,Nkall
-       if(invk(1,i)==kerr)then
-          print '(A7,E9.2,A14,3(1X,I3),I5,2I3,I5)','esterr=',esterr,' at k,iw,m,l=', &
-               & kmap(1,i),kmap(2,i),kmap(3,i),iwerr,merr,lerr,kerr
-          exit
-       end if
-    end do
+    !> DIIS update of sigmak plus the convergence measure esterr (shared, see module flex_scf)
+    call mix_sigma(diis,sigmak,sigmak0,esterr,pp,eps_sgm,invk,kmap,Nk,Nkall,Nw,Norb)
   end subroutine compare_sigma
 
   subroutine renew_mu()
-    integer(c_int32_t) i_iter
-    integer(c_int32_t),parameter:: itemax=100
-    logical flag
-    logical bracket_found
-    real(c_double) rnS,rnL,rnc,rnM,muc,mud,muL,muS,muM,eps,dmu
-
-    call precompute_eig_gkinv()
-    if(esterr>1.0d-2)then
-       eps= 1.0d-8
-    else
-       eps= esterr*1.0d-1
-    end if
-    dmu= abs(mu-mu_OLD)*2.0d0
-    if (dmu<eps*4.0d0) dmu= eps*4.0d0
-    mu_OLD=mu
-
-    bracket_found=.false.
-    if(bracket_valid)then
-       call get_rn(rnS,muS_cache)
-       call get_rn(rnL,muL_cache)
-       if(rnS<rfill .and. rnL>rfill)then
-          muS=muS_cache
-          muL=muL_cache
-          bracket_found=.true.
-          print'(A)','[mu] cached bracket valid'
-       else
-          print'(A)','[mu] cached bracket invalid, re-searching'
-       end if
-    end if
-
-    if(.not.bracket_found)then
-       muL= mu+dmu
-       muS= mu-dmu
-       upper_lim: do i_iter=1,itemax
-          mu=muL
-          rnL=0.0d0
-          call get_rn(rnL,mu)
-          if(rnL<rfill)then
-             if(abs(rfill-rnL)>0.5d0)then
-                muL=muL+1.0d0
-             else if(abs(rfill-rnL)>dmu)then
-                muL=muL+0.5d0
-             else
-                muL= muL +dmu
-             end if
-          else
-             exit
-          end if
-          if(i_iter==itemax)then
-             print*,'Too many'
-             stop
-          end if
-       end do upper_lim
-
-       lower_lim: do i_iter=1,itemax
-          mu=muS
-          rnS=0.0d0
-          call get_rn(rnS,mu)
-          if(rnS>rfill)then
-             if(abs(rnS-rfill)>0.5d0)then
-                muS=muS-1.0d0
-             else if(abs(rnS-rfill)>dmu)then
-                muS=muS-0.5d0
-             else
-                muS=muS-dmu
-             end if
-          else
-             exit
-          end if
-          if(i_iter==itemax)then
-             print*,'Too many'
-             stop
-          end if
-       end do lower_lim
-    end if
-
-    ! save wide bracket before Brent narrows it
-    muS_cache=muS
-    muL_cache=muL
-    bracket_valid=.true.
-
-    rnL=rnL-rfill
-    rnS=rnS-rfill
-    rnc=rnS
-    muc=muS
-    mud=0.0d0
-    flag=.false.
-    brent_loop: do i_iter=1,itemax
-       if(rnc/=rnS .and. rnc/=rnL)then
-          muM=(muL*rnS*rnc*(rnS-rnc)+muS*rnL*rnc*(rnc-rnL)+muc*rnL*rnS*(rnL-rnS))&
-               /((rnL-rnS)*(rnc-rnL)*(rnc-rnS))
-       else
-          muM=muL-rnL*(muL-muS)/(rnL-rnS)
-       end if
-       if((0.25d0*(3.0d0*muS+muL) > muM .or. muM > muL) .or. &
-            (flag .and. abs(muM-muL) >= abs(muL-muc)*0.5d0) .or. &
-            (flag .eqv. .false. .and. abs(muM-muL) >= abs(muc-mud)*0.5d0) .or. &
-            (flag .and. abs(muL-muc)<1.0d-8) .or. &
-            (flag.eqv. .false. .and. abs(muc-mud)<1.0d-8))then
-          muM= (muL+muS)*0.5d0
-          flag=.true.
-       else
-          flag=.false.
-       end if
-       if(abs(muL-muM)<eps)exit
-       mu=muM
-       rnM=0
-       call get_rn(rnM,muM)
-       !print '(1x,a,2f22.16,l2)','muM,rnM=   ',muM,rnM,flag
-       mud=muc
-       muc=muL
-       rnc=rnL
-       if(rnS*(rnM-rfill)<0)then
-          muL=muM
-          rnL=rnM-rfill
-       else
-          muS=muM
-          rnS=rnM-rfill
-       end if
-       if(abs(rnS)<abs(rnL))then
-          muM=muL
-          muL=muS
-          muS=muM
-          rnM=rnL
-          rnL=rnS
-          rnS=rnM
-       end if
-       if(i_iter==itemax)then
-          print *,'Too many loop!'
-          stop
-       end if
-    end do brent_loop
-    if(rnL==rnS)then
-       mu=(muS+muL)*0.5d0
-    else
-       mu= (muS*rnL-muL*rnS)/(rnL-rnS)
-    end if
-    call get_rn(rnM,mu)
-    mu_OLD=mu
-    print'(A4,F8.4,A10,F8.4)','mu  =',mu,' filling =',rnM
+    !> update mu so that get_rn(mu) = rfill (shared Brent solver, see module flex_scf)
+    call precompute_eig_gkinv()   ! eigenvalues of H+Sigma, so get_rn needs no matrix inverse
+    call solve_mu(mu,mu_OLD,bracket_valid,muS_cache,muL_cache,rfill,esterr,get_rn)
   end subroutine renew_mu
   
   subroutine get_rn(rn,rmu)

@@ -1,8 +1,16 @@
-subroutine get_qshift(qpoint,klist,qshift,Nk)
-  !> shift k to k+q (hash-based O(Nk) mapping)
+subroutine get_qshift_impl(qpoint,klist,qshift,Nk,ksgn)
+  !> index of ksgn*k+q on the k-list, for every k (hash-based O(Nk) mapping).
+  !> ksgn=+1 gives k+q (get_qshift), ksgn=-1 gives -k+q (get_iqshift); the two differ only in
+  !> that one line, so they share this implementation.  -k is taken as 1-k to keep the
+  !> fractional coordinates in [0,1), which is what the hash keys assume.
+  !!@param  qpoint,in: q-vector
+  !!@param   klist,in: list of all k-points
+  !!@param qshift,out: index into klist of ksgn*k+q for each k
+  !!@param      Nk,in: number of k-points
+  !!@param    ksgn,in: +1 for k+q, -1 for -k+q
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(c_int64_t),intent(in):: Nk
+  integer(c_int64_t),intent(in):: Nk,ksgn
   real(c_double),intent(in),dimension(3,Nk):: klist
   real(c_double),intent(in),dimension(3):: qpoint
   integer(c_int64_t),intent(out),dimension(Nk):: qshift
@@ -50,7 +58,11 @@ subroutine get_qshift(qpoint,klist,qshift,Nk)
   nmiss = 0
   !$omp parallel do private(i1,i2,i3,key_t,h,step,tmpf,j1,j2,j3,found) reduction(+:nmiss)
   do i = 1, Nk
-     tmpf(:) = klist(:,i) + qpoint(:)
+     if(ksgn>0)then
+        tmpf(:) = klist(:,i) + qpoint(:)
+     else
+        tmpf(:) = 1.0d0 - klist(:,i) + qpoint(:)
+     end if
      do j = 1, 3
         if(tmpf(j) >= 1.0d0) then
            tmpf(j) = tmpf(j) - 1.0d0
@@ -82,13 +94,28 @@ subroutine get_qshift(qpoint,klist,qshift,Nk)
   end do
   !$omp end parallel do
   if(nmiss > 0)then
-     print'(A,I0,A,I0,A)','WARNING(get_qshift): ',nmiss,' of ',Nk,' k+q points not found on the k-mesh.'
+     if(ksgn>0)then
+        print'(A,I0,A,I0,A)','WARNING(get_qshift): ',nmiss,' of ',Nk,' k+q points not found on the k-mesh.'
+     else
+        print'(A,I0,A,I0,A)','WARNING(get_iqshift): ',nmiss,' of ',Nk,' -k+q points not found on the k-mesh.'
+     end if
      print'(A)','  klist must be a periodic [0,1) mesh without endpoints (e.g. gen_klist with sw_pp=False).'
      print'(A)','  Missing points fall back to index 1; the resulting chi/phi is unreliable.'
   end if
 
   deallocate(ht_key)
   deallocate(ht_val)
+end subroutine get_qshift_impl
+
+subroutine get_qshift(qpoint,klist,qshift,Nk)
+  !> index of k+q on the k-list (thin wrapper, see get_qshift_impl)
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double
+  implicit none
+  integer(c_int64_t),intent(in):: Nk
+  real(c_double),intent(in),dimension(3,Nk):: klist
+  real(c_double),intent(in),dimension(3):: qpoint
+  integer(c_int64_t),intent(out),dimension(Nk):: qshift
+  call get_qshift_impl(qpoint,klist,qshift,Nk,1_c_int64_t)
 end subroutine get_qshift
 
 module calc_irr_chi
@@ -496,7 +523,7 @@ end subroutine get_chi_map
 
 subroutine chi0_threshold(chi,Nk,Nw,Nchi)
   !> Drop the FFT round-off of the convolution (relative cut, see drop_roundoff).
-  use numerics, only:drop_roundoff
+  use numerics, only:drop_roundoff,reverse_index
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double
   implicit none
   integer(c_int64_t),intent(in):: Nk,Nw,Nchi
@@ -513,6 +540,7 @@ subroutine chi0_conv_acc(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,coef,&
   !> without a second chi-sized work array.  The small-value thresholding is
   !> applied by the callers (chi0_threshold) after the final combination.
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  use numerics, only:reverse_index
   implicit none
   integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
@@ -529,32 +557,7 @@ subroutine chi0_conv_acc(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,coef,&
   complex(c_double),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmp,tmpgk13,tmpgk42
 
   weight=coef*temp/dble(Nkall)
-  ii(0)=0
-  ij(0)=0
-  ik(0)=0
-  iw(1)=1
-  !$omp parallel
-  !$omp do
-  do i=1,Nx-1
-     ii(i)=Nx-i
-  end do
-  !$omp end do
-  !$omp do
-  do i=1,Ny-1
-     ij(i)=Ny-i
-  end do
-  !$omp end do
-  !$omp do
-  do i=1,Nz-1
-     ik(i)=Nz-i
-  end do
-  !$omp end do
-  !$omp do
-  do i=2,2*Nw
-     iw(i)=2*Nw-i+2
-  end do
-  !$omp end do
-  !$omp end parallel
+  call reverse_index(ii,ij,ik,iw,Nx,Ny,Nz,Nw)
   call init_fft_plans(tmpgk13,tmp,Nx,Ny,Nz,2*Nw)
   orb_loop:do iorb=1,Nchi*(Nchi+1)/2
      l=irr_chi(iorb,1)

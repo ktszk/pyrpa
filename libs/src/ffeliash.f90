@@ -502,7 +502,7 @@ subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,prt,iprm,temp
   !>     tmpfk23 stores F_{lm}(k,iω) directly (other leg).
   !>   - FFT both to real space, multiply tmpfk14(r,τ)·tmpfk23(-r,-τ), inverse FFT.
   !>   - Result is the χ^FF bubble at chi-orbital pair (l,m) and its mirror (m,l) via Hermitian conjugate.
-  use numerics, only:drop_roundoff
+  use numerics, only:drop_roundoff,reverse_index
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
@@ -533,32 +533,7 @@ subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,prt,iprm,temp
      dprt=-1.0d0 !gap parity even freq triplet is odd
   end if
   weight=temp/dble(Nkall)
-  ii(0)=0
-  ij(0)=0
-  ik(0)=0
-  iw(1)=1
-  !$omp parallel
-  !$omp do
-  do i=1,Nx-1
-     ii(i)=Nx-i
-  end do
-  !$omp end do
-  !$omp do
-  do i=1,Ny-1
-     ij(i)=Ny-i
-  end do
-  !$omp end do
-  !$omp do
-  do i=1,Nz-1
-     ik(i)=Nz-i
-  end do
-  !$omp end do
-  !$omp do
-  do i=2,2*Nw
-     iw(i)=2*Nw-i+2
-  end do
-  !$omp end do
-  !$omp end parallel
+  call reverse_index(ii,ij,ik,iw,Nx,Ny,Nz,Nw)
   call init_fft_plans(tmpfk14,tmp,Nx,Ny,Nz,2*Nw)
   orb_loop:do iorb=1,Nchi*(Nchi+1)/2
      l=irr_chi(iorb,1)
