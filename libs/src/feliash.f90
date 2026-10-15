@@ -294,6 +294,7 @@ contains
     end do
     idx=minloc(dble(eigenvals(1:m_act)),1)                  ! pick most negative Ritz value
     lambda1=dble(eigenvals(idx))   !save lambda_- in host variable
+    call real_ritz(VR(1:m_act,idx),m_act)
     print'(A,F12.6)','  lambda_- =',lambda1
     ! early exit: if Pass 1 already resolved a sufficiently positive Ritz value,
     ! it is the physical eliashberg eigenvalue lambda_+ — skip Pass 2.
@@ -301,6 +302,7 @@ contains
        idx=maxloc(dble(eigenvals(1:m_act)),1)
        print'(A,F12.6)','  eliash   =',dble(eigenvals(idx))
        lambda_out=dble(eigenvals(idx))
+       call real_ritz(VR(1:m_act,idx),m_act)
        ! reconstruct Ritz vector x = sum_ii VR(ii,idx) * v_{ii-1}
        !$omp parallel workshare
        delta(:,:,:,:)=(0.0d0,0.0d0)
@@ -392,6 +394,7 @@ contains
     idx=maxloc(dble(eigenvals(1:m_act)),1)                ! largest Ritz value -> lambda_+ + shift
     print'(A,F12.6)','  eliash   =',dble(eigenvals(idx))-shift
     lambda_out=dble(eigenvals(idx))-shift
+    call real_ritz(VR(1:m_act,idx),m_act)
     ! reconstruct Ritz vector for lambda_+: delta = V_m * y_+
     !$omp parallel workshare
     delta(:,:,:,:)=(0.0d0,0.0d0)
@@ -405,6 +408,20 @@ contains
     !$omp parallel workshare
     delta(:,:,:,:)=delta(:,:,:,:)*(1.0d0/beta)               ! normalize gap function
     !$omp end parallel workshare
+    ! y above is an eigenvector of the deflated P A P (P = 1 - delta1 delta1^T), not of A:
+    ! A y = lambda_+ y + c delta1 with c = <delta1, A y>, so x = y + c/(lambda_+ - lambda_-) delta1
+    call apply_op(newdelta,delta)
+    call get_inner(hij,delta1,newdelta)
+    if(abs(lambda_out-lambda1)>1.0d-12)then     ! lambda_+ = lambda_- (e.g. V=0): nothing to undo
+       hij=hij/(lambda_out-lambda1)
+       !$omp parallel workshare
+       delta(:,:,:,:)=delta(:,:,:,:)+hij*delta1(:,:,:,:)
+       !$omp end parallel workshare
+       call get_norm(beta,delta)
+       !$omp parallel workshare
+       delta(:,:,:,:)=delta(:,:,:,:)*(1.0d0/beta)
+       !$omp end parallel workshare
+    end if
 
     deallocate(V,H_mat,A_mat,eigenvals,VL_dum,VR,zwork,rwork)
   end subroutine solve_arnoldi
@@ -421,7 +438,9 @@ contains
   end subroutine apply_op
 
   subroutine get_inner(h,u,v)
-    !> complex inner product h = 2*<u,v> summed over IBZ (factor 2 for k/-k symmetry)
+    !> real inner product h = 2*Re<u,v> summed over IBZ (factor 2 for k/-k symmetry).
+    !> Arnoldi works on the real vector space of Hermitian Δ, where apply_op is linear
+    !> (it is only real-linear: the upper triangle is filled by conjugation).
     complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: u,v
     complex(c_double),intent(out):: h
     integer(c_int32_t) i,j,l,m
@@ -442,8 +461,18 @@ contains
        end do
     end do
     !$omp end parallel
-    h=cmplx(2.0d0*tmp_r,2.0d0*tmp_i,c_double)
+    h=cmplx(2.0d0*tmp_r,0.0d0,c_double)
   end subroutine get_inner
+
+  subroutine real_ritz(y,n)
+    !> Ritz coefficients y of the real Hessenberg matrix: fix the arbitrary ZGEEV phase so that
+    !> y is real (exact for a real Ritz value), keeping the Ritz vector Hermitian
+    integer(c_int32_t),intent(in):: n
+    complex(c_double),intent(inout):: y(n)
+    complex(c_double) ph
+    ph=y(maxloc(abs(y),1))
+    y(:)=cmplx(dble(y(:)*conjg(ph)/abs(ph)),0.0d0,c_double)
+  end subroutine real_ritz
 end subroutine lin_eliash
 
 subroutine mkfk_trs_nsoc(fk,Gk,delta,Nk,Nw,Norb)
@@ -523,10 +552,15 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,iprm,olist
   integer(c_int32_t) i,j,k,n,l,m
   real(c_double) sgn,dprt
   complex(c_double),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpVdelta,tmpfk,tmp
+  complex(c_double),dimension(Norb,Norb):: dtrim
   logical(1),parameter:: sw_odd_freq=.false.
 
-  ! sgn: F(-k,ω) = sgn·F^T(k,ω);  dprt: Δ(k,-ω) = dprt·Δ*(k,ω)
-  ! singlet: F(-k)=+F^T(k), even-ω gap; triplet: F(-k)=-F^T(k), odd-ω gap
+  ! sgn: Pauli, F(-k,-ω) = sgn·F^T(k,ω);  dprt: inversion parity, F(-k,ω) = dprt·P F(k,ω) P
+  ! -ω is rebuilt as F(k,-ω) = sgn·dprt·P F^*(k,ω) P, using F^T=F^* (Δ Hermitian: TRS lets the
+  ! gauge be chosen so, exactly, for singlet d0 and triplet dz).  No frequency parity is assumed,
+  ! so the odd-ω (orbital-antisymmetric) admixture of multi-orbital gaps is kept.  Since only the
+  ! lower triangle is computed and the rest filled by conjugation, the map is real-linear only:
+  ! lin_eliash therefore runs Arnoldi over the real space of Hermitian Δ (real inner product).
   if(sw_pair)then
      sgn=1.0d0 !singlet Fk=F^T-k
      dprt=1.0d0 !gap parity even freq singlet is even
@@ -641,6 +675,25 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,iprm,olist
      end do
   end do
   !$omp end parallel
+
+  ! k=-k points (TRIM) are stored once and never rebuilt from parity, so impose it there:
+  ! Δ(K) = dprt·P Δ(K) P.  Without this an odd-parity (triplet) gap keeps a spurious,
+  ! parity-violating component at TRIM, which in multi-orbital models gives a wrong eigenvalue.
+  !$omp parallel do private(i,j,l,m,dtrim)
+  do i=1,Nkall
+     if(invk(2,i)==0 .and. modulo(2*kmap(1,i),Nx)==0 .and. modulo(2*kmap(2,i),Ny)==0&
+          .and. modulo(2*kmap(3,i),Nz)==0)then
+        do j=1,Nw
+           do m=1,Norb
+              do l=1,Norb
+                 dtrim(l,m)=dprt*prt(l)*prt(m)*newdelta(invk(1,i),j,iprm(l),iprm(m))
+              end do
+           end do
+           newdelta(invk(1,i),j,:,:)=0.5d0*(newdelta(invk(1,i),j,:,:)+dtrim(:,:))
+        end do
+     end if
+  end do
+  !$omp end parallel do
 end subroutine mkdelta_nsoc
 
 subroutine get_initial_delta(delta,init_delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,gap_sym)

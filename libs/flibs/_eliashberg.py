@@ -158,7 +158,10 @@ _loader._lib.mkfk_trs_soc_.argtypes = [
     np.ctypeslib.ndpointer(dtype=np.int64),       # slist
     np.ctypeslib.ndpointer(dtype=np.int64),       # invk
     np.ctypeslib.ndpointer(dtype=np.int64),       # invs
+    np.ctypeslib.ndpointer(dtype=np.int64),       # idk (stored index of each k)
+    np.ctypeslib.ndpointer(dtype=np.int64),       # ipk (1: rebuilt from parity)
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nkall, Nk
+    ctypes.POINTER(ctypes.c_int64),                                           # Ndk
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, Norb
     ctypes.POINTER(ctypes.c_int64)                              # gap_sym
 ]
@@ -507,8 +510,10 @@ def gen_Fk_soc(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray, invs: np.nda
     Nkall, Nk, Nw, Norb = len(invk), len(Gk[0, 0, 0]), len(delta[0, 0]), len(delta)
     Fk = np.zeros((Norb, Norb, Nw, Nkall), dtype=np.complex128)
     sgnsig = np.array([slist]).T.dot(np.array([slist])).astype(np.float64)
-    _loader._lib.mkfk_trs_soc_(Fk, Gk, delta, sgnsig, slist, invk, invs, _loader.i64(Nkall),
-                               _loader.i64(Nk), _loader.i64(Nw), _loader.i64(Norb),
+    idk = np.arange(1, Nkall + 1, dtype=np.int64)   # delta given on the full BZ: identity storage
+    ipk = np.zeros(Nkall, dtype=np.int64)
+    _loader._lib.mkfk_trs_soc_(Fk, Gk, delta, sgnsig, slist, invk, invs, idk, ipk, _loader.i64(Nkall),
+                               _loader.i64(Nk), _loader.i64(Nkall), _loader.i64(Nw), _loader.i64(Norb),
                                _loader.i64(gap_sym))
     return Fk
 

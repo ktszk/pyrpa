@@ -9,10 +9,14 @@ came out of cross-checking it against the no-SOC solver:
   * triplet seed of lin_eliash_soc is a d_z, odd-parity triplet + parity projection
   * conv_delta_orb_to_band_soc is gauge covariant for triplets (gap_sym argument)
 
+  * lin_eliash (no SOC) imposes inversion parity at the k=-k (TRIM) points, and both solvers run
+    Arnoldi with a real inner product (their kernels are only real-linear), so the multi-orbital
+    triplet (odd parity with an odd-frequency, orbital-antisymmetric admixture) is the exact
+    eigenpair of the full kernel
+
 Note on triplets in multi-orbital models: frequency parity is not a symmetry of the kernel there
-(inter-orbital terms mix even and odd frequency), so lin_eliash, which imposes even frequency,
-is not a valid reference for them; the multi-orbital triplet is checked against the exact kernel
-projected on its true symmetry sector (Sz=0 triplet, odd parity) instead.
+(inter-orbital terms mix even and odd frequency); the multi-orbital triplet is checked against
+the exact kernel projected on its true symmetry sector (Sz=0 triplet, odd parity).
 
 Runs standalone (no pytest needed):  python tests/test_eliash_nosym.py
 Also works under pytest if installed:  pytest tests/test_eliash_nosym.py
@@ -273,6 +277,106 @@ def test_soc_multiorbital_triplet_matches_exact_symmetry_sector():
     B = u[:, sv > 0.5]
     ev = np.linalg.eigvals(B.conj().T @ K @ B)
     assert abs(lam_s - ev.real.max()) < 1e-8, (lam_s, ev.real.max())
+
+
+def test_multiorbital_triplet_is_exact_eigenpair_nosoc_and_soc():
+    """Two orbitals: lin_eliash and lin_eliash_soc (p_x seed) must both return an exact eigenpair
+    of the full spin-orbital kernel in the Sz=0, odd-parity triplet sector, odd-frequency admixture
+    included, with a Hermitian (TRS-gauge) orbital gap.  Guards the TRIM parity projection of
+    lin_eliash (without it the triplet keeps a spurious component at k=-k and a wrong lambda) and
+    the real-inner-product Arnoldi of both solvers (their kernels fill components by conjugation,
+    so they are only real-linear; a complex Arnoldi gave errors up to 1e-4 in lambda)."""
+    N, Nw, temp, mu, U = 4, 4, 0.1, 0.35, 1.0
+    olist, site = P.get_chi_orb_list(2, [2])
+    ol2, site2 = P.spin_double_chiolist(olist, site, 2)
+    klist, kmap, invk = F.gen_irr_k_TRS(N, N, 1)
+    flat = {tuple(k): i for i, k in enumerate(kmap.tolist())}
+    km = np.array([flat[tuple(((-k) % np.array([N, N, 1])).tolist())] for k in kmap])
+    trim = np.all((2*kmap) % np.array([N, N, 1]) == 0, axis=1)
+    for t4, J in ((0.1, 0.3), (0.1, 0.0)):
+        rvec, ham_r = _two_orbital_dxz_dyz(t4=t4)
+        eig, uni = P.get_eigs(klist, ham_r, [], rvec)
+        Gk = F.gen_Green0(eig, uni, mu, temp, Nw)
+        Smat, Cmat = F.gen_SCmatrix(olist, site, U, J)
+        with T.silence():
+            chi, _ = F.get_chi0(Smat, Cmat, Gk, olist, kmap, invk, temp, N, N, 1)
+            d, lam = F.linearized_eliashberg(chi, Gk, uni, P.get_initial_gap(klist, 2, -1), Smat, Cmat, olist,
+                                             np.ones(2), kmap, invk, N, N, 1, temp, -1, eps=1e-12, arnoldi_m=200)
+        A = np.array([(1 if s == 0 else -1)*d[:, :, :, ik - 1].transpose(2, 1, 0) for ik, s, _ in invk])
+        assert np.abs(A[trim]).max() < 1e-12*np.abs(A).max()                 # odd parity at TRIM
+        Ad = np.conj(np.swapaxes(A, 2, 3))
+        assert np.linalg.norm(A - np.vdot(Ad, A)/abs(np.vdot(Ad, A))*Ad) < 1e-12*np.linalg.norm(A)   # Hermitian
+        ham2, _, slist, invs = P.spin_double_model(ham_r, [])
+        eig2, uni2 = P.get_eigs(kmap/np.array([N, N, 1]), ham2, [], rvec)
+        Gk2 = F.gen_Green0(eig2, uni2, mu, temp, Nw)
+        Vmat = F.gen_Vmatrix(ol2, slist, site2, invs, U, J)
+        _, K = _bruteforce_chi0_kernel(Gk2.transpose(3, 2, 1, 0), Vmat.T, ol2, temp, kmap, N, N, (0, 0))
+        X = np.zeros((len(kmap), Nw, 4, 4), complex)
+        X[:, :, :2, 2:] = A
+        X[:, :, 2:, :2] = A                                                   # Sz=0 triplet, d_z
+        x = X.reshape(-1)
+        assert np.linalg.norm(K @ x - lam*x) < 1e-10*np.linalg.norm(K @ x), (t4, J, lam)
+        _, lam_s, info = _trs_solvers(rvec, ham_r, N, N, Nw, temp, mu, U, J, gs=-1, eps=1e-12, m=200)
+        xs = np.asarray(info['delta']).transpose(3, 2, 1, 0).reshape(-1)
+        assert abs(lam_s - lam) < 1e-10, (t4, J, lam_s, lam)
+        assert np.linalg.norm(K @ xs - lam_s*xs) < 1e-10*np.linalg.norm(K @ xs), (t4, J, lam_s)
+
+        def proj(v):                                # Sz=0, spin-swap symmetric, odd parity
+            D = v.reshape(len(kmap), Nw, 4, 4).copy()
+            D[:, :, :2, :2] = 0
+            D[:, :, 2:, 2:] = 0
+            sw = D.copy()
+            sw[:, :, :2, 2:], sw[:, :, 2:, :2] = D[:, :, 2:, :2], D[:, :, :2, 2:]
+            D = 0.5*(D + sw)
+            return (0.5*(D - D[km])).reshape(-1)
+        u, sv, _ = np.linalg.svd(np.array([proj(e) for e in np.eye(K.shape[0])]).T)
+        B = u[:, sv > 0.5]
+        assert abs(lam - np.linalg.eigvals(B.conj().T @ K @ B).real.max()) < 1e-9, (t4, J, lam)
+
+
+def test_soc_with_spin_orbit_is_exact_eigenpair_in_parity_sector():
+    """Genuine SOC (L_z s_z on dxz/dyz): lin_eliash_soc must give the leading eigenpair of the exact
+    spin-orbital kernel in its parity sector -- even (gap_sym=+1) / odd (-1) parity with Delta on the
+    irreducible k-points and no singlet/triplet spin structure imposed (with SOC they mix), and the
+    whole kernel for parity mixing (-10, full BZ).  Imposing D_ud = -/+ D_du gave 0.054 instead of
+    0.186 for +1; the complex Arnoldi gave 0.42 for -10."""
+    N, Nw, temp, mu, U, J, lso = 4, 4, 0.1, 0.35, 1.0, 0.3, 0.2
+    rvec, ham_r = _two_orbital_dxz_dyz()
+    ham2, _, slist, invs = P.spin_double_model(ham_r, [])
+    r0 = [i for i, r in enumerate(rvec) if not r.any()][0]
+    ham2 = ham2.copy()
+    ham2[r0] += 0.5*lso*np.kron(np.diag([1, -1]), np.array([[0, -1j], [1j, 0]]))
+    olist, site = P.get_chi_orb_list(2, [2])
+    ol2, site2 = P.spin_double_chiolist(olist, site, 2)
+    klist, kmap, invk = F.gen_irr_k_TRS(N, N, 1)
+    eig, uni = P.get_eigs(klist, ham2, [], rvec)
+    Gk = F.gen_Green0(eig, uni, mu, temp, Nw)
+    Vmat = F.gen_Vmatrix(ol2, slist, site2, invs, U, J)
+    ef, uf = P.get_eigs(kmap/np.array([N, N, 1]), ham2, [], rvec)
+    Gf = F.gen_Green0(ef, uf, mu, temp, Nw)
+    _, K = _bruteforce_chi0_kernel(Gf.transpose(3, 2, 1, 0), Vmat.T, ol2, temp, kmap, N, N, (0, 0))
+    Nkall = len(kmap)
+    flat = {tuple(k): i for i, k in enumerate(kmap.tolist())}
+    km = np.array([flat[tuple(((-k) % np.array([N, N, 1])).tolist())] for k in kmap])
+    for gs in (1, -1, -10):
+        with T.silence():
+            chis, sg, sg2, isc = F.get_chi0_soc(Vmat, Gk, ol2, slist, kmap, invk, invs, temp, N, N, 1)
+            d, lam = F.linearized_eliashberg_soc(chis, Gk, uni, P.get_initial_gap(klist, 4, 1 if gs > 0 else -1),
+                                                 Vmat, sg, sg2, np.ones(4), slist, ol2, kmap, invk, invs, isc,
+                                                 N, N, 1, temp, gs, eps=1e-12, arnoldi_m=200)
+        x = np.asarray(d).transpose(3, 2, 1, 0).reshape(-1)
+        if gs == -10:
+            B = np.eye(K.shape[0])
+        else:                                       # parity sector, no spin structure
+            p = 1 if gs > 0 else -1
+            Pm = np.array([(0.5*(e.reshape(Nkall, Nw, 4, 4) + p*e.reshape(Nkall, Nw, 4, 4)[km])).reshape(-1)
+                           for e in np.eye(K.shape[0])]).T
+            u, sv, _ = np.linalg.svd(Pm)
+            B = u[:, sv > 0.5]
+            X = x.reshape(Nkall, Nw, 4, 4)
+            assert np.linalg.norm(X - p*X[km]) < 1e-12*np.linalg.norm(X)
+        assert abs(lam - np.linalg.eigvals(B.conj().T @ K @ B).real.max()) < 1e-9, (gs, lam)
+        assert np.linalg.norm(K @ x - lam*x) < 1e-10*np.linalg.norm(K @ x), gs
 
 
 def test_soc_band_gap_is_gauge_covariant_with_physical_parity():
