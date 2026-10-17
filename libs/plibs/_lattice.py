@@ -368,7 +368,17 @@ def mk_qlist(k_set: np.ndarray | list, Nx: int, Ny: int, Nz: int,
     qlist += [k_set[-1]]
     splen += [maxsplen]          # maxsplen already includes the full last segment
     xticks += [maxsplen]
-    return np.array(qlist), np.array(splen), xticks
+    # get_qshift resolves k+q by an exact lookup on the k-mesh, so every q has to be a mesh
+    # point.  The step above is not always commensurate (a 1/3 coordinate such as hexagonal K,
+    # or a k_z=1/2 end point on an Nz=1 mesh), so snap each q to the nearest mesh point;
+    # the path length (splen) keeps the ideal positions for the plot axis.
+    qlist = np.array(qlist, dtype=np.float64)
+    qsnap = np.round(qlist*Narray)/Narray
+    dev = np.abs(qsnap-qlist).max() if len(qlist) else 0.0
+    if dev > 1.0e-8:
+        print(f'mk_qlist: q-points snapped to the {Nx}x{Ny}x{Nz} k-mesh '
+              f'(max shift {dev:.3g} in reciprocal-lattice units)', flush=True)
+    return qsnap, np.array(splen), xticks
 
 
 def get_ptv(alatt: np.ndarray, deg: np.ndarray, brav: int) -> tuple[np.ndarray, np.ndarray]:

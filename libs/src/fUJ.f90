@@ -268,7 +268,10 @@ subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
 
   integer(c_int32_t) i,j,l,info
   integer(c_int32_t),dimension(Nchi):: ipiv
-  complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,Smat_c,Cmat_c,V0_c
+  complex(c_double),dimension(Nchi,Nchi):: Smat_c,Cmat_c,V0_c
+  ! thread-private work matrices are allocated on the heap: as automatic arrays they would sit
+  ! on each OpenMP thread's stack and overflow it for large Nchi (multi-site / SOC models)
+  complex(c_double),allocatable,dimension(:,:):: cmat1,cmat2,cmat3,cmat4
 
   Smat_c(:,:)=cmplx(Smat(:,:),0.0d0,kind=c_double)
   Cmat_c(:,:)=cmplx(Cmat(:,:),0.0d0,kind=c_double)
@@ -281,7 +284,9 @@ subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
      V0_c(:,:)=cmplx(0.5d0*(Smat(:,:)-Cmat(:,:)),0.0d0,kind=c_double) !bare Vuu=(S-C)/2
   end if
 
-  !$omp parallel do collapse(2) private(i,cmat1,cmat2,cmat3,cmat4,ipiv,info,l)
+  !$omp parallel private(i,j,cmat1,cmat2,cmat3,cmat4,ipiv,info,l)
+  allocate(cmat1(Nchi,Nchi),cmat2(Nchi,Nchi),cmat3(Nchi,Nchi),cmat4(Nchi,Nchi))
+  !$omp do collapse(2)
   wloop:do j=1,Nw
      qloop:do i=1,Nk
         call zgemm('N','N',Nchi,Nchi,Nchi,(-1.0d0,0.0d0),chi(i,j,:,:),Nchi,Smat_c,Nchi,(0.0d0,0.0d0),cmat1,Nchi) !-chi0S
@@ -312,7 +317,9 @@ subroutine get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
         chi(i,j,:,:)=cmat4(:,:)
      end do qloop
   end do wloop
-  !$omp end parallel do
+  !$omp end do
+  deallocate(cmat1,cmat2,cmat3,cmat4)
+  !$omp end parallel
 end subroutine get_V_delta_nsoc_flex
 
 subroutine get_vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi)
@@ -331,13 +338,17 @@ subroutine get_vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi)
 
   integer(c_int32_t) i,j,l,info
   integer(c_int32_t),dimension(Nchi):: ipiv
-  complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,cmat5,Smat_c,Cmat_c,SC_c
+  complex(c_double),dimension(Nchi,Nchi):: Smat_c,Cmat_c,SC_c
+  ! thread-private work matrices on the heap (see get_V_delta_nsoc_flex)
+  complex(c_double),allocatable,dimension(:,:):: cmat1,cmat2,cmat3,cmat4,cmat5
 
   Smat_c(:,:)=cmplx(Smat(:,:),0.0d0,kind=c_double)
   Cmat_c(:,:)=cmplx(Cmat(:,:),0.0d0,kind=c_double)
   SC_c(:,:)=Smat_c(:,:)+Cmat_c(:,:)
 
-  !$omp parallel do collapse(2) private(i,cmat1,cmat2,cmat3,cmat4,cmat5,ipiv,info,l)
+  !$omp parallel private(i,j,cmat1,cmat2,cmat3,cmat4,cmat5,ipiv,info,l)
+  allocate(cmat1(Nchi,Nchi),cmat2(Nchi,Nchi),cmat3(Nchi,Nchi),cmat4(Nchi,Nchi),cmat5(Nchi,Nchi))
+  !$omp do collapse(2)
   do j=1,Nw
      do i=1,Nk
         call zgemm('N','N',Nchi,Nchi,Nchi,(-1.0d0,0.0d0),chi(i,j,:,:),Nchi,Smat_c,Nchi,(0.0d0,0.0d0),cmat1,Nchi) !-chi0S
@@ -361,7 +372,9 @@ subroutine get_vsigma_flex_nosoc(chi,Smat,Cmat,Nk,Nw,Nchi)
         chi(i,j,:,:)=cmat1(:,:)
      end do
   end do
-  !$omp end parallel do
+  !$omp end do
+  deallocate(cmat1,cmat2,cmat3,cmat4,cmat5)
+  !$omp end parallel
 end subroutine get_vsigma_flex_nosoc
 
 subroutine get_V_soc_flex(chi,Vmat,olist,slist,Nk,Nw,Nchi,sw_dcsub)
@@ -400,7 +413,9 @@ subroutine get_V_soc_flex(chi,Vmat,olist,slist,Nk,Nw,Nchi,sw_dcsub)
 
   integer(c_int32_t) i,j,l,m,info
   integer(c_int32_t),dimension(Nchi):: ipiv
-  complex(c_double),dimension(Nchi,Nchi):: cmat1,cmat2,cmat3,cmat4,cmat5,cmatv,Vod
+  complex(c_double),dimension(Nchi,Nchi):: cmatv,Vod
+  ! thread-private work matrices on the heap (see get_V_delta_nsoc_flex)
+  complex(c_double),allocatable,dimension(:,:):: cmat1,cmat2,cmat3,cmat4,cmat5
 
   cmatv(:,:)=cmplx(Vmat(:,:),0.0d0,kind=c_double)
   ! V_od: the elements joining a same-spin pair to the opposite same-spin pair
@@ -416,7 +431,9 @@ subroutine get_V_soc_flex(chi,Vmat,olist,slist,Nk,Nw,Nchi,sw_dcsub)
      end do
   end if
 
-  !$omp parallel do collapse(2) private(i,cmat1,cmat2,cmat3,cmat4,cmat5,ipiv,info,l)
+  !$omp parallel private(i,j,cmat1,cmat2,cmat3,cmat4,cmat5,ipiv,info,l)
+  allocate(cmat1(Nchi,Nchi),cmat2(Nchi,Nchi),cmat3(Nchi,Nchi),cmat4(Nchi,Nchi),cmat5(Nchi,Nchi))
+  !$omp do collapse(2)
   wloop:do j=1,Nw
      qloop:do i=1,Nk
         if(sw_dcsub)then     ! counterterm from the BARE chi0, before chi is overwritten
@@ -437,5 +454,7 @@ subroutine get_V_soc_flex(chi,Vmat,olist,slist,Nk,Nw,Nchi,sw_dcsub)
         chi(i,j,:,:)=cmat3(:,:)-cmat4(:,:)
      end do qloop
   end do wloop
-  !$omp end parallel do
+  !$omp end do
+  deallocate(cmat1,cmat2,cmat3,cmat4,cmat5)
+  !$omp end parallel
 end subroutine get_V_soc_flex

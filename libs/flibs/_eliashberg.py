@@ -588,6 +588,10 @@ def remap_gap(delta0: np.ndarray, plist: np.ndarray, invk: np.ndarray, gap_sym: 
     @param   iperm: orbital permutation of the inversion operator (None = identity)
     @return  delta: Anomalous self-energy on full k-grid [Norb, Norb, Nw, Nkall] complex128
     """
+    if delta0.ndim != 4:
+        raise ValueError(f'remap_gap: delta0 must be [Norb, Norb, Nw, Nk], got shape {delta0.shape} '
+                         '(slice a single frequency as delta0[:, :, :1, :], not delta0[:, :, 0, :])')
+    delta0 = np.ascontiguousarray(delta0, dtype=np.complex128)
     Nkall, Nk, Norb = len(invk), len(delta0.T), len(plist)
     Nw = delta0.shape[2]
     delta = np.zeros((Norb, Norb, Nw, Nkall), dtype=np.complex128)

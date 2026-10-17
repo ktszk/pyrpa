@@ -422,8 +422,7 @@ def get_chi_orb_list(Norb: int, site_prof: np.ndarray) -> tuple[np.ndarray, np.n
             chiolist = np.array(chiolist)
             site = np.array(site, dtype=np.int64)
         else:
-            print("site_prof doesn't correspond to Hamiltonian", flush=True)
-            exit()
+            raise ValueError(f"site_prof={list(site_prof)} does not add up to Norb={Norb}")
     # Fortran memory order: the single-site branch gets it from the .T view above, the
     # multi-site one is built row by row and has to be converted.
     return np.asfortranarray(chiolist, dtype=np.int64), site
@@ -685,13 +684,6 @@ def gap_symms(klist: np.ndarray, Norb: int, gap_sym: int,
                     (None = the value stored by set_harmonic_lattice)
     @return phi: form factor [Norb, Nk], complex for the chiral indices
     """
-    # The gap symmetry form factor depends only on k, so build one row and broadcast to all orbitals.
-    # CAUTION: these harmonics are built from FRACTIONAL coordinates (cos(2*pi*k_x) etc.),
-    # which represent the labeled symmetries (s, d_{x^2-y^2}, ...) only for a tetragonal /
-    # orthogonal single-site lattice.  For non-orthogonal lattices or multi-site cells
-    # (e.g. the 2-Fe cell of iron-based systems) the label and the actual irreducible
-    # representation no longer correspond exactly; in such cases prefer the orbital-basis
-    # gap route (gap_orbital + Nagai-Nakamura band projection, see project_gap_to_band).
     av = _HARM_AVEC if avec is None else np.asarray(avec, dtype=np.float64)
     rv = _HARM_RVEC if rvec is None else np.asarray(rvec, dtype=np.float64)
     if av is not None and rv is not None and (gap_sym in _CART_GAP or gap_sym in _CART_CHIRAL):
@@ -703,6 +695,7 @@ def gap_symms(klist: np.ndarray, Norb: int, gap_sym: int,
             # correctly on an orthogonal single-site lattice.
             print(f'Warning: Cartesian gap harmonic unavailable ({e}); '
                   'falling back to the fractional-coordinate form factor', flush=True)
+    # FRACTIONAL fallback (see the CAUTION in the docstring)
     A = 2*np.pi
     kx, ky, kz = klist[:, 0], klist[:, 1], klist[:, 2]
     if gap_sym == 0:        # s

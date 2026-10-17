@@ -197,8 +197,10 @@ def detect_symm_ops_auto_U(rvec: np.ndarray, ham_r: np.ndarray,
     @brief Detect point group symmetry operations and automatically determine the orbital
     transformation matrix U for each, including multi-orbital systems with orbital mixing
     (e.g. E_g representations with dxz/dyz mixing under C4 rotation).
-    For each candidate S, numerically solves H(S·R) = U H(R) U† for U using eigendecomposition
-    of a random-weighted probe matrix, then verifies on all available R-pairs.
+    For each candidate S, finds U with H(S·R) = U H(R) U† by a signed-permutation search
+    (guided by the null space of the linear constraints for larger Norb), falling back to the
+    nearest unitary of that null vector, and verifies it on all available R-pairs (see
+    _find_U_for_S).  Note that tol is an ABSOLUTE tolerance on the hopping elements.
     Works with truncated R-vector sets (first-principles models) via min_fraction threshold.
     @param      rvec: R-vectors [Nr, 3] float64
     @param     ham_r: Hopping matrix [Nr, Norb, Norb] complex128

@@ -925,7 +925,8 @@ subroutine FFT(cmat,tmp,Nx,Ny,Nz,Nw,SW)
   !!@param      Ny,in: y mesh
   !!@param      Nz,in: z mesh
   !!@param      Nw,in: w mesh
-  !!@param      SW,in: FFT or IFFT switch (if true IFFT)
+  !!@param      SW,in: .true. forward (sign -1, unnormalized);
+  !!                   .false. backward (sign +1, normalized by 1/(Nx*Ny*Nz*Nw))
   use fftw_plan_cache
   use,intrinsic::iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none

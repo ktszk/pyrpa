@@ -934,7 +934,6 @@ def follow_orbit(seed: dict, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarra
     for i in range(len(dA)-1):
         if dA[i]*dA[i+1] >= 0.:
             continue
-        cand = 0.5*(dd[i+1]+dd[i+1])
         if best is None or abs(dd[i+1]-d0) < abs(best[0]-d0):
             x, y = dd[i:i+3], A[i:i+3]
             co = np.polyfit(x, y, 2)

@@ -219,6 +219,11 @@ def pade_with_trace(A: np.ndarray, iwlist: np.ndarray, wlist: np.ndarray) -> np.
     @param  wlist: Real-frequency mesh [Nw] complex128
     @return     B: Analytically-continued trace [Nk, Nw] complex128
     """
+    # Callers typically pass a Matsubara slice G[:, :, :Niw, :], which is NOT contiguous;
+    # ndpointer would hand Fortran the raw strided buffer, so copy to C order first.
+    A = np.ascontiguousarray(A, dtype=np.complex128)
+    iwlist = np.ascontiguousarray(iwlist, dtype=np.complex128)
+    wlist = np.ascontiguousarray(wlist, dtype=np.complex128)
     Nk, Nw, Niw = len(A.T), len(wlist), len(iwlist)
     Norb = A.shape[0]
     B = np.zeros((Nk, Nw), dtype=np.complex128)

@@ -1283,6 +1283,67 @@ def test_linearized_eliashberg_soc_lambda_matches_the_printed_value():
 
 
 # --------------------------------------------------------------------------- #
+#  array layout handed to Fortran / q-path commensurability
+# --------------------------------------------------------------------------- #
+def test_pade_with_trace_accepts_a_noncontiguous_matsubara_slice():
+    """G[:, :, :Niw, :] is a strided view; ndpointer would pass its raw buffer, so the
+    wrapper must copy it, giving the same result as an explicitly contiguous array."""
+    rng = np.random.default_rng(0)
+    Norb, Nw, Nk, temp = 2, 64, 3, 0.01
+    iw = (2*np.arange(Nw)+1)*np.pi*temp
+    eps = rng.normal(size=(Nk, Norb))
+    G = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
+    for o in range(Norb):
+        G[o, o] = 1.0/(1j*iw[:, None]-eps[None, :, o])
+    w = np.linspace(-2.0, 2.0, 7)+0.05j
+    a = F.pade_with_trace(G[:, :, :40, :], 1j*iw[:40], w)
+    b = F.pade_with_trace(np.ascontiguousarray(G[:, :, :40, :]), 1j*iw[:40], w)
+    assert np.allclose(a, b, rtol=0, atol=1e-12)
+    # and it is the exact free spectrum, -Im Tr G = sum_n delta/((w-e)^2+delta^2)
+    ref = (0.05/((w.real[None, :, None]-eps[:, None, :])**2+0.05**2)).sum(axis=2)
+    assert np.allclose(-a.imag, ref, rtol=1e-6)
+
+
+def test_remap_gap_rejects_a_dropped_matsubara_axis():
+    """remap_gap needs [Norb,Norb,Nw,Nk]; a 3-D slice used to be read as Nw=Nk."""
+    klist, kmap, invk = F.gen_irr_k_TRS(4, 4, 1)
+    Nk, Norb = len(klist), 2
+    d = np.ones((Norb, Norb, 3, Nk), dtype=np.complex128)
+    plist = np.ones(Norb)
+    try:
+        F.remap_gap(d[:, :, 0, :], plist, invk, 1)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('a 3-D delta0 must raise')
+    one = F.remap_gap(d[:, :, :1, :], plist, invk, 1)
+    assert one.shape == (Norb, Norb, 1, 16) and np.allclose(one, 1.0)
+
+
+def test_mk_qlist_puts_every_q_on_the_k_mesh():
+    """Hexagonal K = (2/3,-1/3) and Z on an Nz=1 mesh are not commensurate with the step
+    mk_qlist picks; get_qshift needs exact mesh points, so they are snapped."""
+    bvec = P.get_bvec(P.get_ptv(np.array([3.0, 3.0, 5.0]), np.array([90., 90., 120.]), 3)[0])
+    k_sets, _ = P.get_symm_line(3)
+    for N in [(64, 64, 4), (16, 16, 1)]:
+        qlist, splen, xticks = P.mk_qlist(k_sets, *N, bvec)
+        n = qlist*np.array(N)
+        assert np.allclose(n, np.round(n), atol=1e-9)
+        assert len(splen) == len(qlist) and np.all(np.diff(splen) >= 0)
+
+
+def test_get_chi_orb_list_raises_on_an_inconsistent_site_profile():
+    try:
+        P.get_chi_orb_list(10, [4, 5])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('site_prof not adding up to Norb must raise')
+    ol, site = P.get_chi_orb_list(10, [5, 5])
+    assert len(ol) == 50 and ol.flags['F_CONTIGUOUS'] and set(site.tolist()) == {1, 6}
+
+
+# --------------------------------------------------------------------------- #
 #  standalone runner (no pytest required)
 # --------------------------------------------------------------------------- #
 if __name__ == '__main__':

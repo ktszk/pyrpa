@@ -764,7 +764,7 @@ def output_gap_function(invk: np.ndarray, kmap: np.ndarray, gap: np.ndarray, uni
         if soc:
             gapb = gap[:, :, 0, :]
         else:
-            gapb = flibs.remap_gap(gap[:, :, 0, :], plist, invk, gap_sym, iperm=iperm)
+            gapb = flibs.remap_gap(gap[:, :, :1, :], plist, invk, gap_sym, iperm=iperm)[:, :, 0, :]
     else:
         if soc:
             gapb = flibs.conv_delta_orb_to_band_soc(gap, uni, invk, invs, slist, gap_sym)
@@ -1132,31 +1132,27 @@ def calc_eliashberg_eq(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_
     Gk = green_state['Gk']
     mu_self = green_state['mu_self']
     delta_init_band = _response.get_initial_gap(state['klist'], len(state['eig'].T), gap_sym)
-    # Use linearized Eliashberg to obtain a symmetry-correct initial gap.
-    # Alternative: flibs.get_initial_delta (plain orbital projection, kept for reference).
-    if True:
-        # Reuse the linearized problem as a cheap physical gate before entering the much more
-        # expensive nonlinear loop. This filters out SDW/CDW instabilities and T >= Tc cases.
-        chi, stoner = _get_chi0_normal(state, Gk, chiolist, Smat, Cmat, mu_self,
-                                       temp, Nx, Ny, Nz, sw_tail)
-        if stoner >= 1.0:
-            print(f"Stoner factor = {stoner:.6f} >= 1: SDW/CDW instability, stopping before "
-                  f"nonlinear Eliashberg.", flush=True)
-            return
-        delta_init, lambda_eliash = flibs.linearized_eliashberg(chi, Gk, state['uni'], delta_init_band, Smat, Cmat,
-                                                                chiolist, plist, state['kmap'], state['invk'], Nx, Ny,
-                                                                Nz, temp, gap_sym, iperm=iperm)
-        print(f'Stoner factor = {stoner:.6f}, lambda_eliash = {lambda_eliash:.6f}', flush=True)
-        if lambda_eliash < 1.0:
-            print(f"lambda_eliash = {lambda_eliash:.6f} < 1: no superconducting instability "
-                  f"at this temperature (T >= Tc), stopping before nonlinear Eliashberg.", flush=True)
-            return
-        if sw_check_only:
-            print("sw_check_only=True: stopping after linearized Eliashberg.", flush=True)
-            return
-    else:
-        delta_init_band = _response.get_initial_gap(state['klist'], len(state['eig'].T), gap_sym)
-        delta_init = flibs.get_initial_delta(delta_init_band, state['uni'], state['kmap'], state['invk'], Nw, gap_sym)
+    # Use the linearized Eliashberg solution as a symmetry-correct initial gap (a plain orbital
+    # projection, flibs.get_initial_delta, would also work as a seed).  Solving the linearized
+    # problem first doubles as a cheap physical gate before the much more expensive nonlinear
+    # loop: it filters out SDW/CDW instabilities and T >= Tc cases.
+    chi, stoner = _get_chi0_normal(state, Gk, chiolist, Smat, Cmat, mu_self,
+                                   temp, Nx, Ny, Nz, sw_tail)
+    if stoner >= 1.0:
+        print(f"Stoner factor = {stoner:.6f} >= 1: SDW/CDW instability, stopping before "
+              f"nonlinear Eliashberg.", flush=True)
+        return
+    delta_init, lambda_eliash = flibs.linearized_eliashberg(chi, Gk, state['uni'], delta_init_band, Smat, Cmat,
+                                                            chiolist, plist, state['kmap'], state['invk'], Nx, Ny,
+                                                            Nz, temp, gap_sym, iperm=iperm)
+    print(f'Stoner factor = {stoner:.6f}, lambda_eliash = {lambda_eliash:.6f}', flush=True)
+    if lambda_eliash < 1.0:
+        print(f"lambda_eliash = {lambda_eliash:.6f} < 1: no superconducting instability "
+              f"at this temperature (T >= Tc), stopping before nonlinear Eliashberg.", flush=True)
+        return
+    if sw_check_only:
+        print("sw_check_only=True: stopping after linearized Eliashberg.", flush=True)
+        return
     # BCS weak-coupling ratio: Δ₀ = 1.764 kB Tc; scale initial gap to this amplitude.
     target_gap = _eilenberger.BCS_RATIO * temp
     delta_max = np.abs(delta_init).max()

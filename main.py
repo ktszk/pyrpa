@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
-import enum
 """
 ftype: set input hamiltonian's format
 0: ham_r.txt, irvec.txt, ndegen.txt in {fname} dir
@@ -20,9 +19,10 @@ brav: choose primitive translation vector S,FC,BC etc
 7: body center (common)
 else: monoclinic
 """
+import enum
 
 #fname, ftype, brav, sw_soc = 'inputs/Cu', 4, 6, False        # ecalj job_mlo binaries (abc=[3.597]*3, fill=5.5)
-fname, ftype, brav, sw_soc = 'inputs/00010.input', 1, 2, False        # ecalj job_mlo binaries (abc=[3.597]*3, fill=5.5)
+fname, ftype, brav, sw_soc = 'inputs/00010.input', 1, 2, False        # .input hopping file, body-centred cell
 sw_dec_axis = False
 
 
@@ -57,7 +57,7 @@ class CalcMode(enum.IntEnum):
     ELECTRON_MASS      = (20, "calculate electron mass")                   # electron mass calculation (not implemented)
     SPECTRUM_IMPURITY  = (21, "spectrum with impurity")                    # spectral function with impurity (not implemented)
     SIGMA_CPA          = (22, "calculate sigma_cpa")                       # conductivity via CPA
-    NONLIN_ELIASHBERG  = (23, "solve nonlinear eliashberg equation")       # solve nonlinear Eliashberg equation (not implemented)
+    NONLIN_ELIASHBERG  = (23, "solve nonlinear eliashberg equation")       # solve nonlinear Eliashberg equation (no SOC)
     EILENBERGER        = (24, "solve quasiclassical Eilenberger equation")  # homogeneous multi-orbital Eilenberger (Matsubara)
     EILENBERGER_SURFACE = (25, "solve surface state via Riccati Eilenberger")  # specular surface gap profile + LDOS (model FS)
     EILENBERGER_VORTEX = (26, "solve isolated vortex via Riccati Eilenberger")  # vortex D(rho) + core LDOS (model FS)
@@ -118,7 +118,8 @@ MODES_CHI_NORMAL    = frozenset({M.CHIS_SPECTRUM, M.CHIS_QPOINT, M.CHIS_QMAP, M.
 MODES_CHIS_SC       = frozenset({M.CHIS_SPECTRUM_SC, M.CHIS_QPOINT_SC, M.NMR_SC})
 # modes that reconstruct Delta(-k) from Delta(k) with the inversion operator (plist/iperm).
 # For these the operator must really be a symmetry of H(R) -- see plibs.inversion_op.
-MODES_NEED_PARITY   = frozenset({M.FLEX, M.LIN_ELIASHBERG, M.NONLIN_ELIASHBERG, M.GAP_FUNCTION})
+# (FLEX alone never uses it; LIN_ELIASHBERG with sw_nosym is exempted in main().)
+MODES_NEED_PARITY   = frozenset({M.LIN_ELIASHBERG, M.NONLIN_ELIASHBERG, M.GAP_FUNCTION})
 del M
 
 # option=CalcMode.CHIS_QPOINT_SC
@@ -141,7 +142,7 @@ fill = 5.5  # band filling; mu solved from sum f(eps-mu)=Nk*fill (no SOC: per sp
 # site_prof=[5]
 
 inv_tol = 3.0e-2  # relative residual below which the inversion operator is accepted as a
-# symmetry of H(R) (option 14,15,16,23). Fitted first-principles models
+# symmetry of H(R) (option 15,16,23). Fitted first-principles models
 # carry a few % of error, so this is deliberately loose; see plibs.inversion_op
 Emin, Emax = 0, 25.  # energy window [eV] for DOS / spectral-function plots (option 1,4)
 delta = 2.72e-1  # spectral broadening eta [eV]: imaginary part added to G (Lorentzian width); too large smears, too small=noise
@@ -226,7 +227,8 @@ tau_mode = 'const'  # relaxation time model for the Boltzmann transport modes (o
 #         dependence beyond the Fermi window.
 # 'epa'  : tau(k) from the electron-phonon averaged coupling; needs epa_file.
 #         This is what makes R_H(T) and sheet-dependent mobilities meaningful.
-# 'dos1'/'dos2': DOS-based tau (flibs.get_tau modes 1/2), scaled by tau_const.
+# 'dos1'/'dos2': DOS-based tau (flibs.get_tau modes 1/2), tau inversely proportional to the DOS
+#         at the state's energy; dos1 is capped at tau_const.
 epa_file = None  # path to the epa.x (job='egrid') output read when tau_mode='epa'
 hall_mesh_list = None  # k-mesh convergence sweep for the Hall coefficient (option 5), e.g. [20,30,40]
 # or [(20,20,10),(30,30,15)]. sigma^(1) converges much more slowly than sigma
@@ -516,8 +518,7 @@ def plot_band(eig: np.ndarray, spl: np.ndarray, xlabel: list, xticks: list, uni:
     if len(ol) < 3:
         print(f"Warning: plot_band olist requires 3 elements (current: {len(ol)}). Color display disabled", flush=True)
         color = False
-    fig = plt.figure()
-    ax = plt.axes()
+    plt.figure()
     for e, cl in zip(eig, uni):  # band loop
         if color:
             # Normalize eigenvectors so that per-orbital weights (|u_n|^2) sum to 1
@@ -709,18 +710,24 @@ def plot_spectrum(k_sets: list, xlabel: list, kmesh: int, bvec: np.ndarray, mu: 
             return
         sig_r, rvec_s, iw_grid = npz['sigma'], npz['rvec'], npz['iw']
         mu_self = float(npz['mu'])
+        # Sigma is stored on the Matsubara mesh of the FLEX run, so G must be built at THAT
+        # temperature (gen_green regenerates iw_n from it), not at the current temp
+        temp_self = float(npz['temp'])
         print(f'chem. pot. with self = {mu_self:.4f} eV', flush=True)
+        if not np.isclose(temp_self, temp):
+            print(f'Note: self_en_wannier.npz was written at T={temp_self:.4e} eV; '
+                  f'G(k,iw_n) is built at that T, not at the current {temp:.4e} eV', flush=True)
         # Sigma(k) = sum_R Sigma(R) e^{-2pi i k.R}; Sigma is not Hermitian, so gen_ham cannot be reused
         phase = np.exp(-2j*np.pi*klist.dot(rvec_s.T))                          # [Nks,Nr]
         selfen = np.ascontiguousarray(np.einsum('mnwr,kr->mnwk', sig_r, phase))  # [Norb,Norb,Niw,Nks]
         ham_k = flibs.gen_ham(klist, ham_r, rvec)
-        Gk_mats = flibs.gen_green(selfen, ham_k, mu_self, temp)
+        Gk_mats = flibs.gen_green(selfen, ham_k, mu_self, temp_self)
         if sw_maxent:
             # MaxEnt (ana_cont): regularized fit rather than exact interpolation, so it
             # does not chase Matsubara noise into spurious real-axis poles over wide
             # Emin..Emax / k windows the way the Pade continued fraction below does.
             # Slower (~0.1-0.5s per k-point) but every point uses all available iw_grid.
-            Gk = plibs.maxent_trace_spectrum(Gk_mats, iw_grid, wlist, temp, noise_level=maxent_noise)
+            Gk = plibs.maxent_trace_spectrum(Gk_mats, iw_grid, wlist, temp_self, noise_level=maxent_noise)
         else:
             Niw = min(40, len(iw_grid))  # Pade becomes unstable with too many Matsubara points
             # A(k,w) = -Im Tr G(k,w+i*delta)
@@ -766,8 +773,15 @@ def build_tau(eig: np.ndarray, mu: float, temp: float, tau_const: float, rvec: n
         Nk2, klist, eig2, uni, kw2 = plibs.get_emesh(Nx, Ny, Nz, ham_r, S_r, rvec, avec.T, sw_uni=True)
         wlist = np.linspace(eig.min()-mu, eig.max()-mu, Nw, True)
         Dos = flibs.gen_dos(eig2, uni, mu, wlist, delta)
-        return (flibs.get_tau(Dos.sum(axis=0), eig, tau_const, int(tau_mode[-1])),
-                f'DOS-based tau (mode {tau_mode[-1]}, capped at {tau_const})')
+        mode = int(tau_mode[-1])
+        dos_tot = Dos.sum(axis=0)
+        # get_tau mode 1 forms tau_const*eps/DOS itself, but mode 2 returns its table as is
+        # (tau = tauw), so mode 2 is handed 1/DOS.  The DOS is floored at the same eps=1e-4
+        # get_tau uses, so a gap (DOS=0) gives a large but finite tau instead of inf.
+        tauw = dos_tot if mode == 1 else 1.0/np.maximum(dos_tot, 1.0e-4)
+        return (flibs.get_tau(tauw, eig, tau_const, mode),
+                f'DOS-based tau (mode {mode}, tau ~ 1/DOS'
+                + (f', capped at {tau_const})' if mode == 1 else ')'))
     raise ValueError(f"unknown tau_mode '{tau_mode}' (use 'const', 'epa', 'dos1' or 'dos2')")
 
 
@@ -1275,7 +1289,7 @@ def output_Fk(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.nda
         ham_k = flibs.gen_ham(klist, ham_r, rvec)
         npz = np.load('self_en.npz')
         sigmak, mu_self = npz['arr_0'], npz['arr_1']
-        print(f'chem. pot. with self= {mu:.4f} eV', flush=True)
+        print(f'chem. pot. with self= {mu_self:.4f} eV', flush=True)
         Gk = flibs.gen_green(sigmak, ham_k, mu_self, temp)
     else:
         Gk = flibs.gen_Green0(eig, uni, mu, temp, Nw)
@@ -1295,7 +1309,8 @@ def output_Fk(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.nda
             Fktr = np.array([f.diagonal().sum() for f in Fkt.T])
     else:
         Fk0 = flibs.gen_Fk(Gk, gap, invk)
-        Fk = flibs.remap_gap(Fk0[:, :, 0, :], plist, invk, gap_sym, iperm=iperm)
+        # remap_gap takes [Norb,Norb,Nw,Nk]: keep a length-1 Matsubara axis for the lowest w_n
+        Fk = flibs.remap_gap(Fk0[:, :, :1, :], plist, invk, gap_sym, iperm=iperm)[:, :, 0, :]
         Fktr = np.array([f.diagonal().sum() for f in Fk.T])
     print('output anomalous green function')
     try:
@@ -1336,22 +1351,15 @@ def output_Fk(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.nda
                 fp.write('\n')
     except IOError as e:
         print(f"Error: Failed to write 'Gpade.dat': {e}", flush=True)
-    # maxgap=abs(gap).max()
-    # print((abs(gap)<maxgap*1.0e-6).sum())
-    # print((abs(gap)<maxgap*1.0e-6).sum()/gap.size*100)
-    # plt.plot(iwlist,gap[2,2,:,i].real)
-    # plt.plot(iwlist,gap[2,2,:,100].imag)
-    # plt.show()
     if sw_self:
-        maxsigma = abs(sigmak).max()
-        # print((abs(sigmak)<maxsigma*1.0e-6).sum())
-        # print((abs(sigmak)<maxsigma*1.0e-6).sum()/sigmak.size*100)
-        plt.plot(iwlist, sigmak[0, 4, :, 318].real, color='r')
-        # plt.plot(-iwlist,Gk[4,0,:,318].real,color='r')
-        plt.plot(iwlist, sigmak[0, 4, :, 318].imag, color='b')
-        # plt.plot(-iwlist,-Gk[4,0,:,318].imag,color='b')
+        # quick look at the self-energy: Sigma_11(Gamma, iw_n)
+        plt.plot(iwlist, sigmak[0, 0, :, 0].real, color='r', label='Re')
+        plt.plot(iwlist, sigmak[0, 0, :, 0].imag, color='b', label='Im')
+        plt.xlabel(r'$\omega_n$ (eV)')
+        plt.ylabel(r'$\Sigma_{11}(\Gamma, i\omega_n)$')
+        plt.legend()
         plt.show()
-    info = plibs.output_gap_function(invk, kmap, gap, uni, plist, gap_sym, Nx, sw_soc, invs, slist, iperm=iperm)
+    plibs.output_gap_function(invk, kmap, gap, uni, plist, gap_sym, Nx, sw_soc, invs, slist, iperm=iperm)
 
 
 def get_mass(mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray, bvec: np.ndarray,
@@ -1644,6 +1652,20 @@ def calc_cpa_Akw(k_sets: list, kmesh: int, bvec: np.ndarray,
     return Akw
 
 
+def get_spin_lists(Norb: int) -> tuple[np.ndarray, np.ndarray]:
+    """Spin label slist [Norb] (+1 up, -1 down) and 1-based opposite-spin partner invs [Norb]
+    of a spinful (SOC) basis: the header's slist/invs if given, otherwise the default
+    ordering (all up, then all down; the up block takes the extra orbital when Norb is odd)."""
+    slist = globals().get('slist')
+    if slist is None:
+        slist = np.ones(Norb, dtype=np.int64)
+        slist[(Norb+1)//2:] = -1
+    invs = globals().get('invs')
+    if invs is None:
+        invs = np.concatenate([np.arange((Norb+1)//2, Norb), np.arange((Norb+1)//2)])+1
+    return np.asarray(slist, dtype=np.int64), np.asarray(invs, dtype=np.int64)
+
+
 def set_eil_gauge(Norb: int) -> dict:
     """Pair-partner gauge kwargs for the band-gap projection (eil_pair_gauge).
     'soc' additionally needs the spin-partner map of the spinful basis."""
@@ -1745,10 +1767,16 @@ def main() -> None:
     # when inversion exchanges sites (2-Fe cells etc.), where the true operator is a signed
     # permutation. Validate, and switch to the permutation form when needed.
     iperm = None
-    if option in MODES_NEED_PARITY:
+    # the symmetry-free solver (sw_nosym) works on the full BZ and never rebuilds Delta(-k)
+    if option in MODES_NEED_PARITY and not (option == CalcMode.LIN_ELIASHBERG and sw_nosym):
         psgn, pperm, pstat, pres = plibs.inversion_op(rvec, ham_r, plist, tol=inv_tol)
         res_str = 'n/a' if pres is None else f'{pres:.2e}'
         print(f"Inversion operator: {pstat} (diag(plist) residual {res_str})", flush=True)
+        if pstat == 'monomial' and sw_soc:
+            # the SOC Eliashberg kernels and output_Fk take a DIAGONAL parity only (no iperm)
+            print("Error: inversion exchanges orbitals (signed permutation), which the SOC "
+                  "Eliashberg path does not support (diagonal parity only).", flush=True)
+            return
         if pstat == 'monomial':
             plist, iperm = psgn, pperm
             print(f"  -> using signed permutation: perm={pperm.tolist()} sgn={psgn.astype(int).tolist()}",
@@ -1876,6 +1904,15 @@ def main() -> None:
     if option in MODES_FLEX_ELIASH:  # eliashberg/flex calculations
         if gap_sym not in {-1, 0, 1, 2, 3}:
             print(f"Warning: gap_sym={gap_sym} is non-standard. Common values: -1,0,1,2,3", flush=True)
+    if option == CalcMode.NONLIN_ELIASHBERG and sw_soc:
+        print("Error: the nonlinear Eliashberg solver has no SOC version; set sw_soc=False", flush=True)
+        return
+    # the SC-state chi modes build their gap from delta0: a number (one shape) or one amplitude per band
+    if option in MODES_CHIS_SC:
+        if not (np.isscalar(delta0) or len(delta0) == Norb):
+            print(f"Error: delta0 must be a number or a list of Norb={Norb} band amplitudes "
+                  f"(got {len(delta0)})", flush=True)
+            return
 
     # Validate at_point for chis at q-point calculation (normal and SC state)
     if option in MODES_CHIS_QPOINT:  # chis at q-point
@@ -1888,7 +1925,6 @@ def main() -> None:
     if option in MODES_COLOR:
         print("color mode: "+color_option.description, flush=True)
     print("Hamiltonian name is "+fname, flush=True)
-    print(f"Number of orbital = {Norb}", flush=True)
     if option in MODES_PRINT_UJ:
         if orb_dep:  # orbital-dependent matrices: report their range instead of single numbers
             # Only the pairs sitting on one site enter the vertices; the inter-site blocks
@@ -1903,17 +1939,25 @@ def main() -> None:
         else:  # write constant U,J
             print(f'U= {U:5.2f} and J= {J:5.3f}')
     if option in MODES_NEED_CHI:
-        """ chiolist is the list of orbital properties of index on chi """
-        try:
-            chiolist
-        except NameError:
-            try:
-                site_prof
-            except NameError:
-                site_prof = [1]  # one site (len(site_prof)=1)
+        # chiolist is the orbital-pair basis of chi, site the site label of each pair.
+        # Header settings are read with globals().get: assigning a name anywhere in main()
+        # makes it local for the whole function, so a bare `try: site_prof` would always
+        # raise UnboundLocalError and silently discard the user's value.
+        chiolist, site = globals().get('chiolist'), globals().get('site')
+        if chiolist is None:
             # Build the orbital-pair basis once here so every response/Eliashberg branch
             # shares the same indexing convention when passing chi objects to Fortran.
-            chiolist, site = plibs.get_chi_orb_list(len(ham_r[0]), site_prof)
+            try:
+                chiolist, site = plibs.get_chi_orb_list(len(ham_r[0]), globals().get('site_prof', [1]))
+            except ValueError as err:
+                print(f"Error: {err}", flush=True)
+                return
+        elif site is None:
+            print("Error: a user-defined chiolist needs the matching site list (site)", flush=True)
+            return
+        else:
+            chiolist = np.asfortranarray(chiolist, dtype=np.int64)   # Fortran reads ol(Nchi,2)
+            site = np.asarray(site, dtype=np.int64)
         if option in MODES_COULOMB_VERTEX:
             print("generate coulomb vertex matrix S")
             # Susceptibility branches only need the static interaction vertex; FLEX/Eliashberg
@@ -1950,9 +1994,9 @@ def main() -> None:
         print(f'chem. pot. = {mu:.4f} eV', flush=True)
     if option == CalcMode.BAND:  # plot band
         klist, spa_length, xticks = plibs.mk_klist(k_sets, kmesh, bvec)
-        eig, uni0 = plibs.get_eigs(klist, ham_r, S_r, rvec)
-        uni = np.array([u.T for u in uni0])  # rotate uni(k,band,orb) to uni(k,orb,band)
-        plot_band(eig.T-mu, spa_length, xlabel, xticks, uni.T, olist, (False if color_option == 0 else True))
+        eig, uni = plibs.get_eigs(klist, ham_r, S_r, rvec)
+        # plot_band loops over bands and reads orbital weights per k: uni(k,band,orb) -> (band,orb,k)
+        plot_band(eig.T-mu, spa_length, xlabel, xticks, uni.transpose(1, 2, 0), olist, color_option != 0)
     elif option == CalcMode.DOS:  # plot dos
         Nk, klist, eig, uni, kweight = plibs.get_emesh(Nx, Ny, Nz, ham_r, S_r, rvec, avec, sw_uni=True)
         wlist = np.linspace(Emin, Emax, Nw, True)
@@ -2047,8 +2091,9 @@ def main() -> None:
             # plt.show()
             plt.savefig(fname=susfname, dpi=300)
     elif option in MODES_CHIS_SC:  # calc chis at superconducting state
-        sw_spsym = True if gap_sym < 0 else False
-        if isinstance(delta0, float):
+        sw_spsym = gap_sym < 0
+        scalar_gap = bool(np.isscalar(delta0))
+        if scalar_gap:
             klist, kmap, invk = flibs.gen_irr_k_TRS(Nx, Ny, Nz)
             eig, uni = plibs.get_eigs(klist, ham_r, S_r, rvec)
             deltaini = flibs.remap_gap(flibs.get_initial_delta(plibs.get_initial_gap(klist, len(eig.T), gap_sym),
@@ -2065,7 +2110,7 @@ def main() -> None:
             # consistent, and gives the [0,1) endpoint-free mesh required by get_qshift
             klist = kmap/np.array([Nx, Ny, Nz], dtype=np.float64)
             Nk = len(klist)
-        elif (isinstance(delta0, np.ndarray) or isinstance(delta0, list)):
+        else:  # one amplitude per band (length checked above)
             # sw_pp=False: get_qshift requires the periodic [0,1) mesh without endpoints
             Nk, klist = plibs.gen_klist(Nx, Ny, Nz, sw_pp=False)
             eig, uni = plibs.get_eigs(klist, ham_r, S_r, rvec)
@@ -2102,8 +2147,12 @@ def main() -> None:
             hamk_path = flibs.gen_ham(kpath_bdg, ham_r, rvec)
             _, uni_path = plibs.get_eigs(kpath_bdg, ham_r, S_r, rvec)
             inigap_path = plibs.gap_symms(kpath_bdg, Norb, gap_sym)
-            if isinstance(delta0, float):
-                scale = delta0 / gap_max if gap_max > 0 else delta0
+            if scalar_gap:
+                # scale the band form factor so that its maximum over the k-mesh is delta0,
+                # the amplitude deltak was normalized to.  (gap_max belongs to the
+                # norm-normalized orbital-basis seed and is not comparable to gap_symms.)
+                fmax = np.abs(plibs.gap_symms(klist, 1, gap_sym)).max()
+                scale = delta0 / fmax if fmax > 0 else delta0
                 deltak_path = flibs.get_band_to_orb_delta(
                     (inigap_path * scale).astype(np.complex128), uni_path)
             else:
@@ -2201,35 +2250,14 @@ def main() -> None:
     elif option == CalcMode.LIN_ELIASHBERG and sw_nosym:  # symmetry-free gap equation (Zeeman / FFLO)
         if sw_self or sw_from_file:
             print('Warning: sw_nosym has no FLEX self-energy (TRS-free FLEX not implemented); using bare G', flush=True)
-        if sw_soc:
-            try:
-                slist
-            except NameError:
-                Norb = len(ham_r[0])
-                slist = np.ones(Norb, dtype=np.int64)
-                slist[(Norb+1)//2:] = -1
-            try:
-                invs
-            except NameError:
-                invs = np.concatenate([np.arange((Norb+1)//2, Norb), np.arange((Norb+1)//2)])+1
+        slist, invs = get_spin_lists(Norb) if sw_soc else (None, None)
         plibs.calc_lin_eliash_nosym(Nx, Ny, Nz, Nw, ham_r, S_r, rvec, mu, temp, chiolist, site, orb_dep, U, J,
-                                    gap_sym, sw_soc, slist if sw_soc else None, invs if sw_soc else None,
+                                    gap_sym, sw_soc, slist, invs,
                                     Umat if orb_dep else None, Jmat if orb_dep else None,
                                     hvec=zeeman_h, qlist=fflo_q, arnoldi_m=nosym_arnoldi_m)
     elif option in MODES_FLEX_ELIASH:  # flex/eliashberg calculations
         if sw_soc:  # with soc
-            try:
-                slist
-            except NameError:  # default, up(~norb/2-1)>down(norb/2~)
-                Norb = len(ham_r[0])
-                # Correctly split even if Norb is odd (up-spin majority)
-                slist = np.ones(Norb, dtype=np.int64)
-                slist[(Norb+1)//2:] = -1  # Correct split: for odd case [+1,+1,+1,-1,-1] (Norb=5)
-            try:
-                invs
-            except NameError:
-                # Also fixed reverse index of split spins
-                invs = np.concatenate([np.arange((Norb+1)//2, Norb), np.arange((Norb+1)//2)])+1
+            slist, invs = get_spin_lists(Norb)
             if option == CalcMode.FLEX:  # calc self-energy using flex
                 plibs.calc_flex_soc(Nx, Ny, Nz, Nw, ham_r, S_r, rvec, mu, temp, chiolist, slist, invs, site,
                                     orb_dep, U, J, fill, sw_out_self, sw_in_self,
