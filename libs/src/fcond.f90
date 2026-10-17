@@ -1,4 +1,4 @@
-subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind(C)
+subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,kweight,Norb,Nk,mu,w,idelta,eps,temp) bind(C)
   !> calc_Lij
   !!@param    L11,out: L11@linear response theory
   !!@param    L22,out: L22@linear response theory
@@ -6,6 +6,8 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
   !!@param      vk,in: group velocity:
   !!@param     eig,in: energy of bands
   !!@param  ffermi,in: fermi distribute function
+  !!@param kweight,in: weight of each k-point (all 1 on the uniform mesh); the sum is
+  !!                   normalized by sum(kweight), like calc_kn's callers
   !!@param    Norb,in: The number of orbitals
   !!@param      Nk,in: The number of k-points
   !!@param      mu,in: chemical potential
@@ -19,15 +21,17 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
   integer(c_int64_t),intent(in):: Nk,Norb
   real(c_double),intent(in):: temp,eps,w,idelta,mu
   real(c_double),intent(in),dimension(Norb,Nk):: eig,ffermi
+  real(c_double),intent(in),dimension(Nk):: kweight
   complex(c_double),intent(in),dimension(3,Norb,Norb,Nk):: vk
   complex(c_double),intent(out),dimension(3,3):: L11,L12,L22
 
   integer(c_int64_t) i,j,k,l,m
   complex(c_double) tmp,denom
-  real(c_double) ebar,pocc,temp_safe
+  real(c_double) ebar,pocc,temp_safe,wsum
   complex(c_double),parameter::ii=(0.0d0,1.0d0)
 
   temp_safe=max(temp,1.0d-12)
+  wsum=sum(kweight)
   !$omp parallel
   !$omp workshare
   L11(:,:)=0.0d0
@@ -36,7 +40,7 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
   !$omp end workshare
   !$omp do reduction(+: L11,L12,L22) private(i,l,m,j,k,tmp,ebar,pocc,denom)
   ! Kubo formula, ONE expression for every band pair (l,m):
-  !   L_ij = (i/Nk) sum_{k,l,m} v_ml v_lm * p(l,m) / (w + e_m - e_l + i*delta)
+  !   L_ij = (i/sum_k w_k) sum_{k,l,m} w_k v_ml v_lm * p(l,m) / (w + e_m - e_l + i*delta)
   ! with p(l,m) = (f_l-f_m)/(e_m-e_l) -> -df/de at e_m = e_l (occ_factor).
   ! The l=m term is then exactly the Drude weight f(1-f)/(T(w+i*delta)), so the
   ! intra- and inter-band branches are the same function and the crossover is
@@ -61,7 +65,7 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
            denom=cmplx(w+eig(m,i)-eig(l,i),idelta,kind=c_double)
            do j=1,3
               do k=1,3
-                 tmp=vk(k,m,l,i)*vk(j,l,m,i)*pocc/denom
+                 tmp=vk(k,m,l,i)*vk(j,l,m,i)*pocc*kweight(i)/denom
                  L11(k,j)=L11(k,j)+tmp
                  L12(k,j)=L12(k,j)+tmp*ebar
                  L22(k,j)=L22(k,j)+tmp*ebar*ebar
@@ -72,14 +76,14 @@ subroutine calc_lij(L11,L22,L12,vk,eig,ffermi,Norb,Nk,mu,w,idelta,eps,temp) bind
   end do k_loop
   !$omp end do
   !$omp workshare
-  L11(:,:)=ii*L11(:,:)/Nk
-  L12(:,:)=ii*L12(:,:)/Nk
-  L22(:,:)=ii*L22(:,:)/Nk
+  L11(:,:)=ii*L11(:,:)/wsum
+  L12(:,:)=ii*L12(:,:)/wsum
+  L22(:,:)=ii*L22(:,:)/wsum
   !$omp end workshare
   !$omp end parallel
 end subroutine calc_lij
 
-subroutine calc_lij_wl(L11,L22,L12,vk,eig,ffermi,Norb,Nk,Nw,mu,wl,idelta,eps,temp) bind(C)
+subroutine calc_lij_wl(L11,L22,L12,vk,eig,ffermi,kweight,Norb,Nk,Nw,mu,wl,idelta,eps,temp) bind(C)
   !> calc_Lij for all Nw frequencies in a single k-loop pass.
   !> Precomputes frequency-independent prefactors per (k,l,m) pair,
   !> then applies the w-dependent denominator in the inner loop.
@@ -89,6 +93,7 @@ subroutine calc_lij_wl(L11,L22,L12,vk,eig,ffermi,Norb,Nk,Nw,mu,wl,idelta,eps,tem
   !!@param   vk,in: group velocity [3,Norb,Norb,Nk]
   !!@param  eig,in: energy of bands [Norb,Nk]
   !!@param   ff,in: fermi distribute function [Norb,Nk]
+  !!@param kweight,in: weight of each k-point [Nk]; normalized by sum(kweight)
   !!@param Norb,in: The number of orbitals
   !!@param   Nk,in: The number of k-points
   !!@param   Nw,in: The number of frequency points
@@ -104,11 +109,12 @@ subroutine calc_lij_wl(L11,L22,L12,vk,eig,ffermi,Norb,Nk,Nw,mu,wl,idelta,eps,tem
   real(c_double),intent(in):: temp,eps,idelta,mu
   real(c_double),intent(in),dimension(Nw):: wl
   real(c_double),intent(in),dimension(Norb,Nk):: eig,ffermi
+  real(c_double),intent(in),dimension(Nk):: kweight
   complex(c_double),intent(in),dimension(3,Norb,Norb,Nk):: vk
   complex(c_double),intent(out),dimension(Nw,3,3):: L11,L12,L22
 
   integer(c_int64_t) i,j,k,l,m,iw
-  real(c_double) de,fl,fm,el,em,ebar,pocc,temp_safe
+  real(c_double) de,fl,fm,el,em,ebar,pocc,temp_safe,wsum
   complex(c_double) p11,p12,p22,denom
   complex(c_double),parameter::ii=(0.0d0,1.0d0)
 
@@ -116,6 +122,7 @@ subroutine calc_lij_wl(L11,L22,L12,vk,eig,ffermi,Norb,Nk,Nw,mu,wl,idelta,eps,tem
   L12(:,:,:)=(0.0d0,0.0d0)
   L22(:,:,:)=(0.0d0,0.0d0)
   temp_safe=max(temp,1.0d-12)
+  wsum=sum(kweight)
 
   ! Same single smooth kernel as calc_lij (see the comment there); the
   ! frequency-independent prefactor is hoisted out of the w-loop.
@@ -132,7 +139,7 @@ subroutine calc_lij_wl(L11,L22,L12,vk,eig,ffermi,Norb,Nk,Nw,mu,wl,idelta,eps,tem
            if(l/=m .and. abs(pocc)*max(1.0d0,ebar*ebar)<=eps)cycle band_loop2   ! see calc_lij
            do j=1,3
               do k=1,3
-                 p11=vk(k,m,l,i)*vk(j,l,m,i)*pocc
+                 p11=vk(k,m,l,i)*vk(j,l,m,i)*pocc*kweight(i)
                  p12=p11*ebar
                  p22=p12*ebar
                  do iw=1,Nw
@@ -148,9 +155,9 @@ subroutine calc_lij_wl(L11,L22,L12,vk,eig,ffermi,Norb,Nk,Nw,mu,wl,idelta,eps,tem
   end do k_loop
   !$omp end parallel do
 
-  L11(:,:,:)=ii*L11(:,:,:)/Nk
-  L12(:,:,:)=ii*L12(:,:,:)/Nk
-  L22(:,:,:)=ii*L22(:,:,:)/Nk
+  L11(:,:,:)=ii*L11(:,:,:)/wsum
+  L12(:,:,:)=ii*L12(:,:,:)/wsum
+  L22(:,:,:)=ii*L22(:,:,:)/wsum
 end subroutine calc_lij_wl
 
 subroutine calc_kn(K0,K1,K2,eig,veloc,kweight,tau,temp,mu,Nk,Norb) bind(C)
@@ -398,7 +405,7 @@ subroutine calc_tdf(tdf,eig,veloc,kweight,tau,Nw,Nk,Norb) bind(C)
            tmp=0.0d0
            k_loop: do i=1,Nk
               band_loop: do j=1,Norb
-                 ! bin CENTRE E_iw = emin + (iw-1/2)*dw (same binning as get_tau)
+                 ! bin CENTRE E_iw = emin + (iw-1/2)*dw
                  tmp=tmp+veloc(m,j,i)*veloc(l,j,i)*tau(j,i)*kweight(i) &
                       /(((dble(iw)-0.5d0)*dw+emin-eig(j,i))**2+id*id)
               end do band_loop
@@ -414,43 +421,6 @@ subroutine calc_tdf(tdf,eig,veloc,kweight,tau,Nw,Nk,Norb) bind(C)
   end do omega_loop
   !$omp end parallel do
 end subroutine calc_tdf
-
-subroutine get_tau(tau,tauw,eig,tau_max,eps,tau_mode,Nk,Nw,Norb) bind(C)
-  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
-  implicit none
-  integer(c_int64_t),intent(in):: Nk,Nw,Norb,tau_mode
-  real(c_double),intent(in):: eps,tau_max
-  real(c_double),intent(in),dimension(Nw):: tauw
-  real(c_double),intent(in),dimension(Norb,Nk):: eig
-  real(c_double),intent(out),dimension(Norb,Nk):: tau
-
-  integer(c_int32_t) i,j,iter_w
-  real(c_double) Emax,Emin,Elength
-  Emin=minval(eig(:,:))
-  Emax=maxval(eig(:,:))
-  Elength=Emax-Emin
-  !$omp parallel do private(i,j,iter_w)
-  do i=1,Nk
-     do j=1,Norb
-        if (Elength<1.0d-30) then
-           iter_w=1
-        else
-           iter_w=int(Nw*(eig(j,i)-Emin)/Elength)+1
-           iter_w=max(1,min(iter_w,int(Nw)))
-        end if
-        if(tau_mode==1)then
-           if(tauw(iter_w)<eps)then
-              tau(j,i)=tau_max
-           else
-              tau(j,i)=tau_max*eps/tauw(iter_w)
-           end if
-        else if(tau_mode==2)then
-           tau(j,i)=tauw(iter_w)
-        end if
-     end do
-  end do
-  !$omp end parallel do
-end subroutine get_tau
 
 subroutine calc_tau_epa(tau,gavg,wavg,eig,edge,step,mu,temp,&
      Nk,Norb,nmodes,nbin,ngrid,nbin_max) bind(C)

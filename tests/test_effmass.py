@@ -137,8 +137,9 @@ def test_imass_is_axis_symmetric():
 
 
 def test_axis_rotation_convention():
-    """mrot acts on both axes: M_rot = mrot^T M mrot (numpy side), matching the
-    v -> v @ mrot convention of get_veloc."""
+    """mrot acts on both axes: M_rot = mrot M mrot^T, matching the v = mrot @ dE/dk
+    convention of get_veloc (the wrappers pass mrot to Fortran in Fortran order, so the
+    result does not depend on the memory layout of the array)."""
     rvec, ham_r, _, _, _ = T.mlo_model(seed=13)
     klist = _klist()
     eig, uni = _eig_uni(klist, ham_r, [], rvec)
@@ -147,7 +148,10 @@ def test_axis_rotation_convention():
                                  [0.0, 0.0, 0.9]])
     m1 = F.get_mass(klist, ham_r, rvec, np.eye(3), uni, True, None, eig)
     m2 = F.get_mass(klist, ham_r, rvec, mrot, uni, True, None, eig)
-    assert np.abs(m2 - mrot.T @ m1 @ mrot).max() < 1e-10
+    assert np.abs(m2 - mrot @ m1 @ mrot.T).max() < 1e-10
+    # same matrix in Fortran memory order: identical result
+    m3 = F.get_mass(klist, ham_r, rvec, np.asfortranarray(mrot), uni, True, None, eig)
+    assert np.array_equal(m2, m3)
 
 
 def test_degenerate_bands_stay_finite():
@@ -361,7 +365,7 @@ def _cubic_tb(tx=1.0, ty=1.0, tz=1.0):
 
 def _extremal_orbits(rvec, ham_r, avec, mu, theta, phi, meshkz=25, dk=2 * np.pi / 240,
                      egrid=None):
-    """The full plane-slicing pipeline, exactly as main.get_dhva_band drives it."""
+    """The full plane-slicing pipeline, exactly as plibs.get_dhva_band drives it."""
     bvec = P.get_bvec(avec)
     bhat = P.bfield_hat(theta, phi)
     kf = P.fs_cartesian_points(rvec, ham_r, [], avec, mu, mesh=40, egrid=egrid)
@@ -629,6 +633,27 @@ def test_follow_orbit_returns_none_when_the_orbit_is_gone():
     f = P.follow_orbit(image, rvec, ham_r, [], avec, mu, P.bfield_hat(0.0, 0.0),
                        4.0, dk, 0.1)
     assert f is not None and np.isclose(f['area'], belly['area'], rtol=1e-3)
+
+
+
+def test_band_mass_path_matches_tight_binding():
+    """band_mass_path on the 1-orbital square lattice e = -2t(cos k_x a + cos k_y a):
+    m* = hbar^2/(2 t a^2) at Gamma (isotropic, flat along z), and at X the x mass flips
+    sign while the y mass (the X->M path direction) keeps it."""
+    import scipy.constants as sc
+    t, a = 1.0, 3.0
+    rvec = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]], float)
+    ham_r = np.zeros((5, 1, 1), complex)
+    ham_r[1:] = -t
+    ref = sc.hbar**2/(2*t*sc.e*(a*1e-10)**2)/sc.m_e
+    r = P.band_mass_path([[0, 0, 0], [.5, 0, 0], [.5, .5, 0], [0, 0, 0]], 20, rvec, ham_r, [],
+                         np.diag([a, a, 10.0]), P.unit_constants(True))
+    iG, iX = 0, 20
+    assert np.allclose(r['m_axes'][iG, 0, :2], ref, rtol=1e-8) and np.isinf(r['m_axes'][iG, 0, 2])
+    assert np.isclose(r['m_path'][iG, 0], ref, rtol=1e-8)
+    assert np.allclose(r['m_axes'][iX, 0, :2], [-ref, ref], rtol=1e-8)
+    assert np.isclose(r['m_path'][iX, 0], ref, rtol=1e-8)          # outgoing X->M is along y
+    assert np.allclose(np.sort(r['m_princ'][iG, 0][np.isfinite(r['m_princ'][iG, 0])]), [ref, ref], rtol=1e-8)
 
 
 if __name__ == '__main__':

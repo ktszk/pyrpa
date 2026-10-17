@@ -11,23 +11,23 @@ __all__ = [
 # --- ctypes signatures: set once at import.
 # All Fortran entry points are subroutines, so restype is always None.
 _loader._lib.get_vsigma_flex_nosoc_.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # chi (inout)
-    np.ctypeslib.ndpointer(dtype=np.float64),             # Smat
-    np.ctypeslib.ndpointer(dtype=np.float64),             # Cmat
+    _loader.c_array(np.complex128),          # chi (inout)
+    _loader.c_array(np.float64),             # Smat
+    _loader.c_array(np.float64),             # Cmat
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nw, Nchi
 ]
 _loader._lib.get_vsigma_flex_nosoc_.restype = None
 _loader._lib.mkself.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),             # sigmak (out)
+    _loader.c_array(np.complex128),             # sigmak (out)
     ctypes.POINTER(ctypes.c_double),                                       # mu (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),                # Smat
-    np.ctypeslib.ndpointer(dtype=np.float64),                # Cmat
-    np.ctypeslib.ndpointer(dtype=np.int64),                  # kmap
-    np.ctypeslib.ndpointer(dtype=np.int64),                  # invk
-    np.ctypeslib.ndpointer(dtype=np.int64),                  # olist
-    np.ctypeslib.ndpointer(dtype=np.complex128),             # hamk
-    np.ctypeslib.ndpointer(dtype=np.float64),                # eig
-    np.ctypeslib.ndpointer(dtype=np.complex128),             # uni
+    _loader.c_array(np.float64),                # Smat
+    _loader.c_array(np.float64),                # Cmat
+    _loader.c_array(np.int64),                  # kmap
+    _loader.c_array(np.int64),                  # invk
+    _loader.f_array(np.int64),                  # olist
+    _loader.c_array(np.complex128),             # hamk
+    _loader.c_array(np.float64),                # eig
+    _loader.c_array(np.complex128),             # uni
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),                    # mu_init, rfill
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int64),                     # temp, scf_loop
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int64),  # pp, eps, Nkall
@@ -43,17 +43,17 @@ _loader._lib.mkself.argtypes = [
 ]
 _loader._lib.mkself.restype = None
 _loader._lib.mkself_soc.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),             # sigmak (out)
+    _loader.c_array(np.complex128),             # sigmak (out)
     ctypes.POINTER(ctypes.c_double),                                       # mu (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),                # Vmat
-    np.ctypeslib.ndpointer(dtype=np.int64),                  # kmap
-    np.ctypeslib.ndpointer(dtype=np.int64),                  # invk
-    np.ctypeslib.ndpointer(dtype=np.int64),                  # invs
-    np.ctypeslib.ndpointer(dtype=np.int64),                  # olist
-    np.ctypeslib.ndpointer(dtype=np.int64),                  # slist
-    np.ctypeslib.ndpointer(dtype=np.complex128),             # hamk
-    np.ctypeslib.ndpointer(dtype=np.float64),                # eig
-    np.ctypeslib.ndpointer(dtype=np.complex128),             # uni
+    _loader.c_array(np.float64),                # Vmat
+    _loader.c_array(np.int64),                  # kmap
+    _loader.c_array(np.int64),                  # invk
+    _loader.c_array(np.int64),                  # invs
+    _loader.f_array(np.int64),                  # olist
+    _loader.c_array(np.int64),                  # slist
+    _loader.c_array(np.complex128),             # hamk
+    _loader.c_array(np.float64),                # eig
+    _loader.c_array(np.complex128),             # uni
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),                    # mu_init, rfill
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int64),                     # temp, scf_loop
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int64),  # pp, eps, Nkall

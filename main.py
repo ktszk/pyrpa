@@ -54,8 +54,8 @@ class CalcMode(enum.IntEnum):
     BAND_FILLING       = (17, "check band filling and electron/hole character")  # per-band filling & FS character
     CYCLOTRON_MASS     = (18, "calculate cyclotron mass")                  # cyclotron mass calculation
     DHVA               = (19, "plot dHvA frequency")
-    ELECTRON_MASS      = (20, "calculate electron mass")                   # electron mass calculation (not implemented)
-    SPECTRUM_IMPURITY  = (21, "spectrum with impurity")                    # spectral function with impurity (not implemented)
+    ELECTRON_MASS      = (20, "calculate electron mass")                   # band (effective) mass tensor along the symmetry line
+    SPECTRUM_IMPURITY  = (21, "spectrum with impurity")                    # unfolded spectral function of an impurity supercell
     SIGMA_CPA          = (22, "calculate sigma_cpa")                       # conductivity via CPA
     NONLIN_ELIASHBERG  = (23, "solve nonlinear eliashberg equation")       # solve nonlinear Eliashberg equation (no SOC)
     EILENBERGER        = (24, "solve quasiclassical Eilenberger equation")  # homogeneous multi-orbital Eilenberger (Matsubara)
@@ -207,6 +207,12 @@ nmr_spsym = None  # None: take the singlet/triplet channel from the sign of gap_
 # xlabel=[r'$\Gamma$','X','M']
 # m_diis_num=2
 at_point = [0., .5, 0.]  # reduced q-point [0..1] for the single-q susceptibility (option 8)
+# --- impurity supercell (option 21): on-site impurity potential in a periodic supercell ---
+imp_cell = [8, 8, 1]  # supercell size per axis; must exceed twice the hopping range (size^3*Norb is diagonalized)
+imp_sites = None  # 0-based impurity site indices in the supercell (gen_rlist order); None -> random at imp_conc
+imp_conc = 0.05  # impurity concentration used when imp_sites is None (at least one impurity)
+imp_seed = 0  # random seed of the impurity placement (None: different every run)
+imp_V = 1.0  # on-site impurity potential [eV]: a number (times the unit matrix) or an Norb x Norb matrix
 orb_dep = False  # use orbital dependence U,J (True: use Umat/Jmat matrices below; False: constant U,J)
 UJ_material = None  # with orb_dep=True, name of a stored cRPA parameter set loaded from UJ_dir instead of
 # writing Umat/Jmat out below, e.g. 'FeSe','FeTe','LiFeAs','BaFe2As2','LaFeAsO',
@@ -227,8 +233,10 @@ tau_mode = 'const'  # relaxation time model for the Boltzmann transport modes (o
 #         dependence beyond the Fermi window.
 # 'epa'  : tau(k) from the electron-phonon averaged coupling; needs epa_file.
 #         This is what makes R_H(T) and sheet-dependent mobilities meaningful.
-# 'dos1'/'dos2': DOS-based tau (flibs.get_tau modes 1/2), tau inversely proportional to the DOS
-#         at the state's energy; dos1 is capped at tau_const.
+# 'e2'   : Fermi-liquid tau, 1/tau ∝ (e-mu)^2 + (pi k_B T)^2 (electron-electron scattering),
+#         tau = tau_const on the Fermi level.
+# 'dos'  : tau inversely proportional to the DOS at the state's energy (golden-rule scattering
+#         rate), used as a ratio: tau(e) = tau_const*D(mu)/D(e), i.e. tau_const on the Fermi level.
 epa_file = None  # path to the epa.x (job='egrid') output read when tau_mode='epa'
 hall_mesh_list = None  # k-mesh convergence sweep for the Hall coefficient (option 5), e.g. [20,30,40]
 # or [(20,20,10),(30,30,15)]. sigma^(1) converges much more slowly than sigma
@@ -238,7 +246,7 @@ sw_omega = False  # True: real freq, False: Matsubara freq.
 sw_rescale_flex = True  # True: rescale self energy to make max|Sigma|~U, False: no rescaling
 sw_chi0_tail = True  # True: tail-corrected chi0 in FLEX/Eliashberg (conv[G]-conv[G0]+analytic reference; O(1/Nw^2) Matsubara truncation error). no-SOC path only
 sw_self = False  # True: use calculated self energy for spectrum band plot
-sw_out_self = False  # True: write the FLEX self-energy to sigma.bin/self_en.npz (also triggers gap output in option 15)
+sw_out_self = False  # True: write the FLEX self-energy to sigma.bin/self_en.npz (also triggers gap output in option 15,23; option 23 with sw_self also writes the SC-state self-energy to self_en_sc.npz)
 sw_in_self = False  # True: load the previous self-energy from sigma.bin as the initial guess for the SC loop (a seed with a different Nw is auto re-gridded in place onto the current Nw)
 sigma_in_scale = 1.0  # factor multiplying the sigma seed loaded via sw_in_self; for U-annealing set (U_new/U_old)**2 (Sigma ~ U^2)
 sw_from_file = False  # True: read the self-energy from sigma.bin and skip FLEX (solve Eliashberg with it directly)
@@ -246,7 +254,7 @@ sw_check_only = False  # True: stop after linear Eliashberg (also stops if Stone
 # ----- symmetry-free linearized Eliashberg (option 15 with sw_nosym): Zeeman field / FFLO -----
 sw_nosym = False  # True: option 15 solves the gap equation on the full BZ with NO TRS/inversion (bare G, RPA);
 # a spinless model (sw_soc=False) is spin-doubled automatically. No singlet/triplet projection: gap_sym only seeds
-zeeman_h = [0.0, 0.0, 0.0]  # Zeeman field (hx,hy,hz) [eV] added as H_Z = h.sigma (g*mu_B*B/2 absorbed) (sw_nosym only)
+zeeman_h = [0.0, 0.0, 0.0]  # Zeeman field (hx,hy,hz) [eV] added as H_Z = h.sigma (g*mu_B*B/2 absorbed) (sw_nosym only); mu is re-solved at the same fill
 fflo_q = [[0, 0, 0]]  # pair momenta Q in integer k-mesh units, Q=(iQx/Nx,iQy/Ny,iQz/Nz); lambda(Q) -> lambda_Q.dat
 # e.g. [[q, 0, 0] for q in range(5)] scans along kx. chi0/V_Delta are computed once and reused for every Q
 nosym_arnoldi_m = 60  # Krylov dimension of the nosym solver (small lambda may need >~60 for 1e-6 accuracy)
@@ -306,9 +314,8 @@ eil_lattice = 'square'  # periodic vortex lattice geometry: 'square' or 'triangu
 import os
 import numpy as np
 import libs.flibs as flibs, libs.plibs as plibs
-import scipy.linalg as sclin, scipy.constants as scconst
-import matplotlib.pyplot as plt, matplotlib.cm as cm
-import collections.abc
+import libs.plots as plots   # figures (matplotlib); plibs holds the calculations only
+import matplotlib.pyplot as plt
 # ----------------------------- initial settings --------------------------------------
 sw_gen_sym = False
 try:
@@ -349,22 +356,9 @@ if option in MODES_SYMLINE:  # modes using k_sets/xlabel (symmetry line)
                 xlabel = xlabel2
         except NameError:
             xlabel = xlabel2
-if sw_unit:
-    # Physical constants in SI/eV units; ihbar converts velocity: hbar/(eV·s) * 1e-10 (AA->m)^-1
-    hbar = scconst.physical_constants['reduced Planck constant in eV s'][0]
-    ihbar = 1.0e-10/hbar   # factor for v = (1/hbar) * dE/dk  [m/s per eV/AA^-1]
-    kb = scconst.physical_constants['Boltzmann constant in eV/K'][0]
-    eC = scconst.e         # elementary charge [C]
-    tau_unit = 1.e-15      # relaxation time unit: 1 fs = 1e-15 s
-    emass = scconst.m_e    # electron rest mass [kg]
-else:
-    # Dimensionless units: all constants set to 1 for testing or code-level checks
-    hbar = 1.
-    ihbar = 1.
-    kb = 1.
-    eC = 1.
-    tau_unit = 1.
-    emass = 1.
+# physical constants in SI/eV units, or all 1 in the dimensionless test mode (sw_unit=False)
+units = plibs.unit_constants(sw_unit)
+kb, ihbar = units.kb, units.ihbar   # used directly below (the drivers take `units`)
 try:
     tempK
     try:
@@ -387,1269 +381,6 @@ if option in MODES_NEED_ROTMAT:
         print('No RotMat')
         RotMat = np.eye(3)
 # ------------------------ define functions -------------------------------------------
-
-
-def print_matrix(label: str, mat: np.ndarray, width: float = 10, prec: int = 3, ndigits: int = 10) -> None:
-    """Print a labelled N x 3 real matrix, one row per line (transport tensors)."""
-    print(label, flush=True)
-    for row in np.asarray(mat).round(ndigits):
-        print(f" {row[0]:{width}.{prec}e} {row[1]:{width}.{prec}e} {row[2]:{width}.{prec}e}", flush=True)
-
-
-def plot_dielectric(w: np.ndarray, eps: np.ndarray, fname: str = 'dielectric',
-                    wp_scr: np.ndarray | None = None) -> None:
-    """Publication-quality figure of the dielectric function eps(w).
-
-    Journal conventions: single-column width, serif/mathtext labels, inward
-    ticks on all four sides with minor ticks, thin recessive frame, and the two
-    curves separated by BOTH colour and line style (Okabe-Ito CVD-safe pair +
-    solid/dashed) so they stay distinct in colour-blind view and B/W print.
-
-    @param     w: photon-energy grid [eV] (real, 1-D)
-    @param   eps: complex dielectric function on w (eps1=Re, eps2=Im)
-    @param fname: output basename; writes <fname>.pdf (vector) and <fname>.png
-    @param wp_scr: screened plasma frequency [eV]; if given, marked with a guide
-    Leaves the figure open so a later plt.show() displays it interactively.
-    """
-    blue, verm = '#0072B2', '#D55E00'          # Okabe-Ito colour-blind-safe pair
-    rc = {'font.family': 'serif', 'mathtext.fontset': 'dejavuserif', 'font.size': 9,
-          'axes.linewidth': 0.8, 'lines.linewidth': 1.3,
-          'xtick.direction': 'in', 'ytick.direction': 'in',
-          'xtick.top': True, 'ytick.right': True,
-          'xtick.minor.visible': True, 'ytick.minor.visible': True,
-          'legend.frameon': False, 'savefig.dpi': 600, 'figure.dpi': 600}
-    with plt.rc_context(rc):
-        fig, ax = plt.subplots(figsize=(3.4, 2.6))   # PRB single-column width (~86 mm)
-        ax.axhline(0.0, color='0.6', lw=0.6, zorder=0)
-        if wp_scr is not None:
-            # mark the screened plasma frequency (where eps1 crosses zero)
-            ax.axvline(wp_scr, color='0.5', lw=0.8, ls=':', zorder=0)
-            ax.annotate(r'$\hbar\omega_{\mathrm{p}}$', xy=(wp_scr, 0),
-                        xytext=(3, 3), textcoords='offset points',
-                        ha='left', va='bottom', fontsize=8, color='0.35')
-        ax.plot(w, np.real(eps), color=blue, ls='-', label=r'$\varepsilon_1$ (real)')
-        ax.plot(w, np.imag(eps), color=verm, ls='--', label=r'$\varepsilon_2$ (imag)')
-        ax.set_xlabel(r'$\hbar\omega$ (eV)')
-        ax.set_ylabel(r'Dielectric function $\varepsilon(\omega)$')
-        ax.set_xlim(np.min(w), np.max(w))
-        ax.legend(loc='best', handlelength=1.8)
-        fig.tight_layout(pad=0.3)
-        for ext in ('pdf', 'png'):
-            fig.savefig(f'{fname}.{ext}', bbox_inches='tight')
-    print(f"dielectric-function figure written to '{fname}.pdf' and '{fname}.png'", flush=True)
-
-
-def plot_reflectivity(w: np.ndarray, refl: np.ndarray, fname: str = 'reflectivity', wp_scr: np.ndarray | None = None,
-                      swatch: list | None = None) -> None:
-    """Publication-quality figure of the normal-incidence reflectivity R(w).
-
-    Same journal conventions as plot_dielectric (single-column width, serif
-    mathtext, inward ticks, Okabe-Ito CVD-safe colours combined with distinct
-    line styles). The three principal (xx, yy, zz) components are drawn; the
-    yy/zz curves are omitted when they are numerically identical to xx (cubic
-    or otherwise isotropic response), keeping the panel uncluttered.
-
-    @param      w: photon-energy grid [eV] (real, 1-D)
-    @param   refl: reflectivity array [Nw, 3] (xx, yy, zz), values in [0, 1]
-    @param  fname: output basename; writes <fname>.pdf (vector) and <fname>.png
-    @param wp_scr: screened plasma frequency [eV]; if given, marked with a guide
-    @param swatch: optional [(label, rgb)] list; each is drawn as a colour patch
-                   so the perceived metallic colour is shown next to R(w)
-    Leaves the figure open so a later plt.show() displays it interactively.
-    """
-    blue, verm, green = '#0072B2', '#D55E00', '#009E73'   # Okabe-Ito CVD-safe triple
-    sty = [(blue, '-', r'$R_{xx}$'), (verm, '--', r'$R_{yy}$'), (green, ':', r'$R_{zz}$')]
-    rc = {'font.family': 'serif', 'mathtext.fontset': 'dejavuserif', 'font.size': 9,
-          'axes.linewidth': 0.8, 'lines.linewidth': 1.3,
-          'xtick.direction': 'in', 'ytick.direction': 'in',
-          'xtick.top': True, 'ytick.right': True,
-          'xtick.minor.visible': True, 'ytick.minor.visible': True,
-          'legend.frameon': False, 'savefig.dpi': 600, 'figure.dpi': 600}
-    with plt.rc_context(rc):
-        fig, ax = plt.subplots(figsize=(3.4, 2.6))   # PRB single-column width (~86 mm)
-        if wp_scr is not None:
-            # the reflectivity edge sits at the screened plasma frequency
-            ax.axvline(wp_scr, color='0.5', lw=0.8, ls=':', zorder=0)
-            ax.annotate(r'$\hbar\omega_{\mathrm{p}}$', xy=(wp_scr, 1.0),
-                        xytext=(3, -9), textcoords='offset points',
-                        ha='left', va='top', fontsize=8, color='0.35')
-        for i, (col, ls, lab) in enumerate(sty):
-            # skip a component that duplicates xx (isotropic response)
-            if i > 0 and np.allclose(refl[:, i], refl[:, 0], rtol=1e-10, atol=1e-12):
-                continue
-            ax.plot(w, refl[:, i], color=col, ls=ls, label=lab)
-        ax.set_xlabel(r'$\hbar\omega$ (eV)')
-        ax.set_ylabel(r'Reflectivity $R(\omega)$')
-        ax.set_xlim(np.min(w), np.max(w))
-        ax.set_ylim(0.0, 1.0)
-        if swatch:
-            # perceived colour patches (sRGB) as a small legend-like column in
-            # the bottom-right corner: square patch + label, stacked upwards
-            x0, y0, wsw, hsw, row = 0.560, 0.055, 0.042, 0.060, 0.075
-            for j, (lab, rgb) in enumerate(reversed(swatch)):
-                y = y0+j*row
-                ax.add_patch(plt.Rectangle((x0, y), wsw, hsw, transform=ax.transAxes,
-                                           facecolor=tuple(np.clip(rgb, 0, 1)),
-                                           edgecolor='0.35', lw=0.5, zorder=5))
-                ax.text(x0+wsw+0.018, y+0.5*hsw, lab, transform=ax.transAxes,
-                        ha='left', va='center', fontsize=6, color='0.3', zorder=5)
-        ax.legend(loc='best', handlelength=1.8)
-        fig.tight_layout(pad=0.3)
-        for ext in ('pdf', 'png'):
-            fig.savefig(f'{fname}.{ext}', bbox_inches='tight')
-    print(f"reflectivity figure written to '{fname}.pdf' and '{fname}.png'", flush=True)
-
-
-def flatten_orbs(seq: list) -> list:
-    """Flatten an olist (mix of ints and int-lists) into a flat list of orbital indices."""
-    out = []
-    for o in seq:
-        out += o if isinstance(o, list) else [o]
-    return out
-
-
-def plot_band(eig: np.ndarray, spl: np.ndarray, xlabel: list, xticks: list, uni: np.ndarray, ol: np.ndarray,
-              color: bool) -> None:
-    def get_col(cl: np.ndarray, ol: np.ndarray) -> np.ndarray:
-        col = (np.abs(cl[ol])**2 if isinstance(ol, int)
-               else (np.abs(cl[ol])**2).sum(axis=0)).round(4)
-        return col
-    # Check if olist has required 3 elements
-    if len(ol) < 3:
-        print(f"Warning: plot_band olist requires 3 elements (current: {len(ol)}). Color display disabled", flush=True)
-        color = False
-    plt.figure()
-    for e, cl in zip(eig, uni):  # band loop
-        if color:
-            # Normalize eigenvectors so that per-orbital weights (|u_n|^2) sum to 1
-            norm = np.sqrt((abs(cl)**2).sum(axis=0))
-            # Check for norm close to zero (use tolerance for floating-point comparison)
-            if np.any(norm < 1e-14):
-                print("Warning: plot_band found norm close to zero. Skipping", flush=True)
-                continue
-            cls = cl/norm
-            # Map three orbital groups to RGB channels for color coding
-            c1 = get_col(cls, ol[0])
-            c2 = get_col(cls, ol[1])
-            c3 = get_col(cls, ol[2])
-            clist = np.array([c1, c2, c3]).T
-            for i in range(len(e)):
-                plt.plot(spl[i:i+2], e[i:i+2], c=clist[i])
-        else:
-            for i in range(len(e)):
-                plt.plot(spl[i:i+2], e[i:i+2], color='black')
-    for x in xticks[1:-1]:
-        plt.axvline(x, ls='-', lw=0.25, color='black')
-    plt.ylim(eig.min()*1.1, eig.max()*1.1)
-    plt.xlim(0, spl.max())
-    plt.axhline(0., ls='--', lw=0.25, color='black')
-    plt.xticks(xticks, xlabel)
-    plt.show()
-
-
-def plot_FS(fscolors: list, klist: np.ndarray, color_option: int) -> None:
-    fig = plt.figure()
-    ax = fig.add_subplot(111, aspect='equal')
-    col = ['r', 'g', 'b', 'c', 'm', 'y', 'k', 'w']
-    if color_option == 0:
-        for kl in klist:
-            for kk in kl:
-                plt.plot(kk[:, 0], kk[:, 1], color='black', lw=2)
-    else:
-        if color_option == 2:
-            v = []
-            k = []
-            for vl, kl in zip(fscolors, klist):
-                for vv, kk in zip(vl, kl):
-                    v.extend(vv)
-                    k.extend(kk)
-            v = np.array(v)
-            k = np.array(k)
-            vmax = v.max()
-            vmin = v.min()
-            # Check for vmax=vmin case
-            if vmax == vmin:
-                print(f"Warning: plot_FS has vmax=vmin={vmax}. Color map disabled", flush=True)
-                vmax = vmin + 1.0  # Set default value
-        for kl, fscol, cb in zip(klist, fscolors, col):
-            for kk, fcol in zip(kl, fscol):
-                if color_option == 2:
-                    clist = cm.jet((fcol-vmin)/(vmax-vmin))
-                else:
-                    clist = fcol
-                for k1, k2, clst in zip(kk, kk[1:], clist):
-                    plt.plot([k1[0], k2[0]], [k1[1], k2[1]], c=clst, lw=2)
-        if color_option == 2:
-            plt.scatter(k[:, 0], k[:, 1], s=0.1, c=v)
-            plt.jet()
-            plt.colorbar()
-    plt.xlim(-0.5, 0.5)
-    plt.ylim(-0.5, 0.5)
-    plt.xticks([-0.5, 0, 0.5], [r'-$\pi$', '0', r'$\pi$'])
-    plt.yticks([-0.5, 0, 0.5], [r'-$\pi$', '0', r'$\pi$'])
-    plt.show()
-
-
-def poly_vertices(polys: list) -> np.ndarray:
-    """
-    @brief Collect every vertex of a (possibly per-band nested) polygon collection.
-           The polygons are ragged once the sheets are folded into the BZ -- clipping a
-           triangle at a zone face leaves 3 to 6 vertices -- so they cannot simply be
-           cast to one array.
-    @param polys: polygons, or lists of polygons, with vertices in the last axis
-    @return     : all vertices as one [N,3] array
-    """
-    out = []
-    stack = list(polys)
-    while stack:
-        p = stack.pop()
-        if isinstance(p, np.ndarray) and p.ndim >= 2 and p.shape[-1] == 3:
-            out.append(p.reshape(-1, 3))
-        else:
-            stack.extend(list(p))
-    return np.vstack(out) if out else np.zeros((0, 3))
-
-
-def plot_3d_surf(fspolys: list, fscenters: np.ndarray, fscolors: list, surface_opt: int, kscale: float,
-                 bvec: np.ndarray) -> None:
-    import mpl_toolkits.mplot3d.axes3d as axes3d
-    import mpl_toolkits.mplot3d.art3d as art3d
-    import matplotlib.colors as colors
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    clist = ['r', 'g', 'b', 'c', 'm', 'y', 'k', 'w']
-    if surface_opt == 0:
-        for j, polys in enumerate(fspolys):
-            ax.add_collection3d(art3d.Poly3DCollection(polys, facecolor=clist[j%6]))
-    else:
-        if surface_opt == 1:
-            tri = art3d.Poly3DCollection(fspolys, facecolors=fscolors, lw=0)
-        else:
-            if surface_opt == ColorMode.GAP:  # diverging map, symmetric about 0 so the node sits on white
-                cmap = cm.bwr
-                vmax = np.abs(fscolors).max()
-                vmin = -vmax
-            else:
-                cmap = cm.jet
-                vmin, vmax = fscolors.min(), fscolors.max()
-            # Check for vmax=vmin case
-            if vmax == vmin:
-                print(f"Warning: plot_3d_surf has vmax=vmin={vmax}. Using default colors", flush=True)
-                nor_cols = np.ones_like(fscolors)*0.5
-            else:
-                nor_cols = (fscolors-vmin)/(vmax-vmin)
-            tri = art3d.Poly3DCollection(fspolys, facecolors=cmap(nor_cols), lw=0)
-            fs = ax.scatter(fscenters[:, 0], fscenters[:, 1], fscenters[:, 2],
-                            c=fscolors, cmap=cmap, vmin=vmin, vmax=vmax, s=0.1)
-            plt.colorbar(fs, format='%.2e')
-        ax.add_collection3d(tri)
-    ax.grid(False)
-    bzv = plibs.BZedge(bvec, ax)
-    # Sheets and BZ edges are both Cartesian k [A^-1] now, so one range fits both.
-    # (kscale>1 samples beyond the 1st BZ, hence taking the max of the two extents.)
-    verts = poly_vertices(fspolys)
-    kmax = np.maximum(np.abs(bzv).max(axis=0), np.abs(verts).max(axis=0)) if len(verts) \
-        else np.abs(bzv).max(axis=0)
-    ax.set_xlim(-kmax[0], kmax[0])
-    ax.set_ylim(-kmax[1], kmax[1])
-    ax.set_zlim(-kmax[2], kmax[2])
-    ax.set_box_aspect(tuple(kmax))
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.set_zticks([])
-    plt.tight_layout()
-    plt.show()
-    # plt.savefig(fname='3DFS.png',dpi=300)
-
-
-def set_init_3dfsplot(color_option: int, polys: list, centers: np.ndarray, blist: list, avec: np.ndarray,
-                      rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, olist: np.ndarray,
-                      gap_sym: int | str | None = None, delta0: np.ndarray | None = None,
-                      gap_orbital: np.ndarray | collections.abc.Callable | None = None,
-                      gauge_kw: dict | None = None) -> tuple:
-    if color_option == 0:
-        fspolys = polys
-        fscenters = []
-        fscolors = []
-        return fspolys, fscenters, fscolors
-    else:
-        if color_option == ColorMode.GAP:  # the actual Eilenberger pairing gap, on the real 3D FS
-            colors = plibs.gap_color_3d(centers, blist, rvec, ham_r, S_r, gap_sym, delta0, gap_orbital,
-                                        **(gauge_kw or {}))
-        else:
-            colors = plibs.get_colors(centers, blist, ihbar*avec.T, rvec, ham_r, S_r, olist, color_option)
-        fspolys = []
-        fscenters = []
-        fscolors = []
-        for i in polys:
-            fspolys.extend(i)
-        for i in centers:
-            fscenters.extend(i)
-        for i in colors:
-            fscolors.extend(i)
-        # centers come back fractional; the sheets are Cartesian, so map the scatter
-        # overlay with bvec to keep both in the same frame
-        fscenters = np.array(fscenters).dot(plibs.get_bvec(avec))
-        fscolors = np.array(fscolors)
-        return fspolys, fscenters, fscolors
-
-
-def plot_spectrum(k_sets: list, xlabel: list, kmesh: int, bvec: np.ndarray, mu: float, ham_r: np.ndarray,
-                  S_r: np.ndarray, rvec: np.ndarray, Emin: float, Emax: float, delta: float, Nw: int,
-                  sw_self: bool = True, sw_maxent: bool = False, maxent_noise: float = 1.0e-4) -> None:
-    klist, spa_length, xticks = plibs.mk_klist(k_sets, kmesh, bvec)
-    eig, uni = plibs.get_eigs(klist, ham_r, S_r, rvec)
-    wlist = np.linspace(Emin, Emax, Nw)
-    if sw_self:
-        # Sigma is defined on the FLEX k-mesh, so evaluate it on the k-path by Fourier
-        # interpolation of the Wannier-R self-energy written by output_self_wannier.
-        try:
-            npz = np.load('self_en_wannier.npz')
-        except FileNotFoundError:
-            print("Error: 'self_en_wannier.npz' not found (run FLEX with sw_out_self=True)", flush=True)
-            return
-        sig_r, rvec_s, iw_grid = npz['sigma'], npz['rvec'], npz['iw']
-        mu_self = float(npz['mu'])
-        # Sigma is stored on the Matsubara mesh of the FLEX run, so G must be built at THAT
-        # temperature (gen_green regenerates iw_n from it), not at the current temp
-        temp_self = float(npz['temp'])
-        print(f'chem. pot. with self = {mu_self:.4f} eV', flush=True)
-        if not np.isclose(temp_self, temp):
-            print(f'Note: self_en_wannier.npz was written at T={temp_self:.4e} eV; '
-                  f'G(k,iw_n) is built at that T, not at the current {temp:.4e} eV', flush=True)
-        # Sigma(k) = sum_R Sigma(R) e^{-2pi i k.R}; Sigma is not Hermitian, so gen_ham cannot be reused
-        phase = np.exp(-2j*np.pi*klist.dot(rvec_s.T))                          # [Nks,Nr]
-        selfen = np.ascontiguousarray(np.einsum('mnwr,kr->mnwk', sig_r, phase))  # [Norb,Norb,Niw,Nks]
-        ham_k = flibs.gen_ham(klist, ham_r, rvec)
-        Gk_mats = flibs.gen_green(selfen, ham_k, mu_self, temp_self)
-        if sw_maxent:
-            # MaxEnt (ana_cont): regularized fit rather than exact interpolation, so it
-            # does not chase Matsubara noise into spurious real-axis poles over wide
-            # Emin..Emax / k windows the way the Pade continued fraction below does.
-            # Slower (~0.1-0.5s per k-point) but every point uses all available iw_grid.
-            Gk = plibs.maxent_trace_spectrum(Gk_mats, iw_grid, wlist, temp_self, noise_level=maxent_noise)
-        else:
-            Niw = min(40, len(iw_grid))  # Pade becomes unstable with too many Matsubara points
-            # A(k,w) = -Im Tr G(k,w+i*delta)
-            Gk = -flibs.pade_with_trace(Gk_mats[:, :, :Niw, :], 1j*iw_grid[:Niw], wlist+1j*delta).imag
-    else:
-        Gk = flibs.gen_tr_Greenw_0(eig, mu, wlist, delta)
-    w, x = np.meshgrid(wlist, spa_length)
-    plt.contourf(x, w, Gk, cmap=plt.hot())
-    for x in xticks[1:-1]:
-        plt.axvline(x, ls='-', lw=0.25, color='black')
-    plt.xlim(0, spa_length.max())
-    plt.axhline(0., ls='--', lw=0.25, color='black')
-    plt.xticks(xticks, xlabel)
-    plt.colorbar()
-    plt.show()
-
-
-def build_tau(eig: np.ndarray, mu: float, temp: float, tau_const: float, rvec: np.ndarray | None = None,
-              ham_r: np.ndarray | None = None, S_r: np.ndarray | None = None, avec: np.ndarray | None = None,
-              Nx: int | None = None, Ny: int | None = None, Nz: int | None = None, Nw: int = 300) -> tuple:
-    '''
-    Relaxation time tau[Nk,Norb] in units of tau_unit, per the tau_mode switch.
-
-    R_H is INDEPENDENT of a constant tau (it carries tau^2/tau^2), so the whole
-    temperature dependence of the Hall coefficient -- and any difference between
-    the mobilities of two Fermi-surface sheets -- lives in tau(k).  With
-    tau_mode='const' the R_H printed by get_hall_coe is a pure band-structure
-    number; only a k-dependent tau makes R_H(T) meaningful.
-
-    Returns (tau, label).
-    '''
-    if tau_mode == 'const':
-        return eig*0.+tau_const, f'constant tau = {tau_const} '+('fs' if sw_unit else '')
-    if tau_mode == 'epa':
-        if not epa_file:
-            raise ValueError("tau_mode='epa' needs epa_file (epa.x job='egrid' output)")
-        ngrid, nmodes, edge, step, nbin, wavg, gavg = plibs.read_epa_output(epa_file)
-        # calc_tau_epa works with hbar=1 and energies in eV, so it returns hbar/eV;
-        # the Boltzmann kernels expect tau in units of tau_unit.
-        tau = flibs.calc_tau_epa(eig, gavg, wavg, edge, step, nbin, mu, temp)*hbar/tau_unit
-        return tau, f'EPA tau(k) from {epa_file} ({nmodes} modes)'
-    if tau_mode in ('dos1', 'dos2'):
-        Nk2, klist, eig2, uni, kw2 = plibs.get_emesh(Nx, Ny, Nz, ham_r, S_r, rvec, avec.T, sw_uni=True)
-        wlist = np.linspace(eig.min()-mu, eig.max()-mu, Nw, True)
-        Dos = flibs.gen_dos(eig2, uni, mu, wlist, delta)
-        mode = int(tau_mode[-1])
-        dos_tot = Dos.sum(axis=0)
-        # get_tau mode 1 forms tau_const*eps/DOS itself, but mode 2 returns its table as is
-        # (tau = tauw), so mode 2 is handed 1/DOS.  The DOS is floored at the same eps=1e-4
-        # get_tau uses, so a gap (DOS=0) gives a large but finite tau instead of inf.
-        tauw = dos_tot if mode == 1 else 1.0/np.maximum(dos_tot, 1.0e-4)
-        return (flibs.get_tau(tauw, eig, tau_const, mode),
-                f'DOS-based tau (mode {mode}, tau ~ 1/DOS'
-                + (f', capped at {tau_const})' if mode == 1 else ')'))
-    raise ValueError(f"unknown tau_mode '{tau_mode}' (use 'const', 'epa', 'dos1' or 'dos2')")
-
-
-def print_tau_summary(tau: np.ndarray, eig: np.ndarray, mu: float, temp: float, label: str, indent: str = '  ') -> None:
-    '''Report tau where it matters: weighted by the Fermi window -df/de, not over all bands.'''
-    print(f'{indent}tau: {label}', flush=True)
-    w = 0.25*(1.-np.tanh(0.5*(eig-mu)/temp)**2)/temp
-    if w.sum() <= 0:
-        return
-    tav = (w*tau).sum()/w.sum()
-    sel = w > 0.01*w.max()          # states actually inside the Fermi window
-    unit = 'fs' if sw_unit else ''
-    print(f'{indent}     <tau>_FS = {tav:.4g} {unit}   range over the Fermi window '
-          f'[{tau[sel].min():.4g}, {tau[sel].max():.4g}] {unit}', flush=True)
-    if tau.std() > 0:
-        # R_H picks up <tau^2>/<tau>^2, which is 1 only for a constant tau
-        r = ((w*tau*tau).sum()/w.sum())/tav**2
-        print(f'{indent}     <tau^2>/<tau>^2 = {r:.4f} '
-              + ('(constant tau: R_H is tau-independent)' if abs(r-1.) < 1e-6
-                 else '(>1: tau(k) shifts R_H away from the constant-tau value)'), flush=True)
-
-
-def _hall_at_mesh(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray, Nx: int, Ny: int, Nz: int,
-                  fill: float, temp: float, tau_const: float, gsp: float, Nw: int = 300, detail: bool = False) -> dict:
-    '''
-    Weak-field (B-linear) Boltzmann Hall response on ONE k-mesh.
-    detail=True additionally builds the band-resolved (two-fluid) decomposition
-    and the Luttinger-volume carrier densities; that part is only worth its cost
-    on the mesh actually being reported, not on every step of a convergence sweep.
-    Returns a dict; all printing is done by get_hall_coe.
-    '''
-    Nk, eig, vk, imass, kweight = plibs.get_emesh(Nx, Ny, Nz, ham_r, S_r, rvec, avec.T*ihbar, sw_veloc=True, sw_mass=True)
-    Vuc = sclin.det(avec)*1e-30
-    wsum = kweight.sum()          # NOT Nk: stays correct if a symmetry-reduced mesh is ever used
-    mu = plibs.calc_mu(eig, Nk, fill, temp)
-    tau, tau_label = build_tau(eig, mu, temp, tau_const, rvec, ham_r, S_r, avec, Nx, Ny, Nz, Nw)
-    K0, K1, K2 = flibs.calc_Kn(eig, vk, kweight, temp, mu, tau)
-    # Full Hall kernel S[n,a,b,g] for the three field directions g, band resolved.
-    # The tensor (rather than the single B||z scalar) is what allows the proper
-    # rho^(1) = -sigma^-1 sigma^(1) sigma^-1 below instead of assuming sigma is
-    # diagonal in xyz.
-    Shall_n, Sabs_n = flibs.calc_sigma_hall(eig, vk, imass/eC, kweight, tau, temp, mu)
-    Shall = Shall_n.sum(axis=0)
-    Rh = plibs.hall_coefficient(K0, Shall, Vuc, wsum, gsp)          # m^3/C, per field axis
-    nH, kind = plibs.hall_carrier_density(Rh, eC)                 # cm^-3, 'electron'/'hole'
-    sigma = gsp*tau_unit*eC*K0/(wsum*Vuc)                       # S/m
-    # sigma^(1)/B carries one more power of e and of tau than sigma  -> S/(m T)
-    sigma1 = gsp*eC*eC*tau_unit*tau_unit*Shall/(wsum*Vuc)
-    # Hall mobility mu_H = R_H * sigma_aa with the current in the plane normal to B.
-    # omega_c*tau = mu_H[SI]*B, so mu_H directly measures how far the weak-field
-    # expansion this whole routine is built on can be trusted.
-    muH = np.array([Rh[g]*sigma[(g+1)%3, (g+1)%3] for g in range(3)])   # m^2/(V s)
-    # --- two k-mesh adequacy diagnostics -----------------------------------
-    dfermi = 0.25*(1.-np.tanh(0.5*(eig-mu)/temp)**2)/temp
-    # (i) effective number of states carrying the Fermi window, as the
-    #     participation ratio of the -df/de weights.  Everything here is an
-    #     average over Neff states, so Neff sets the statistical noise floor.
-    Neff = dfermi.sum()**2/(dfermi**2).sum()
-    # (ii) cancellation ratio of the Hall integrand: it changes sign around the
-    #     Fermi surface, and when |sum| << sum|.| the total is a small residue of
-    #     large opposing parts -- exactly the regime where R_H keeps changing
-    #     sign with the mesh.  sigma_xx has no such cancellation, which is why it
-    #     looks converged long before sigma^(1) is.
-    cancel = abs(Shall[0, 1, 2])/max(Sabs_n[:, 0, 1, 2].sum(), 1e-300)
-    out = {'mesh': (Nx, Ny, Nz), 'Nk': Nk, 'mu': mu, 'Rh': Rh, 'nH': nH, 'kind': kind,
-           'sigma': sigma, 'sigma1': sigma1, 'muH': muH, 'Neff': Neff, 'cancel': cancel, 'K0': K0,
-           'tau_label': tau_label}
-    if detail:
-        # keep the per-state arrays only for the mesh that gets reported: holding
-        # eig/tau for every step of a sweep is hundreds of MB on a fine mesh
-        out['tau'], out['eig'] = tau, eig
-        # --- two-fluid decomposition -----------------------------------------
-        # sigma and sigma^(1) are both plain band sums, so each sheet can be given
-        # its own conductivity, Hall coefficient and mobility.  Comparing a band's
-        # OWN n_H against its Luttinger volume shows whether that sheet behaves as
-        # one simple closed pocket; the mismatch between the total n_H and n_e/n_h
-        # is then the compensation the experiment is really seeing.
-        K0n = flibs.calc_k0_band(eig, vk, kweight, temp, mu, tau)                   # [Norb,3,3]
-        Norb = len(K0n)
-        trK0 = np.trace(K0)
-        Rh_n = np.full(Norb, np.nan)
-        for n in range(Norb):
-            if np.trace(K0n[n]) > 1e-8*trK0:
-                Rh_n[n] = plibs.hall_coefficient(K0n[n], Shall_n[n], Vuc, wsum, gsp)[2]
-        out['car'] = plibs.fs_carrier_density(eig, mu, Vuc, gsp, mesh=(Nx, Ny, Nz))
-        out['sigma_n'] = gsp*tau_unit*eC*K0n/(wsum*Vuc)                        # [Norb,3,3] S/m
-        out['Rh_n'] = Rh_n
-    return out
-
-
-def get_hall_coe(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray, Nx: int, Ny: int, Nz: int,
-                 fill: float, temp: float, tau_const: float, Nw: int = 300, with_spin: bool = False,
-                 mesh_list: list | None = None) -> list | None:
-    '''
-    Weak-field Hall coefficient R_H and the Hall carrier density n_H=1/(e|R_H|).
-
-    R_H is formed from the FULL tensors, rho^(1)=-sigma^-1 sigma^(1) sigma^-1,
-    for all three field directions.  Give mesh_list (e.g. [20,30,40] or
-    [(20,20,10),...]) to run a k-mesh convergence sweep: sigma^(1) converges far
-    more slowly than sigma and can come out with the WRONG SIGN on an
-    under-converged mesh, so a single-mesh number is not usable on its own.
-    '''
-    # Parameter validation
-    if temp <= 0:
-        print("Error: Temperature (temp) is non-positive", flush=True)
-        return
-    if tau_const <= 0:
-        print("Error: Relaxation time (tau_const) is non-positive", flush=True)
-        return
-    if sclin.det(avec) <= 0:
-        print("Error: Unit cell volume (Vuc) is non-positive", flush=True)
-        return
-    gsp = (1.0 if with_spin else 2.0)  # spin degeneracy factor
-    if mesh_list:
-        meshes = [(m, m, m) if np.isscalar(m) else tuple(m) for m in mesh_list]
-    else:
-        meshes = [(Nx, Ny, Nz)]
-    print(f"T = {temp/kb:.3f} K", flush=True)
-    print(f"spin degeneracy gsp = {gsp:.0f} "
-          f"({'SOC: both spins already in H' if with_spin else 'spin-degenerate bands'})", flush=True)
-    print('  mesh          Nk      mu[eV]     Neff   cancel      R_H^x        R_H^y        R_H^z    [m^3/C]', flush=True)
-    results = []
-    for i, (nx, ny, nz) in enumerate(meshes):
-        r = _hall_at_mesh(rvec, ham_r, S_r, avec, nx, ny, nz, fill, temp, tau_const, gsp, Nw,
-                          detail=(i == len(meshes)-1))
-        results.append(r)
-        print(f'  {nx:3d}x{ny:3d}x{nz:3d} {r["Nk"]:9d}  {r["mu"]:9.4f} {r["Neff"]:8.3g} {r["cancel"]:8.2e} '
-              + ' '.join(f'{v:+12.4e}' for v in r['Rh']), flush=True)
-    res = results[-1]
-    # --- k-mesh convergence verdict -----------------------------------------
-    if len(results) > 1:
-        prev = results[-2]['Rh']; last = res['Rh']
-        print('  k-mesh convergence (finest vs previous):', flush=True)
-        for g, ax in enumerate('xyz'):
-            if abs(last[g]) < 1e-30:
-                continue
-            if prev[g]*last[g] < 0:
-                msg = 'SIGN FLIP - not converged'
-            else:
-                d = abs(last[g]/prev[g]-1.)*100
-                msg = f'{d:6.2f}% change'+('  <- not converged' if d > 5. else '')
-            print(f'    B||{ax}: {msg}', flush=True)
-    else:
-        print('  (single mesh: pass mesh_list=[...] to check k-mesh convergence)', flush=True)
-    # --- detail on the finest mesh ------------------------------------------
-    print(f'--- {res["mesh"][0]}x{res["mesh"][1]}x{res["mesh"][2]} mesh, mu = {res["mu"]:.4f} eV ---', flush=True)
-    print_tau_summary(res['tau'], res['eig'], res['mu'], temp, res['tau_label'])
-    print_matrix('sigma matrix (S/m)', res['sigma'])
-    for g, ax in enumerate('xyz'):
-        a = (g+1)%3
-        print(f'  B||{ax}: R_H = {res["Rh"][g]:+.5e} m^3/C   '
-              f'n_H = {res["nH"][g]:.5e} cm^-3 ({res["kind"][g]})   '
-              f'mu_H = {1e4*res["muH"][g]:+.4e} cm^2/Vs   '
-              f'omega_c*tau = {abs(res["muH"][g]):.3e} /T', flush=True)
-    print(f'  sigma^(1)_xy/B = {res["sigma1"][0, 1, 2]:+.5e} S/(m T)  (B||z)', flush=True)
-    # --- validity warnings ---------------------------------------------------
-    print(f'  Fermi-window sampling: Neff = {res["Neff"]:.4g} states, '
-          f'Hall-integrand cancellation |sum|/sum|.| = {res["cancel"]:.3e}', flush=True)
-    if res['Neff'] < 1.0e3:
-        print(f'  WARNING: only ~{res["Neff"]:.4g} states carry the Fermi window. '
-              f'Refine the k-mesh (or raise T) before trusting R_H.', flush=True)
-    if res['cancel'] < 1.0e-2:
-        print(f'  WARNING: the Hall integrand cancels to {res["cancel"]:.2e} of its absolute weight. '
-              f'R_H is a small residue of large opposing contributions here (near-compensation), '
-              f'so it needs a much finer mesh than sigma_xx and its SIGN may still be mesh-dependent.', flush=True)
-    Bmax = 0.1/max(abs(res['muH']).max(), 1e-30)
-    print(f'  weak-field limit omega_c*tau<0.1 holds up to B ~ {Bmax:.3g} T', flush=True)
-    # --- band-resolved (two-fluid) decomposition vs the Luttinger volume ------
-    car = res['car']
-    print('--- carrier densities: Luttinger volume vs Hall, band by band ---', flush=True)
-    print('  band  type      n_e[cm^-3]    n_h[cm^-3]   pk e/h   sigma_xx[S/m]   R_H(band)'
-          '    n_H(band)   mu_H[cm^2/Vs]', flush=True)
-    for n, k in enumerate(car['kind']):
-        if k in ('full', 'empty'):
-            continue
-        rn = res['Rh_n'][n]
-        if np.isnan(rn) or abs(rn) < 1e-30:
-            hall = f'{"-":>12s} {"-":>12s} {"-":>13s}'
-        else:
-            hall = (f'{rn:+12.4e} {1./(abs(rn)*eC)/1e6:12.4e}'
-                    f' {1e4*abs(rn*res["sigma_n"][n, 0, 0]):13.4e}')
-        print(f'  {n+1:4d}  {k:8s}  {car["ne_band"][n]:.5e}   {car["nh_band"][n]:.5e}  '
-              f'{car["npocket_e"][n]:2d}/{car["npocket_h"][n]:<2d}   '
-              f'{res["sigma_n"][n, 0, 0]:.5e}  {hall}', flush=True)
-    ne, nh = car['n_e'], car['n_h']
-    print(f'  Luttinger total: n_e = {ne:.5e}   n_h = {nh:.5e} cm^-3'
-          + (f'   n_e/n_h = {ne/nh:.4f}' if nh > 0 else ''), flush=True)
-    print(f'  Hall (all bands, B||z): n_H = {res["nH"][2]:.5e} cm^-3 ({res["kind"][2]})'
-          '   <- the number to compare with experiment', flush=True)
-    if (car['kind'] == 'open').any():
-        print('  note: an OPEN sheet percolates the zone and has no Luttinger volume, so the '
-              'n_e/n_h totals above miss whatever it carries.', flush=True)
-    if ne > 0 and nh > 0 and abs(ne/nh-1.) < 0.2:
-        print('  note: nearly compensated (n_e ~ n_h). n_H is then a small difference of '
-              'large terms, extremely sensitive to mu, and is NOT a carrier density -- '
-              'compare mobilities/two-fluid fits with experiment instead.', flush=True)
-    return results
-
-
-def calc_conductivity_Boltzmann(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray, Nx: int,
-                                Ny: int, Nz: int, fill: float, temp: float, tau_const: float, Nw: int = 300,
-                                with_spin: bool = False) -> None:
-    '''
-    calculate conductivities using Boltzmann equations
-    '''
-    # no dep. T and mu or filling
-    # Parameter validation
-    if temp <= 0:
-        print("Error: Temperature (temp) is non-positive", flush=True)
-        return
-    if tau_const <= 0:
-        print("Error: Relaxation time (tau_const) is non-positive", flush=True)
-        return
-
-    Nk, eig, vk, kweight = plibs.get_emesh(Nx, Ny, Nz, ham_r, S_r, rvec, avec.T*ihbar, sw_veloc=True)
-    Vuc = sclin.det(avec)*1e-30
-    if Vuc <= 0:
-        print("Error: Unit cell volume (Vuc) is non-positive", flush=True)
-        return
-    gsp = (1.0 if with_spin else 2.0)  # spin weight
-    iNV = 1./(Nk*Vuc)
-    itemp = 1./temp
-    mu = plibs.calc_mu(eig, Nk, fill, temp)
-    tau, tau_label = build_tau(eig, mu, temp, tau_const, rvec, ham_r, S_r, avec, Nx, Ny, Nz, Nw)
-    print(f"T = {temp/kb:.3f} K", flush=True)
-    print(f"mu = {mu:.4f} eV", flush=True)
-    print_tau_summary(tau, eig, mu, temp, tau_label, indent='')
-    if sw_tdf:
-        tdf = flibs.calc_tdf(eig, vk, kweight, tau, Nw)
-        # absolute-energy grid matching the calc_tdf bin CENTRES: E_i = emin + (i-1/2)*dw
-        dw = (eig.max()-eig.min())/Nw
-        wlist = eig.min()+dw*(np.arange(1, Nw+1)-0.5)
-        dfermi = 0.25*(1.-np.tanh(0.5*(wlist-mu)/temp)**2)/temp
-        K0 = (dfermi*tdf.T).T.sum(axis=0)*dw
-        K1 = (dfermi*(wlist-mu)*tdf.T).T.sum(axis=0)*dw
-        K2 = (dfermi*(wlist-mu)**2*tdf.T).T.sum(axis=0)*dw
-        plt.plot(wlist-mu, tdf[:, 0, 0])
-        plt.show()
-    else:
-        K0, K1, K2 = flibs.calc_Kn(eig, vk, kweight, temp, mu, tau)
-    # sigma [S/m] = gsp * tau[s] * e[C] * K0[eV·m^-3] / (N*V[m^3])
-    sigma = gsp*tau_unit*eC*K0*iNV  # e cancels eV->J so units work out to S/m
-    kappa = gsp*tau_unit*eC*kb*K2*iNV*itemp
-
-    # Handle sclin.inv() failures
-    try:
-        K0_inv = sclin.inv(K0)
-        kappa2 = gsp*tau_unit*eC*kb*(K2-K1.dot(K0_inv.dot(K1)))*iNV*itemp
-        Seebeck = -kb*K0_inv.dot(K1)*itemp
-        Peltier = K1.dot(K0_inv)
-    except np.linalg.LinAlgError:
-        print("Error: K0 is a singular matrix. Cannot compute Seebeck coefficient and Peltier", flush=True)
-        kappa2 = kappa.copy()
-        Seebeck = np.zeros_like(K0)
-        Peltier = np.zeros_like(K0)
-
-    try:
-        sigma_inv = sclin.inv(sigma*temp)
-        # Lorenz tensor L = kb * kappa . (sigma*T)^-1 (matrix product, not element-wise)
-        Lorenz = kb*kappa.dot(sigma_inv)
-        Lorenz2 = kb*kappa2.dot(sigma_inv)
-    except np.linalg.LinAlgError:
-        print("Warning: sigma*temp is a singular matrix. Cannot compute Lorenz coefficient", flush=True)
-        Lorenz = np.zeros_like(sigma)
-        Lorenz2 = np.zeros_like(sigma)
-    sigmaS = gsp*tau_unit*kb*eC*K1*iNV*itemp
-    PF = sigma*Seebeck**2
-    print_matrix('sigma matrix (S/m)', sigma)
-    print_matrix('kappa matrix (K22 only) (W/m/K)', kappa)
-    print_matrix('kappa matrix (full) (W/m/K)', kappa2)
-    print_matrix('sigmaS matrix (A/m/K)', sigmaS)
-    print_matrix('Seebeck matrix (V/K)', Seebeck)
-    print_matrix('Peltier matrix (V)', Peltier)
-    print_matrix('Lorenz matrix (K22 only) (Wohm/K^2) (fe 2.44e-8)', Lorenz, width=9, prec=2)
-    print_matrix('Lorenz matrix? (full) (Wohm/K^2)', Lorenz2, width=9, prec=2)
-    print_matrix('Power Factor (SA/m^2/K)', PF, ndigits=8)
-
-
-def calc_conductivity_lrt(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray, Nx: int, Ny: int,
-                          Nz: int, fill: float, temp: float, Nw: int, delta: float, with_spin: bool = False) -> None:
-    '''
-    calculation of linear response theory
-    electric conductivity of LRT corresponds to Boltzmann then delta~O(10-1) (tau~1fs) at 300K
-    thermal conductivity and L12 of LRT correspond to Boltzmann then delta~O(10-3) (tau~100fs) at 300K
-    '''
-    # Parameter validation
-    if temp <= 0:
-        print("Error: Temperature (temp) is non-positive", flush=True)
-        return
-    if delta <= 0:
-        print("Error: Broadening (delta) is non-positive", flush=True)
-        return
-
-    Nk, eig, vk, kweight = plibs.get_emesh(Nx, Ny, Nz, ham_r, S_r, rvec, avec.T*ihbar, True, True)
-    Vuc = sclin.det(avec)
-    if Vuc <= 0:
-        print("Error: Unit cell volume (Vuc) is non-positive", flush=True)
-        return
-    gsp = (1.0 if with_spin else 2.0)  # spin weight
-    mu = plibs.calc_mu(eig, Nk, fill, temp)
-    print(f'chemical potential = {mu:.4f} eV', flush=True)
-    print(f'temperature = {temp/kb:.3f} K', flush=True)
-    print(f'about tau = {1.e15*hbar/delta:.3f} fs', flush=True)
-    print(f'delta = {delta:9.3e}', flush=True)
-    L11, L12, L22, wlist = plibs.get_conductivity(mu, temp, eig, vk, Nw, Emax, delta)
-    sigmaconst = gsp*hbar*eC/Vuc*1.0e30
-    kappaSconst = sigmaconst*kb/temp
-    sigma = sigmaconst*L11
-    kappa = kappaSconst*L22
-    sigmaS = kappaSconst*L12
-    # full electronic thermal conductivity subtracts the thermoelectric backflow:
-    # kappa = kappaSconst*(L22 - L12.L11^-1.L12)  (cf. Boltzmann K2-K1.K0^-1.K1).
-    # The subtraction is done on the bare L tensors (all share the same prefactor),
-    # so kappa2 carries the same kappaSconst as the L22-only kappa.
-    try:
-        kappa2 = kappaSconst*np.array([l22-l12.dot(sclin.inv(l11).dot(l12))
-                                       for l11, l12, l22 in zip(L11, L12, L22)])
-    except np.linalg.LinAlgError:
-        print("Warning: L11 is a singular matrix. Cannot subtract thermoelectric backflow from kappa", flush=True)
-        kappa2 = kappa.copy()
-    # Handle sclin.inv() failures
-    try:
-        Seebeck = np.array([-sclin.inv(s).dot(sS) for s, sS in zip(sigma, sigmaS)])
-    except np.linalg.LinAlgError:
-        print("Warning: sigma is a singular matrix. Cannot compute Seebeck coefficient", flush=True)
-        Seebeck = np.zeros_like(sigma)
-    print_matrix('sigma matrix (S/m)', sigma[0].real)
-    print_matrix('kappa matrix (L22 only) (W/m/K)', kappa[0].real)
-    print_matrix('kappa matrix (full) (W/m/K)', kappa2[0].real)
-    print_matrix('sigmaS matrix (A/m/K)', sigmaS[0].real)
-    print('Lorenz number (Wohm/K^2) (fe 2.44e-8)', flush=True)
-    try:
-        # Lorenz tensor L = kb * kappa . (sigma*T)^-1 (matrix product, not element-wise)
-        sigmaT_inv = sclin.inv(sigma[0]*temp)
-        Lorenz_matrix = (kb*kappa[0].dot(sigmaT_inv)).real.round(10)
-        Lorenz_matrix2 = (kb*kappa2[0].dot(sigmaT_inv)).real.round(10)
-        print(' (L22 only):', flush=True)
-        for lor in Lorenz_matrix:
-            print(f" {lor[0]:9.2e} {lor[1]:9.2e} {lor[2]:9.2e}", flush=True)
-        print(' (full):', flush=True)
-        for lor in Lorenz_matrix2:
-            print(f" {lor[0]:9.2e} {lor[1]:9.2e} {lor[2]:9.2e}", flush=True)
-    except np.linalg.LinAlgError:
-        print("Warning: Failed to compute Lorenz coefficient (singular matrix)", flush=True)
-    print_matrix('Seebeck coefficient matrix (V/K)', Seebeck[0].real)
-    # dielectric function (relative permittivity) from the optical conductivity,
-    # SI convention: eps(w) = 1 + i*sigma(w)/(eps0*w_rad) = 1 + i*hbar*sigma/(eps0*w),
-    # sigma in S/m, w in eV (hbar converts the eV grid to angular frequency).
-    # Frequency-resolved like sigma; the w=0 point is skipped (eps ~ 1/w there).
-    eps0 = scconst.epsilon_0
-    epsilon = 1.+1j*hbar/eps0*(sigma.T/(wlist+1e-8)).T
-    # console summary at the lowest positive frequency (static-limit estimate)
-    print(f'dielectric function at w = {wlist[1]:9.3e} eV', flush=True)
-    print_matrix('Re[eps] matrix', epsilon[1].real)
-    print_matrix('Im[eps] matrix', epsilon[1].imag)
-    # --- optical constants: N, R, alpha, and the non-metal spectra -----------
-    # N(w) = n + i*kappa = sqrt(eps(w)) on the passive branch (Im N >= 0), then
-    # the normal-incidence Fresnel reflectivity R = |(N-1)/(N+1)|^2 and the
-    # Beer-Lambert absorption coefficient alpha = 2*w*kappa/(hbar*c). Only the
-    # principal (diagonal) components are used, so these describe light
-    # polarized along a crystal axis; w=0 is skipped as for eps.
-    Nref = plibs.refractive_index(epsilon.diagonal(axis1=1, axis2=2))  # [Nw,3] xx,yy,zz
-    refl = plibs.reflectivity(Nref)
-    alpha = plibs.absorption_coefficient(wlist, Nref)                  # [1/m]
-    # what leaves a NON-metal: the slab transmittance at thickness color_thick
-    # and the Kubelka-Munk diffuse (body) reflectance at scattering length
-    # color_scatt. A metal is opaque, so both come out black -- correctly so.
-    trans = plibs.transmittance(refl, alpha, color_thick)
-    rinf = plibs.kubelka_munk(alpha, color_scatt)
-    absorp = np.clip(1.0-refl-trans, 0.0, 1.0)          # absorptance of the slab
-    print(f'reflectivity (normal incidence) at w = {wlist[1]:9.3e} eV', flush=True)
-    print(f'  R = ({refl[1, 0]:.4f}, {refl[1, 1]:.4f}, {refl[1, 2]:.4f})  (xx, yy, zz)', flush=True)
-    print(f'absorption coefficient at w = {wlist[1]:9.3e} eV', flush=True)
-    print(f'  alpha = ({alpha[1, 0]:9.3e}, {alpha[1, 1]:9.3e}, {alpha[1, 2]:9.3e}) 1/m', flush=True)
-    # --- perceived colour (metallic lustre) from R(w) ------------------------
-    # R(w) is folded with the CIE 1931 2-deg observer under illuminant D65 and
-    # converted to sRGB (see plibs._color), the standard route for first-
-    # principles metal colours (Prandini et al., npj Comput. Mater. 5, 129
-    # (2019)). The polycrystalline entry uses the directional average of R,
-    # which is what an unpolarised measurement on a polycrystal sees.
-    cols = [(lab, plibs.spectrum_color(wlist[1:], r))
-            for lab, r in [('xx', refl[1:, 0]), ('yy', refl[1:, 1]), ('zz', refl[1:, 2]),
-                           ('poly', refl[1:].mean(axis=1))]]
-    # --- non-metal colours: the light that got through the material ----------
-    # A dielectric reflects almost nothing, so its colour is carried by the
-    # transmitted (or diffusely back-scattered) light, both computed from the
-    # directional average. The absorptance entry is the complement of what
-    # leaves the sample, so it is reported as its photographic negative.
-    ncols = [('T(d)', plibs.spectrum_color(wlist[1:], trans[1:].mean(axis=1)), 'hex'),
-             ('KM',  plibs.spectrum_color(wlist[1:], rinf[1:].mean(axis=1)), 'hex'),
-             ('A neg', plibs.spectrum_color(wlist[1:], absorp[1:].mean(axis=1)), 'hex_neg')]
-    print('perceived colour (CIE 1931 2-deg observer, D65, sRGB):', flush=True)
-    # show the colour itself as a 24-bit ANSI block, but only on a real terminal
-    # so redirected logs stay free of escape sequences
-    tty = os.isatty(1)
-    for lab, c in cols:
-        r, g, b = (int(v) for v in c['rgb255'])
-        sq = f'\x1b[48;2;{r};{g};{b}m    \x1b[0m ' if tty else ''
-        print(f'  {lab:4s} {sq}{c["hex"]}  RGB = ({r:3d},{g:3d},{b:3d})'
-              f'  xy = ({c["xy"][0]:.4f}, {c["xy"][1]:.4f})  Y = {c["Y"]:.4f}'
-              + ('  [out of sRGB gamut, clipped]' if c['clipped'] else ''), flush=True)
-    print(f'non-metal colour (d = {1e3*color_thick:.4g} mm, '
-          f'l_scatt = {1e6*color_scatt:.4g} um, directional average):', flush=True)
-    for lab, c, key in ncols:
-        r, g, b = (int(v) for v in (c['rgb255_neg'] if key == 'hex_neg' else c['rgb255']))
-        sq = f'\x1b[48;2;{r};{g};{b}m    \x1b[0m ' if tty else ''
-        note = (' (opaque at this thickness)' if lab == 'T(d)' and c['Y'] < 1.e-4 else
-                ' (negated: A is the complement of the transmitted light)'
-                if key == 'hex_neg' else '')
-        # Y belongs to the spectrum that was integrated, so on the negated row
-        # it is labelled Y(A): the luminance of the absorptance, not of the swatch
-        print(f'  {lab:5s} {sq}{c[key]}  RGB = ({r:3d},{g:3d},{b:3d})'
-              f'  {"Y(A)" if key == "hex_neg" else "Y"} = {c["Y"]:.4f}{note}', flush=True)
-    if not cols[0][1]['full_range']:
-        print(f'  Warning: the spectrum does not cover the visible window '
-              f'(380-780 nm = 1.59-3.26 eV); R was held constant outside '
-              f'[{plibs.ev_nm/wlist[-1]:.0f}, {plibs.ev_nm/wlist[1]:.0f}] nm, so the colour is '
-              f'only indicative. Increase Emax (and Nw) to fix this.', flush=True)
-    # --- plasma frequency ----------------------------------------------------
-    # (1) effective (unscreened) plasma frequency from the optical f-sum rule
-    #     (hbar*wp_a)^2 = (2*hbar/(pi*eps0)) * int_0^Emax Re sigma_aa(w) dw
-    #     (sigma in S/m, w in eV -> hbar*wp in eV). It is the spectral weight up
-    #     to the cutoff Emax and, unlike a Drude fit, needs no broadening input.
-    hwp = np.sqrt([abs(2*hbar/(np.pi*eps0)*np.trapezoid(sigma[:, i, i].real, wlist)) for i in range(3)])
-    h_eVs = scconst.physical_constants['Planck constant in eV s'][0]  # h = 2*pi*hbar
-    fp = hwp/h_eVs/1e12   # plasma frequency nu_p = wp/(2*pi) in THz
-    print(f'plasma frequency (f-sum rule, integrated to Emax={Emax} eV):', flush=True)
-    print(f'  hbar*wp = ({hwp[0]:.4f}, {hwp[1]:.4f}, {hwp[2]:.4f}) eV  (xx, yy, zz)', flush=True)
-    print(f'  nu_p    = ({fp[0]:.2f}, {fp[1]:.2f}, {fp[2]:.2f}) THz', flush=True)
-    # (2) screened plasma frequency: energy where Re eps_xx crosses zero upward
-    #     (the longitudinal plasmon / reflectivity edge), by linear interpolation.
-    e1, wpos = epsilon[1:, 0, 0].real, wlist[1:]
-    zc = np.where((e1[:-1] < 0.0)&(e1[1:] >= 0.0))[0]
-    if zc.size:
-        j = zc[0]
-        wp_scr = wpos[j]-e1[j]*(wpos[j+1]-wpos[j])/(e1[j+1]-e1[j])
-        print(f'  screened plasma freq (Re eps_xx=0): hbar*wp_scr = {wp_scr:.4f} eV'
-              f'  (nu_scr = {wp_scr/h_eVs/1e12:.2f} THz)', flush=True)
-    else:
-        wp_scr = None
-        print('  screened plasma freq (Re eps_xx=0): no upward zero crossing in [0, Emax]', flush=True)
-    # write sigma(w) and eps(w) (diagonal components) to a data file
-    try:
-        header = ('perceived colour (CIE1931 2-deg, D65, sRGB) '
-                  + '  '.join(f'{lab}: {c["hex"]} RGB({c["rgb255"][0]},{c["rgb255"][1]},'
-                              f'{c["rgb255"][2]})' for lab, c in cols)+'\n'
-                  + f'non-metal colour (d = {color_thick:.4g} m, l_scatt = {color_scatt:.4g} m) '
-                  + '  '.join(f'{lab}: {c[key]}' for lab, c, key in ncols)+'\n'
-                  + f'plasma frequency (f-sum rule) hbar*wp [eV] = '
-                  f'{hwp[0]:.6f} {hwp[1]:.6f} {hwp[2]:.6f}  (xx yy zz)\n'
-                  + (f'screened plasma frequency (Re eps_xx=0) hbar*wp_scr [eV] = {wp_scr:.6f}\n'
-                     if wp_scr is not None else 'screened plasma frequency (Re eps_xx=0): none in window\n')
-                  + 'w[eV] '
-                  'Re_sigma_xx Im_sigma_xx Re_sigma_yy Im_sigma_yy Re_sigma_zz Im_sigma_zz '
-                  'Re_eps_xx Im_eps_xx Re_eps_yy Im_eps_yy Re_eps_zz Im_eps_zz '
-                  'R_xx R_yy R_zz alpha_xx alpha_yy alpha_zz[1/m] '
-                  'T_xx T_yy T_zz Rinf_xx Rinf_yy Rinf_zz')
-        d = np.arange(3)
-        data = np.column_stack([wlist[1:],
-                                *[f(sigma[1:, i, i]) for i in d for f in (np.real, np.imag)],
-                                *[f(epsilon[1:, i, i]) for i in d for f in (np.real, np.imag)],
-                                refl[1:], alpha[1:], trans[1:], rinf[1:]])
-        np.savetxt('optical.dat', data, header=header)
-        print("optical conductivity, dielectric function and reflectivity written to 'optical.dat'", flush=True)
-    except OSError as e:
-        print(f"Error: Failed to write 'optical.dat': {e}", flush=True)
-    # publication-quality dielectric-function figure (xx component), saved to file
-    plot_dielectric(wlist[1:], epsilon[1:, 0, 0], fname='dielectric', wp_scr=wp_scr)
-    # publication-quality reflectivity figure (principal components)
-    # one patch per distinct colour (a cubic metal collapses to a single swatch)
-    sw = []
-    for lab, c in cols:
-        for e in sw:
-            if e[0] == c['hex']:
-                e[1].append(lab)
-                break
-        else:
-            sw.append([c['hex'], [lab], c['rgb']])
-    swatch = [(f'{",".join(labs)}  {hx}', rgb) for hx, labs, rgb in sw]
-    # add the non-metal colours only when the sample actually lets light through
-    # at this thickness; a metal is opaque, so they would all be black clutter
-    if ncols[0][1]['Y'] > 0.05:
-        swatch += [(f'{lab}  {c[key]}', c['rgb_neg'] if key == 'hex_neg' else c['rgb'])
-                   for lab, c, key in ncols]
-    plot_reflectivity(wlist[1:], refl[1:], fname='reflectivity', wp_scr=wp_scr,
-                      swatch=swatch)
-    # quick interactive view of the optical conductivity
-    fig = plt.figure()
-    ax = fig.add_subplot(111)
-    ax.set_xlabel(r'$\omega$ (eV)')
-    ax.set_ylabel(r'$\sigma_{xx}(\omega)$ (S/m)')
-    ax.plot(wlist, sigma[:, 0, 0].real, label='Re')
-    ax.plot(wlist, sigma[:, 0, 0].imag, label='Im')
-    ax.legend()
-    plt.show()
-
-
-def output_Fk(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray,
-              plist: np.ndarray, mu: float, temp: float, sw_self: bool, sw_soc: bool = False,
-              invs: np.ndarray | None = None, slist: np.ndarray | None = None, gap_sym: int = 0,
-              sw_maxent: bool = False, maxent_noise: float = 1.0e-4, iperm: np.ndarray | None = None) -> None:
-    klist, kmap, invk = flibs.gen_irr_k_TRS(Nx, Ny, Nz)
-    eig, uni = plibs.get_eigs(klist, ham_r, S_r, rvec)
-    if sw_self:
-        ham_k = flibs.gen_ham(klist, ham_r, rvec)
-        npz = np.load('self_en.npz')
-        sigmak, mu_self = npz['arr_0'], npz['arr_1']
-        print(f'chem. pot. with self= {mu_self:.4f} eV', flush=True)
-        Gk = flibs.gen_green(sigmak, ham_k, mu_self, temp)
-    else:
-        Gk = flibs.gen_Green0(eig, uni, mu, temp, Nw)
-    try:
-        gap = np.load('gap.npy')
-    except FileNotFoundError:
-        print("Error: 'gap.npy' not found", flush=True)
-        return
-    if sw_soc:
-        Fk = flibs.gen_Fk_soc(Gk, gap, invk, invs, slist, gap_sym)
-        Norb = int(len(slist)/2)
-        if gap_sym >= 0:
-            Fks = Fk[:Norb, Norb:, 0, :]-Fk[Norb:, :Norb, 0, :]
-            Fktr = np.array([f.diagonal().sum() for f in Fks.T])
-        else:
-            Fkt = Fk[:Norb, Norb:, 0, :]+Fk[Norb:, :Norb, 0, :]
-            Fktr = np.array([f.diagonal().sum() for f in Fkt.T])
-    else:
-        Fk0 = flibs.gen_Fk(Gk, gap, invk)
-        # remap_gap takes [Norb,Norb,Nw,Nk]: keep a length-1 Matsubara axis for the lowest w_n
-        Fk = flibs.remap_gap(Fk0[:, :, :1, :], plist, invk, gap_sym, iperm=iperm)[:, :, 0, :]
-        Fktr = np.array([f.diagonal().sum() for f in Fk.T])
-    print('output anomalous green function')
-    try:
-        with open(f'Fk_tr.dat', 'w') as f:
-            iwlist = (2*np.arange(Nw)+1)*np.pi*temp
-            # wlistg=np.linspace(0,10,10)
-            # Fkw=flibs.pade_with_trace(Fk[:,:,:30,:],iwlist[:30]*1j,wlistg+3e-2*1j)
-            for i, km in enumerate(kmap):
-                if km[2] == 0:
-                    # f.write(f'{km[0]:3} {km[1]:3} {Fks[i,0].real:12.8f} {Fks[i,0].imag:12.8f}\n')
-                    f.write(f'{km[0]:3} {km[1]:3} {Fktr[i].real:12.8f} {Fktr[i].imag:12.8f}\n')
-                    if km[0] == Nx-1:
-                        f.write('\n')
-    except IOError as e:
-        print(f"Error: Failed to write 'Fk_tr.dat': {e}", flush=True)
-    emax = (eig.max()-(mu_self if sw_self else mu))*1.2
-    emin = (eig.min()-(mu_self if sw_self else mu))*1.2
-    wlist = np.linspace(emin, emax, 500)
-    # only the kx-axis line (ky=kz=0) is written, so continue just those k-points:
-    # MaxEnt costs ~0.1-0.5 s/k-point and would otherwise be wasted on the rest.
-    sel = [i for i, km in enumerate(klist) if km[1] == 0.0 and km[2] == 0.0]
-    try:
-        with open(f'Gpade.dat', 'w') as fp:
-            if sw_maxent:
-                # MaxEnt (ana_cont): regularized fit, so it does not chase Matsubara
-                # noise into spurious real-axis structure over this wide 500-point
-                # window the way the 40-point Pade continued fraction below does;
-                # uses the full stored Matsubara mesh instead of truncating to 40.
-                Akw = plibs.maxent_trace_spectrum(Gk[:, :, :, sel], iwlist, wlist, temp, noise_level=maxent_noise)
-            else:
-                idelta = 1e-2
-                Gkw = flibs.pade_with_trace(Gk[:, :, :40, :], iwlist[:40]*1j, wlist+idelta*1j)
-                Akw = -Gkw[sel].imag
-            for row, i in enumerate(sel):
-                km = klist[i]
-                for j, w in enumerate(wlist):
-                    fp.write(f'{km[0]:3} {w.real:12.8f} {Akw[row, j]:12.8f}\n')
-                fp.write('\n')
-    except IOError as e:
-        print(f"Error: Failed to write 'Gpade.dat': {e}", flush=True)
-    if sw_self:
-        # quick look at the self-energy: Sigma_11(Gamma, iw_n)
-        plt.plot(iwlist, sigmak[0, 0, :, 0].real, color='r', label='Re')
-        plt.plot(iwlist, sigmak[0, 0, :, 0].imag, color='b', label='Im')
-        plt.xlabel(r'$\omega_n$ (eV)')
-        plt.ylabel(r'$\Sigma_{11}(\Gamma, i\omega_n)$')
-        plt.legend()
-        plt.show()
-    plibs.output_gap_function(invk, kmap, gap, uni, plist, gap_sym, Nx, sw_soc, invs, slist, iperm=iperm)
-
-
-def get_mass(mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray, bvec: np.ndarray,
-             mu: float, de: float = 3.e-6, meshkz: int = 20) -> None:
-    """
-    calculate cyclotron mass m*_c=hbar^2/2pi (dS/dE) where S is the area of Fermi surface cross section
-    avec/bvec: primitive/reciprocal lattice vectors as rows, used for the slice area
-               Jacobian and to report the field direction RotMat actually describes
-    de: energy step for numerical derivative (eV)
-    meshkz: number of kz points for coarse scan of S(kz) in [0, 0.5] (reduced)
-    """
-    # Parameter validation
-    if de <= 0:
-        print("Error: Energy step (de) is non-positive", flush=True)
-        return
-    if meshkz <= 0:
-        print("Error: kz mesh size (meshkz) is non-positive", flush=True)
-        return
-
-    # Area Jacobian of the kz-slice spanned by RotMat: |v1 x v2| with v_i = sum_k RotMat[i,k] b_k.
-    # Equals 4*pi^2/(a1*a2) for an orthorhombic cell at RotMat=I, but follows the rotation
-    # and the cell shape otherwise.
-    ABZ = plibs.slice_area_factor(RotMat, bvec)
-    bhat = plibs.field_direction(RotMat, avec)
-    th_B = np.degrees(np.arccos(min(abs(bhat[2]), 1.)))
-    ph_B = np.degrees(np.arctan2(bhat[1], bhat[0]))
-    print(f"field direction implied by RotMat: B_hat = "
-          f"({bhat[0]:.4f}, {bhat[1]:.4f}, {bhat[2]:.4f})  "
-          f"theta={th_B:.2f} deg, phi={ph_B:.2f} deg", flush=True)
-    print(f"slice area Jacobian = {ABZ:.6f} AA^-2", flush=True)
-    plibs.open_contour_report()   # clear the counter for this run
-
-    # --- Phase 1: coarse scan S(kz) ---
-    print("Phase 1: scanning S(kz)...", flush=True)
-    S_scan, eig_cache = plibs.scan_fs_area(mesh, rvec, ham_r, S_r, RotMat, mu, ABZ, meshkz)
-
-    # --- Phase 2: refine extremal kz, compute m* ---
-    print("Phase 2: computing m* at extremal orbits...", flush=True)
-    print("="*50, flush=True)
-    for band_idx in sorted(S_scan.keys()):
-        data = np.array(S_scan[band_idx])
-        kz_arr, S_arr = data[:, 0], data[:, 1]
-        if len(kz_arr) < 3:
-            continue
-        cand_kz = plibs.find_extremal_kz(kz_arr, S_arr, band_idx, mesh, rvec, ham_r, S_r, RotMat, mu, ABZ)
-        print(f"Band {band_idx+1}: extremal kz = {[f'{k:.4f}' for k in cand_kz]}", flush=True)
-
-        results = []
-        for kz_ext in cand_kz:
-            eig = eig_cache.get(kz_ext)
-            if eig is None:
-                eig = plibs.get_eigs_2d(mesh, rvec, ham_r, S_r, RotMat, kz_ext)
-            v2, blist = plibs.get_kf_points(eig, mesh, mu, kz_ext)
-            S0 = plibs.get_band_area(v2, blist, band_idx, ABZ)
-            if not S0:
-                continue
-            v2_p, blist_p = plibs.get_kf_points(eig, mesh, mu+de, kz_ext)
-            v2_m, blist_m = plibs.get_kf_points(eig, mesh, mu-de, kz_ext)
-            Sp = plibs.get_band_area(v2_p, blist_p, band_idx, ABZ)
-            Sm = plibs.get_band_area(v2_m, blist_m, band_idx, ABZ)
-            if Sp is None or Sm is None:
-                continue
-            # dS/dE via central finite difference; *1e20 converts AA^-2/eV -> m^-2/J
-            dSdE_SI = (Sp-Sm)/(2.*de)*1.e20
-            # Onsager: m*_c = (hbar^2 / 2pi) * dS/dE  [in units of electron mass m_e]
-            mc = np.abs(dSdE_SI)*eC*hbar**2/(2*np.pi*emass)
-            results.append((kz_ext, S0, mc))
-            print(f"  kz={kz_ext:.4f}: S={S0:.4f} AA^-2, m*={mc:.4f} m_e", flush=True)
-
-        if results:
-            mc_vals = np.array([r[2] for r in results])
-            kz_vals = np.array([r[0] for r in results])
-            i_max, i_min = np.argmax(mc_vals), np.argmin(mc_vals)
-            print(f"  >> Max m* = {mc_vals[i_max]:.4f} m_e  at kz = {kz_vals[i_max]:.4f}", flush=True)
-            print(f"  >> Min m* = {mc_vals[i_min]:.4f} m_e  at kz = {kz_vals[i_min]:.4f}", flush=True)
-    n_open = plibs.open_contour_report()
-    if n_open:
-        print(f"Warning: {n_open} orbit(s) discarded: the contour left the 2D slice box, so its "
-              "area is not the orbit area. Increase the cell along the slice normal or use a "
-              "field direction commensurate with the lattice.", flush=True)
-
-
-def get_dhva_band(mesh: int, rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray, bvec: np.ndarray,
-                  mu: float, theta_list: np.ndarray, phi: float = 0., meshkz: int = 20, grid_mesh: int = 120) -> dict:
-    """
-    Calculate dHvA frequency F vs magnetic field polar angle theta.
-    F = hbar/(2*pi*e) * A_ext  (Onsager relation)
-    The Fermi surface is sliced by Cartesian planes perpendicular to B, over a window
-    wide enough to close the orbit, so theta/phi may be any real angle: H(k) is exactly
-    periodic in the fractional k it is fed, and the window may span several zones.
-    avec/bvec : primitive/reciprocal lattice vectors as rows
-    theta_list: array of polar angles from z-axis [deg]
-    phi       : azimuthal angle [deg] (fixes the rotation plane, default 0 = xz-plane)
-    meshkz    : number of slice offsets scanned per angle
-    grid_mesh : diagonalise once on a grid_mesh^3 fractional grid and interpolate the
-                slices from it (cubic). None diagonalises every slice point instead --
-                exact but far slower; the grid reproduces it to ~1e-5 in the area.
-    Returns   : dict  band_idx -> np.ndarray of shape (N, 2) columns=[theta, F[T]]
-    """
-    F_factor = hbar/(2.*np.pi)*1.e20   # AA^-2 -> T (Onsager): hbar[eV*s]/(2pi) * 1e20[AA^-2->m^-2]
-    # keep the in-plane resolution the caller asked for: mesh points across a zone
-    dk = float(np.linalg.norm(bvec, axis=1).min())/mesh
-    egrid = None
-    if grid_mesh:
-        print(f"building the {grid_mesh}^3 band-energy grid...", flush=True)
-        egrid = plibs.build_fs_energy_grid(rvec, ham_r, S_r, mu, mesh=grid_mesh)
-        if egrid is None:
-            print("Error: no band crosses the chemical potential", flush=True)
-            return {}
-        print(f"  bands kept: {[b+1 for b in egrid['bands']]}", flush=True)
-    kf = plibs.fs_cartesian_points(rvec, ham_r, S_r, avec, mu, mesh=40, egrid=egrid)
-    if len(kf) == 0:
-        print("Error: no band crosses the chemical potential", flush=True)
-        return {}
-
-    all_results = {}  # band_idx -> [(theta, F), ...]
-    has_axial = {}    # band_idx -> angles with a closed orbit encircling the field axis
-    no_axial = {}     # band_idx -> angles without one
-    seeds = []        # orbits found at earlier angles, followed into the next
-    seed_life = 3     # angles a seed survives without being found again
-    n_open_tot = n_rej = 0
-
-    for theta in theta_list:
-        bhat = plibs.bfield_hat(theta, phi)
-        radius, dmax = plibs.fs_extent_along(kf, bhat, avec)
-        # commensurate B: A(d) repeats with period p and is symmetric about 0 and p/2,
-        # so [0,p/2] is the fundamental domain and both ends are extremal planes.
-        # Incommensurate B: no repeat, only interior dA/dd=0 orbits.
-        period = plibs.slice_period(bvec, bhat)
-        d_end = min(dmax, 0.5*period) if period is not None else dmax
-        sym_end = d_end if (period is not None and 0.5*period <= dmax*(1.+1e-9)) else None
-        L0, d_arr = 2.6*radius, np.linspace(0., d_end, meshkz, True)
-        S_scan, orbit_cache, n_open, axial_bands = plibs.scan_plane_area(
-            rvec, ham_r, S_r, avec, mu, bhat, d_arr, L0, dk, egrid=egrid)
-        n_open_tot += n_open
-        for b in S_scan:
-            (has_axial if b in axial_bands else no_axial).setdefault(b, []).append(theta)
-        # follow every orbit through the scan, take dA/dd=0 per branch, then collapse
-        # the copies that differ by a whole reciprocal lattice vector
-        branches = plibs.track_orbit_branches(orbit_cache, d_arr)
-        ext = [e for br in branches for e in plibs.branch_extrema(br, d_end=sym_end)]
-        # one step of the offset scan is the natural scale for telling a zone copy
-        # (same orbit) from a neighbouring extremum of the same tube
-        # Carry orbits found at earlier angles forward: an orbit already known is
-        # followed straight to its extremum from its own centre, without having to be
-        # rediscovered among hundreds of branches. This only ever adds. A seed that
-        # fails to follow is kept for a few more angles rather than dropped at once --
-        # one bad angle would otherwise break the chain for the whole rest of the sweep.
-        step = d_end/max(meshkz-1, 1)
-        alive = []
-        for sd in seeds:
-            f = plibs.follow_orbit(sd, rvec, ham_r, S_r, avec, mu, bhat, L0, dk, step, egrid=egrid)
-            if f is None:
-                if sd.get('_age', 0)+1 < seed_life:
-                    sd = dict(sd); sd['_age'] = sd.get('_age', 0)+1
-                    alive.append(sd)
-                continue
-            f['_age'] = 0
-            ext.append(f)
-            alive.append(f)
-        ext = plibs.dedup_extremal_orbits(ext, bvec, tol_k=step, bhat=bhat)
-        # an area that moves with the sampling window is not an orbit (see the docstring)
-        ext, rejected = plibs.verify_orbits_window(ext, rvec, ham_r, S_r, avec, mu, bhat,
-                                                   L0, dk, egrid=egrid)
-        n_rej += len(rejected)
-        # seeds come from before the window check: continuity across angles is stronger
-        # evidence than that check, and a rejected orbit must still be able to seed
-        seeds = plibs.dedup_extremal_orbits(ext+alive, bvec, tol_k=step, bhat=bhat)
-        for e in ext:
-            all_results.setdefault(e['band'], []).append((theta, e['area']*F_factor))
-
-        print(f"theta={theta:.1f} deg: FS bands={[b+1 for b in sorted(S_scan)]}, "
-              f"window={L0:.2f} AA^-1, d in [0,{d_end:.3f}]"
-              + ("" if period is None else f" (period {period:.3f})")+", "
-              f"{len(branches)} branches -> {len(ext)} extremal orbits"
-              + (f" ({len(rejected)} rejected: window dependent)" if rejected else "")
-              + (f"  [no orbit encircles the axis: band(s) "
-                 f"{[b+1 for b in sorted(set(S_scan)-axial_bands)]}]"
-                 if set(S_scan)-axial_bands else ""), flush=True)
-
-    # Only worth saying for a band that HAS a central orbit somewhere in the sweep:
-    # a sheet that never encircles the axis (electron pockets off at X, say) is not an
-    # open orbit, it simply lives elsewhere.
-    for b in sorted(set(has_axial) & set(no_axial)):
-        print(f"Band {b+1}: no closed orbit encircles the field axis for theta = "
-              f"{', '.join(f'{t:g}' for t in no_axial[b])} deg, so the central orbit of "
-              "this sheet gives no dHvA oscillation there (open orbits show up in "
-              "magnetoresistance instead).", flush=True)
-    if n_open_tot:
-        print(f"Note: {n_open_tot} contour piece(s) never closed in the sampling window; "
-              "open orbits and window-cut copies together.", flush=True)
-
-    # convert to arrays
-    all_results = {k: np.array(v) for k, v in all_results.items()}
-    if not all_results:
-        print("Error: no usable extremal orbit was found at any angle", flush=True)
-        return all_results
-
-    # Connect extremal frequencies into orbit branches across angle by continuity of F
-    # (a rank sort would swap branches wherever two of them cross)
-    def _link_branches(theta_F: dict, tol: float = 0.35) -> list:
-        out = []
-        active = []                      # (branch index, last F)
-        for th in sorted(theta_F):
-            fs = theta_F[th]
-            pairs = sorted(((abs(f-fp)/max(f, fp, 1e-30), ia, ifq)
-                            for ia, (_, fp) in enumerate(active)
-                            for ifq, f in enumerate(fs)), key=lambda t: t[0])
-            used_a, used_f, new_active = set(), set(), []
-            for cost, ia, ifq in pairs:
-                if cost > tol or ia in used_a or ifq in used_f:
-                    continue
-                used_a.add(ia); used_f.add(ifq)
-                bi = active[ia][0]
-                out[bi].append((th, fs[ifq]))
-                new_active.append((bi, fs[ifq]))
-            for ifq, f in enumerate(fs):
-                if ifq not in used_f:
-                    out.append([(th, f)])
-                    new_active.append((len(out)-1, f))
-            active = new_active
-        return out
-
-    fig, ax = plt.subplots()
-    prop_cycle = plt.rcParams['axes.prop_cycle'].by_key()['color']
-    for ci, band_idx in enumerate(sorted(all_results.keys())):
-        d = all_results[band_idx]
-        color = prop_cycle[ci % len(prop_cycle)]
-        theta_F = {th: sorted(d[d[:, 0] == th, 1]) for th in np.unique(d[:, 0])}
-        for i, br in enumerate(_link_branches(theta_F)):
-            pts = np.array(br)
-            label = f'Band {band_idx+1}' if i == 0 else '_nolegend_'
-            ax.plot(pts[:, 0], pts[:, 1], '-o', color=color, markersize=3, label=label)
-    ax.set_xlabel('theta (deg)')
-    ax.set_ylabel('F (T)')
-    ax.set_title(f'dHvA frequency vs field angle  phi={phi:.1f} deg')
-    ax.legend()
-    plt.tight_layout()
-    plt.savefig('dhva_band.png', dpi=150)
-    plt.show()
-    return all_results
-
-
-def calc_cpa_Akw(k_sets: list, kmesh: int, bvec: np.ndarray,
-                 ham_r: np.ndarray, rvec: np.ndarray, mu: float,
-                 sigma_cpa: np.ndarray, wlist: np.ndarray,
-                 zlist_real: np.ndarray, xlabel: list) -> np.ndarray:
-    """
-    Compute and plot the CPA spectral function A(k,w) along a symmetry-line k-path.
-    Returns Akw array of shape (Nks, Nw).
-    """
-    Norb = ham_r.shape[0]
-    Nw = len(wlist)
-    klist_s, spa_length, xticks = plibs.mk_klist(k_sets, kmesh, bvec)
-    hamk_s = flibs.gen_ham(klist_s, ham_r, rvec)
-    hamk_s[:, range(Norb), range(Norb)] -= mu
-    Nks = len(klist_s)
-    Akw = np.zeros((Nks, Nw))
-    A_batch = (np.eye(Norb)[None, None, :, :] * zlist_real[:, None, None, None]
-               - hamk_s[None, :, :, :]
-               - sigma_cpa[:, None, :, :])  # (Nw, Nks, Norb, Norb)
-    try:
-        Gk_all = np.linalg.inv(A_batch)
-        Akw = (-np.trace(Gk_all, axis1=2, axis2=3).imag / np.pi).T
-    except np.linalg.LinAlgError:
-        print("Warning: Batch matrix inversion failed, falling back to element-wise.", flush=True)
-        for iw in range(Nw):
-            zI = np.eye(Norb) * zlist_real[iw]
-            sig = sigma_cpa[iw]
-            for ik in range(Nks):
-                try:
-                    Gk = np.linalg.inv(zI - hamk_s[ik] - sig)
-                    Akw[ik, iw] = -np.trace(Gk).imag / np.pi
-                except np.linalg.LinAlgError:
-                    print(f"Warning: Matrix inversion failed at k-point {ik}, frequency index {iw}. Setting to zero.", flush=True)
-                    Akw[ik, iw] = 0.0
-    w, x = np.meshgrid(wlist, spa_length)
-    plt.contourf(x, w, Akw, 100, cmap=plt.get_cmap('hot'))
-    for xt in xticks[1:-1]:
-        plt.axvline(xt, ls='-', lw=0.25, color='white')
-    plt.xlim(0, spa_length.max())
-    plt.axhline(0., ls='--', lw=0.25, color='white')
-    plt.xticks(xticks, xlabel)
-    plt.ylabel('Energy (eV)')
-    plt.title('CPA spectrum')
-    plt.colorbar(label=r'$A(\mathbf{k},\omega)$')
-    plt.tight_layout()
-    plt.savefig('cpa_spectrum.png', dpi=150)
-    plt.show()
-    return Akw
 
 
 def get_spin_lists(Norb: int) -> tuple[np.ndarray, np.ndarray]:
@@ -1996,55 +727,44 @@ def main() -> None:
         klist, spa_length, xticks = plibs.mk_klist(k_sets, kmesh, bvec)
         eig, uni = plibs.get_eigs(klist, ham_r, S_r, rvec)
         # plot_band loops over bands and reads orbital weights per k: uni(k,band,orb) -> (band,orb,k)
-        plot_band(eig.T-mu, spa_length, xlabel, xticks, uni.transpose(1, 2, 0), olist, color_option != 0)
+        plots.plot_band(eig.T-mu, spa_length, xlabel, xticks, uni.transpose(1, 2, 0), olist, color_option != 0)
     elif option == CalcMode.DOS:  # plot dos
         Nk, klist, eig, uni, kweight = plibs.get_emesh(Nx, Ny, Nz, ham_r, S_r, rvec, avec, sw_uni=True)
         wlist = np.linspace(Emin, Emax, Nw, True)
         Dos = flibs.gen_dos(eig, uni, mu, wlist, delta)
-        if color_option == 1:
-            if len(olist) != 0:
-                for ol, cl in zip(olist, ['red', 'green', 'blue']):
-                    if ol == []:
-                        pass
-                    else:
-                        if isinstance(ol, int):
-                            plt.plot(wlist, Dos[ol], color=cl)
-                        else:
-                            plt.plot(wlist, Dos[ol, :].sum(axis=0), color=cl)
-            plt.plot(wlist, Dos.sum(axis=0), color='black')
-        elif color_option == 0:
-            clist = ['k', 'r', 'g', 'b', 'c', 'm', 'y']
-            tmp_ol_b = flatten_orbs(olist)
-            plt.fill_between(wlist, Dos[tmp_ol_b].sum(axis=0), Dos.sum(axis=0), color=clist[0])
-            for i in range(len(olist)-1):
-                tmp_ol_u = flatten_orbs(olist[i:])
-                tmp_ol_b = flatten_orbs(olist[i+1:])
-                plt.fill_between(wlist, Dos[tmp_ol_b].sum(axis=0), Dos[tmp_ol_u].sum(axis=0), color=clist[i+1])
-            plt.fill_between(wlist, 0, Dos[tmp_ol_b].sum(axis=0), color=clist[len(olist)])
-        plt.xlim(Emin, Emax)
-        plt.ylim(0, max(Dos.sum(axis=0))*1.2)
-        plt.show()
+        plots.plot_dos(wlist, Dos, olist, color_option)
     elif option == CalcMode.FERMI_2D:  # 2D Fermi surface plot
         eig2d = plibs.get_eigs_2d(Nx, rvec, ham_r, S_r, RotMat, kz)
         klist, blist = plibs.get_kf_points(eig2d, Nx, mu, kz)
         clist = plibs.get_colors(klist, blist, ihbar*avec.T, rvec, ham_r, S_r, olist, color_option, True)
-        plot_FS(clist, klist, color_option)
+        plots.plot_FS(clist, klist, color_option)
     elif option == CalcMode.FERMI_3D:  # 3D Fermi surface plot (color_option=GAP: the Eilenberger pairing gap Re[phi(k)])
         polys, centers, blist = plibs.gen_3d_surf_points(Nx, rvec, ham_r, S_r, mu, kscale, bvec)
         gorb = (plibs.gap_orbital_from_wannier(eil_gap_file, eil_gap_iw, eil_gap_navg)  # RPA/FLEX gap as form factor
                 if eil_gap_file else eil_gap_orbital)
-        fspolys, fscenters, fscolors = set_init_3dfsplot(color_option, polys, centers, blist, avec, rvec, ham_r, S_r, olist,
-                                                         gap_sym, delta0, gorb, set_eil_gauge(len(ham_r[0])))
-        plot_3d_surf(fspolys, fscenters, fscolors, color_option, kscale, bvec)
+        fspolys, fscenters, fscolors = plots.set_init_3dfsplot(color_option, polys, centers, blist, avec, rvec, ham_r,
+                                                               S_r, olist, gap_sym, delta0, gorb,
+                                                               set_eil_gauge(len(ham_r[0])), ihbar=ihbar)
+        plots.plot_3d_surf(fspolys, fscenters, fscolors, color_option, bvec)
     elif option == CalcMode.SPECTRUM:  # plot spectrum
-        plot_spectrum(k_sets, xlabel, kmesh, bvec, mu, ham_r, S_r, rvec, Emin, Emax, delta, Nw, sw_self)
+        spec = plibs.spectrum_on_path(k_sets, kmesh, bvec, mu, ham_r, S_r, rvec, Emin, Emax, delta, Nw, temp, sw_self)
+        if spec is not None:
+            spa_length, xticks, wlist, Akw = spec
+            plots.plot_path_map(spa_length, xticks, xlabel, wlist, Akw)
     elif option == CalcMode.CONDUCTIVITY_BT:  # calc conductivity
-        get_hall_coe(rvec, ham_r, S_r, avec, Nx, Ny, Nz, fill, temp, tau_const,
-                     with_spin=sw_soc, mesh_list=hall_mesh_list)
-        calc_conductivity_Boltzmann(rvec, ham_r, S_r, avec, Nx, Ny, Nz, fill, temp, tau_const,
-                                    with_spin=sw_soc)
+        # relaxation-time model; dos_delta is the DOS broadening of tau_mode='dos'
+        tau_kw = dict(tau_mode=tau_mode, epa_file=epa_file, dos_delta=delta)
+        plibs.get_hall_coe(rvec, ham_r, S_r, avec, Nx, Ny, Nz, fill, temp, tau_const, units, tau_kw,
+                           with_spin=sw_soc, mesh_list=hall_mesh_list)
+        res = plibs.calc_conductivity_Boltzmann(rvec, ham_r, S_r, avec, Nx, Ny, Nz, fill, temp, tau_const, units,
+                                                tau_kw, with_spin=sw_soc, sw_tdf=sw_tdf)
+        if res is not None and sw_tdf:
+            plots.plot_tdf(res['tdf_e'], res['tdf'])
     elif option == CalcMode.CONDUCTIVITY_PT:  # calc_optical conductivity
-        calc_conductivity_lrt(rvec, ham_r, S_r, avec, Nx, Ny, Nz, fill, temp, Nw, delta, with_spin=sw_soc)
+        res = plibs.calc_conductivity_lrt(rvec, ham_r, S_r, avec, Nx, Ny, Nz, fill, temp, Nw, delta, units, Emax,
+                                          color_thick=color_thick, color_scatt=color_scatt, with_spin=sw_soc)
+        if res is not None:
+            plots.plot_optical(res)
     elif option in MODES_CHI_NORMAL:  # calc_chis_spectrum
         print("calculate electron energy", flush=True)
         Nk, klist, eig, uni, kweight = plibs.get_emesh(Nx, Ny, Nz, ham_r, S_r, rvec, avec, sw_uni=True)
@@ -2092,47 +812,15 @@ def main() -> None:
             plt.savefig(fname=susfname, dpi=300)
     elif option in MODES_CHIS_SC:  # calc chis at superconducting state
         sw_spsym = gap_sym < 0
-        scalar_gap = bool(np.isscalar(delta0))
-        if scalar_gap:
-            klist, kmap, invk = flibs.gen_irr_k_TRS(Nx, Ny, Nz)
-            eig, uni = plibs.get_eigs(klist, ham_r, S_r, rvec)
-            deltaini = flibs.remap_gap(flibs.get_initial_delta(plibs.get_initial_gap(klist, len(eig.T), gap_sym),
-                                                               uni, kmap, invk, 1, gap_sym), plist, invk, gap_sym, iperm=iperm)
-            deltaini_static = np.ascontiguousarray(deltaini[:, :, 0, :].transpose(2, 0, 1))  # [Nkall,Norb,Norb]
-            print("maximum gap = %7.4f meV"%(delta0*1e3), flush=True)
-            gap_max = abs(deltaini_static).max()
-            if gap_max <= 0.0:
-                print("Warning: initial gap is zero. Using unscaled delta", flush=True)
-                deltak = deltaini_static.copy()
-            else:
-                deltak = delta0*deltaini_static/gap_max
-            # Full-grid klist in kmap (FFT) order: keeps deltak <-> klist index pairing
-            # consistent, and gives the [0,1) endpoint-free mesh required by get_qshift
-            klist = kmap/np.array([Nx, Ny, Nz], dtype=np.float64)
-            Nk = len(klist)
-        else:  # one amplitude per band (length checked above)
-            # sw_pp=False: get_qshift requires the periodic [0,1) mesh without endpoints
-            Nk, klist = plibs.gen_klist(Nx, Ny, Nz, sw_pp=False)
-            eig, uni = plibs.get_eigs(klist, ham_r, S_r, rvec)
-            inigap = plibs.gap_symms(klist, Norb, gap_sym)
-            for i, k in enumerate(klist):
-                # AFM-zone test in centered fractional coords: keep the full gap inside the
-                # M-centered diamond (|kx|+|ky|>=1/2) and damp bands 1,2 inside the
-                # Gamma-centered diamond (|kx|+|ky|<1/2).
-                kc = k-np.round(k)
-                if (abs(kc[0])+abs(kc[1]) >= 0.5):
-                    pass
-                else:
-                    inigap[1, i] = inigap[1, i]*.5
-                    inigap[2, i] = inigap[2, i]*.5
-            # delta0 is per-band [Norb]; broadcast over k: (inigap.T)[Nk,Norb] * delta0[Norb] → [Norb,Nk]
-            deltaini = (inigap.T*np.array(delta0, dtype=np.complex128)).T
-            deltak = flibs.get_band_to_orb_delta(deltaini, uni)
+        # model gap Delta(k) (gap_sym form factor, delta0 amplitude) on the full [0,1) k-mesh
+        klist, deltak = plibs.sc_gap_on_mesh(Nx, Ny, Nz, ham_r, S_r, rvec, gap_sym, delta0, plist, iperm)
         hamk = flibs.gen_ham(klist, ham_r, rvec)
         if option == CalcMode.CHIS_SPECTRUM_SC:
             print("generate qlist", flush=True)
             qlist, spa_length, xticks = plibs.mk_qlist(k_sets, Nx, Ny, Nz, bvec)
-            w, sp, sus = plibs.chis_spectrum_sc(mu, temp, Smat, hamk, deltak, klist, qlist, chiolist, Nw, Emax, delta, sw_spsym)
+            sus, _, wlist = plibs.chis_spectrum_sc(mu, temp, Smat, hamk, deltak, klist, qlist, chiolist, Nw, Emax,
+                                                   delta, sw_spsym)
+            w, sp = np.meshgrid(wlist, spa_length)   # [Nq,Nw], like sus
             print("write chis spectrum in png file", flush=True)
             plt.contourf(sp, w, abs(sus.imag), 100)
             plt.colorbar()
@@ -2141,36 +829,7 @@ def main() -> None:
             plt.close()
         elif option == CalcMode.CHIS_QPOINT_SC:
             # --- BdG band structure along (0,0,0) -> (0,0.5,0) ---
-            Nk_path = 200
-            kpath_bdg = np.zeros((Nk_path, 3))
-            kpath_bdg[:, 1] = np.linspace(0, 0.5, Nk_path)
-            hamk_path = flibs.gen_ham(kpath_bdg, ham_r, rvec)
-            _, uni_path = plibs.get_eigs(kpath_bdg, ham_r, S_r, rvec)
-            inigap_path = plibs.gap_symms(kpath_bdg, Norb, gap_sym)
-            if scalar_gap:
-                # scale the band form factor so that its maximum over the k-mesh is delta0,
-                # the amplitude deltak was normalized to.  (gap_max belongs to the
-                # norm-normalized orbital-basis seed and is not comparable to gap_symms.)
-                fmax = np.abs(plibs.gap_symms(klist, 1, gap_sym)).max()
-                scale = delta0 / fmax if fmax > 0 else delta0
-                deltak_path = flibs.get_band_to_orb_delta(
-                    (inigap_path * scale).astype(np.complex128), uni_path)
-            else:
-                deltak_path = flibs.get_band_to_orb_delta(
-                    (inigap_path.T * np.array(delta0, dtype=np.complex128)).T, uni_path)
-            eig_BdG_path, _ = flibs.get_eig(
-                flibs.mkBdGhamk(hamk_path - mu * np.eye(Norb), deltak_path))
-            ky = kpath_bdg[:, 1]
-            for n in range(eig_BdG_path.shape[1]):
-                plt.plot(ky, eig_BdG_path[:, n], 'b-', lw=0.5)
-            plt.axhline(0, ls='--', lw=0.5, color='gray')
-            plt.xlabel(r'$k_y \; (2\pi/a)$')
-            plt.ylabel('Energy (eV)')
-            plt.title('BdG bands  (0,0,0) → (0,0.5,0)')
-            plt.tight_layout()
-            plt.savefig('BdG_band.png', dpi=150)
-            # plt.show()
-            plt.clf()
+            plots.plot_bdg_path(*plibs.bdg_bands_path(ham_r, S_r, rvec, mu, klist, gap_sym, delta0))
             # --- chi calculation ---
             q_point = np.array(at_point)
             print(f"q-point is ({q_point[0]:.3f}, {q_point[1]:.3f}, {q_point[2]:.3f})", flush=True)
@@ -2245,7 +904,7 @@ def main() -> None:
             res = plibs.nmr_sweep(hamk, deltak, klist, qlist, mu, temps, temp_c, Smat, chiolist,
                                   delta, nmr_w0, sw_spsym, hf_weight, sw_scale_check=False)
             plibs.write_nmr_dat(res)
-            plibs.plot_nmr(res)
+            plots.plot_nmr(res)
             print('wrote nmr_sc.dat and nmr_sc.png', flush=True)
     elif option == CalcMode.LIN_ELIASHBERG and sw_nosym:  # symmetry-free gap equation (Zeeman / FFLO)
         if sw_self or sw_from_file:
@@ -2254,7 +913,7 @@ def main() -> None:
         plibs.calc_lin_eliash_nosym(Nx, Ny, Nz, Nw, ham_r, S_r, rvec, mu, temp, chiolist, site, orb_dep, U, J,
                                     gap_sym, sw_soc, slist, invs,
                                     Umat if orb_dep else None, Jmat if orb_dep else None,
-                                    hvec=zeeman_h, qlist=fflo_q, arnoldi_m=nosym_arnoldi_m)
+                                    hvec=zeeman_h, qlist=fflo_q, arnoldi_m=nosym_arnoldi_m, fill=fill)
     elif option in MODES_FLEX_ELIASH:  # flex/eliashberg calculations
         if sw_soc:  # with soc
             slist, invs = get_spin_lists(Norb)
@@ -2270,7 +929,10 @@ def main() -> None:
                                           Umat if orb_dep else None, Jmat if orb_dep else None,
                                           sigma_scale=sigma_in_scale)
             elif option == CalcMode.GAP_FUNCTION:  # post gap calculation, output gap function/anomalous green's function
-                output_Fk(Nx, Ny, Nz, Nw, ham_r, S_r, rvec, plist, mu, temp, sw_self, sw_soc, invs, slist, gap_sym)
+                sig = plibs.output_Fk(Nx, Ny, Nz, Nw, ham_r, S_r, rvec, plist, mu, temp, sw_self, sw_soc, invs, slist,
+                                      gap_sym)
+                if sig is not None:
+                    plots.plot_sigma_iw(*sig)
         else:  # without soc
             if option == CalcMode.FLEX:  # calc self-energy using flex
                 plibs.calc_flex(Nx, Ny, Nz, Nw, ham_r, S_r, rvec, mu, temp, chiolist, site,
@@ -2284,7 +946,9 @@ def main() -> None:
                                              Umat if orb_dep else None, Jmat if orb_dep else None,
                                              sw_tail=sw_chi0_tail, sigma_scale=sigma_in_scale, iperm=iperm)
             elif option == CalcMode.GAP_FUNCTION:  # post gap calculation, output gap function/anomalous green's function
-                output_Fk(Nx, Ny, Nz, Nw, ham_r, S_r, rvec, plist, mu, temp, sw_self, iperm=iperm)
+                sig = plibs.output_Fk(Nx, Ny, Nz, Nw, ham_r, S_r, rvec, plist, mu, temp, sw_self, iperm=iperm)
+                if sig is not None:
+                    plots.plot_sigma_iw(*sig)
     elif option == CalcMode.EILENBERGER:  # solve homogeneous quasiclassical Eilenberger equation
         # the orbital gap (RPA/FLEX export or explicit matrix) is projected band-resolved
         # onto the FULL 3D Fermi surface -> k_z dependence and multi-sheet signs come from
@@ -2374,80 +1038,32 @@ def main() -> None:
         print('band, hole fraction, electron fraction:', flush=True)
         plibs.report_band_filling(Nx, rvec, ham_r, S_r, mu, Arot)
     elif option == CalcMode.CYCLOTRON_MASS:  # calc cyclotron mass
-        get_mass(Nx, rvec, ham_r, S_r, avec, bvec, mu)
+        plibs.get_mass(Nx, rvec, ham_r, S_r, avec, bvec, mu, RotMat, units)
     elif option == CalcMode.DHVA:  # plot dHvA frequency vs angle
         theta_list = np.linspace(0., 90., 40)
-        get_dhva_band(Nx, rvec, ham_r, S_r, avec, bvec, mu, theta_list)
-    elif option == CalcMode.ELECTRON_MASS:  # mass calc
-        klist, spa_length, xticks = plibs.mk_klist(k_sets, kmesh, bvec)
-        eig, uni = plibs.get_eigs(klist, ham_r, S_r, rvec)
-        mass = flibs.get_mass(klist, ham_r, rvec, avec.T*ihbar, uni, S_r=S_r, eig=eig)*eC/emass
-    elif option == CalcMode.SPECTRUM_IMPURITY:  # calc spectrum with impurity
-        klist, spa_length, xticks = plibs.mk_klist(k_sets, kmesh, bvec)
-        rlist = plibs.gen_rlist(Nx, Ny, Nz)
-        wlist = np.linspace(Emin, Emax, Nw, True)
-        ham_i = ham_r
-        ham_ri = ham_r  # placeholder: use host hopping for cross-species pairs
-        imp_list = np.array([0])
-        print("get imp Ham", flush=True)
-        ham_imp = flibs.gen_imp_ham(rvec, ham_r, ham_i, ham_ri, rlist, imp_list)
-        eigs, uni = sclin.eigh(ham_imp)
-        print("get mu", flush=True)
-        mu = plibs.calc_mu_imp(eigs, len(rlist), fill, temp)
-        print('chem. pot. = %7.4f'%mu, flush=True)
-        spectrum = flibs.get_imp_spectrum(uni, eigs, mu, wlist, klist, rlist)
-        w, k = np.meshgrid(wlist, spa_length)
-        plt.contourf(k, w, abs(spectrum.imag), 100)
-        plt.show()
+        dhva = plibs.get_dhva_band(Nx, rvec, ham_r, S_r, avec, bvec, mu, theta_list, units)
+        if dhva:
+            plots.plot_dhva(dhva, phi=0.)
+    elif option == CalcMode.ELECTRON_MASS:  # band (effective) mass along the symmetry line
+        res = plibs.band_mass_path(k_sets, kmesh, rvec, ham_r, S_r, avec, units)
+        plibs.report_band_mass(res, xlabel, mu)
+        plots.plot_band_mass(res, xlabel)
+    elif option == CalcMode.SPECTRUM_IMPURITY:  # unfolded spectrum of an impurity supercell
+        Nsite = int(np.prod(imp_cell))
+        sites = (plibs.random_impurity_sites(Nsite, imp_conc, imp_seed) if imp_sites is None
+                 else np.asarray(imp_sites, dtype=np.int64))
+        res = plibs.calc_impurity_spectrum(ham_r, rvec, imp_cell, sites, imp_V, fill, temp, k_sets, kmesh, bvec,
+                                           Emin, Emax, Nw, delta)
+        plots.plot_impurity_spectrum(res, xlabel)
     elif option == CalcMode.SIGMA_CPA:
         # --- CPA calculation ---
         mu = plibs.get_mu(ham_r, S_r, rvec, Arot, temp, fill)
         print(f'Temperature = {temp:10.3e} eV ({temp/kb:.2f} K)', flush=True)
         print(f'chem. pot. = {mu:.4f} eV', flush=True)
-        # VA, VB are the onsite perturbation RELATIVE to the reference onsite in hamk
-        # Species A (host): no perturbation -> VA = 0
-        # Species B (impurity): diagonal shift
-        VA = np.zeros((Norb, Norb), dtype=np.complex128)
-        VB = 1.0 * np.eye(Norb, dtype=np.complex128)
-        x_cpa = .5
-        # sw_pp=False: periodic [0,1) mesh avoids double-counting the BZ boundary in the k-sum
-        Nk, klist = plibs.gen_klist(Nx, Ny, Nz, sw_pp=False)
-        hamk = flibs.gen_ham(klist, ham_r, rvec)
-        # shift onsite by -mu so that w=0 corresponds to the Fermi level
-        hamk[:, range(Norb), range(Norb)] -= mu
-        # CPA on real axis for spectrum
-        wlist = np.linspace(Emin, Emax, Nw)
-        zlist_real = wlist + 1j*delta
-        print(f"CPA: Norb={Norb}, Nk={Nk}, Nw={Nw}, x={x_cpa}", flush=True)
-        sigma_cpa = flibs.solve_cpa(hamk, VA, VB, x_cpa, zlist_real, pp=0.5)
-        print("CPA converged", flush=True)
-        # --- spectrum along symmetry line ---
-        Akw = calc_cpa_Akw(k_sets, kmesh, bvec, ham_r, rvec, mu,
-                           sigma_cpa, wlist, zlist_real, xlabel)
-        # --- CPA on Matsubara frequencies -> sigma.bin ---
-        iwlist_mats = 1j*np.pi*temp*(2*np.arange(Nw, dtype=np.float64)+1)
-        print(f"CPA Matsubara: Norb={Norb}, Nk={Nk}, Nw={Nw}, x={x_cpa}", flush=True)
-        # reuse hamk (already shifted by -mu) computed above
-        sigma_cpa_mats = flibs.solve_cpa(hamk, VA, VB, x_cpa, iwlist_mats, pp=0.5)
-        print("CPA Matsubara converged", flush=True)
-        # build (Norb, Norb, Nw, Nk_irr) array for sigma.bin
-        # sigma_cpa_mats: (Nw, Norb, Norb) -> (Norb, Norb, Nw) -> broadcast over Nk_irr
-        klist_irr, kmap, invk = flibs.gen_irr_k_TRS(Nx, Ny, Nz)
-        Nk_irr = len(klist_irr)
-        sigma_out = np.broadcast_to(
-            sigma_cpa_mats.transpose(1, 2, 0)[:, :, :, np.newaxis],
-            (Norb, Norb, Nw, Nk_irr)
-        ).copy()
-        # write sigma.bin in Fortran unformatted format
-        # records: mu (float64), mu_OLD (float64), sigmak (Nk_irr,Nw,Norb,Norb) = (Norb,Norb,Nw,Nk_irr) C-order
-        import scipy.io as scio
-        with scio.FortranFile('sigma.bin', 'w') as f:
-            f.write_record(np.float64(mu))
-            f.write_record(np.float64(mu))   # mu_OLD = mu (no iteration history for CPA)
-            f.write_record(sigma_out.flatten().astype(np.complex128))
-        np.savez('self_en', sigma_out, np.float64(mu))
-        print(f"CPA Matsubara self-energy written to sigma.bin and self_en.npz"
-              f" (Nk_irr={Nk_irr}, Nw={Nw})", flush=True)
+        # binary alloy: species B shifts every on-site level by 1 eV, concentration 0.5
+        spa_length, xticks, wlist, Akw = plibs.calc_cpa(ham_r, rvec, mu, temp, Nx, Ny, Nz, Nw, Emin, Emax, delta,
+                                                        k_sets, kmesh, bvec, x_cpa=0.5, VB_shift=1.0)
+        plots.plot_cpa_spectrum(spa_length, xticks, xlabel, wlist, Akw)
     elif option == CalcMode.NONLIN_ELIASHBERG:
         plibs.calc_eliashberg_eq(Nx, Ny, Nz, Nw, ham_r, S_r, rvec, chiolist, site, plist,
                                  mu, temp, gap_sym, sw_self,

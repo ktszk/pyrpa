@@ -17,8 +17,8 @@ __all__ = [
     'bilinear_eval', 'bilinear_cell_eval', 'abrikosov_z'
 ]
 
-_c128 = np.ctypeslib.ndpointer(dtype=np.complex128)
-_f64 = np.ctypeslib.ndpointer(dtype=np.float64)
+_c128 = _loader.c_array(np.complex128)
+_f64 = _loader.c_array(np.float64)
 
 _loader._lib.bilinear_eval.argtypes = [
     _c128,                                                    # out  [npt,nw]

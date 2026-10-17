@@ -158,7 +158,7 @@ def output_self_wannier(sigmak: np.ndarray, mu_self: float, kmap: np.ndarray, in
     after zero_tol zeroing. Writes fname.npz (binary) and fname.dat (text).
     Orbital order.  Unlike output_gap_wannier this writes the array as it comes, i.e. in
     the reversed ctypes view of the Fortran sigma(Nk,Nw,Norb,Norb) (sigma[a,b] = Sigma_ba).
-    Its only consumer, the spectral-function interpolation in main.py's plot_spectrum,
+    Its only consumer, the spectral-function interpolation in plibs.plot_spectrum,
     hands the interpolated Sigma straight back to Fortran (gen_green), where the reversal
     undoes itself -- it is never read as a matrix on the python side, so transposing here
     would break it.

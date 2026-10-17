@@ -356,6 +356,28 @@ def test_linearized_eliashberg_zero_interaction_has_zero_lambda_and_finite_gap()
     assert np.isfinite(gap).all()
 
 
+def test_linearized_eliashberg_arnoldi_converges_independently_of_krylov_size():
+    """The shared Arnoldi (eliash_krylov) must return the CONVERGED leading eigenvalue of the
+    seeded symmetry for any Krylov dimension: it restarts (Krylov-Schur) until the Ritz
+    residual is below eps.  A single fixed m=10 space used to leave lambda off by ~1% here,
+    and the unconverged value even changed with the OpenMP thread count."""
+    import _tools as T
+    st = T.two_orbital_square(Nx=12, Ny=12, Nw=64, temp=0.05, mu=-0.5, U=1.2, J=0.15)
+    with _silence_stdout():
+        chi0, _ = F.get_chi0(st['Smat'], st['Cmat'], st['Gk'], st['olist'], st['kmap'], st['invk'],
+                             st['temp'], st['Nx'], st['Ny'], st['Nz'])
+        init = P.get_initial_gap(st['klist'], 2, 1)
+        lams = []
+        for m in (6, 10, 30):
+            _, lam = F.linearized_eliashberg(
+                chi0.copy(), st['Gk'], st['uni'], init, st['Smat'], st['Cmat'], st['olist'], st['plist'],
+                st['kmap'], st['invk'], st['Nx'], st['Ny'], st['Nz'], st['temp'], gap_sym=1,
+                eps=1.0e-8, arnoldi_m=m)
+            lams.append(lam)
+    assert np.isfinite(lams).all() and lams[0] > 0
+    assert np.allclose(lams, lams[-1], rtol=1e-6), lams
+
+
 def test_nonlinear_eliashberg_zero_seed_and_zero_interaction_stays_zero():
     """The nonlinear FLEX-Eliashberg kernel should preserve the trivial zero-gap solution at S=C=0."""
     st = _tiny_one_orbital_model(Nw=3)

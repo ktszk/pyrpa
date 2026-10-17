@@ -145,10 +145,10 @@ subroutine lin_eliash_soc(delta_full,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,p
      call get_initial_delta_soc(newdelta,init_delta,uni,kmap,slist,invk,invs,idk,ipk,&
           Nkall,Nk,Ndk,Nw,Norb,gap_sym)
      if(gap_sym==gap_unit .or. gap_sym==par_mix)then
-        call arnoldi_two_pass(lambda_out,delta,newdelta,ks,arnoldi_m,apply_op)
+        call arnoldi_two_pass(lambda_out,delta,newdelta,ks,arnoldi_m,eps,apply_op)
      else
         ! with SOC the parity sector holds two branches, so the solver is told which one to take
-        call arnoldi_two_pass(lambda_out,delta,newdelta,ks,arnoldi_m,apply_op,classify_branch)
+        call arnoldi_two_pass(lambda_out,delta,newdelta,ks,arnoldi_m,eps,apply_op,classify_branch)
      end if
   else !--- Power method
      eigenval_loop:do i_eig=1,eig_max !solve eig_val using power method, 1st eig is usually large negative value

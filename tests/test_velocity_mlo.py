@@ -138,9 +138,9 @@ def test_vnm_mlo_is_hermitian():
 
 
 def test_axis_rotation_matches_orthogonal_convention():
-    """mrot must act on the Cartesian axes exactly as in the orthogonal get_veloc.
-    Fortran reads the C-ordered [3,3] array transposed, so vk(m) = sum_l mrot[l,m]*v(l),
-    i.e. v_rot = v @ mrot -- the same for both routines."""
+    """mrot must act on the Cartesian axes exactly as in the orthogonal get_veloc:
+    v_rot = mrot @ v, i.e. v_rot = v @ mrot.T on the [Nk,Norb,3] arrays -- the same for both
+    routines, and independent of the memory layout of mrot (the wrappers pass it in Fortran order)."""
     rvec, ham_r, S_r, _, _ = _mlo_model(seed=5)
     klist = _klist()
     mrot = np.ascontiguousarray([[0.0, 1.0, 0.0],
@@ -149,14 +149,14 @@ def test_axis_rotation_matches_orthogonal_convention():
     eig, uni = _eig_uni(klist, ham_r, S_r, rvec)
     v1 = F.get_veloc(klist, ham_r, rvec, np.eye(3), uni, S_r, eig)
     v2 = F.get_veloc(klist, ham_r, rvec, mrot, uni, S_r, eig)
-    assert np.abs(v2 - v1 @ mrot).max() < 1e-12
+    assert np.abs(v2 - v1 @ mrot.T).max() < 1e-12
 
     # same convention on the orthogonal path, so ftype 4 stays consistent with the rest
     hamk = F.gen_ham(klist, ham_r, rvec)
     eo, uo = F.get_eig(hamk)
     w1 = F.get_veloc(klist, ham_r, rvec, np.eye(3), uo)
     w2 = F.get_veloc(klist, ham_r, rvec, mrot, uo)
-    assert np.abs(w2 - w1 @ mrot).max() < 1e-12
+    assert np.abs(w2 - w1 @ mrot.T).max() < 1e-12
 
 
 def test_orthogonal_path_untouched():

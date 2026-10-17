@@ -74,21 +74,29 @@ def _solve_mu(func: collections.abc.Callable, emin: float, emax: float, label: s
         raise
 
 
-def calc_mu(eig: np.ndarray, Nk: int, fill: float, temp: float) -> float:
+def calc_mu(eig: np.ndarray, Nk: int, fill: float, temp: float, kweight: np.ndarray | None = None) -> float:
     """
     @brief This function obtains chemical potential mu
-    @param   eig: Eigenvalues array
-    @param    Nk: Number of k-points
+    @param   eig: Eigenvalues array [Nk, Norb]
+    @param    Nk: Number of k-points (the total weight when kweight is None)
     @param  fill: band filling
     @param  temp: Temperature
+    @param kweight: k-point weights [Nk] (None: uniform mesh); the electron count is then
+                    sum_k w_k sum_n f(e_nk) = fill * sum_k w_k
     @return   mu: chemical potential
     """
     if temp <= 0:
         raise ValueError(f"calc_mu requires temp > 0, got {temp}")
 
-    def func(mu: float) -> np.ndarray:
-        sum_fermi = flibs.get_ffermi(eig, mu, temp).sum()
-        return (fill*Nk-sum_fermi)  # zero when total electrons equals target filling * Nk
+    if kweight is None:
+        def func(mu: float) -> np.ndarray:
+            sum_fermi = flibs.get_ffermi(eig, mu, temp).sum()
+            return (fill*Nk-sum_fermi)  # zero when total electrons equals target filling * Nk
+    else:
+        w = np.asarray(kweight, dtype=np.float64)
+
+        def func(mu: float) -> np.ndarray:
+            return fill*w.sum()-(flibs.get_ffermi(eig, mu, temp).sum(axis=1)*w).sum()
     return _solve_mu(func, eig.min(), eig.max(), 'calc_mu')
 
 
@@ -1222,9 +1230,9 @@ def gen_3d_surf_points(mesh: int, rvec: np.ndarray, ham_r: np.ndarray,
     @param     mu: chemical potential
     @param kscale: change considering k-space area 1.0 is only 1st BZ
     @param   bvec: reciprocal lattice vectors as rows [Angstrom^-1]. If given, the
-                   surface vertices are returned in Cartesian k (same frame as BZedge);
+                   surface vertices are returned in Cartesian k (same frame as libs.plots.BZedge);
                    otherwise they stay in 2pi*fractional units of the reciprocal cell.
-    @param sw_fold: fold the sheets into the Wigner-Seitz cell (the 1st BZ that BZedge
+    @param sw_fold: fold the sheets into the Wigner-Seitz cell (the 1st BZ that libs.plots.BZedge
                    draws). Marching cubes runs on the parallelepiped k_frac in
                    [-1/2,1/2]^3, which IS the 1st BZ only for a primitive lattice; on a
                    centred (bcc/fcc/base-centred) or skewed cell the sheet would otherwise
@@ -1257,7 +1265,7 @@ def gen_3d_surf_points(mesh: int, rvec: np.ndarray, ham_r: np.ndarray,
                 fspolys.append(verts[faces])
                 fscenters.append(kfrac[faces].mean(axis=1))
             else:
-                # Cartesian k = sum_i k_frac_i * b_i, so that the sheet and BZedge(bvec) share a frame
+                # Cartesian k = sum_i k_frac_i * b_i, so that the sheet and libs.plots.BZedge share a frame
                 tris = kfrac.dot(bvec)[faces]
                 if sw_fold and np.allclose(ks, 1.):
                     tris = _lattice.fold_to_bz(tris, bvec)

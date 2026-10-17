@@ -11,7 +11,7 @@ import scipy.linalg as sclin
 # re-exporting numpy, scipy, ctypes and the sibling packages imported above.
 __all__ = [
     'RY_TO_EV', 'import_hoppings', 'import_MLO_hoppings', 'read_HamRsMLO', 'get_bvec', 'gen_rlist',
-    'gen_klist_with_kmap', 'gen_klist', 'mk_klist', 'mk_qlist', 'get_ptv', 'get_symm_line', 'BZedge',
+    'gen_klist_with_kmap', 'gen_klist', 'mk_klist', 'mk_qlist', 'get_ptv', 'get_symm_line',
     'bz_faces', 'bz_face_planes', 'fold_to_bz'
 ]
 
@@ -477,28 +477,6 @@ def get_symm_line(brav: int) -> tuple[list, list]:
     return k_list, xlabel
 
 
-def BZedge(bvec: np.ndarray, ax: object | None = None) -> np.ndarray:
-    """
-    @brief Draw first Brillouin zone boundary edges using Wigner-Seitz construction in reciprocal space.
-           The edges are drawn in Cartesian k [Angstrom^-1], so whatever is overlaid on the same
-           axes (Fermi sheets, k-points) must be Cartesian too.
-    @param bvec: reciprocal lattice vectors as rows, shape (3,3), in Angstrom^-1
-    @param   ax: matplotlib Axes3D; uses plt.gca() if None
-    @return  the BZ corner points [Nv,3] in Cartesian k, for setting the axis ranges
-    """
-    import matplotlib.pyplot as plt
-
-    if ax is None:
-        ax = plt.gca()
-
-    corners = []
-    for face in bz_faces(bvec):
-        poly = np.vstack([face, face[0]])
-        ax.plot(poly[:, 0], poly[:, 1], poly[:, 2], color='black', lw=0.5)
-        corners.append(face)
-    return np.vstack(corners) if corners else np.zeros((0, 3))
-
-
 def _order_bz_polygon(verts: np.ndarray) -> np.ndarray:
     """
     @brief Sort the vertices of a planar polygon by azimuth around its centre, so that
@@ -600,7 +578,7 @@ def _clip_half_space(poly: np.ndarray, nvec: np.ndarray, dist: float, eps: float
 def fold_to_bz(polys: np.ndarray, bvec: np.ndarray, nshell: int = 2) -> list:
     """
     @brief Fold triangles sampled on the primitive reciprocal cell -- the parallelepiped
-           k_frac in [-1/2,1/2]^3 -- into the 1st BZ, the Wigner-Seitz cell drawn by BZedge.
+           k_frac in [-1/2,1/2]^3 -- into the 1st BZ, the Wigner-Seitz cell drawn by libs.plots.BZedge.
            For a primitive (P) lattice the two cells coincide and the triangles come back
            untouched, but for a centred lattice (body/face/base centred, and any skewed
            cell) they do not: the part of the sheet outside the zone has to be translated by

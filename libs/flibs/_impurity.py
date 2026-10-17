@@ -11,46 +11,46 @@ __all__ = [
 # --- ctypes signatures: set once at import.
 # All Fortran entry points are subroutines, so restype is always None.
 _loader._lib.gen_imp_ham.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # ham_imp (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # ham_r
-    np.ctypeslib.ndpointer(dtype=np.float64),     # rvec
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # ham_i
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # ham_ri
-    np.ctypeslib.ndpointer(dtype=np.int64),       # imp_list
-    np.ctypeslib.ndpointer(dtype=np.float64),     # rlist
+    _loader.c_array(np.complex128),  # ham_imp (out)
+    _loader.c_array(np.complex128),  # ham_r
+    _loader.c_array(np.float64),     # rvec
+    _loader.c_array(np.complex128),  # ham_i
+    _loader.c_array(np.complex128),  # ham_ri
+    _loader.c_array(np.int64),       # imp_list
+    _loader.c_array(np.float64),     # rlist
     ctypes.POINTER(ctypes.c_double),                            # eps
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nimp, Nsite
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nr, Norb
 ]
 _loader._lib.gen_imp_ham.restype = None
 _loader._lib.get_dft_imp_ham.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # ham_k (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # ham_imp
-    np.ctypeslib.ndpointer(dtype=np.float64),     # klist
-    np.ctypeslib.ndpointer(dtype=np.float64),     # rlist
+    _loader.c_array(np.complex128),  # ham_k (out)
+    _loader.c_array(np.complex128),  # ham_imp
+    _loader.c_array(np.float64),     # klist
+    _loader.c_array(np.float64),     # rlist
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nk, Nsite
     ctypes.POINTER(ctypes.c_int64)                              # Norb
 ]
 _loader._lib.get_dft_imp_ham.restype = None
 _loader._lib.get_spectrum_spaghetti.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # spa (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
-    np.ctypeslib.ndpointer(dtype=np.float64),     # eigs
-    np.ctypeslib.ndpointer(dtype=np.float64),     # klist
-    np.ctypeslib.ndpointer(dtype=np.float64),     # rlist
-    np.ctypeslib.ndpointer(dtype=np.float64),     # wlist
+    _loader.c_array(np.complex128),  # spa (out)
+    _loader.c_array(np.complex128),  # uni
+    _loader.c_array(np.float64),     # eigs
+    _loader.c_array(np.float64),     # klist
+    _loader.c_array(np.float64),     # rlist
+    _loader.c_array(np.float64),     # wlist
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, Nk
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nsite, Norb
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double)          # mu, eta
 ]
 _loader._lib.get_spectrum_spaghetti.restype = None
 _loader._lib.solve_cpa_array.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # sigma_cpa_w (inout)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # hamk
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # VA
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # VB
+    _loader.c_array(np.complex128),  # sigma_cpa_w (inout)
+    _loader.c_array(np.complex128),  # hamk
+    _loader.c_array(np.complex128),  # VA
+    _loader.c_array(np.complex128),  # VB
     ctypes.POINTER(ctypes.c_double),                            # x
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # zlist
+    _loader.c_array(np.complex128),  # zlist
     ctypes.POINTER(ctypes.c_double),                            # pp
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nk, Norb
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, maxiter

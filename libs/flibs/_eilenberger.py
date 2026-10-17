@@ -10,22 +10,22 @@ __all__ = [
 
 # --- ctypes signature (set once at import); the Fortran entry is a subroutine.
 _loader._lib.riccati_chords.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),           # g   (out) [Ns,Nchord,Nw]
-    np.ctypeslib.ndpointer(dtype=np.complex128),           # f   (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),           # om  (in)
-    np.ctypeslib.ndpointer(dtype=np.complex128),           # dd  (in)
+    _loader.c_array(np.complex128),           # g   (out) [Ns,Nchord,Nw]
+    _loader.c_array(np.complex128),           # f   (out)
+    _loader.c_array(np.complex128),           # om  (in)
+    _loader.c_array(np.complex128),           # dd  (in)
     ctypes.POINTER(ctypes.c_double),                                     # hvf
-    np.ctypeslib.ndpointer(dtype=np.float64),              # ds  (in) [Nchord]
+    _loader.c_array(np.float64),              # ds  (in) [Nchord]
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),  # Ns, Nchord, Nw
 ]
 _loader._lib.riccati_chords.restype = None
 
 
 _loader._lib.matrix_riccati_batch.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),              # g   (out) [Ns,Nw,2,2]
-    np.ctypeslib.ndpointer(dtype=np.complex128),              # f   (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),              # om  (in)  [Nw]
-    np.ctypeslib.ndpointer(dtype=np.complex128),              # Dpath (in) [Ns,2,2]
+    _loader.c_array(np.complex128),              # g   (out) [Ns,Nw,2,2]
+    _loader.c_array(np.complex128),              # f   (out)
+    _loader.c_array(np.complex128),              # om  (in)  [Nw]
+    _loader.c_array(np.complex128),              # Dpath (in) [Ns,2,2]
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),  # hvf, ds, h
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),                       # Ns, Nw
 ]
@@ -55,10 +55,10 @@ def matrix_riccati_batch(om: np.ndarray, Dpath: np.ndarray, hvf: float, ds: floa
 
 
 _loader._lib.matrix_riccati_chords.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),              # g   (out) [Ns,Nchord,Nw,2,2]
-    np.ctypeslib.ndpointer(dtype=np.complex128),              # f   (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),              # om  (in)  [Nw]
-    np.ctypeslib.ndpointer(dtype=np.complex128),              # Dpath (in) [Ns,Nchord,2,2]
+    _loader.c_array(np.complex128),              # g   (out) [Ns,Nchord,Nw,2,2]
+    _loader.c_array(np.complex128),              # f   (out)
+    _loader.c_array(np.complex128),              # om  (in)  [Nw]
+    _loader.c_array(np.complex128),              # Dpath (in) [Ns,Nchord,2,2]
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),  # hvf, ds, h
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),     # Ns, Nchord, Nw
 ]
@@ -114,13 +114,13 @@ def riccati_chords(om: np.ndarray, dd: np.ndarray, hvf: float, ds: float) -> tup
 
 
 _loader._lib.riccati_chords_bc.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),           # g   (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),           # f   (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),           # om  (in)  [Nw]
-    np.ctypeslib.ndpointer(dtype=np.complex128),           # dom (in)  [Ns,Nchord]
-    np.ctypeslib.ndpointer(dtype=np.complex128),           # dd  (in)  [Ns,Nchord]
+    _loader.c_array(np.complex128),           # g   (out)
+    _loader.c_array(np.complex128),           # f   (out)
+    _loader.c_array(np.complex128),           # om  (in)  [Nw]
+    _loader.c_array(np.complex128),           # dom (in)  [Ns,Nchord]
+    _loader.c_array(np.complex128),           # dd  (in)  [Ns,Nchord]
     ctypes.POINTER(ctypes.c_double),                                     # hvf
-    np.ctypeslib.ndpointer(dtype=np.float64),              # ds  (in)  [Nchord]
+    _loader.c_array(np.float64),              # ds  (in)  [Nchord]
     ctypes.POINTER(ctypes.c_int64),                                      # irow
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),  # Ns, Nchord, Nw
 ]

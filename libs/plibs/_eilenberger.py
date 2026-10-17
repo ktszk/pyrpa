@@ -1830,7 +1830,7 @@ def gap_orbital_from_wannier(fname: str = 'gap_wannier', iw_index: int = 0, n_av
 
     Fourier convention: output_gap_wannier builds Delta(R) with np.fft.ifftn over the
     k-axes, whose kernel is exp(+2 pi i k.R), so the inverse taken here carries the MINUS
-    sign, matching the self-energy interpolation in main.py's plot_spectrum.  (This used
+    sign, matching the self-energy interpolation in plibs.plot_spectrum.  (This used
     to be written with a plus and therefore returned Delta(-k).  It changed nothing in
     practice -- the result is only ever used as a form factor that project_gap_to_band
     renormalizes, and Delta(-k)=Delta(k) for the even-parity gaps this path is used with,

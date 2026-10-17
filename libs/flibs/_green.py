@@ -12,73 +12,73 @@ __all__ = [
 # --- ctypes signatures: set once at import.
 # All Fortran entry points are subroutines, so restype is always None.
 _loader._lib.gen_green0_.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # Gk (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),             # eig
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # uni
+    _loader.c_array(np.complex128),          # Gk (out)
+    _loader.c_array(np.float64),             # eig
+    _loader.c_array(np.complex128),          # uni
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),                 # mu, temp
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nw, Norb
 ]
 _loader._lib.gen_green0_.restype = None
 _loader._lib.gen_green_inv_.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # Gk (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # self
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # hamk
+    _loader.c_array(np.complex128),          # Gk (out)
+    _loader.c_array(np.complex128),          # self
+    _loader.c_array(np.complex128),          # hamk
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),                 # mu, temp
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nw, Norb
 ]
 _loader._lib.gen_green_inv_.restype = None
 _loader._lib.getinv_.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # Gk (inout)
+    _loader.c_array(np.complex128),          # Gk (inout)
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nw, Norb
 ]
 _loader._lib.getinv_.restype = None
 _loader._lib.gen_green_inv_from_eig.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # Gk (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # self
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # uni
-    np.ctypeslib.ndpointer(dtype=np.float64),             # eig
+    _loader.c_array(np.complex128),          # Gk (out)
+    _loader.c_array(np.complex128),          # self
+    _loader.c_array(np.complex128),          # uni
+    _loader.c_array(np.float64),             # eig
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),                 # mu, temp
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nw, Norb
 ]
 _loader._lib.gen_green_inv_from_eig.restype = None
 _loader._lib.gen_tr_greenw_0.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # trGk (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),             # wl
-    np.ctypeslib.ndpointer(dtype=np.float64),             # eig
+    _loader.c_array(np.complex128),          # trGk (out)
+    _loader.c_array(np.float64),             # wl
+    _loader.c_array(np.float64),             # eig
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),                 # mu, delta
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nw, Norb
 ]
 _loader._lib.gen_tr_greenw_0.restype = None
 _loader._lib.gen_dos.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # Dos (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),             # wl
-    np.ctypeslib.ndpointer(dtype=np.float64),             # eig
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # uni
+    _loader.c_array(np.complex128),          # Dos (out)
+    _loader.c_array(np.float64),             # wl
+    _loader.c_array(np.float64),             # eig
+    _loader.c_array(np.complex128),          # uni
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),                 # mu, delta
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nw, Norb
 ]
 _loader._lib.gen_dos.restype = None
 _loader._lib.get_a_.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # a (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # xn
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # inp_data
+    _loader.c_array(np.complex128),  # a (out)
+    _loader.c_array(np.complex128),  # xn
+    _loader.c_array(np.complex128),  # inp_data
     ctypes.POINTER(ctypes.c_int64)                              # Np
 ]
 _loader._lib.get_a_.restype = None
 _loader._lib.get_qp_.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # P (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # Q (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # a
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # xn
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # wlist
+    _loader.c_array(np.complex128),  # P (out)
+    _loader.c_array(np.complex128),  # Q (out)
+    _loader.c_array(np.complex128),  # a
+    _loader.c_array(np.complex128),  # xn
+    _loader.c_array(np.complex128),  # wlist
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nw, Np
 ]
 _loader._lib.get_qp_.restype = None
 _loader._lib.pade_with_trace.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # arrayin
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # arrayout (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # iwlist
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # wlist
+    _loader.c_array(np.complex128),  # arrayin
+    _loader.c_array(np.complex128),  # arrayout (out)
+    _loader.c_array(np.complex128),  # iwlist
+    _loader.c_array(np.complex128),  # wlist
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nk, Niw
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nw, Norb
 ]

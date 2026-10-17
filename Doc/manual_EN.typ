@@ -532,7 +532,8 @@ This section explains all parameters in the upper part of `main.py`, including t
 - `tau_mode` (str, default `'const'`): Relaxation-time model for option=5.
   - `'const'`: constant `tau_const`, $bold(k)$- and band-independent.
   - `'epa'`: $tau(bold(k))$ from the electron--phonon averaged coupling (Samsonidze--Kozinsky EPA), read from `epa_file`. This is what makes $R_H (T)$ and sheet-dependent mobilities meaningful.
-  - `'dos1'` / `'dos2'`: DOS-based $tau$, scaled by `tau_const`.
+  - `'e2'`: Fermi-liquid $tau$, $1\/tau prop (epsilon-mu)^2 + (pi k_B T)^2$ (electron--electron scattering), normalized to `tau_const` on the Fermi level.
+  - `'dos'`: $tau prop 1\/D(epsilon)$ (golden-rule scattering rate), used as a ratio to the Fermi level: $tau(epsilon) = tau_"const" D(mu)\/D(epsilon)$.
   A summary is printed with the Fermi-surface average $angle.l tau angle.r$, its range over the Fermi window, and $angle.l tau^2 angle.r \/ angle.l tau angle.r^2$ — which is 1 exactly when $tau$ is constant and quantifies how far $tau(bold(k))$ shifts $R_H$ away from the constant-$tau$ value.
 
 - `epa_file` (str or `None`): Path to the `epa.x` (`job='egrid'`) output read when `tau_mode='epa'`.

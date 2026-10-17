@@ -5,18 +5,19 @@ import libs.flibs._loader as _loader
 # Public API of this submodule; keeps `from ._x import *` in __init__.py from
 # re-exporting numpy, scipy, ctypes and the sibling packages imported above.
 __all__ = [
-    'calc_Lij', 'calc_Lij_wl', 'calc_Kn', 'calc_sigma_hall', 'calc_k0_band', 'calc_tdf', 'get_tau', 'calc_tau_epa'
+    'calc_Lij', 'calc_Lij_wl', 'calc_Kn', 'calc_sigma_hall', 'calc_k0_band', 'calc_tdf', 'calc_tau_epa'
 ]
 
 # --- ctypes signatures: set once at import.
 # All Fortran entry points are subroutines, so restype is always None.
 _loader._lib.calc_lij.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # L11 (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # L22 (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # L12 (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # vk
-    np.ctypeslib.ndpointer(dtype=np.float64),     # eig
-    np.ctypeslib.ndpointer(dtype=np.float64),     # ffermi
+    _loader.c_array(np.complex128),  # L11 (out)
+    _loader.c_array(np.complex128),  # L22 (out)
+    _loader.c_array(np.complex128),  # L12 (out)
+    _loader.c_array(np.complex128),  # vk
+    _loader.c_array(np.float64),     # eig
+    _loader.c_array(np.float64),     # ffermi
+    _loader.c_array(np.float64),     # kweight
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Norb, Nk
     ctypes.POINTER(ctypes.c_double),                            # mu
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),         # w, idelta
@@ -24,90 +25,83 @@ _loader._lib.calc_lij.argtypes = [
 ]
 _loader._lib.calc_lij.restype = None
 _loader._lib.calc_lij_wl.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),           # L11 (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),           # L22 (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),           # L12 (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),           # vk
-    np.ctypeslib.ndpointer(dtype=np.float64),              # eig
-    np.ctypeslib.ndpointer(dtype=np.float64),              # ffermi
+    _loader.f_array(np.complex128),           # L11 (out, Fortran order [Nw,3,3])
+    _loader.f_array(np.complex128),           # L22 (out, Fortran order [Nw,3,3])
+    _loader.f_array(np.complex128),           # L12 (out, Fortran order [Nw,3,3])
+    _loader.c_array(np.complex128),           # vk
+    _loader.c_array(np.float64),              # eig
+    _loader.c_array(np.float64),              # ffermi
+    _loader.c_array(np.float64),              # kweight
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),  # Norb, Nk, Nw
     ctypes.POINTER(ctypes.c_double),                                     # mu
-    np.ctypeslib.ndpointer(dtype=np.float64),              # wl
+    _loader.c_array(np.float64),              # wl
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),                  # idelta, eps
     ctypes.POINTER(ctypes.c_double),                                     # temp
 ]
 _loader._lib.calc_lij_wl.restype = None
 _loader._lib.calc_kn.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),  # K0 (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),  # K1 (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),  # K2 (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),  # eig
-    np.ctypeslib.ndpointer(dtype=np.float64),  # veloc
-    np.ctypeslib.ndpointer(dtype=np.float64),  # kweight
-    np.ctypeslib.ndpointer(dtype=np.float64),  # tau
+    _loader.c_array(np.float64),  # K0 (out)
+    _loader.c_array(np.float64),  # K1 (out)
+    _loader.c_array(np.float64),  # K2 (out)
+    _loader.c_array(np.float64),  # eig
+    _loader.c_array(np.float64),  # veloc
+    _loader.c_array(np.float64),  # kweight
+    _loader.c_array(np.float64),  # tau
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),      # temp, mu
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)         # Nk, Norb
 ]
 _loader._lib.calc_kn.restype = None
 _loader._lib.calc_sigma_hall.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),  # shall (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),  # sabs (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),  # eig
-    np.ctypeslib.ndpointer(dtype=np.float64),  # veloc
-    np.ctypeslib.ndpointer(dtype=np.float64),  # imass
-    np.ctypeslib.ndpointer(dtype=np.float64),  # kweight
-    np.ctypeslib.ndpointer(dtype=np.float64),  # tau
+    _loader.c_array(np.float64),  # shall (out)
+    _loader.c_array(np.float64),  # sabs (out)
+    _loader.c_array(np.float64),  # eig
+    _loader.c_array(np.float64),  # veloc
+    _loader.c_array(np.float64),  # imass
+    _loader.c_array(np.float64),  # kweight
+    _loader.c_array(np.float64),  # tau
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),      # temp, mu
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)         # Nk, Norb
 ]
 _loader._lib.calc_sigma_hall.restype = None
 _loader._lib.calc_k0_band.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),  # K0n (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),  # eig
-    np.ctypeslib.ndpointer(dtype=np.float64),  # veloc
-    np.ctypeslib.ndpointer(dtype=np.float64),  # kweight
-    np.ctypeslib.ndpointer(dtype=np.float64),  # tau
+    _loader.c_array(np.float64),  # K0n (out)
+    _loader.c_array(np.float64),  # eig
+    _loader.c_array(np.float64),  # veloc
+    _loader.c_array(np.float64),  # kweight
+    _loader.c_array(np.float64),  # tau
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),      # temp, mu
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)         # Nk, Norb
 ]
 _loader._lib.calc_k0_band.restype = None
 _loader._lib.calc_tdf.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),  # tdf (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),  # eig
-    np.ctypeslib.ndpointer(dtype=np.float64),  # veloc
-    np.ctypeslib.ndpointer(dtype=np.float64),  # kweight
-    np.ctypeslib.ndpointer(dtype=np.float64),  # tau
+    _loader.c_array(np.float64),  # tdf (out)
+    _loader.c_array(np.float64),  # eig
+    _loader.c_array(np.float64),  # veloc
+    _loader.c_array(np.float64),  # kweight
+    _loader.c_array(np.float64),  # tau
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),        # Nw, Nk
     ctypes.POINTER(ctypes.c_int64)                           # Norb
 ]
 _loader._lib.calc_tdf.restype = None
-_loader._lib.get_tau.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),  # tau (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),  # tauw
-    np.ctypeslib.ndpointer(dtype=np.float64),  # eig
-    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),      # tau_max, eps
-    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),        # tau_mode, Nk
-    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)         # Nw, Norb
-]
-_loader._lib.get_tau.restype = None
 _loader._lib.calc_tau_epa.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),  # tau (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),  # gavg
-    np.ctypeslib.ndpointer(dtype=np.float64),  # wavg
-    np.ctypeslib.ndpointer(dtype=np.float64),  # eig
-    np.ctypeslib.ndpointer(dtype=np.float64),  # edge
-    np.ctypeslib.ndpointer(dtype=np.float64),  # step
+    _loader.c_array(np.float64),  # tau (out)
+    _loader.c_array(np.float64),  # gavg
+    _loader.c_array(np.float64),  # wavg
+    _loader.c_array(np.float64),  # eig
+    _loader.c_array(np.float64),  # edge
+    _loader.c_array(np.float64),  # step
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),      # mu, temp
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),        # Nk, Norb
     ctypes.POINTER(ctypes.c_int64),                          # nmodes
-    np.ctypeslib.ndpointer(dtype=np.int64),    # nbin
+    _loader.c_array(np.int64),    # nbin
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)         # ngrid, nbin_max
 ]
 _loader._lib.calc_tau_epa.restype = None
 
 
 def calc_Lij(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float, w: float,
-             idelta: float, temp: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+             idelta: float, temp: float,
+             kweight: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     @brief Evaluate the generalized thermoelectric transport tensors L11, L12, L22 at a given frequency.
     @param    eig: Eigenvalues [Nk, Norb] float64
@@ -117,6 +111,7 @@ def calc_Lij(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float, w: 
     @param      w: Frequency in eV
     @param idelta: Lorentzian broadening parameter in eV
     @param   temp: Temperature in eV
+    @param kweight: k-point weights [Nk] (None: uniform mesh, all 1); the sum is normalized by sum(kweight)
     @return   L11: Charge conductivity tensor [3, 3] complex128
     @return   L12: Thermoelectric tensor [3, 3] complex128
     @return   L22: Thermal conductivity tensor [3, 3] complex128
@@ -127,14 +122,15 @@ def calc_Lij(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float, w: 
     L12 = np.zeros((3, 3), dtype=np.complex128)
     L22 = np.zeros((3, 3), dtype=np.complex128)
     eps = idelta * 1e-3
-    _loader._lib.calc_lij(L11, L22, L12, vk, eig, ffermi, _loader.i64(Norb), _loader.i64(Nk),
+    kweight = np.ones(Nk) if kweight is None else np.ascontiguousarray(kweight, dtype=np.float64)
+    _loader._lib.calc_lij(L11, L22, L12, vk, eig, ffermi, kweight, _loader.i64(Norb), _loader.i64(Nk),
                           _loader.dbl(mu), _loader.dbl(w), _loader.dbl(idelta),
                           _loader.dbl(eps), _loader.dbl(temp))
     return L11, L12, L22
 
 
 def calc_Lij_wl(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float,
-                wl: np.ndarray, idelta: float, temp: float
+                wl: np.ndarray, idelta: float, temp: float, kweight: np.ndarray | None = None
                 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     @brief Evaluate L11, L12, L22 for all frequencies wl in a single Fortran call.
@@ -145,6 +141,7 @@ def calc_Lij_wl(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float,
     @param     wl: Frequency mesh [Nw] float64
     @param idelta: Lorentzian broadening parameter in eV
     @param   temp: Temperature in eV
+    @param kweight: k-point weights [Nk] (None: uniform mesh, all 1); the sum is normalized by sum(kweight)
     @return   L11: [Nw, 3, 3] complex128
     @return   L12: [Nw, 3, 3] complex128
     @return   L22: [Nw, 3, 3] complex128
@@ -154,10 +151,11 @@ def calc_Lij_wl(eig: np.ndarray, vk: np.ndarray, ffermi: np.ndarray, mu: float,
     Nw = len(wl)
     eps = idelta * 1e-3
     wl = np.ascontiguousarray(wl, dtype=np.float64)
+    kweight = np.ones(Nk) if kweight is None else np.ascontiguousarray(kweight, dtype=np.float64)
     L11 = np.zeros((Nw, 3, 3), dtype=np.complex128, order='F')
     L12 = np.zeros((Nw, 3, 3), dtype=np.complex128, order='F')
     L22 = np.zeros((Nw, 3, 3), dtype=np.complex128, order='F')
-    _loader._lib.calc_lij_wl(L11, L22, L12, vk, eig, ffermi,
+    _loader._lib.calc_lij_wl(L11, L22, L12, vk, eig, ffermi, kweight,
                              _loader.i64(Norb), _loader.i64(Nk), _loader.i64(Nw),
                              _loader.dbl(mu), wl,
                              _loader.dbl(idelta), _loader.dbl(eps), _loader.dbl(temp))
@@ -275,25 +273,6 @@ def calc_tdf(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray,
     _loader._lib.calc_tdf(tdf, eig, veloc, kweight, tau, _loader.i64(Nw),
                           _loader.i64(Nk), _loader.i64(Norb))
     return tdf
-
-
-def get_tau(tauw: np.ndarray, eig: np.ndarray, tau_max: float, tau_mode: int, eps: float = 1.0e-4) -> np.ndarray:
-    """
-    @brief Estimate k-resolved relaxation time tau(k) from frequency-dependent scattering weights.
-    @param    tauw: Frequency-dependent scattering weight [Nw] float64
-    @param     eig: Eigenvalues [Nk, Norb] float64
-    @param tau_max: Upper bound for relaxation time values
-    @param tau_mode: Mode selector for the Fortran tau integral equation
-    @param     eps: Convergence tolerance
-    @return    tau: k-resolved relaxation time [Nk, Norb] float64
-    """
-    Nk, Nw = len(eig), len(tauw)
-    Norb = eig.shape[1]
-    tau = np.zeros((Nk, Norb), dtype=np.float64)
-    _loader._lib.get_tau(tau, tauw, eig, _loader.dbl(tau_max), _loader.dbl(eps),
-                         _loader.i64(tau_mode), _loader.i64(Nk), _loader.i64(Nw),
-                         _loader.i64(Norb))
-    return tau
 
 
 def calc_tau_epa(eig: np.ndarray, gavg: np.ndarray, wavg: np.ndarray,

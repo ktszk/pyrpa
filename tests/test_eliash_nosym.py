@@ -229,6 +229,31 @@ def test_singlet_lambda_agrees_between_nosoc_soc_and_nosym_on_anisotropic_band()
         assert res['best_lambda'] > lam_n
 
 
+def test_zeeman_field_resolves_mu_at_fixed_filling():
+    """With fill given, the nosym driver re-solves mu for the Zeeman-split bands: a vanishing
+    field returns the mu of get_mu for the spinless model (spin doubling, fill per spin), and a
+    finite field keeps the electron count 2*fill on the same mesh."""
+    md = T.one_orbital_square(Nx=8, Ny=8, Nw=16, temp=0.05, mu=0.0, tx=1.0, ty=0.7)
+    temp, fill, h = 0.05, 0.4, 0.3
+    mu0 = P.get_mu(md['ham_r'], [], md['rvec'], np.eye(3), temp, fill)
+    run = lambda hv, f: P.calc_lin_eliash_nosym(8, 8, 1, 16, md['ham_r'], [], md['rvec'], mu0, temp, md['olist'],
+                                                md['site'], False, 1.0, 0.0, 1, False, hvec=hv, arnoldi_m=10,
+                                                sw_out=False, fill=f)
+    with T.silence():
+        r_tiny = run((0.0, 0.0, 1.0e-9), fill)
+        r_h = run((0.0, 0.0, h), fill)
+        r_fixed = run((0.0, 0.0, h), None)
+    assert abs(r_tiny['mu']-mu0) < 1e-6
+    assert r_fixed['mu'] == mu0                      # no fill: mu kept, as before
+    # electron count of the Zeeman-split bands at the re-solved mu, on get_mu's mesh
+    ham2, _, sl, iv = P.spin_double_model(md['ham_r'], [])
+    ham2 = P.add_zeeman(ham2, [], md['rvec'], sl, iv, np.array([0.0, 0.0, h]))
+    Nk, eig, _ = P.get_emesh(40, 40, 40, ham2, [], md['rvec'], np.eye(3))
+    n = F.get_ffermi(eig, r_h['mu'], temp).sum()/Nk
+    assert abs(n-2*fill) < 1e-8, n
+    assert abs(r_h['mu']-mu0) > 1e-4                 # this band is not particle-hole symmetric: mu moves
+
+
 def test_soc_triplet_matches_nosoc_triplet_one_orbital():
     """One orbital (frequency parity exact): a p_x seed must stay in the odd-parity Sz=0 triplet
     sector of lin_eliash_soc (d_z seed + parity projection) and reproduce lin_eliash, instead of

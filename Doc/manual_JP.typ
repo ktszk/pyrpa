@@ -533,7 +533,8 @@ olist = [[0, 3], [1, 4], [2, 5]]
 - `tau_mode` （文字列, 既定 `'const'`）: option=5 の緩和時間モデル。
   - `'const'`: 定数 `tau_const`（$bold(k)$・バンドに依らない）。
   - `'epa'`: 電子フォノン平均結合（Samsonidze--Kozinsky の EPA）による $tau(bold(k))$。`epa_file` が必要です。$R_H (T)$ やシートごとの移動度差が意味を持つのはこのモードです。
-  - `'dos1'` / `'dos2'`: DOS ベースの $tau$（`tau_const` でスケール）。
+  - `'e2'`: フェルミ液体型 $tau$。$1\/tau prop (epsilon-mu)^2 + (pi k_B T)^2$（電子間散乱）で, フェルミ準位で `tau_const` になるよう規格化。
+  - `'dos'`: $tau prop 1\/D(epsilon)$（散乱率が終状態の DOS に比例するフェルミの黄金律）。フェルミ準位との比として使い, $tau(epsilon) = tau_"const" D(mu)\/D(epsilon)$。
   実行時にフェルミ面平均 $angle.l tau angle.r$, フェルミ窓での範囲, および $angle.l tau^2 angle.r \/ angle.l tau angle.r^2$ が出力されます。最後の量は定数 $tau$ でちょうど 1 になり, $tau(bold(k))$ が $R_H$ を定数 $tau$ の値からどれだけずらすかを表します。
 
 - `epa_file` （文字列 または `None`）: `tau_mode='epa'` のときに読み込む `epa.x`（`job='egrid'`）の出力ファイルパス。

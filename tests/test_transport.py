@@ -131,6 +131,34 @@ def test_kubo_dc_equals_boltzmann_multiband():
     assert np.allclose(L22.real, K2, rtol=1e-6, atol=1e-9)
 
 
+def test_kweight_duplicated_mesh_matches_uniform():
+    """k-point weights: splitting every k-point into two copies of weight 1/2 must give the
+    uniform-mesh result exactly -- for the Kubo kernels (calc_Lij, calc_Lij_wl) and for the
+    chemical potential (calc_mu), which are all normalized by sum(kweight), not by Nk."""
+    Nk, Norb = 32, 2
+    temp, mu, delta = 0.02, 0.0, 2.0e-3
+    eig, vk, _ = _band_diagonal_model(Nk, Norb, seed=5)
+    ff = F.get_ffermi(eig, mu, temp)
+    eig2, vk2, ff2 = (np.ascontiguousarray(np.concatenate([x, x])) for x in (eig, vk, ff))
+    w2 = np.full(2*Nk, 0.5)
+    wl = np.linspace(0.0, 0.4, 4)
+    for a, b in zip(F.calc_Lij(eig, vk, ff, mu, 0.1, delta, temp),
+                    F.calc_Lij(eig2, vk2, ff2, mu, 0.1, delta, temp, kweight=w2)):
+        assert np.allclose(a, b, rtol=1e-12, atol=1e-14)
+    for a, b in zip(F.calc_Lij_wl(eig, vk, ff, mu, wl, delta, temp),
+                    F.calc_Lij_wl(eig2, vk2, ff2, mu, wl, delta, temp, kweight=w2)):
+        assert np.allclose(a, b, rtol=1e-12, atol=1e-14)
+    # an overall scale of the weights drops out
+    for a, b in zip(F.calc_Lij(eig, vk, ff, mu, 0.1, delta, temp),
+                    F.calc_Lij(eig, vk, ff, mu, 0.1, delta, temp, kweight=np.full(Nk, 3.0))):
+        assert np.allclose(a, b, rtol=1e-12, atol=1e-14)
+    import libs.plibs as P
+    fill = 0.7
+    m1 = P.calc_mu(eig, Nk, fill, temp)
+    m2 = P.calc_mu(eig2, 2*Nk, fill, temp, kweight=w2)
+    assert abs(m1-m2) < 1e-10
+
+
 def test_calc_lij_wl_matches_scalar():
     """The batched calc_Lij_wl must reproduce the single-frequency calc_Lij at
     each frequency on the mesh."""

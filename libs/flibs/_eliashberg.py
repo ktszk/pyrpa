@@ -13,18 +13,18 @@ __all__ = [
 # --- ctypes signatures: set once at import.
 # All Fortran entry points are subroutines, so restype is always None.
 _loader._lib.lin_eliash.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # delta (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi (inout)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # Gk
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
-    np.ctypeslib.ndpointer(dtype=np.float64),     # init_delta
-    np.ctypeslib.ndpointer(dtype=np.float64),     # Smat
-    np.ctypeslib.ndpointer(dtype=np.float64),     # Cmat
-    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
-    np.ctypeslib.ndpointer(dtype=np.float64),     # prt
-    np.ctypeslib.ndpointer(dtype=np.int64),       # iprm (inversion orbital permutation)
-    np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
-    np.ctypeslib.ndpointer(dtype=np.int64),       # invk
+    _loader.c_array(np.complex128),  # delta (out)
+    _loader.c_array(np.complex128),  # chi (inout)
+    _loader.c_array(np.complex128),  # Gk
+    _loader.c_array(np.complex128),  # uni
+    _loader.c_array(np.float64),     # init_delta
+    _loader.c_array(np.float64),     # Smat
+    _loader.c_array(np.float64),     # Cmat
+    _loader.f_array(np.int64),       # olist
+    _loader.c_array(np.float64),     # prt
+    _loader.c_array(np.int64),       # iprm (inversion orbital permutation)
+    _loader.c_array(np.int64),       # kmap
+    _loader.c_array(np.int64),       # invk
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),         # temp, eps
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nkall, Nk
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, Nchi
@@ -36,21 +36,21 @@ _loader._lib.lin_eliash.argtypes = [
 ]
 _loader._lib.lin_eliash.restype = None
 _loader._lib.lin_eliash_soc.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # delta (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi (inout)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # Gk
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
-    np.ctypeslib.ndpointer(dtype=np.float64),     # init_delta
-    np.ctypeslib.ndpointer(dtype=np.float64),     # Vmat
-    np.ctypeslib.ndpointer(dtype=np.float64),     # sgnsig
-    np.ctypeslib.ndpointer(dtype=np.float64),     # sgnsig2
-    np.ctypeslib.ndpointer(dtype=np.float64),     # prt
-    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
-    np.ctypeslib.ndpointer(dtype=np.int64),       # slist
-    np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
-    np.ctypeslib.ndpointer(dtype=np.int64),       # invk
-    np.ctypeslib.ndpointer(dtype=np.int64),       # invs
-    np.ctypeslib.ndpointer(dtype=np.int64),       # invschi
+    _loader.c_array(np.complex128),  # delta (out)
+    _loader.c_array(np.complex128),  # chi (inout)
+    _loader.c_array(np.complex128),  # Gk
+    _loader.c_array(np.complex128),  # uni
+    _loader.c_array(np.float64),     # init_delta
+    _loader.c_array(np.float64),     # Vmat
+    _loader.c_array(np.float64),     # sgnsig
+    _loader.c_array(np.float64),     # sgnsig2
+    _loader.c_array(np.float64),     # prt
+    _loader.f_array(np.int64),       # olist
+    _loader.c_array(np.int64),       # slist
+    _loader.c_array(np.int64),       # kmap
+    _loader.c_array(np.int64),       # invk
+    _loader.c_array(np.int64),       # invs
+    _loader.c_array(np.int64),       # invschi
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),         # temp, eps
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nkall, Nk
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, Nchi
@@ -62,24 +62,24 @@ _loader._lib.lin_eliash_soc.argtypes = [
 ]
 _loader._lib.lin_eliash_soc.restype = None
 _loader._lib.get_vdelta_nosym.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi (inout: chi0 -> V_Delta)
-    np.ctypeslib.ndpointer(dtype=np.float64),     # Vmat
-    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
-    np.ctypeslib.ndpointer(dtype=np.int64),       # slist
+    _loader.c_array(np.complex128),  # chi (inout: chi0 -> V_Delta)
+    _loader.c_array(np.float64),     # Vmat
+    _loader.f_array(np.int64),       # olist
+    _loader.c_array(np.int64),       # slist
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nkall, Nw
     ctypes.POINTER(ctypes.c_int64),                             # Nchi
     ctypes.POINTER(ctypes.c_bool)                               # sw_dcsub
 ]
 _loader._lib.get_vdelta_nosym.restype = None
 _loader._lib.lin_eliash_nosym.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # delta (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # Vdelta (in)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # Gk
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # init_delta
-    np.ctypeslib.ndpointer(dtype=np.float64),     # Vmat
-    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
-    np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
-    np.ctypeslib.ndpointer(dtype=np.int64),       # iQ
+    _loader.c_array(np.complex128),  # delta (out)
+    _loader.c_array(np.complex128),  # Vdelta (in)
+    _loader.c_array(np.complex128),  # Gk
+    _loader.c_array(np.complex128),  # init_delta
+    _loader.c_array(np.float64),     # Vmat
+    _loader.f_array(np.int64),       # olist
+    _loader.c_array(np.int64),       # kmap
+    _loader.c_array(np.int64),       # iQ
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),         # temp, eps
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nkall, Nw
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nchi, Norb
@@ -90,28 +90,28 @@ _loader._lib.lin_eliash_nosym.argtypes = [
 ]
 _loader._lib.lin_eliash_nosym.restype = None
 _loader._lib.conv_delta_orb_to_band_nosym.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # deltab (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # delta
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
-    np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
-    np.ctypeslib.ndpointer(dtype=np.int64),       # iQ
+    _loader.c_array(np.complex128),  # deltab (out)
+    _loader.c_array(np.complex128),  # delta
+    _loader.c_array(np.complex128),  # uni
+    _loader.c_array(np.int64),       # kmap
+    _loader.c_array(np.int64),       # iQ
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Norb, Nkall
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, Nx
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Ny, Nz
 ]
 _loader._lib.conv_delta_orb_to_band_nosym.restype = None
 _loader._lib.eliashberg.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),              # delta (inout)
-    np.ctypeslib.ndpointer(dtype=np.complex128),              # sigmak (out/inout)
-    np.ctypeslib.ndpointer(dtype=np.complex128),              # Gk (inout)
-    np.ctypeslib.ndpointer(dtype=np.complex128),              # hamk
-    np.ctypeslib.ndpointer(dtype=np.float64),                 # Smat
-    np.ctypeslib.ndpointer(dtype=np.float64),                 # Cmat
-    np.ctypeslib.ndpointer(dtype=np.int64),                   # olist
-    np.ctypeslib.ndpointer(dtype=np.float64),                 # plist (= prt in Fortran)
-    np.ctypeslib.ndpointer(dtype=np.int64),                   # iprm (inversion orbital permutation)
-    np.ctypeslib.ndpointer(dtype=np.int64),                   # kmap
-    np.ctypeslib.ndpointer(dtype=np.int64),                   # invk
+    _loader.c_array(np.complex128),              # delta (inout)
+    _loader.c_array(np.complex128),              # sigmak (out/inout)
+    _loader.c_array(np.complex128),              # Gk (inout)
+    _loader.c_array(np.complex128),              # hamk
+    _loader.c_array(np.float64),                 # Smat
+    _loader.c_array(np.float64),                 # Cmat
+    _loader.f_array(np.int64),                   # olist
+    _loader.c_array(np.float64),                 # plist (= prt in Fortran)
+    _loader.c_array(np.int64),                   # iprm (inversion orbital permutation)
+    _loader.c_array(np.int64),                   # kmap
+    _loader.c_array(np.int64),                   # invk
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),  # mu, temp, eps
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),     # Nkall, Nk, Nw
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),     # Nchi, Norb, Nx
@@ -124,45 +124,45 @@ _loader._lib.eliashberg.argtypes = [
 ]
 _loader._lib.eliashberg.restype = None
 _loader._lib.conv_delta_orb_to_band.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # deltab (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # delta
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # uni
-    np.ctypeslib.ndpointer(dtype=np.float64),             # prt
-    np.ctypeslib.ndpointer(dtype=np.int64),               # iprm (inversion orbital permutation)
-    np.ctypeslib.ndpointer(dtype=np.int64),               # invk
+    _loader.c_array(np.complex128),          # deltab (out)
+    _loader.c_array(np.complex128),          # delta
+    _loader.c_array(np.complex128),          # uni
+    _loader.c_array(np.float64),             # prt
+    _loader.c_array(np.int64),               # iprm (inversion orbital permutation)
+    _loader.c_array(np.int64),               # invk
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),                   # Norb, Nkall
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nw, gap_sym
 ]
 _loader._lib.conv_delta_orb_to_band.restype = None
 _loader._lib.conv_delta_orb_to_band_soc.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # deltab (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # delta
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
-    np.ctypeslib.ndpointer(dtype=np.int64),       # invk
-    np.ctypeslib.ndpointer(dtype=np.int64),       # invs
-    np.ctypeslib.ndpointer(dtype=np.int64),       # slist
+    _loader.c_array(np.complex128),  # deltab (out)
+    _loader.c_array(np.complex128),  # delta
+    _loader.c_array(np.complex128),  # uni
+    _loader.c_array(np.int64),       # invk
+    _loader.c_array(np.int64),       # invs
+    _loader.c_array(np.int64),       # slist
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Norb, Nkall
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nk, Nw
     ctypes.POINTER(ctypes.c_int64)                              # gap_sym
 ]
 _loader._lib.conv_delta_orb_to_band_soc.restype = None
 _loader._lib.mkfk_trs_nsoc_.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # fk (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # Gk
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # delta
+    _loader.c_array(np.complex128),          # fk (out)
+    _loader.c_array(np.complex128),          # Gk
+    _loader.c_array(np.complex128),          # delta
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nw, Norb
 ]
 _loader._lib.mkfk_trs_nsoc_.restype = None
 _loader._lib.mkfk_trs_soc_.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # fk (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # Gk
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # delta
-    np.ctypeslib.ndpointer(dtype=np.float64),     # sgnsig
-    np.ctypeslib.ndpointer(dtype=np.int64),       # slist
-    np.ctypeslib.ndpointer(dtype=np.int64),       # invk
-    np.ctypeslib.ndpointer(dtype=np.int64),       # invs
-    np.ctypeslib.ndpointer(dtype=np.int64),       # idk (stored index of each k)
-    np.ctypeslib.ndpointer(dtype=np.int64),       # ipk (1: rebuilt from parity)
+    _loader.c_array(np.complex128),  # fk (out)
+    _loader.c_array(np.complex128),  # Gk
+    _loader.c_array(np.complex128),  # delta
+    _loader.c_array(np.float64),     # sgnsig
+    _loader.c_array(np.int64),       # slist
+    _loader.c_array(np.int64),       # invk
+    _loader.c_array(np.int64),       # invs
+    _loader.c_array(np.int64),       # idk (stored index of each k)
+    _loader.c_array(np.int64),       # ipk (1: rebuilt from parity)
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nkall, Nk
     ctypes.POINTER(ctypes.c_int64),                                           # Ndk
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, Norb
@@ -170,29 +170,29 @@ _loader._lib.mkfk_trs_soc_.argtypes = [
 ]
 _loader._lib.mkfk_trs_soc_.restype = None
 _loader._lib.get_initial_delta_.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # delta (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),     # init_delta
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
-    np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
-    np.ctypeslib.ndpointer(dtype=np.int64),       # invk
+    _loader.c_array(np.complex128),  # delta (out)
+    _loader.c_array(np.float64),     # init_delta
+    _loader.c_array(np.complex128),  # uni
+    _loader.c_array(np.int64),       # kmap
+    _loader.c_array(np.int64),       # invk
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nkall, Nk
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, Norb
     ctypes.POINTER(ctypes.c_int64),                             # gap_sym
 ]
 _loader._lib.get_initial_delta_.restype = None
-_loader._lib.get_band_to_orb_delta.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # delta (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # init_delta
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
+_loader._lib.get_band_to_orb_delta.argtypes = [   # all three are built in Fortran order by the wrapper
+    _loader.f_array(np.complex128),  # delta (out)
+    _loader.f_array(np.complex128),  # init_delta
+    _loader.f_array(np.complex128),  # uni
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nk, Norb
 ]
 _loader._lib.get_band_to_orb_delta.restype = None
 _loader._lib.remap_delta.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # delta (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # delta0
-    np.ctypeslib.ndpointer(dtype=np.float64),     # prt
-    np.ctypeslib.ndpointer(dtype=np.int64),       # iprm (inversion orbital permutation)
-    np.ctypeslib.ndpointer(dtype=np.int64),       # invk
+    _loader.c_array(np.complex128),  # delta (out)
+    _loader.c_array(np.complex128),  # delta0
+    _loader.c_array(np.float64),     # prt
+    _loader.c_array(np.int64),       # iprm (inversion orbital permutation)
+    _loader.c_array(np.int64),       # invk
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nkall, Nk
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, Norb
     ctypes.POINTER(ctypes.c_int64)                              # gap_sym

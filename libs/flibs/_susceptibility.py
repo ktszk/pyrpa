@@ -13,13 +13,13 @@ __all__ = [
 # --- ctypes signatures: set once at import.
 # All Fortran entry points are subroutines, so restype is always None.
 _loader._lib.get_chi0_conv_.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # Gk
-    np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
-    np.ctypeslib.ndpointer(dtype=np.int64),       # invk
-    np.ctypeslib.ndpointer(dtype=np.int32),       # irr_chi
-    np.ctypeslib.ndpointer(dtype=np.int32),       # chi_map
-    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
+    _loader.c_array(np.complex128),  # chi
+    _loader.c_array(np.complex128),  # Gk
+    _loader.c_array(np.int64),       # kmap
+    _loader.c_array(np.int64),       # invk
+    _loader.c_array(np.int32),       # irr_chi
+    _loader.c_array(np.int32),       # chi_map
+    _loader.f_array(np.int64),       # olist
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int64),          # temp, Nx
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Ny, Nz
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, Nk
@@ -28,13 +28,13 @@ _loader._lib.get_chi0_conv_.argtypes = [
 ]
 _loader._lib.get_chi0_conv_.restype = None
 _loader._lib.get_chi_irr.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
-    np.ctypeslib.ndpointer(dtype=np.float64),     # eig
-    np.ctypeslib.ndpointer(dtype=np.float64),     # ffermi
-    np.ctypeslib.ndpointer(dtype=np.int64),       # qshift
-    np.ctypeslib.ndpointer(dtype=np.int64),       # ol
-    np.ctypeslib.ndpointer(dtype=np.float64),     # wl
+    _loader.c_array(np.complex128),  # chi (out)
+    _loader.c_array(np.complex128),  # uni
+    _loader.c_array(np.float64),     # eig
+    _loader.c_array(np.float64),     # ffermi
+    _loader.c_array(np.int64),       # qshift
+    _loader.f_array(np.int64),       # ol
+    _loader.c_array(np.float64),     # wl
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nchi, Norb
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nk, Nw
     ctypes.POINTER(ctypes.c_double),                            # idelta
@@ -42,14 +42,14 @@ _loader._lib.get_chi_irr.argtypes = [
 ]
 _loader._lib.get_chi_irr.restype = None
 _loader._lib.chiq_map.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # trchis (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # trchi (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # uni
-    np.ctypeslib.ndpointer(dtype=np.float64),             # eig
-    np.ctypeslib.ndpointer(dtype=np.float64),             # ffermi
-    np.ctypeslib.ndpointer(dtype=np.float64),             # klist
-    np.ctypeslib.ndpointer(dtype=np.float64),             # Smat
-    np.ctypeslib.ndpointer(dtype=np.int64),               # ol
+    _loader.c_array(np.complex128),          # trchis (out)
+    _loader.c_array(np.complex128),          # trchi (out)
+    _loader.c_array(np.complex128),          # uni
+    _loader.c_array(np.float64),             # eig
+    _loader.c_array(np.float64),             # ffermi
+    _loader.c_array(np.float64),             # klist
+    _loader.c_array(np.float64),             # Smat
+    _loader.f_array(np.int64),               # ol
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),                 # temp, ecut
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),                 # idelta, eps
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),                   # Nx, Ny
@@ -57,24 +57,24 @@ _loader._lib.chiq_map.argtypes = [
 ]
 _loader._lib.chiq_map.restype = None
 _loader._lib.get_tr_chi.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # trchis (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # trchi0 (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # chis_orb (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # chis
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi0
-    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
+    _loader.c_array(np.complex128),  # trchis (out)
+    _loader.c_array(np.complex128),  # trchi0 (out)
+    _loader.c_array(np.complex128),  # chis_orb (out)
+    _loader.c_array(np.complex128),  # chis
+    _loader.c_array(np.complex128),  # chi0
+    _loader.f_array(np.int64),       # olist
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, Nchi
     ctypes.POINTER(ctypes.c_int64)                              # Norb
 ]
 _loader._lib.get_tr_chi.restype = None
 _loader._lib.get_phi_irr.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # phi (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
-    np.ctypeslib.ndpointer(dtype=np.float64),     # eig
-    np.ctypeslib.ndpointer(dtype=np.float64),     # ffermi
-    np.ctypeslib.ndpointer(dtype=np.int64),       # qshift
-    np.ctypeslib.ndpointer(dtype=np.int64),       # ol
-    np.ctypeslib.ndpointer(dtype=np.float64),     # wl
+    _loader.c_array(np.complex128),  # phi (out)
+    _loader.c_array(np.complex128),  # uni
+    _loader.c_array(np.float64),     # eig
+    _loader.c_array(np.float64),     # ffermi
+    _loader.c_array(np.int64),       # qshift
+    _loader.f_array(np.int64),       # ol
+    _loader.c_array(np.float64),     # wl
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nchi, Norb
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nk, Nw
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),         # idelta, eps
@@ -82,12 +82,12 @@ _loader._lib.get_phi_irr.argtypes = [
 ]
 _loader._lib.get_phi_irr.restype = None
 _loader._lib.phiq_map.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # trphi (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
-    np.ctypeslib.ndpointer(dtype=np.float64),     # eig
-    np.ctypeslib.ndpointer(dtype=np.float64),     # ffermi
-    np.ctypeslib.ndpointer(dtype=np.float64),     # klist
-    np.ctypeslib.ndpointer(dtype=np.int64),       # ol
+    _loader.c_array(np.complex128),  # trphi (out)
+    _loader.c_array(np.complex128),  # uni
+    _loader.c_array(np.float64),     # eig
+    _loader.c_array(np.float64),     # ffermi
+    _loader.c_array(np.float64),     # klist
+    _loader.f_array(np.int64),       # ol
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),         # mu, temp
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),         # ecut, idelta
     ctypes.POINTER(ctypes.c_double),                            # eps
@@ -97,29 +97,29 @@ _loader._lib.phiq_map.argtypes = [
 ]
 _loader._lib.phiq_map.restype = None
 _loader._lib.get_tr_phi.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # trphi (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # phi_orb (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # phi
-    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
+    _loader.c_array(np.complex128),  # trphi (out)
+    _loader.c_array(np.complex128),  # phi_orb (out)
+    _loader.c_array(np.complex128),  # phi
+    _loader.f_array(np.int64),       # olist
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, Nchi
     ctypes.POINTER(ctypes.c_int64)                              # Norb
 ]
 _loader._lib.get_tr_phi.restype = None
 _loader._lib.get_chis.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # chis (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi0
-    np.ctypeslib.ndpointer(dtype=np.float64),     # Smat
+    _loader.c_array(np.complex128),  # chis (out)
+    _loader.c_array(np.complex128),  # chi0
+    _loader.c_array(np.float64),     # Smat
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nchi, Nw
 ]
 _loader._lib.get_chis.restype = None
 _loader._lib.get_chi0.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),     # Smat
-    np.ctypeslib.ndpointer(dtype=np.float64),     # Cmat
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # Gk
-    np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
-    np.ctypeslib.ndpointer(dtype=np.int64),       # invk
-    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
+    _loader.c_array(np.complex128),  # chi (out)
+    _loader.c_array(np.float64),     # Smat
+    _loader.c_array(np.float64),     # Cmat
+    _loader.c_array(np.complex128),  # Gk
+    _loader.c_array(np.int64),       # kmap
+    _loader.c_array(np.int64),       # invk
+    _loader.f_array(np.int64),       # olist
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int64),          # temp, Nx
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Ny, Nz
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, Nk
@@ -129,15 +129,15 @@ _loader._lib.get_chi0.argtypes = [
 ]
 _loader._lib.get_chi0.restype = None
 _loader._lib.get_chi0_tail.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi
-    np.ctypeslib.ndpointer(dtype=np.float64),     # Smat
-    np.ctypeslib.ndpointer(dtype=np.float64),     # Cmat
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # Gk
-    np.ctypeslib.ndpointer(dtype=np.float64),     # eig
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
-    np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
-    np.ctypeslib.ndpointer(dtype=np.int64),       # invk
-    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
+    _loader.c_array(np.complex128),  # chi
+    _loader.c_array(np.float64),     # Smat
+    _loader.c_array(np.float64),     # Cmat
+    _loader.c_array(np.complex128),  # Gk
+    _loader.c_array(np.float64),     # eig
+    _loader.c_array(np.complex128),  # uni
+    _loader.c_array(np.int64),       # kmap
+    _loader.c_array(np.int64),       # invk
+    _loader.f_array(np.int64),       # olist
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),         # mu, temp
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nx, Ny
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nz, Nw
@@ -147,17 +147,17 @@ _loader._lib.get_chi0_tail.argtypes = [
 ]
 _loader._lib.get_chi0_tail.restype = None
 _loader._lib.get_chi0_soc.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),     # sgnsig (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),     # sgnsig2 (out)
-    np.ctypeslib.ndpointer(dtype=np.int64),       # invschi (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),     # Vmat
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # Gk
-    np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
-    np.ctypeslib.ndpointer(dtype=np.int64),       # invk
-    np.ctypeslib.ndpointer(dtype=np.int64),       # invs
-    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
-    np.ctypeslib.ndpointer(dtype=np.int64),       # slist
+    _loader.c_array(np.complex128),  # chi (out)
+    _loader.c_array(np.float64),     # sgnsig (out)
+    _loader.c_array(np.float64),     # sgnsig2 (out)
+    _loader.c_array(np.int64),       # invschi (out)
+    _loader.c_array(np.float64),     # Vmat
+    _loader.c_array(np.complex128),  # Gk
+    _loader.c_array(np.int64),       # kmap
+    _loader.c_array(np.int64),       # invk
+    _loader.c_array(np.int64),       # invs
+    _loader.f_array(np.int64),       # olist
+    _loader.c_array(np.int64),       # slist
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int64),          # temp, Nx
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Ny, Nz
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, Nk
@@ -166,10 +166,10 @@ _loader._lib.get_chi0_soc.argtypes = [
 ]
 _loader._lib.get_chi0_soc.restype = None
 _loader._lib.get_chi0_nosym.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # Gk
-    np.ctypeslib.ndpointer(dtype=np.int64),       # kmap
-    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
+    _loader.c_array(np.complex128),  # chi (out)
+    _loader.c_array(np.complex128),  # Gk
+    _loader.c_array(np.int64),       # kmap
+    _loader.f_array(np.int64),       # olist
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_int64),          # temp, Nx
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Ny, Nz
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nw, Nkall
@@ -177,36 +177,36 @@ _loader._lib.get_chi0_nosym.argtypes = [
 ]
 _loader._lib.get_chi0_nosym.restype = None
 _loader._lib.get_chis_chic_soc.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # chic (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # chiszz (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # chispm (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi
-    np.ctypeslib.ndpointer(dtype=np.float64),     # Vmat
-    np.ctypeslib.ndpointer(dtype=np.int64),       # orb_list
-    np.ctypeslib.ndpointer(dtype=np.int64),       # olist
-    np.ctypeslib.ndpointer(dtype=np.int64),       # slist
-    np.ctypeslib.ndpointer(dtype=np.int64),       # invs
+    _loader.c_array(np.complex128),  # chic (out)
+    _loader.c_array(np.complex128),  # chiszz (out)
+    _loader.c_array(np.complex128),  # chispm (out)
+    _loader.c_array(np.complex128),  # chi
+    _loader.c_array(np.float64),     # Vmat
+    _loader.c_array(np.int64),       # orb_list
+    _loader.f_array(np.int64),       # olist
+    _loader.c_array(np.int64),       # slist
+    _loader.c_array(np.int64),       # invs
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nk, Nw
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nchi, Norb
 ]
 _loader._lib.get_chis_chic_soc.restype = None
 _loader._lib.get_chis_chic.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # chis (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # chic (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # chi
-    np.ctypeslib.ndpointer(dtype=np.float64),             # Smat
-    np.ctypeslib.ndpointer(dtype=np.float64),             # Cmat
+    _loader.c_array(np.complex128),          # chis (out)
+    _loader.c_array(np.complex128),          # chic (out)
+    _loader.c_array(np.complex128),          # chi
+    _loader.c_array(np.float64),             # Smat
+    _loader.c_array(np.float64),             # Cmat
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nw, Nchi
 ]
 _loader._lib.get_chis_chic.restype = None
 _loader._lib.get_chi_irr_sc.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
-    np.ctypeslib.ndpointer(dtype=np.float64),     # eig
-    np.ctypeslib.ndpointer(dtype=np.float64),     # ffermi
-    np.ctypeslib.ndpointer(dtype=np.int64),       # qshift
-    np.ctypeslib.ndpointer(dtype=np.int64),       # ol
-    np.ctypeslib.ndpointer(dtype=np.float64),     # wl
+    _loader.c_array(np.complex128),  # chi (out)
+    _loader.c_array(np.complex128),  # uni
+    _loader.c_array(np.float64),     # eig
+    _loader.c_array(np.float64),     # ffermi
+    _loader.c_array(np.int64),       # qshift
+    _loader.f_array(np.int64),       # ol
+    _loader.c_array(np.float64),     # wl
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nchi, Norb
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nk, Nw
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),         # idelta, eps
@@ -214,9 +214,9 @@ _loader._lib.get_chi_irr_sc.argtypes = [
 ]
 _loader._lib.get_chi_irr_sc.restype = None
 _loader._lib.get_eig_or_tr_chi.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # chiqout (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # chi
-    np.ctypeslib.ndpointer(dtype=np.int64),       # invk
+    _loader.c_array(np.complex128),  # chiqout (out)
+    _loader.c_array(np.complex128),  # chi
+    _loader.c_array(np.int64),       # invk
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nkall, Nk
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_bool)             # Nchi, sw_eig
 ]

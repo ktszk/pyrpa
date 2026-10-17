@@ -96,7 +96,7 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,iprm,kmap,
      ! no branch test is passed: singlet and triplet are separate kernels here (sw_pair), so the
      ! largest eigenvalue of this kernel is already the one gap_sym asks for
      call get_initial_delta(newdelta,init_delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,gap_sym)
-     call arnoldi_two_pass(lambda_out,delta,newdelta,ks,arnoldi_m,apply_op)
+     call arnoldi_two_pass(lambda_out,delta,newdelta,ks,arnoldi_m,eps,apply_op)
   else !--- Power method (shift + deflation)
      eigenval_loop:do i_eig=1,eig_max !solve eig_val using power method, 1st eig is usually large negative value
         call get_initial_delta(delta,init_delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,gap_sym)

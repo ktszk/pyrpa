@@ -18,149 +18,149 @@ _loader._lib.openmp_params.argtypes = [
 ]
 _loader._lib.openmp_params.restype = None
 _loader._lib.gen_ham.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # ham_k (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),             # klist
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # ham_r
-    np.ctypeslib.ndpointer(dtype=np.float64),             # rvec
+    _loader.c_array(np.complex128),          # ham_k (out)
+    _loader.c_array(np.float64),             # klist
+    _loader.c_array(np.complex128),          # ham_r
+    _loader.c_array(np.float64),             # rvec
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nr, Norb
 ]
 _loader._lib.gen_ham.restype = None
 _loader._lib.get_eig.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),     # eig (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # ham_k
+    _loader.c_array(np.float64),     # eig (out)
+    _loader.c_array(np.complex128),  # uni (out)
+    _loader.c_array(np.complex128),  # ham_k
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nk, Norb
 ]
 _loader._lib.get_eig.restype = None
 _loader._lib.get_eig_mlo.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),     # eig (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # ham_k
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # Ovlk
+    _loader.c_array(np.float64),     # eig (out)
+    _loader.c_array(np.complex128),  # uni (out)
+    _loader.c_array(np.complex128),  # ham_k
+    _loader.c_array(np.complex128),  # Ovlk
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nk, Norb
 ]
 _loader._lib.get_eig_mlo.restype = None
 _loader._lib.get_ffermi.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),  # ffermi (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),  # eig
+    _loader.c_array(np.float64),  # ffermi (out)
+    _loader.c_array(np.float64),  # eig
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),      # mu, temp
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)         # Nk, Norb
 ]
 _loader._lib.get_ffermi.restype = None
 _loader._lib.get_vlm0.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # vk (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),             # klist
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # ham_r
-    np.ctypeslib.ndpointer(dtype=np.float64),             # rvec
+    _loader.c_array(np.complex128),          # vk (out)
+    _loader.c_array(np.float64),             # klist
+    _loader.c_array(np.complex128),          # ham_r
+    _loader.c_array(np.float64),             # rvec
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nr, Norb
 ]
 _loader._lib.get_vlm0.restype = None
 _loader._lib.get_veloc.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),     # vk (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # vk0
-    np.ctypeslib.ndpointer(dtype=np.float64),     # mrot
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
+    _loader.c_array(np.float64),     # vk (out)
+    _loader.c_array(np.complex128),  # vk0
+    _loader.f_array(np.float64),     # mrot (Fortran order: v = mrot @ dE/dk)
+    _loader.c_array(np.complex128),  # uni
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nk, Norb
 ]
 _loader._lib.get_veloc.restype = None
 _loader._lib.get_vnm.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # vk (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # vk0
-    np.ctypeslib.ndpointer(dtype=np.float64),     # mrot
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
+    _loader.c_array(np.complex128),  # vk (out)
+    _loader.c_array(np.complex128),  # vk0
+    _loader.f_array(np.float64),     # mrot (Fortran order: v = mrot @ dE/dk)
+    _loader.c_array(np.complex128),  # uni
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nk, Norb
 ]
 _loader._lib.get_vnm.restype = None
 _loader._lib.get_veloc_mlo.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),     # vk (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # vk0
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # sk0
-    np.ctypeslib.ndpointer(dtype=np.float64),     # eig
-    np.ctypeslib.ndpointer(dtype=np.float64),     # mrot
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
+    _loader.c_array(np.float64),     # vk (out)
+    _loader.c_array(np.complex128),  # vk0
+    _loader.c_array(np.complex128),  # sk0
+    _loader.c_array(np.float64),     # eig
+    _loader.f_array(np.float64),     # mrot (Fortran order: v = mrot @ dE/dk)
+    _loader.c_array(np.complex128),  # uni
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nk, Norb
 ]
 _loader._lib.get_veloc_mlo.restype = None
 _loader._lib.get_vnm_mlo.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # vk (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # vk0 = dH/dk
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # sk0 = dS/dk
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # Ovlk = S(k)
-    np.ctypeslib.ndpointer(dtype=np.float64),     # eig
-    np.ctypeslib.ndpointer(dtype=np.float64),     # mrot
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
+    _loader.c_array(np.complex128),  # vk (out)
+    _loader.c_array(np.complex128),  # vk0 = dH/dk
+    _loader.c_array(np.complex128),  # sk0 = dS/dk
+    _loader.c_array(np.complex128),  # Ovlk = S(k)
+    _loader.c_array(np.float64),     # eig
+    _loader.f_array(np.float64),     # mrot (Fortran order: v = mrot @ dE/dk)
+    _loader.c_array(np.complex128),  # uni
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nk, Norb
 ]
 _loader._lib.get_vnm_mlo.restype = None
 _loader._lib.get_imass0.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # imk (out)
-    np.ctypeslib.ndpointer(dtype=np.float64),             # klist
-    np.ctypeslib.ndpointer(dtype=np.complex128),          # ham_r
-    np.ctypeslib.ndpointer(dtype=np.float64),             # rvec
+    _loader.c_array(np.complex128),          # imk (out)
+    _loader.c_array(np.float64),             # klist
+    _loader.c_array(np.complex128),          # ham_r
+    _loader.c_array(np.float64),             # rvec
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nr, Norb
 ]
 _loader._lib.get_imass0.restype = None
 _loader._lib.get_imassk.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),     # imk (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # imk0
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # vk0
-    np.ctypeslib.ndpointer(dtype=np.float64),     # eig
-    np.ctypeslib.ndpointer(dtype=np.float64),     # mrot
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
+    _loader.c_array(np.float64),     # imk (out)
+    _loader.c_array(np.complex128),  # imk0
+    _loader.c_array(np.complex128),  # vk0
+    _loader.c_array(np.float64),     # eig
+    _loader.f_array(np.float64),     # mrot (Fortran order: v = mrot @ dE/dk)
+    _loader.c_array(np.complex128),  # uni
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nk, Norb
 ]
 _loader._lib.get_imassk.restype = None
 _loader._lib.get_imassk_mlo.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),     # imk (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # imk0
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # smk0
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # vk0
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # sk0
-    np.ctypeslib.ndpointer(dtype=np.float64),     # eig
-    np.ctypeslib.ndpointer(dtype=np.float64),     # mrot
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # uni
+    _loader.c_array(np.float64),     # imk (out)
+    _loader.c_array(np.complex128),  # imk0
+    _loader.c_array(np.complex128),  # smk0
+    _loader.c_array(np.complex128),  # vk0
+    _loader.c_array(np.complex128),  # sk0
+    _loader.c_array(np.float64),     # eig
+    _loader.f_array(np.float64),     # mrot (Fortran order: v = mrot @ dE/dk)
+    _loader.c_array(np.complex128),  # uni
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nk, Norb
 ]
 _loader._lib.get_imassk_mlo.restype = None
 _loader._lib.get_qshift_.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),  # qpoint
-    np.ctypeslib.ndpointer(dtype=np.float64),  # klist
-    np.ctypeslib.ndpointer(dtype=np.int64),    # qshift (out)
+    _loader.c_array(np.float64),  # qpoint
+    _loader.c_array(np.float64),  # klist
+    _loader.c_array(np.int64),    # qshift (out)
     ctypes.POINTER(ctypes.c_int64),                          # Nk
 ]
 _loader._lib.get_qshift_.restype = None
 _loader._lib.get_iqshift_.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),  # qpoint
-    np.ctypeslib.ndpointer(dtype=np.float64),  # klist
-    np.ctypeslib.ndpointer(dtype=np.int64),    # qshift (out)
+    _loader.c_array(np.float64),  # qpoint
+    _loader.c_array(np.float64),  # klist
+    _loader.c_array(np.int64),    # qshift (out)
     ctypes.POINTER(ctypes.c_int64),                          # Nk
 ]
 _loader._lib.get_iqshift_.restype = None
 _loader._lib.generate_irr_kpoint_inv.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),  # klist (out)
-    np.ctypeslib.ndpointer(dtype=np.int64),    # kmap (out)
-    np.ctypeslib.ndpointer(dtype=np.int64),    # invk_ft_list (out)
+    _loader.c_array(np.float64),  # klist (out)
+    _loader.c_array(np.int64),    # kmap (out)
+    _loader.c_array(np.int64),    # invk_ft_list (out)
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),        # Nk, Nx
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)         # Ny, Nz
 ]
 _loader._lib.generate_irr_kpoint_inv.restype = None
 _loader._lib.get_kweight.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),  # weight (out)
-    np.ctypeslib.ndpointer(dtype=np.int64),    # invk
+    _loader.c_array(np.float64),  # weight (out)
+    _loader.c_array(np.int64),    # invk
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)         # Nk, Nkall
 ]
 _loader._lib.get_kweight.restype = None
 _loader._lib.mkbdghamk.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # hamBdGk (out)
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # hamk
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # delta
+    _loader.c_array(np.complex128),  # hamBdGk (out)
+    _loader.c_array(np.complex128),  # hamk
+    _loader.c_array(np.complex128),  # delta
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nk, Norb
 ]
 _loader._lib.mkbdghamk.restype = None
 _loader._lib.get_parity_prop.argtypes = [
-    np.ctypeslib.ndpointer(dtype=np.float64),     # Pmn (inout)
-    np.ctypeslib.ndpointer(dtype=np.float64),     # rvec
-    np.ctypeslib.ndpointer(dtype=np.complex128),  # ham_r
+    _loader.c_array(np.float64),     # Pmn (inout)
+    _loader.c_array(np.float64),     # rvec
+    _loader.c_array(np.complex128),  # ham_r
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Norb, Nr
 ]
 _loader._lib.get_parity_prop.restype = None
@@ -262,18 +262,27 @@ def get_vlm0(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray) -> np.ndarr
     return vk
 
 
+def _fortran_mrot(mrot: np.ndarray) -> np.ndarray:
+    """The Fortran kernels compute v_m = sum_l mrot(m,l) dE/dk_l, so mrot is handed over in
+    FORTRAN order: whatever the memory layout of the caller's array (avec.T*ihbar is a
+    transposed, Fortran-ordered view; np.eye(3) is C-ordered), the Python index order is
+    the Fortran one and v = mrot @ dE/dk holds as written."""
+    return np.asfortranarray(mrot, dtype=np.float64)
+
+
 def get_vk(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray,
            sk0: np.ndarray | None = None, eig: np.ndarray | None = None) -> np.ndarray:
     """
     @brief Transform orbital-basis velocity matrices to band-basis velocity expectation values.
     @param   vk0: Unrotated velocity matrices dH/dk [Nk, Norb, Norb, 3] complex128
-    @param  mrot: Rotation matrix (lattice-to-Cartesian) [3, 3] float64
+    @param  mrot: Lattice-to-Cartesian matrix [3, 3] float64, v = mrot @ dE/dk (e.g. avec.T*ihbar)
     @param   uni: Eigenvector matrices [Nk, Norb, Norb] complex128
     @param   sk0: Overlap derivative dS/dk [Nk, Norb, Norb, 3] complex128 for a non-orthogonal
                   (MLO) basis; None for an orthogonal basis
     @param   eig: Eigenvalues [Nk, Norb] float64, required together with sk0
     @return   vk: Band velocities [Nk, Norb, 3] float64
     """
+    mrot = _fortran_mrot(mrot)
     Nk = len(uni)
     Norb = uni.shape[1]
     vk = np.zeros((Nk, Norb, 3), dtype=np.float64)
@@ -292,7 +301,7 @@ def get_vnm(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray,
     """
     @brief Compute inter-band velocity matrix elements v_{nm}(k) for all band pairs and Cartesian directions.
     @param   vk0: Unrotated velocity matrices dH/dk [Nk, Norb, Norb, 3] complex128
-    @param  mrot: Rotation matrix (lattice-to-Cartesian) [3, 3] float64
+    @param  mrot: Lattice-to-Cartesian matrix [3, 3] float64, v = mrot @ dE/dk (e.g. avec.T*ihbar)
     @param   uni: Eigenvector matrices [Nk, Norb, Norb] complex128
     @param   sk0: Overlap derivative dS/dk [Nk, Norb, Norb, 3] complex128 for a non-orthogonal
                   (MLO) basis; None for an orthogonal basis
@@ -301,6 +310,7 @@ def get_vnm(vk0: np.ndarray, mrot: np.ndarray, uni: np.ndarray,
                   (the exact Loewdin velocity needs S itself, not only its derivative)
     @return   vnm: Inter-band velocity matrix elements [Nk, Norb, Norb, 3] complex128
     """
+    mrot = _fortran_mrot(mrot)
     Nk = len(uni)
     Norb = uni.shape[1]
     vk = np.zeros((Nk, Norb, Norb, 3), dtype=np.complex128)
@@ -331,7 +341,7 @@ def get_vnmk(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
     @param  klist: k-point list [Nk, 3] float64
     @param  ham_r: Real-space Hamiltonian blocks [Nr, Norb, Norb] complex128
     @param   rvec: Real-space displacement vectors [Nr, 3] float64
-    @param   mrot: Rotation matrix (lattice-to-Cartesian) [3, 3] float64
+    @param   mrot: Lattice-to-Cartesian matrix [3, 3] float64, v = mrot @ dE/dk (e.g. avec.T*ihbar)
     @param    uni: Eigenvector matrices [Nk, Norb, Norb] complex128
     @param    S_r: Real-space overlap blocks [Nr, Norb, Norb] for a non-orthogonal (MLO) basis;
                    None or [] for an orthogonal basis
@@ -352,7 +362,7 @@ def get_veloc(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
     @param  klist: k-point list [Nk, 3] float64
     @param  ham_r: Real-space Hamiltonian blocks [Nr, Norb, Norb] complex128
     @param   rvec: Real-space displacement vectors [Nr, 3] float64
-    @param   mrot: Rotation matrix (lattice-to-Cartesian) [3, 3] float64
+    @param   mrot: Lattice-to-Cartesian matrix [3, 3] float64, v = mrot @ dE/dk (e.g. avec.T*ihbar)
     @param    uni: Eigenvector matrices [Nk, Norb, Norb] complex128
     @param    S_r: Real-space overlap blocks [Nr, Norb, Norb] for a non-orthogonal (MLO) basis;
                    None or [] for an orthogonal basis
@@ -388,7 +398,7 @@ def get_imassk(imass0: np.ndarray, mrot: np.ndarray, uni: np.ndarray,
            2 sum_{m!=n} Re[H~^a_nm H~^b_mn]/(eps_n-eps_m), which needs dH/dk and eig.
            Band pairs degenerate to within 1e-6 eV are skipped (the mass diverges there).
     @param  imass0: Unrotated d2H/dk2 [Nk, Norb, Norb, 3, 3] complex128 (output of get_imass0)
-    @param    mrot: Rotation matrix (lattice-to-Cartesian) [3, 3] float64
+    @param    mrot: Lattice-to-Cartesian matrix [3, 3] float64, v = mrot @ dE/dk (e.g. avec.T*ihbar)
     @param     uni: Eigenvector matrices [Nk, Norb, Norb] complex128
     @param     vk0: Orbital-basis dH/dk [Nk, Norb, Norb, 3] complex128 (output of get_vlm0)
     @param     eig: Eigenvalues [Nk, Norb] float64
@@ -396,6 +406,7 @@ def get_imassk(imass0: np.ndarray, mrot: np.ndarray, uni: np.ndarray,
     @param     sk0: dS/dk [Nk, Norb, Norb, 3] for a non-orthogonal (MLO) basis; None otherwise
     @return  imass: Band-basis inverse effective mass tensor [Nk, Norb, 3, 3] float64
     """
+    mrot = _fortran_mrot(mrot)
     Nk = len(uni)
     Norb = uni.shape[1]
     imass = np.zeros((Nk, Norb, 3, 3), dtype=np.float64)
@@ -416,7 +427,7 @@ def get_mass(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray, mrot: np.nd
     @param    klist: k-point list [Nk, 3] float64
     @param    ham_r: Real-space Hamiltonian blocks [Nr, Norb, Norb] complex128
     @param     rvec: Real-space displacement vectors [Nr, 3] float64
-    @param     mrot: Rotation matrix (lattice-to-Cartesian) [3, 3] float64
+    @param     mrot: Lattice-to-Cartesian matrix [3, 3] float64, v = mrot @ dE/dk (e.g. avec.T*ihbar)
     @param      uni: Eigenvector matrices [Nk, Norb, Norb] complex128
     @param sw_imass: If True, return inverse mass (imass) [Nk, Norb, 3, 3]; if False, return mass
     @param      S_r: Real-space overlap blocks [Nr, Norb, Norb] for a non-orthogonal (MLO) basis;

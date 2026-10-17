@@ -5,6 +5,8 @@ Response functions: spin susceptibility, pairing susceptibility, conductivity, a
 """
 import numpy as np
 import libs.flibs as flibs
+import libs.plibs._bands as _bands
+import libs.plibs._lattice as _lattice
 import collections.abc
 
 # Public API of this submodule; keeps `from ._x import *` in __init__.py from
@@ -12,7 +14,7 @@ import collections.abc
 __all__ = [
     'get_conductivity', 'chis_spectrum', 'chis_q_point', 'chis_q_point_sc', 'chis_spectrum_sc', 'chis_qmap',
     'phi_spectrum', 'phi_q_point', 'phi_qmap', 'get_chi_orb_list', 'expand_UJ_sites', 'site_block_mask',
-    'set_harmonic_lattice', 'lattice_harmonic', 'gap_symms', 'get_initial_gap'
+    'set_harmonic_lattice', 'lattice_harmonic', 'gap_symms', 'get_initial_gap', 'sc_gap_on_mesh', 'bdg_bands_path'
 ]
 
 
@@ -121,7 +123,8 @@ def _solve_phi_path(qlist: np.ndarray, wlist: np.ndarray, olist: np.ndarray, phi
 
 
 def get_conductivity(mu: float, temp: float, eig: np.ndarray, vk: np.ndarray, Nw: int, Emax: float,
-                     idelta: float = 1.e-3) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+                     idelta: float = 1.e-3,
+                     kweight: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     @brief Compute transport coefficients L11, L12, L22 as a function of frequency using the Kubo formula.
     @param      mu: Chemical potential in eV
@@ -131,6 +134,7 @@ def get_conductivity(mu: float, temp: float, eig: np.ndarray, vk: np.ndarray, Nw
     @param      Nw: Number of frequency points
     @param    Emax: Maximum frequency in eV
     @param  idelta: Broadening parameter (Lorentzian width) in eV
+    @param kweight: k-point weights [Nk] (None: uniform mesh)
     @return    L11: Charge conductivity spectrum array [Nw, 3, 3]
     @return    L12: Thermoelectric coefficient spectrum array [Nw, 3, 3]
     @return    L22: Thermal conductivity spectrum array [Nw, 3, 3]
@@ -138,7 +142,7 @@ def get_conductivity(mu: float, temp: float, eig: np.ndarray, vk: np.ndarray, Nw
     """
     wlist = np.linspace(0, Emax, Nw)
     ffermi = flibs.get_ffermi(eig, mu, temp)
-    L11, L12, L22 = flibs.calc_Lij_wl(eig, vk, ffermi, mu, wlist, idelta, temp)
+    L11, L12, L22 = flibs.calc_Lij_wl(eig, vk, ffermi, mu, wlist, idelta, temp, kweight)
     return L11, L12, L22, wlist
 
 
@@ -758,3 +762,93 @@ def get_initial_gap(klist: np.ndarray, Norb: int, gap_sym: int,
             'that they are degenerate and orthogonal, and build Delta_1 +- i Delta_2 '
             'afterwards. The chiral harmonics are for the Eilenberger form factor.')
     return row
+
+
+def sc_gap_on_mesh(Nx: int, Ny: int, Nz: int, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray,
+                   gap_sym: int, delta0: float | list, plist: np.ndarray,
+                   iperm: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """
+    @brief Model superconducting gap Delta(k) in the orbital basis on the full k-mesh, for the
+           SC-state susceptibility / NMR modes (BdG with a fixed gap).
+           delta0 a number: the gap_sym form factor is projected to the orbital basis
+           (get_initial_delta) and rescaled so that max|Delta| = delta0.
+           delta0 a list: one amplitude per band (signs give s+-), with bands 1,2 damped by 1/2
+           inside the Gamma-centred AFM diamond |kx|+|ky| < 1/2 (a model choice for the 5-band
+           iron pnictide, applied only to the bands that exist).
+    @param Nx, Ny, Nz: k-mesh
+    @param ham_r, S_r, rvec: Wannier Hamiltonian, overlap ([] if orthogonal) and R-vectors
+    @param gap_sym: gap symmetry index
+    @param  delta0: maximum gap [eV], or per-band amplitudes [Norb]
+    @param   plist: inversion parity per orbital (scalar delta0 only)
+    @param   iperm: orbital permutation of the inversion operator (None = identity)
+    @return  klist: full k-mesh on [0,1) without endpoints [Nk, 3] (required by get_qshift)
+    @return deltak: gap [Nk, Norb, Norb] complex128, paired with klist
+    """
+    Norb = ham_r.shape[1]
+    if np.isscalar(delta0):
+        klist, kmap, invk = flibs.gen_irr_k_TRS(Nx, Ny, Nz)
+        eig, uni = _bands.get_eigs(klist, ham_r, S_r, rvec)
+        deltaini = flibs.remap_gap(flibs.get_initial_delta(get_initial_gap(klist, len(eig.T), gap_sym),
+                                                           uni, kmap, invk, 1, gap_sym), plist, invk, gap_sym,
+                                   iperm=iperm)
+        deltaini_static = np.ascontiguousarray(deltaini[:, :, 0, :].transpose(2, 0, 1))  # [Nkall,Norb,Norb]
+        print("maximum gap = %7.4f meV" % (delta0*1e3), flush=True)
+        gap_max = abs(deltaini_static).max()
+        if gap_max <= 0.0:
+            print("Warning: initial gap is zero. Using unscaled delta", flush=True)
+            deltak = deltaini_static.copy()
+        else:
+            deltak = delta0*deltaini_static/gap_max
+        # Full-grid klist in kmap (FFT) order: keeps deltak <-> klist index pairing
+        # consistent, and gives the [0,1) endpoint-free mesh required by get_qshift
+        klist = kmap/np.array([Nx, Ny, Nz], dtype=np.float64)
+    else:
+        # sw_pp=False: get_qshift requires the periodic [0,1) mesh without endpoints
+        _, klist = _lattice.gen_klist(Nx, Ny, Nz, sw_pp=False)
+        eig, uni = _bands.get_eigs(klist, ham_r, S_r, rvec)
+        inigap = gap_symms(klist, Norb, gap_sym)
+        for i, k in enumerate(klist):
+            # AFM-zone test in centered fractional coords: keep the full gap inside the
+            # M-centered diamond (|kx|+|ky|>=1/2) and damp bands 1,2 inside the
+            # Gamma-centered diamond (|kx|+|ky|<1/2).
+            kc = k-np.round(k)
+            if abs(kc[0])+abs(kc[1]) < 0.5:
+                inigap[1:3, i] *= .5   # bands 1,2 where they exist
+        # delta0 is per-band [Norb]; broadcast over k: (inigap.T)[Nk,Norb] * delta0[Norb] -> [Norb,Nk]
+        deltaini = (inigap.T*np.array(delta0, dtype=np.complex128)).T
+        deltak = flibs.get_band_to_orb_delta(deltaini, uni)
+    return klist, deltak
+
+
+def bdg_bands_path(ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray, mu: float, klist: np.ndarray,
+                   gap_sym: int, delta0: float | list, Nk_path: int = 200) -> tuple[np.ndarray, np.ndarray]:
+    """
+    @brief BdG bands along (0,0,0) -> (0,0.5,0) for the model gap of sc_gap_on_mesh.
+           The band form factor is scaled like the mesh gap: its maximum over klist is delta0
+           (number), or one amplitude per band (list).
+    @param ham_r, S_r, rvec: Wannier Hamiltonian, overlap ([] if orthogonal) and R-vectors
+    @param      mu: chemical potential [eV]
+    @param   klist: the k-mesh of the SC calculation (sets the form-factor normalization)
+    @param gap_sym: gap symmetry index
+    @param  delta0: maximum gap [eV], or per-band amplitudes [Norb]
+    @param Nk_path: points along the path
+    @return      ky: path coordinate k_y [Nk_path]
+    @return eig_bdg: BdG eigenvalues [Nk_path, 2*Norb] (eV, relative to mu)
+    """
+    Norb = ham_r.shape[1]
+    kpath_bdg = np.zeros((Nk_path, 3))
+    kpath_bdg[:, 1] = np.linspace(0, 0.5, Nk_path)
+    hamk_path = flibs.gen_ham(kpath_bdg, ham_r, rvec)
+    _, uni_path = _bands.get_eigs(kpath_bdg, ham_r, S_r, rvec)
+    inigap_path = gap_symms(kpath_bdg, Norb, gap_sym)
+    if np.isscalar(delta0):
+        # scale the band form factor so that its maximum over the k-mesh is delta0,
+        # the amplitude deltak was normalized to
+        fmax = np.abs(gap_symms(klist, 1, gap_sym)).max()
+        scale = delta0 / fmax if fmax > 0 else delta0
+        deltak_path = flibs.get_band_to_orb_delta((inigap_path * scale).astype(np.complex128), uni_path)
+    else:
+        deltak_path = flibs.get_band_to_orb_delta(
+            (inigap_path.T * np.array(delta0, dtype=np.complex128)).T, uni_path)
+    eig_BdG_path, _ = flibs.get_eig(flibs.mkBdGhamk(hamk_path - mu * np.eye(Norb), deltak_path))
+    return kpath_bdg[:, 1], eig_BdG_path

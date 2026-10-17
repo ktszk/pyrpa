@@ -165,7 +165,7 @@ def calc_lin_eliash_nosym(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray,
                           Umat: np.ndarray | None = None, Jmat: np.ndarray | None = None,
                           hvec: np.ndarray | list = (0.0, 0.0, 0.0), qlist: list | None = None,
                           init_delta: np.ndarray | None = None, eps: float = 1.0e-5, arnoldi_m: int = 60,
-                          sw_out: bool = True) -> dict:
+                          sw_out: bool = True, fill: float | None = None, mu_kmesh: int = 40) -> dict:
     """
     @brief Solve the linearized Eliashberg equation without symmetry (Zeeman field / FFLO) for a list of Q.
 
@@ -180,6 +180,11 @@ def calc_lin_eliash_nosym(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray,
     dominant orbital components at the lowest w_n is written to 'gap_nosym.dat'.
 
     The FLEX self-energy is not available without TRS: G is always the bare G0.
+
+    Chemical potential: the Zeeman field moves the bands, so at a fixed electron count mu
+    moves too.  With fill given and a non-zero field, mu is solved again for the Zeeman-split
+    model, on the same mesh as get_mu (mu_kmesh^3) so that h=0 reproduces the mu passed in;
+    without fill (or at h=0) the mu passed in is used as it is.
 
     @param Nx, Ny, Nz: k-mesh size
     @param      Nw: number of positive Matsubara frequencies
@@ -202,8 +207,11 @@ def calc_lin_eliash_nosym(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray,
     @param     eps: convergence tolerance
     @param arnoldi_m: Krylov dimension (0 = power method); small lambda may need >~60
     @param  sw_out: write the gap of the best Q
+    @param    fill: band filling as in main.py (per spin for a spinless model, total for sw_soc);
+                    None keeps mu fixed
+    @param mu_kmesh: linear k-mesh of the mu solve (get_mu's default)
     @return results: dict with 'qlist', 'lambda', 'best_iQ', 'best_lambda', 'stoner', 'stoner_q',
-                     'character' (gap_character_nosym of the best-Q gap)
+                     'character' (gap_character_nosym of the best-Q gap), 'mu' (the one used)
     """
     if sw_soc:
         if slist is None or invs is None:
@@ -217,9 +225,18 @@ def calc_lin_eliash_nosym(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray,
         Umat_s = None if Umat is None else np.tile(Umat, (2, 2))
         Jmat_s = None if Jmat is None else np.tile(Jmat, (2, 2))
     hvec = np.asarray(hvec, dtype=np.float64)
+    print(f'nosym Eliashberg: Zeeman h = ({hvec[0]:.4e}, {hvec[1]:.4e}, {hvec[2]:.4e}) eV', flush=True)
     if np.any(hvec != 0.0):
         ham_s = add_zeeman(ham_s, S_s, rvec, slist, invs, hvec)
-    print(f'nosym Eliashberg: Zeeman h = ({hvec[0]:.4e}, {hvec[1]:.4e}, {hvec[2]:.4e}) eV', flush=True)
+        if fill is not None:
+            # same electron count in the Zeeman-split bands; the spin-doubled spinless model has
+            # 2*fill electrons per cell (fill is per spin there), a spinful one fill
+            nfill = fill if sw_soc else 2.0*fill
+            Nkmu, eig_mu, _ = _bands.get_emesh(mu_kmesh, mu_kmesh, mu_kmesh, ham_s, S_s, rvec, np.eye(3))
+            mu_h = _bands.calc_mu(eig_mu, Nkmu, nfill, temp)
+            print(f'chem. pot. re-solved with the Zeeman field: {mu:.6f} -> {mu_h:.6f} eV '
+                  f'(shift {mu_h-mu:+.3e} eV)', flush=True)
+            mu = mu_h
     qlist = [(0, 0, 0)] if qlist is None else [tuple(int(x) for x in q) for q in qlist]
 
     # full-BZ mesh: kmap of gen_irr_k_TRS is the complete [0,N)^3 grid
@@ -268,7 +285,7 @@ def calc_lin_eliash_nosym(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray,
     if sw_out:
         _output_gap_nosym(best[2], uni, kmap, Nx, Ny, Nz, best[0], slist, invs)
     return {'qlist': qlist, 'lambda': np.array(lambdas), 'best_iQ': best[0], 'best_lambda': best[1],
-            'stoner': stoner, 'stoner_q': stoner_q, 'character': char}
+            'stoner': stoner, 'stoner_q': stoner_q, 'character': char, 'mu': mu}
 
 
 def _output_gap_nosym(delta: np.ndarray, uni: np.ndarray, kmap: np.ndarray, Nx: int, Ny: int, Nz: int,

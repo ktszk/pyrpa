@@ -279,7 +279,7 @@ contains
     end do
   end subroutine pick_branch
 
-  subroutine arnoldi_two_pass(lambda,x,seed,ks,m_arnoldi,apply_op,classify)
+  subroutine arnoldi_two_pass(lambda,x,seed,ks,m_arnoldi,tol,apply_op,classify)
     !> Two-pass Arnoldi for the physical (largest positive) Eliashberg eigenvalue.
     !>
     !> The kernel's dominant eigenvalue is a large NEGATIVE one, so a plain Arnoldi converges to
@@ -287,63 +287,90 @@ contains
     !> eigenvector; pass 2 runs (A + |lambda_-|) deflated against that eigenvector, which makes
     !> lambda_+ the dominant eigenvalue of the shifted operator.
     !>
-    !> Arnoldi factorization used in both passes: with an orthonormal Krylov basis V_m built from
-    !> v_0 = seed, A V_m = V_m H_m + beta v_m e_m^T with H_m upper Hessenberg; the eigenpairs
-    !> (theta, y) of H_m give the Ritz pairs (theta, V_m y).  All inner products are real
-    !> (kv_dot) because the operator is only real-linear -- see the note at the top of the module.
+    !> Arnoldi factorization used in both passes: with an orthonormal basis V_m,
+    !> A V_m = V_m H_m + v_m h_{m+1}^T, and the eigenpairs (theta, y) of H_m give the Ritz pairs
+    !> (theta, V_m y) with residual |h_{m+1}.y|.  All inner products are real (kv_dot) because
+    !> the operator is only real-linear -- see the note at the top of the module.
+    !>
+    !> Restarts (Krylov-Schur): one Krylov space of fixed size m is not enough in general.  For a
+    !> small lambda_+ next to a large |lambda_-| an m=10 space left lambda_+ wrong by ~1%, and
+    !> two physical eigenvalues 1% apart cannot be told apart by restarting from a single Ritz
+    !> vector (it converges to whichever dominates that vector, not to the largest).  So each
+    !> pass is restarted THICK: H_m is brought to real Schur form with the wanted end of its
+    !> spectrum (most negative for pass 1, most positive for pass 2) in the leading k ~ m/2 block,
+    !> those k Schur vectors are kept, and the space is expanded again to m, until the residual
+    !> of the wanted Ritz pair is below tol*|lambda|.  The memory is m+1+k vectors.
     !!@param  lambda,out: physical eigenvalue
     !!@param       x,out: its eigenvector, normalized
     !!@param      seed,in: starting vector (v_0), need not be normalized
     !!@param        ks,in: vector geometry
     !!@param m_arnoldi,in: Krylov dimension
+    !!@param       tol,in: relative residual at which a Ritz pair counts as converged
     !!@param  apply_op,in: one application of the kernel
     !!@param  classify,in: optional branch test, see pick_branch
     type(kspace),intent(in):: ks
     integer(c_int64_t),intent(in):: m_arnoldi
+    real(c_double),intent(in):: tol
     real(c_double),intent(out):: lambda
     complex(c_double),intent(out):: x(*)
     complex(c_double),intent(in):: seed(*)
     procedure(eliash_op_if):: apply_op
     procedure(eliash_class_if),optional:: classify
 
-    integer(c_int32_t) m_dim,j,ii,p,m_act,idx,lwork,info
-    real(c_double) beta,shift,lambda1,hij
-    complex(c_double),allocatable:: V(:,:),w(:),x1(:),yd(:)
+    integer(c_int32_t) m_dim,p,m_act,idx,lwork,info,irs,j0
+    integer(c_int32_t),parameter:: max_restart=200
+    real(c_double) beta,shift,lambda1,hij,res,thr
+    logical want_max
+    complex(c_double),allocatable:: V(:,:),w(:),x1(:),yd(:),vres(:),Vk(:,:)
     complex(c_double),allocatable:: H_mat(:,:),A_mat(:,:),eigenvals(:)
     complex(c_double),allocatable:: VL_dum(:,:),VR(:,:),zwork(:)
     real(c_double),allocatable:: rwork(:)
 
-    m_dim=int(m_arnoldi,c_int32_t)
+    m_dim=max(int(m_arnoldi,c_int32_t),2)
     lwork=max(64,2*m_dim)
-    allocate(V(ks%nvec,0:m_dim-1),w(ks%nvec),x1(ks%nvec),yd(m_dim))
+    allocate(V(ks%nvec,0:m_dim-1),w(ks%nvec),x1(ks%nvec),yd(m_dim),vres(ks%nvec),Vk(ks%nvec,m_dim))
     allocate(H_mat(m_dim+1,m_dim),A_mat(m_dim,m_dim),eigenvals(m_dim))
     allocate(VL_dum(1,1),VR(m_dim,m_dim),zwork(lwork),rwork(2*m_dim))
 
     ! ===== Pass 1: no shift, find lambda_- ==================================
     print'(A,I4,A)','Arnoldi pass 1 (no shift): Krylov dim =',m_dim,' ...'
     call set_v0(seed)
-    call arnoldi_loop(0.0d0,.false.)
-    call diagonalize('pass 1')
-    idx=minloc(dble(eigenvals(1:m_act)),1)        ! most negative Ritz value
-    lambda1=dble(eigenvals(idx))
-    print'(A,F12.6)','  lambda_- =',lambda1
-    ! early exit: if pass 1 already resolved the wanted branch at a clearly positive Ritz value,
-    ! that is lambda_+ and the shifted pass is unnecessary
-    call pick_branch(idx,x,eigenvals,VR,m_dim,V,ks,m_act,0.0d0,classify)
-    if(idx>0)then
-       if(dble(eigenvals(idx))>=0.1d0)then
-          lambda=dble(eigenvals(idx))
-          print'(A,F12.6)','  eliash   =',lambda
-          call normalize(x)
-          return
+    j0=0
+    want_max=.false.
+    pass1: do irs=1,max_restart
+       call arnoldi_loop(0.0d0,.false.,j0)
+       call diagonalize('pass 1')
+       if(irs==1)then
+          ! early exit: if the first space already resolved the wanted branch at a clearly
+          ! positive, CONVERGED Ritz value, that is lambda_+ and the shifted pass is unnecessary
+          call pick_branch(idx,x,eigenvals,VR,m_dim,V,ks,m_act,0.0d0,classify)
+          if(idx>0)then
+             if(dble(eigenvals(idx))>=0.1d0 .and. &
+                  ritz_res(idx)<=tol*abs(dble(eigenvals(idx))))then
+                lambda=dble(eigenvals(idx))
+                print'(A,F12.6)','  eliash   =',lambda
+                call normalize(x)
+                return
+             end if
+          end if
        end if
-    end if
+       idx=minloc(dble(eigenvals(1:m_act)),1)     ! most negative Ritz value
+       lambda1=dble(eigenvals(idx))
+       res=ritz_res(idx)
+       if(res<=tol*abs(lambda1))exit pass1
+       if(irs==max_restart)then
+          print'(A,ES10.3)','  WARNING(arnoldi): lambda_- not converged, relative residual',res/abs(lambda1)
+          exit pass1
+       end if
+       call thick_restart(j0)
+    end do pass1
     ! deflation direction x1 = Ritz vector of lambda_-
-    idx=minloc(dble(eigenvals(1:m_act)),1)
     yd(1:m_act)=VR(1:m_act,idx)
     call real_ritz(yd,m_act)
     call ritz_vector(x1,V,yd,ks,m_act)
     call normalize(x1)
+    print'(A,F12.6,A,I0,A,ES9.2,A)','  lambda_- =',lambda1,'  (',irs,' Krylov spaces, residual ',&
+         res/abs(lambda1),')'
 
     ! ===== Pass 2: shift + deflation, find lambda_+ =========================
     ! B = (A + shift) restricted to the complement of x1; eigenvalue lambda_i -> lambda_i + shift,
@@ -353,18 +380,33 @@ contains
     call set_v0(seed)
     call deflate(V(1,0))
     call normalize(V(1,0))
-    call arnoldi_loop(shift,.true.)
-    call diagonalize('pass 2')
-    call pick_branch(idx,x,eigenvals,VR,m_dim,V,ks,m_act,shift,classify)
-    if(idx==0)then
-       idx=maxloc(dble(eigenvals(1:m_act)),1)     ! nothing positive: largest Ritz value
-       yd(1:m_act)=VR(1:m_act,idx)
-       call real_ritz(yd,m_act)
-       call ritz_vector(x,V,yd,ks,m_act)
-    end if
-    lambda=dble(eigenvals(idx))-shift
-    print'(A,F12.6)','  eliash   =',lambda
-    call normalize(x)
+    j0=0
+    want_max=.true.
+    pass2: do irs=1,max_restart
+       call arnoldi_loop(shift,.true.,j0)
+       call diagonalize('pass 2')
+       call pick_branch(idx,x,eigenvals,VR,m_dim,V,ks,m_act,shift,classify)
+       if(idx==0)then
+          idx=maxloc(dble(eigenvals(1:m_act)),1)  ! nothing positive: largest Ritz value
+          yd(1:m_act)=VR(1:m_act,idx)
+          call real_ritz(yd,m_act)
+          call ritz_vector(x,V,yd,ks,m_act)
+       end if
+       lambda=dble(eigenvals(idx))-shift
+       call normalize(x)
+       ! the residual is that of the shifted operator, but it bounds the error of lambda_+ itself,
+       ! so it is measured against |lambda_+| (floored, for a lambda_+ near zero)
+       res=ritz_res(idx)
+       if(res<=tol*max(abs(lambda),1.0d-3))exit pass2
+       if(irs==max_restart)then
+          print'(A,ES10.3)','  WARNING(arnoldi): lambda_+ not converged, relative residual',&
+               res/max(abs(lambda),1.0d-3)
+          exit pass2
+       end if
+       call thick_restart(j0)
+    end do pass2
+    print'(A,F12.6,A,I0,A,ES9.2,A)','  eliash   =',lambda,'  (',irs,' Krylov spaces, residual ',&
+         res/max(abs(lambda),1.0d-3),')'
     ! x solves the DEFLATED operator P A P (P = 1 - x1 x1^T), not A itself:
     ! A x = lambda x + c x1 with c = <x1, A x>, so the eigenvector of A is x + c/(lambda_+ - lambda_-) x1
     if(abs(lambda-lambda1)>1.0d-12)then    ! lambda_+ = lambda_- (e.g. V=0): nothing to undo
@@ -377,8 +419,99 @@ contains
        !$omp end parallel do
        call normalize(x)
     end if
-    deallocate(V,w,x1,yd,H_mat,A_mat,eigenvals,VL_dum,VR,zwork,rwork)
+    deallocate(V,w,x1,yd,vres,Vk,H_mat,A_mat,eigenvals,VL_dum,VR,zwork,rwork)
   contains
+    real(c_double) function ritz_res(i)
+      !> residual norm of Ritz pair i of the current space, |h_{m+1,m}| |y_m| / ||y|| (the last
+      !> row of H has only that element after an expansion step); 0 after a lucky breakdown,
+      !> where the space is invariant and the Ritz pair exact
+      integer(c_int32_t),intent(in):: i
+      if(m_act<m_dim)then
+         ritz_res=0.0d0
+      else
+         ritz_res=abs(H_mat(m_act+1,m_act))*abs(VR(m_act,i))/max(sqrt(sum(abs(VR(1:m_act,i))**2)),1.0d-300)
+      end if
+    end function ritz_res
+
+    logical function sel_wanted(ar,ai)
+      !> dgees selection: the wanted end of the spectrum (threshold thr set by thick_restart);
+      !> ai is not needed, the two members of a complex pair share ar
+      real(c_double),intent(in):: ar,ai
+      if(want_max)then
+         sel_wanted=(ar>=thr)
+      else
+         sel_wanted=(ar<=thr)
+      end if
+    end function sel_wanted
+
+    subroutine thick_restart(jnext)
+      !> Krylov-Schur restart: real Schur form H = Q T Q^T with the wanted eigenvalues in the
+      !> leading k x k block; keep V Q(:,1:k), put the old residual direction next, and continue
+      !> the expansion from column k.  A V_k = V_k T_k + v_m b^T with b = h_{m+1,m} Q(m,1:k).
+      integer(c_int32_t),intent(out):: jnext
+      integer(c_int32_t) k,sdim,linfo,lw,ii
+      real(c_double),allocatable:: Hr(:,:),Q(:,:),wr(:),wi(:),work(:),srt(:)
+      logical,allocatable:: bwork(:)
+      complex(c_double),allocatable:: Qc(:,:)
+      real(c_double) hm1
+      allocate(Hr(m_dim,m_dim),Q(m_dim,m_dim),wr(m_dim),wi(m_dim),srt(m_dim),bwork(m_dim),Qc(m_dim,m_dim))
+      lw=max(64,6*m_dim)
+      allocate(work(lw))
+      hm1=dble(H_mat(m_dim+1,m_dim))
+      Hr(:,:)=dble(H_mat(1:m_dim,1:m_dim))
+      ! threshold: the k-th value from the wanted end, k ~ m/2 (at least 1, at most m-2)
+      k=min(max(m_dim/2,1),m_dim-2)
+      srt(:)=dble(eigenvals(1:m_dim))
+      call sort_real(srt,m_dim)                      ! ascending
+      if(want_max)then
+         thr=srt(m_dim-k+1)-1.0d-12*max(abs(srt(1)),abs(srt(m_dim)))
+      else
+         thr=srt(k)+1.0d-12*max(abs(srt(1)),abs(srt(m_dim)))
+      end if
+      call dgees('V','S',sel_wanted,m_dim,Hr,m_dim,sdim,wr,wi,Q,m_dim,work,lw,bwork,linfo)
+      if(linfo/=0)then; print*,'DGEES failed in thick_restart: info=',linfo; stop; end if
+      k=max(sdim,1)
+      if(k<m_dim .and. abs(Hr(min(k+1,m_dim),k))>0.0d0)k=k+1   ! do not split a 2x2 block
+      if(k>=m_dim)k=m_dim-1
+      Qc(:,1:k)=cmplx(Q(:,1:k),0.0d0,c_double)
+      call zgemm('N','N',ks%nvec,k,m_dim,(1.0d0,0.0d0),V,ks%nvec,Qc,m_dim,(0.0d0,0.0d0),Vk,ks%nvec)
+      do ii=1,k
+         !$omp parallel do private(p)
+         do p=1,ks%nvec
+            V(p,ii-1)=Vk(p,ii)
+         end do
+         !$omp end parallel do
+      end do
+      !$omp parallel do private(p)
+      do p=1,ks%nvec
+         V(p,k)=vres(p)
+      end do
+      !$omp end parallel do
+      H_mat(:,:)=(0.0d0,0.0d0)
+      H_mat(1:k,1:k)=cmplx(Hr(1:k,1:k),0.0d0,c_double)
+      H_mat(k+1,1:k)=cmplx(hm1*Q(m_dim,1:k),0.0d0,c_double)
+      jnext=k
+      deallocate(Hr,Q,wr,wi,srt,bwork,Qc,work)
+    end subroutine thick_restart
+
+    subroutine sort_real(a,n)
+      !> ascending insertion sort (n is a Krylov dimension, tens at most)
+      integer(c_int32_t),intent(in):: n
+      real(c_double),intent(inout):: a(n)
+      integer(c_int32_t) ii,jj
+      real(c_double) t
+      do ii=2,n
+         t=a(ii)
+         jj=ii-1
+         do while(jj>=1)
+            if(a(jj)<=t)exit
+            a(jj+1)=a(jj)
+            jj=jj-1
+         end do
+         a(jj+1)=t
+      end do
+    end subroutine sort_real
+
     subroutine set_v0(s)
       !> v_0 = normalized seed
       complex(c_double),intent(in):: s(*)
@@ -417,16 +550,19 @@ contains
       !$omp end parallel do
     end subroutine deflate
 
-    subroutine arnoldi_loop(shft,sw_deflate)
-      !> build the Krylov basis: w = (A + shft) v_j, optionally deflated, then modified
-      !> Gram-Schmidt against v_0..v_j
+    subroutine arnoldi_loop(shft,sw_deflate,jstart)
+      !> expand the basis from column jstart to m: w = (A + shft) v_j, optionally deflated, then
+      !> Gram-Schmidt against v_0..v_j applied twice (a thick restart keeps old vectors, whose
+      !> orthogonality a single sweep would slowly lose).  The last new direction is kept in
+      !> vres for the next restart.  jstart=0 starts a fresh factorization.
       real(c_double),intent(in):: shft
       logical,intent(in):: sw_deflate
-      integer(c_int32_t) jj,kk,q
+      integer(c_int32_t),intent(in):: jstart
+      integer(c_int32_t) jj,kk,q,isw
       real(c_double) hjj
-      H_mat=(0.0d0,0.0d0)
+      if(jstart==0)H_mat=(0.0d0,0.0d0)
       m_act=m_dim
-      do jj=0,m_dim-1
+      do jj=jstart,m_dim-1
          call apply_op(w,V(1,jj))
          if(shft/=0.0d0)then
             !$omp parallel do private(q)
@@ -436,14 +572,16 @@ contains
             !$omp end parallel do
          end if
          if(sw_deflate)call deflate(w)
-         do kk=0,jj
-            hjj=kv_dot(ks,V(1,kk),w)
-            H_mat(kk+1,jj+1)=cmplx(hjj,0.0d0,c_double)
-            !$omp parallel do private(q)
-            do q=1,ks%nvec
-               w(q)=w(q)-hjj*V(q,kk)
+         do isw=1,2
+            do kk=0,jj
+               hjj=kv_dot(ks,V(1,kk),w)
+               H_mat(kk+1,jj+1)=H_mat(kk+1,jj+1)+cmplx(hjj,0.0d0,c_double)
+               !$omp parallel do private(q)
+               do q=1,ks%nvec
+                  w(q)=w(q)-hjj*V(q,kk)
+               end do
+               !$omp end parallel do
             end do
-            !$omp end parallel do
          end do
          beta=kv_norm(ks,w)
          H_mat(jj+2,jj+1)=cmplx(beta,0.0d0,c_double)
@@ -458,12 +596,18 @@ contains
                V(q,jj+1)=w(q)*(1.0d0/beta)
             end do
             !$omp end parallel do
+         else
+            !$omp parallel do private(q)
+            do q=1,ks%nvec
+               vres(q)=w(q)*(1.0d0/beta)
+            end do
+            !$omp end parallel do
          end if
       end do
     end subroutine arnoldi_loop
 
     subroutine diagonalize(tag)
-      !> Ritz values and coefficients of the m_act x m_act Hessenberg block
+      !> Ritz values and coefficients of the m_act x m_act projected matrix
       character(*),intent(in):: tag
       integer(c_int32_t) kk
       A_mat(1:m_act,1:m_act)=H_mat(1:m_act,1:m_act)   ! ZGEEV destroys its input

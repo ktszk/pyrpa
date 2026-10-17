@@ -1,5 +1,5 @@
 """
-Python model calculation library.
+Python model calculation library (calculations only; the figures live in libs.plots).
 
 Functions are organized in submodules by physical topic:
   _symmetry   : Point group operations, symmetry detection, irreducible k-points
@@ -12,6 +12,10 @@ Functions are organized in submodules by physical topic:
   _wannier_io : EPA output reading, U/J parameter sets, Wannier-R space file I/O
   _maxent     : MaxEnt analytic continuation (optional 'ana_cont' dependency)
   _eliash_nosym: Linearized Eliashberg without TRS/inversion (Zeeman field, FFLO pair momentum Q)
+  _units      : Physical constants (SI/eV, or all 1 in the dimensionless test mode)
+  _conductivity: Boltzmann and linear-response transport drivers (tau models, Hall, optics)
+  _fermiology : Cyclotron mass, dHvA frequencies of extremal orbits, band masses on a path
+  _impurity   : Impurity supercell, exact diagonalization and the unfolded spectrum
 """
 from ._symmetry import *
 from ._lattice import *
@@ -28,3 +32,7 @@ from ._eilenberger import *          # homogeneous solver + model Fermi surface 
 from ._eilenberger_surface import *  # specular surface (gap profile, LDOS)
 from ._eilenberger_vortex import *   # isolated vortex + periodic vortex lattice
 from ._eilenberger_spin import *     # 2x2 spin-matrix (Pauli, d-vector textures)
+from ._units import *
+from ._conductivity import *
+from ._fermiology import *
+from ._impurity import *

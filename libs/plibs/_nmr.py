@@ -37,7 +37,7 @@ Where the gap comes from
 Either source produces the same [Nk, Norb, Norb] static Delta(k) that nmr_sweep takes:
 
   * the phenomenological form factor (gap_symms / gap_sym + per-band delta0), built by
-    main.py's SC-chi block -- quick symmetry scans;
+    plibs.sc_gap_on_mesh (main.py's SC-chi block) -- quick symmetry scans;
   * a self-consistent RPA/FLEX/Eliashberg gap, via gap_from_eliashberg(), which reads the
     Delta(R, iw_n) written by output_gap_wannier.  Because that file is in real space it
     is mesh independent: the Eliashberg run can stay on the coarse k-mesh it needs to
@@ -102,7 +102,7 @@ import libs.plibs._response as _response
 __all__ = [
     'BCS_GAP_RATIO', 'BCS_INTERP_C', 'N_DELTA_MIN', 'bcs_gap_ratio', 'bcs_temp_c', 'gap_from_eliashberg',
     'nmr_qmesh', 'hyperfine_form_factor', 'fermi_surface_gap', 'nmr_scale_check', 'nmr_cost_estimate',
-    'nmr_qconvergence', 'nmr_sweep', 'write_nmr_dat', 'plot_nmr'
+    'nmr_qconvergence', 'nmr_sweep', 'write_nmr_dat'
 ]
 
 # BCS weak-coupling ratio 2*Delta(0)/(kB*Tc) = 3.528
@@ -187,7 +187,7 @@ def gap_from_eliashberg(klist: np.ndarray, fname: str = 'gap_wannier',
                     None = use the stored amplitude unchanged
     @param verbose: report what was loaded and how it was rescaled
     @return delta_k: static gap in orbital basis [Nk, Norb, Norb] complex128, laid out
-                     exactly like the deltak built by the gap_sym path in main.py
+                     exactly like the deltak built by the gap_sym path of sc_gap_on_mesh
     """
     import libs.plibs._calc as _calc
     import libs.plibs._wannier_io as _wannier_io
@@ -218,7 +218,7 @@ def gap_from_eliashberg(klist: np.ndarray, fname: str = 'gap_wannier',
     # np.fft.ifftn over the k-axes (kernel exp(+2 pi i k.R)), so this MINUS sign is its
     # exact inverse -- verified to round-trip a random gap to 3e-15.  Same convention as
     # gap_orbital_from_wannier (_eilenberger.py) and the self-energy interpolation in
-    # main.py's plot_spectrum.
+    # plibs.plot_spectrum.
     kl = np.ascontiguousarray(klist, dtype=np.float64)
     rv = np.ascontiguousarray(rvec, dtype=np.float64)
     Nk = len(kl)
@@ -725,47 +725,3 @@ def write_nmr_dat(res: dict, fname: str = 'nmr_sc.dat') -> None:
                         f'{res["R_sc"][i]:14.6e} {res["R_n"][i]:14.6e} {res["R_ratio"][i]:12.6f}\n')
     except OSError as e:
         print(f"Error: failed to write '{fname}': {e}", flush=True)
-
-
-def plot_nmr(res: dict, fname: str = 'nmr_sc.png') -> None:
-    """
-    @brief Two-panel summary plot of the NMR sweep.
-    Left : K_s/K_n vs T/Tc (linear) -- Yosida curve for a singlet, finite residual
-           for a triplet d||z.
-    Right: (1/T1T)_s/(1/T1T)_n vs T/Tc (log-log) -- a Hebel-Slichter peak just below
-           Tc for a full isotropic gap, its suppression for a sign-changing (s+-) gap,
-           and the low-T power law (1/T1 ~ T^3 for line nodes, ~T^5 for point nodes,
-           exponential for a full gap) read off as the slope.
-    @param   res: dict returned by nmr_sweep
-    @param fname: output png file name
-    """
-    import matplotlib.pyplot as plt
-    t = res['t_red']
-    fig, ax = plt.subplots(1, 2, figsize=(10, 4))
-
-    ax[0].plot(t, res['K_ratio'], 'o-', color='tab:blue', ms=4)
-    ax[0].axhline(1.0, ls=':', lw=0.8, color='gray')
-    ax[0].axvline(1.0, ls='--', lw=0.8, color='gray')
-    ax[0].set_xlabel(r'$T/T_c$')
-    ax[0].set_ylabel(r'$K_s/K_n$')
-    ax[0].set_title('Knight shift')
-    ax[0].set_xlim(0, max(1.05, t.max()))
-    ax[0].set_ylim(bottom=0)
-
-    ax[1].loglog(t, res['R_ratio'], 'o-', color='tab:red', ms=4)
-    ax[1].axhline(1.0, ls=':', lw=0.8, color='gray')
-    ax[1].axvline(1.0, ls='--', lw=0.8, color='gray')
-    tt = t[t > 0]
-    if len(tt):
-        # The power law is quoted for 1/T1, but the axis shows 1/(T1 T): line nodes give
-        # 1/T1 ~ T^3, hence a slope of 2 here.  Anchored at the highest temperature shown.
-        ref = (tt / tt.max()) ** 2
-        ax[1].loglog(tt, ref, 'k--', lw=0.8, label=r'$1/T_1\propto T^{3}$ (line nodes)')
-        ax[1].legend(fontsize=8)
-    ax[1].set_xlabel(r'$T/T_c$')
-    ax[1].set_ylabel(r'$(1/T_1T)_s/(1/T_1T)_n$')
-    ax[1].set_title(r'spin-lattice relaxation')
-
-    fig.tight_layout()
-    fig.savefig(fname, dpi=200)
-    plt.close(fig)

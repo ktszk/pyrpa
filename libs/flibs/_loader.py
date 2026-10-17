@@ -5,7 +5,7 @@ import numpy as np
 # Public API of this submodule; keeps `from ._x import *` in __init__.py from
 # re-exporting numpy, scipy, ctypes and the sibling packages imported above.
 __all__ = [
-    'i64', 'dbl'
+    'i64', 'dbl', 'c_array', 'f_array'
 ]
 
 # Resolve lib path relative to this file so import works from any current working directory.
@@ -84,6 +84,40 @@ def _load_library() -> np.ndarray:
 
 
 _lib = _load_library()
+
+
+def c_array(dtype: type) -> type:
+    """
+    @brief ctypes argtype for an array the Fortran side reads as one contiguous block in
+    C order (the reversed-index view of a Fortran array, the convention of every wrapper).
+    A plain ndpointer only checks the dtype and would hand Fortran the raw buffer of a
+    strided view (a slice such as G[:, :, :Niw, :], or a transpose) without complaint, so
+    the layout is enforced here: a non-contiguous argument raises TypeError at the call.
+    @param dtype: numpy dtype of the array
+    @return ndpointer class requiring C-contiguous memory
+    """
+    return np.ctypeslib.ndpointer(dtype=dtype, flags='C_CONTIGUOUS')
+
+
+def f_array(dtype: type) -> type:
+    """
+    @brief ctypes argtype for an array passed in FORTRAN order (e.g. the orbital-pair list
+    ol(Nchi,2), Umat(Norb,Norb) or mrot(3,3)): the Python index order equals the Fortran one.
+    The argument is converted with np.asfortranarray at the call, so the result does not depend
+    on the memory layout the caller happened to build (a C-ordered olist used to be read with
+    its pairs scrambled).  An array that is already Fortran-contiguous is passed without a copy,
+    so output arrays the wrappers allocate in Fortran order are still written in place.
+    @param dtype: numpy dtype of the array
+    @return ndpointer class taking any layout and handing Fortran-contiguous memory to the call
+    """
+    base = np.ctypeslib.ndpointer(dtype=dtype, flags='F_CONTIGUOUS')
+
+    class _FortranOrder(base):
+        @classmethod
+        def from_param(cls, obj: object) -> object:
+            # the returned ctypes view keeps the (possibly converted) array alive for the call
+            return base.from_param(np.asfortranarray(obj, dtype=dtype))
+    return _FortranOrder
 
 
 def i64(value: int) -> object:

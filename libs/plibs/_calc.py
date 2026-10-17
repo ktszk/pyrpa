@@ -8,6 +8,8 @@ import scipy.linalg as sclin
 import libs.flibs as flibs
 import libs.plibs._bands as _bands
 import libs.plibs._eilenberger as _eilenberger
+import libs.plibs._lattice as _lattice
+import libs.plibs._maxent as _maxent
 import libs.plibs._response as _response
 import libs.plibs._wannier_io as _wannier_io
 
@@ -16,7 +18,8 @@ import libs.plibs._wannier_io as _wannier_io
 __all__ = [
     'regrid_sigma_bin', 'calc_path_spectrum', 'hall_coefficient', 'hall_carrier_density', 'fs_carrier_density',
     'report_band_filling', 'get_mu', 'gap_extrapolate_w0', 'output_gap_function', 'calc_flex', 'calc_flex_soc',
-    'calc_lin_eliashberg_eq', 'calc_lin_eliash_soc', 'calc_eliashberg_eq'
+    'calc_lin_eliashberg_eq', 'calc_lin_eliash_soc', 'calc_eliashberg_eq', 'spectrum_on_path', 'output_Fk',
+    'calc_cpa_Akw', 'calc_cpa'
 ]
 
 
@@ -643,6 +646,12 @@ def get_mu(ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray, Arot: np.ndarra
     """
     @brief Chemical potential of the normal state on a cubic kmesh^3 mesh.
 
+    An axis along which the model has no hopping at all (every H(R), and S(R), with a
+    non-zero component of R along it is exactly zero) is sampled with a single point: H(k)
+    does not depend on that k component, so the result is identical and the cost drops by
+    kmesh for a strictly 2D model.  The decision is taken from the hoppings, NOT from the
+    calculation mesh: a 3D model studied on a kz=0 cut (Nz=1) still needs the kz sum for mu.
+
     Convenience wrapper around get_emesh + calc_mu for the callers that only need
     mu and have no use for the eigenvalues.  Returns None (after printing) rather
     than raising when temp or kmesh is non-positive, matching the other drivers
@@ -665,9 +674,19 @@ def get_mu(ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray, Arot: np.ndarra
         return None
     print("calc chem. pot.", flush=True)
     print(f"band filling = {fill:.4f}", flush=True)
-    Nk, eig, kweight = _bands.get_emesh(kmesh, kmesh, kmesh, ham_r, S_r, rvec, Arot)
+    mesh = [kmesh if _disperses(ham_r, S_r, rvec, ax) else 1 for ax in range(3)]
+    Nk, eig, kweight = _bands.get_emesh(*mesh, ham_r, S_r, rvec, Arot)
     mu = _bands.calc_mu(eig, Nk, fill, temp)
     return mu
+
+
+def _disperses(ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray, ax: int) -> bool:
+    """True if any hopping (or overlap) connects cells displaced along axis ax, i.e. H(k)
+    depends on k_ax; an exactly vanishing set means the model is strictly flat along ax."""
+    sel = np.abs(np.asarray(rvec)[:, ax]) > 0
+    if np.any(np.abs(np.asarray(ham_r)[sel]) > 0):
+        return True
+    return len(S_r) > 0 and bool(np.any(np.abs(np.asarray(S_r)[sel]) > 0))
 
 
 def gap_extrapolate_w0(gap: np.ndarray, temp: float, n_points: int = 4,
@@ -1086,7 +1105,11 @@ def calc_eliashberg_eq(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_
     sw_self, the self-energy) to self-consistency.
 
     Side effects: the gap is written by output_gap_function, and with sw_out_self also
-    as 'gap.npy' plus the mesh-independent Wannier form.  Returns early (without
+    as 'gap.npy' plus the mesh-independent Wannier form.  With sw_out_self and sw_self the
+    self-energy of the converged SUPERCONDUCTING state (the normal part, updated together with
+    the gap) is saved too, as 'self_en_sc.npz' (same layout as self_en.npz) and its Wannier
+    form 'self_en_sc_wannier'.  The separate names keep the normal-state FLEX files
+    (sigma.bin, self_en.npz), which seed restarts, untouched.  Returns early (without
     writing) when the self-energy could not be prepared.
 
     @param Nx, Ny, Nz: k-mesh size
@@ -1168,6 +1191,260 @@ def calc_eliashberg_eq(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_
     if sw_out_self:
         np.save('gap', delta)
         _wannier_io.output_gap_wannier(delta, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
+        if sw_self:   # without sw_self the loop keeps Sigma = 0 and there is nothing to save
+            np.savez('self_en_sc', sigmak, mu_self)
+            _wannier_io.output_self_wannier(sigmak, mu_self, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp,
+                                            fname='self_en_sc_wannier')
     output_gap_function(state['invk'], state['kmap'], delta, state['uni'], plist, gap_sym, Nx, iperm=iperm,
                         sw_extrapolate=sw_gap_extrapolate, temp=temp,
                         n_points=gap_extrap_points, order=gap_extrap_order)
+
+
+def spectrum_on_path(k_sets: list, kmesh: int, bvec: np.ndarray, mu: float, ham_r: np.ndarray,
+                     S_r: np.ndarray, rvec: np.ndarray, Emin: float, Emax: float, delta: float, Nw: int,
+                     temp: float, sw_self: bool = True, sw_maxent: bool = False,
+                     maxent_noise: float = 1.0e-4) -> tuple | None:
+    """
+    @brief Spectral function A(k,w) = -Im Tr G(k,w+i delta) along a symmetry line.
+           Bare bands by default; with sw_self the FLEX self-energy of self_en_wannier.npz is
+           Fourier-interpolated onto the path and continued to the real axis (Pade, or MaxEnt
+           with sw_maxent).
+    @param  k_sets: symmetry points
+    @param   kmesh: points per path segment
+    @param    bvec: reciprocal lattice vectors as rows
+    @param      mu: chemical potential [eV] (bare-band case)
+    @param ham_r, S_r, rvec: Wannier Hamiltonian, overlap ([] if orthogonal) and R-vectors
+    @param Emin, Emax, Nw: real-frequency window and number of points [eV]
+    @param   delta: broadening [eV]
+    @param    temp: current temperature [eV] (only compared with the FLEX one in the file)
+    @return (spa_length, xticks, wlist, Akw): path coordinate [Nk], symmetry-point positions,
+            energies [Nw] and A(k,w) [Nk, Nw]; None if the self-energy file is missing
+    """
+    klist, spa_length, xticks = _lattice.mk_klist(k_sets, kmesh, bvec)
+    eig, uni = _bands.get_eigs(klist, ham_r, S_r, rvec)
+    wlist = np.linspace(Emin, Emax, Nw)
+    if sw_self:
+        # Sigma is defined on the FLEX k-mesh, so evaluate it on the k-path by Fourier
+        # interpolation of the Wannier-R self-energy written by output_self_wannier.
+        try:
+            npz = np.load('self_en_wannier.npz')
+        except FileNotFoundError:
+            print("Error: 'self_en_wannier.npz' not found (run FLEX with sw_out_self=True)", flush=True)
+            return
+        sig_r, rvec_s, iw_grid = npz['sigma'], npz['rvec'], npz['iw']
+        mu_self = float(npz['mu'])
+        # Sigma is stored on the Matsubara mesh of the FLEX run, so G must be built at THAT
+        # temperature (gen_green regenerates iw_n from it), not at the current temp
+        temp_self = float(npz['temp'])
+        print(f'chem. pot. with self = {mu_self:.4f} eV', flush=True)
+        if not np.isclose(temp_self, temp):
+            print(f'Note: self_en_wannier.npz was written at T={temp_self:.4e} eV; '
+                  f'G(k,iw_n) is built at that T, not at the current {temp:.4e} eV', flush=True)
+        # Sigma(k) = sum_R Sigma(R) e^{-2pi i k.R}; Sigma is not Hermitian, so gen_ham cannot be reused
+        phase = np.exp(-2j*np.pi*klist.dot(rvec_s.T))                          # [Nks,Nr]
+        selfen = np.ascontiguousarray(np.einsum('mnwr,kr->mnwk', sig_r, phase))  # [Norb,Norb,Niw,Nks]
+        ham_k = flibs.gen_ham(klist, ham_r, rvec)
+        Gk_mats = flibs.gen_green(selfen, ham_k, mu_self, temp_self)
+        if sw_maxent:
+            # MaxEnt (ana_cont): regularized fit rather than exact interpolation, so it
+            # does not chase Matsubara noise into spurious real-axis poles over wide
+            # Emin..Emax / k windows the way the Pade continued fraction below does.
+            # Slower (~0.1-0.5s per k-point) but every point uses all available iw_grid.
+            Gk = _maxent.maxent_trace_spectrum(Gk_mats, iw_grid, wlist, temp_self, noise_level=maxent_noise)
+        else:
+            Niw = min(40, len(iw_grid))  # Pade becomes unstable with too many Matsubara points
+            # A(k,w) = -Im Tr G(k,w+i*delta)
+            Gk = -flibs.pade_with_trace(Gk_mats[:, :, :Niw, :], 1j*iw_grid[:Niw], wlist+1j*delta).imag
+    else:
+        Gk = flibs.gen_tr_Greenw_0(eig, mu, wlist, delta)
+    return spa_length, xticks, wlist, Gk
+
+
+def output_Fk(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray,
+              plist: np.ndarray, mu: float, temp: float, sw_self: bool, sw_soc: bool = False,
+              invs: np.ndarray | None = None, slist: np.ndarray | None = None, gap_sym: int = 0,
+              sw_maxent: bool = False, maxent_noise: float = 1.0e-4,
+              iperm: np.ndarray | None = None) -> tuple | None:
+    """
+    @brief Post-process a converged gap (gap.npy): the trace of the anomalous Green's function
+           F(k, iw_0) on the kz=0 plane (Fk_tr.dat), the real-axis spectrum along kx (Gpade.dat,
+           Pade or MaxEnt), and the gap function itself (output_gap_function).
+    @param Nx, Ny, Nz, Nw: k-mesh and number of Matsubara frequencies of the gap
+    @param ham_r, S_r, rvec: Wannier Hamiltonian, overlap ([] if orthogonal) and R-vectors
+    @param   plist: inversion parity (signs) per orbital
+    @param mu, temp: chemical potential and temperature [eV]
+    @param sw_self: use the FLEX self-energy of self_en.npz in G
+    @param sw_soc, invs, slist: spin-orbital basis (SOC only)
+    @param gap_sym: gap symmetry index (sign: singlet/triplet)
+    @param   iperm: orbital permutation of the inversion operator (None = identity)
+    @return (iwlist, Sigma_11(Gamma, iw_n)) for a quick look at the self-energy when sw_self, else None
+    """
+    klist, kmap, invk = flibs.gen_irr_k_TRS(Nx, Ny, Nz)
+    eig, uni = _bands.get_eigs(klist, ham_r, S_r, rvec)
+    if sw_self:
+        ham_k = flibs.gen_ham(klist, ham_r, rvec)
+        npz = np.load('self_en.npz')
+        sigmak, mu_self = npz['arr_0'], npz['arr_1']
+        print(f'chem. pot. with self= {mu_self:.4f} eV', flush=True)
+        Gk = flibs.gen_green(sigmak, ham_k, mu_self, temp)
+    else:
+        Gk = flibs.gen_Green0(eig, uni, mu, temp, Nw)
+    try:
+        gap = np.load('gap.npy')
+    except FileNotFoundError:
+        print("Error: 'gap.npy' not found", flush=True)
+        return
+    if sw_soc:
+        Fk = flibs.gen_Fk_soc(Gk, gap, invk, invs, slist, gap_sym)
+        Norb = int(len(slist)/2)
+        if gap_sym >= 0:
+            Fks = Fk[:Norb, Norb:, 0, :]-Fk[Norb:, :Norb, 0, :]
+            Fktr = np.array([f.diagonal().sum() for f in Fks.T])
+        else:
+            Fkt = Fk[:Norb, Norb:, 0, :]+Fk[Norb:, :Norb, 0, :]
+            Fktr = np.array([f.diagonal().sum() for f in Fkt.T])
+    else:
+        Fk0 = flibs.gen_Fk(Gk, gap, invk)
+        # remap_gap takes [Norb,Norb,Nw,Nk]: keep a length-1 Matsubara axis for the lowest w_n
+        Fk = flibs.remap_gap(Fk0[:, :, :1, :], plist, invk, gap_sym, iperm=iperm)[:, :, 0, :]
+        Fktr = np.array([f.diagonal().sum() for f in Fk.T])
+    print('output anomalous green function')
+    try:
+        with open(f'Fk_tr.dat', 'w') as f:
+            iwlist = (2*np.arange(Nw)+1)*np.pi*temp
+            for i, km in enumerate(kmap):
+                if km[2] == 0:
+                    f.write(f'{km[0]:3} {km[1]:3} {Fktr[i].real:12.8f} {Fktr[i].imag:12.8f}\n')
+                    if km[0] == Nx-1:
+                        f.write('\n')
+    except IOError as e:
+        print(f"Error: Failed to write 'Fk_tr.dat': {e}", flush=True)
+    emax = (eig.max()-(mu_self if sw_self else mu))*1.2
+    emin = (eig.min()-(mu_self if sw_self else mu))*1.2
+    wlist = np.linspace(emin, emax, 500)
+    # only the kx-axis line (ky=kz=0) is written, so continue just those k-points:
+    # MaxEnt costs ~0.1-0.5 s/k-point and would otherwise be wasted on the rest.
+    sel = [i for i, km in enumerate(klist) if km[1] == 0.0 and km[2] == 0.0]
+    try:
+        with open(f'Gpade.dat', 'w') as fp:
+            if sw_maxent:
+                # MaxEnt (ana_cont): regularized fit, so it does not chase Matsubara
+                # noise into spurious real-axis structure over this wide 500-point
+                # window the way the 40-point Pade continued fraction below does;
+                # uses the full stored Matsubara mesh instead of truncating to 40.
+                Akw = _maxent.maxent_trace_spectrum(Gk[:, :, :, sel], iwlist, wlist, temp,
+                                                    noise_level=maxent_noise)
+            else:
+                idelta = 1e-2
+                Gkw = flibs.pade_with_trace(Gk[:, :, :40, :], iwlist[:40]*1j, wlist+idelta*1j)
+                Akw = -Gkw[sel].imag
+            for row, i in enumerate(sel):
+                km = klist[i]
+                for j, w in enumerate(wlist):
+                    fp.write(f'{km[0]:3} {w.real:12.8f} {Akw[row, j]:12.8f}\n')
+                fp.write('\n')
+    except IOError as e:
+        print(f"Error: Failed to write 'Gpade.dat': {e}", flush=True)
+    output_gap_function(invk, kmap, gap, uni, plist, gap_sym, Nx, sw_soc, invs, slist, iperm=iperm)
+    return (iwlist, sigmak[0, 0, :, 0]) if sw_self else None
+
+
+def calc_cpa_Akw(k_sets: list, kmesh: int, bvec: np.ndarray,
+                 ham_r: np.ndarray, rvec: np.ndarray, mu: float,
+                 sigma_cpa: np.ndarray, wlist: np.ndarray,
+                 zlist_real: np.ndarray) -> tuple:
+    """
+    Compute the CPA spectral function A(k,w) along a symmetry-line k-path.
+    Returns (Akw [Nks, Nw], spa_length [Nks], xticks).
+    """
+    Norb = ham_r.shape[1]
+    Nw = len(wlist)
+    klist_s, spa_length, xticks = _lattice.mk_klist(k_sets, kmesh, bvec)
+    hamk_s = flibs.gen_ham(klist_s, ham_r, rvec)
+    hamk_s[:, range(Norb), range(Norb)] -= mu
+    Nks = len(klist_s)
+    Akw = np.zeros((Nks, Nw))
+    A_batch = (np.eye(Norb)[None, None, :, :] * zlist_real[:, None, None, None]
+               - hamk_s[None, :, :, :]
+               - sigma_cpa[:, None, :, :])  # (Nw, Nks, Norb, Norb)
+    try:
+        Gk_all = np.linalg.inv(A_batch)
+        Akw = (-np.trace(Gk_all, axis1=2, axis2=3).imag / np.pi).T
+    except np.linalg.LinAlgError:
+        print("Warning: Batch matrix inversion failed, falling back to element-wise.", flush=True)
+        for iw in range(Nw):
+            zI = np.eye(Norb) * zlist_real[iw]
+            sig = sigma_cpa[iw]
+            for ik in range(Nks):
+                try:
+                    Gk = np.linalg.inv(zI - hamk_s[ik] - sig)
+                    Akw[ik, iw] = -np.trace(Gk).imag / np.pi
+                except np.linalg.LinAlgError:
+                    print(f"Warning: Matrix inversion failed at k-point {ik}, frequency index {iw}. "
+                          "Setting to zero.", flush=True)
+                    Akw[ik, iw] = 0.0
+    return Akw, spa_length, xticks
+
+
+def calc_cpa(ham_r: np.ndarray, rvec: np.ndarray, mu: float, temp: float, Nx: int, Ny: int, Nz: int, Nw: int,
+             Emin: float, Emax: float, delta: float, k_sets: list, kmesh: int, bvec: np.ndarray,
+             x_cpa: float = 0.5, VB_shift: float = 1.0) -> tuple:
+    """
+    @brief Binary-alloy CPA: species A is the host (no perturbation), species B shifts every
+           on-site level by VB_shift.  Solves the CPA self-energy on the real axis for the
+           spectral function along the symmetry line (returned), then on the Matsubara
+           axis and writes it as a k-independent seed in the FLEX layout (sigma.bin, self_en.npz).
+    @param ham_r, rvec: Wannier Hamiltonian and R-vectors
+    @param mu, temp: chemical potential and temperature [eV]
+    @param Nx, Ny, Nz: k-mesh of the CPA k-sum (and of the irreducible mesh of sigma.bin)
+    @param      Nw: number of real frequencies / Matsubara frequencies
+    @param Emin, Emax, delta: real-frequency window and broadening [eV]
+    @param k_sets, kmesh, bvec: symmetry line of the spectrum
+    @param   x_cpa: concentration of species B
+    @param VB_shift: on-site shift of species B [eV]
+    @return (spa_length, xticks, wlist, Akw): the real-axis CPA spectrum along the path
+    """
+    import scipy.io as scio
+    Norb = ham_r.shape[1]
+    # VA, VB are the onsite perturbation RELATIVE to the reference onsite in hamk
+    # Species A (host): no perturbation -> VA = 0
+    # Species B (impurity): diagonal shift
+    VA = np.zeros((Norb, Norb), dtype=np.complex128)
+    VB = VB_shift * np.eye(Norb, dtype=np.complex128)
+    # sw_pp=False: periodic [0,1) mesh avoids double-counting the BZ boundary in the k-sum
+    Nk, klist = _lattice.gen_klist(Nx, Ny, Nz, sw_pp=False)
+    hamk = flibs.gen_ham(klist, ham_r, rvec)
+    # shift onsite by -mu so that w=0 corresponds to the Fermi level
+    hamk[:, range(Norb), range(Norb)] -= mu
+    # CPA on real axis for spectrum
+    wlist = np.linspace(Emin, Emax, Nw)
+    zlist_real = wlist + 1j*delta
+    print(f"CPA: Norb={Norb}, Nk={Nk}, Nw={Nw}, x={x_cpa}", flush=True)
+    sigma_cpa = flibs.solve_cpa(hamk, VA, VB, x_cpa, zlist_real, pp=0.5)
+    print("CPA converged", flush=True)
+    # --- spectrum along symmetry line ---
+    Akw, spa_length, xticks = calc_cpa_Akw(k_sets, kmesh, bvec, ham_r, rvec, mu, sigma_cpa, wlist, zlist_real)
+    # --- CPA on Matsubara frequencies -> sigma.bin ---
+    iwlist_mats = 1j*np.pi*temp*(2*np.arange(Nw, dtype=np.float64)+1)
+    print(f"CPA Matsubara: Norb={Norb}, Nk={Nk}, Nw={Nw}, x={x_cpa}", flush=True)
+    # reuse hamk (already shifted by -mu) computed above
+    sigma_cpa_mats = flibs.solve_cpa(hamk, VA, VB, x_cpa, iwlist_mats, pp=0.5)
+    print("CPA Matsubara converged", flush=True)
+    # build (Norb, Norb, Nw, Nk_irr) array for sigma.bin
+    # sigma_cpa_mats: (Nw, Norb, Norb) -> (Norb, Norb, Nw) -> broadcast over Nk_irr
+    klist_irr, kmap, invk = flibs.gen_irr_k_TRS(Nx, Ny, Nz)
+    Nk_irr = len(klist_irr)
+    sigma_out = np.broadcast_to(
+        sigma_cpa_mats.transpose(1, 2, 0)[:, :, :, np.newaxis],
+        (Norb, Norb, Nw, Nk_irr)
+    ).copy()
+    # write sigma.bin in Fortran unformatted format
+    # records: mu (float64), mu_OLD (float64), sigmak (Nk_irr,Nw,Norb,Norb) = (Norb,Norb,Nw,Nk_irr) C-order
+    with scio.FortranFile('sigma.bin', 'w') as f:
+        f.write_record(np.float64(mu))
+        f.write_record(np.float64(mu))   # mu_OLD = mu (no iteration history for CPA)
+        f.write_record(sigma_out.flatten().astype(np.complex128))
+    np.savez('self_en', sigma_out, np.float64(mu))
+    print(f"CPA Matsubara self-energy written to sigma.bin and self_en.npz"
+          f" (Nk_irr={Nk_irr}, Nw={Nw})", flush=True)
+    return spa_length, xticks, wlist, Akw
