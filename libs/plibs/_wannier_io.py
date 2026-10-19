@@ -284,38 +284,52 @@ def _UJ_to_matrix(vals: list, label: str, fname: str) -> np.ndarray:
     return np.asfortranarray(mat)
 
 
+def _load_UJ_file(fname: str) -> dict:
+    """Parse a U/J file: TOML (.toml, the bundled format) or JSON (.json, still accepted)."""
+    import json
+    import tomllib
+
+    if fname.endswith('.toml'):
+        with open(fname, 'rb') as f:
+            return tomllib.load(f)
+    with open(fname) as f:
+        return json.load(f)
+
+
 def read_UJ(material: str, dirname: str = 'UJ') -> tuple[np.ndarray, np.ndarray]:
     """
     @brief Read an orbital-dependent Coulomb parameter set (e.g. cRPA U/J of the Fe-based
     superconductors) and return it as the Umat/Jmat matrices used when orb_dep=True.
-    Looked up in this order: material given as a .json path; {dirname}/{material}.json
-    (one material per file); {dirname}.json (or dirname itself, when it names a .json file)
-    holding several materials keyed by name.
-    Each U/J is stored either flat (Norb^2 values, row-major) or as nested rows.
-    @param material: material name, e.g. 'FeSe', or a path to a .json file
+    Files are TOML (.toml) or JSON (.json); where both exist, .toml is taken.
+    Looked up in this order: material given as a .toml/.json path; {dirname}/{material}.toml
+    or .json (one material per file); {dirname}.toml or .json (or dirname itself, when it names
+    such a file) holding several materials keyed by name (TOML tables [FeSe] ..., JSON objects).
+    Each U/J is stored either flat (Norb^2 values, row-major) or as nested rows.  Optional
+    metadata: 'source' (printed, so the reference ends up in the log), 'orbitals' (names of
+    the Norb orbitals in file order; its length is checked).  Other keys are ignored.
+    @param material: material name, e.g. 'FeSe', or a path to a .toml/.json file
     @param  dirname: directory holding the per-material files, or a multi-material
-                     .json file (default 'UJ')
+                     .toml/.json file (default 'UJ')
     @return    Umat: intra-/inter-orbital Coulomb matrix [Norb, Norb] float64 (eV), Fortran-contiguous
     @return    Jmat: Hund coupling matrix [Norb, Norb] float64 (eV), Fortran-contiguous
     """
     import glob
-    import json
     import os
 
-    name = os.path.basename(material)[:-5] if material.endswith('.json') else material
-    if material.endswith('.json') and os.path.isfile(material):
-        fname = material
-    elif os.path.isfile(os.path.join(dirname, name + '.json')):
-        fname = os.path.join(dirname, name + '.json')
-    elif os.path.isfile(dirname if dirname.endswith('.json') else dirname + '.json'):
-        fname = dirname if dirname.endswith('.json') else dirname + '.json'  # combined multi-material file
-    else:
-        raise FileNotFoundError(f'read_UJ: no U/J file for "{material}" in {dirname}/ or {dirname}.json')
-    with open(fname) as f:
-        data = json.load(f)
+    exts = ('.toml', '.json')
+    is_path = material.endswith(exts)
+    name = os.path.splitext(os.path.basename(material))[0] if is_path else material
+    base = dirname[:-5] if dirname.endswith(exts) else dirname
+    candidates = ([material] if is_path else []) + [os.path.join(dirname, name + e) for e in exts] \
+        + ([dirname] if dirname.endswith(exts) else [base + e for e in exts])
+    fname = next((c for c in candidates if os.path.isfile(c)), None)
+    if fname is None:
+        raise FileNotFoundError(f'read_UJ: no U/J file for "{material}" in {dirname}/ or {base}.toml/.json')
+    data = _load_UJ_file(fname)
     if 'U' not in data or 'J' not in data:     # multi-material file: pick the requested entry
         if name not in data:
-            avail = sorted(set(data) | {os.path.basename(p)[:-5] for p in glob.glob(os.path.join(dirname, '*.json'))})
+            avail = sorted(set(data) | {os.path.splitext(os.path.basename(p))[0]
+                                        for e in exts for p in glob.glob(os.path.join(dirname, '*' + e))})
             raise KeyError(f'read_UJ: "{name}" not found in {fname}. Available: {", ".join(avail)}')
         data = data[name]
         if 'U' not in data or 'J' not in data:
@@ -324,4 +338,8 @@ def read_UJ(material: str, dirname: str = 'UJ') -> tuple[np.ndarray, np.ndarray]
     Jmat = _UJ_to_matrix(data['J'], 'J', fname)
     if Umat.shape != Jmat.shape:
         raise ValueError(f'read_UJ: U and J shapes differ in {fname}: {Umat.shape} vs {Jmat.shape}')
+    if 'orbitals' in data and len(data['orbitals']) != len(Umat):
+        raise ValueError(f'read_UJ: {fname} lists {len(data["orbitals"])} orbitals for a {len(Umat)}x{len(Umat)} U')
+    if 'source' in data:
+        print(f'U/J set "{name}" from {fname}: {data["source"]}', flush=True)
     return Umat, Jmat

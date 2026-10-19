@@ -4,7 +4,9 @@
 // dfftw_execute_dft_ and dfftw_destroy_plan_ with Fortran name-mangled
 // symbols (trailing underscore).
 //
-// SPDX-License-Identifier: BSD-3-Clause
+// Copyright (c) 2026 K. Suzuki
+// SPDX-License-Identifier: MIT
+// (see LICENSE; the bundled pocketfft_hdronly.h itself is BSD-3-Clause, see THIRD_PARTY_NOTICES)
 #include "pocketfft_hdronly.h"
 #include <complex>
 #include <cstdint>

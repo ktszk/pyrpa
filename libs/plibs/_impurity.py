@@ -7,7 +7,6 @@ primitive cell (the "spaghetti" plot of a disordered crystal).
 """
 import numpy as np
 import scipy.linalg as sclin
-import libs.flibs as flibs
 import libs.plibs._bands as _bands
 import libs.plibs._lattice as _lattice
 
@@ -38,39 +37,59 @@ def impurity_supercell(ham_r: np.ndarray, rvec: np.ndarray, cell: list, imp_site
            the sites imp_sites carry the extra on-site potential imp_V.  Hoppings are those of
            the host for every pair (host-host, host-impurity and impurity-impurity), so the
            impurity is a pure on-site perturbation, the same model as the CPA species B.
-    @param     ham_r: host Wannier Hamiltonian H(R) [Nr, Norb, Norb]
+           Every H(R) is folded into the supercell: the block (site i, site j) is the sum of
+           H(R) over all R with R_i + R = R_j modulo the cell.  This is the exact Hamiltonian of
+           the periodic supercell for any cell size: a pristine cell reproduces H(k) at every
+           commensurate k, also along an axis of size 1 (kz = 0 for cell[2] = 1, with the
+           interlayer hoppings then summed into the on-site block) and when a hopping is longer
+           than half the cell.  A small cell only means that an impurity sees its own images.
+    @param     ham_r: host Wannier Hamiltonian H(R) [Nr, Norb, Norb] (convention of gen_ham)
     @param      rvec: R-vectors [Nr, 3] (integer fractional)
     @param      cell: supercell size per axis
-    @param imp_sites: 0-based impurity site indices into the supercell (order of gen_rlist)
-    @param     imp_V: on-site potential [eV]: a number (times the unit matrix) or [Norb, Norb]
+    @param imp_sites: 0-based impurity site indices into the supercell (order of gen_rlist), distinct
+    @param     imp_V: on-site potential [eV]: a number (times the unit matrix), a list of Norb
+                      per-orbital values (diagonal) or a Hermitian [Norb, Norb] matrix
     @return  ham_imp: supercell Hamiltonian [Norb*Nsite, Norb*Nsite] (orbital fast, site slow)
     @return    rlist: site positions [Nsite, 3] (fractional, integer valued)
     """
     Norb = ham_r.shape[1]
+    cell = np.asarray(cell, dtype=np.int64)
     rlist = np.ascontiguousarray(_lattice.gen_rlist(*cell), dtype=np.float64)
-    # the supercell is periodic with a minimum-image convention: a hopping longer than half
-    # the cell would be folded onto the wrong neighbour
-    rmax = np.abs(np.asarray(rvec)[np.abs(ham_r).max(axis=(1, 2)) > 0]).max(axis=0)
-    short = [ax for ax in range(3) if cell[ax] > 1 and 2*rmax[ax] >= cell[ax]]
-    if short:
-        print(f"Warning: supercell {list(cell)} is not larger than twice the hopping range "
-              f"{rmax.astype(int).tolist()} along axis {short}; long hoppings wrap around", flush=True)
-    i0 = np.where(np.all(np.isclose(rvec, 0.0), axis=1))[0]
-    if len(i0) > 1:
-        raise ValueError('impurity_supercell: rvec has several R=0 entries')
-    if len(i0) == 0:
-        # no on-site block in the hopping file (zero on-site energies): add one to carry imp_V
-        rvec = np.vstack([rvec, np.zeros(3)])
-        ham_r = np.concatenate([ham_r, np.zeros((1, Norb, Norb), dtype=ham_r.dtype)])
-        i0 = [len(rvec)-1]
+    Nsite = len(rlist)
+    rv = np.asarray(rvec, dtype=np.float64)
+    Ri = np.rint(rv).astype(np.int64)
+    if not np.allclose(rv, Ri):
+        raise ValueError('impurity_supercell: rvec must be integer lattice vectors')
+    sites = np.asarray(imp_sites, dtype=np.int64).ravel()
+    if np.any((sites < 0) | (sites >= Nsite)):
+        raise ValueError(f'impurity_supercell: imp_sites must lie in [0, {Nsite-1}], got {sites.tolist()}')
+    if len(np.unique(sites)) != len(sites):
+        raise ValueError(f'impurity_supercell: imp_sites has duplicates: {sites.tolist()}')
     V = np.asarray(imp_V, dtype=np.complex128)
-    V = V*np.eye(Norb) if V.ndim == 0 else V
-    ham_i = np.array(ham_r, dtype=np.complex128, copy=True)
-    ham_i[i0[0]] += V
-    ham_imp = flibs.gen_imp_ham(np.ascontiguousarray(rvec, dtype=np.float64), np.ascontiguousarray(ham_r),
-                                ham_i, np.ascontiguousarray(ham_r), rlist,
-                                np.asarray(imp_sites, dtype=np.int64))
-    return ham_imp, rlist
+    if V.ndim == 0:
+        V = V*np.eye(Norb)
+    elif V.ndim == 1:
+        if len(V) != Norb:
+            raise ValueError(f'impurity_supercell: imp_V has {len(V)} entries, expected Norb={Norb}')
+        V = np.diag(V)
+    elif V.shape != (Norb, Norb):
+        raise ValueError(f'impurity_supercell: imp_V must be a number, [Norb] or [Norb, Norb], got {V.shape}')
+    if not np.allclose(V, V.conj().T):
+        raise ValueError('impurity_supercell: imp_V must be Hermitian')
+
+    # site index from integer position (gen_rlist order)
+    rint = np.rint(rlist).astype(np.int64)
+    site_of = np.empty(cell, dtype=np.int64)
+    site_of[rint[:, 0], rint[:, 1], rint[:, 2]] = np.arange(Nsite)
+    # gen_ham convention H(k) = sum_R H(R) exp(+2 pi i k.R): the block (site i, site i+R) is H(R)
+    H4 = np.zeros((Nsite, Norb, Nsite, Norb), dtype=np.complex128)   # [site i, orb, site i+R, orb]
+    src = np.arange(Nsite)
+    for R, hR in zip(Ri, np.asarray(ham_r)):
+        tgt = (rint + R) % cell
+        # site i -> site i+R is a bijection for a fixed R, so no index repeats within one +=
+        H4[src, :, site_of[tgt[:, 0], tgt[:, 1], tgt[:, 2]], :] += hR
+    H4[sites, :, sites, :] += V
+    return H4.reshape(Norb*Nsite, Norb*Nsite), rlist
 
 
 def unfolded_spectrum(eigs: np.ndarray, uni: np.ndarray, rlist: np.ndarray, Norb: int, klist: np.ndarray,

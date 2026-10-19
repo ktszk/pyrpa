@@ -1,0 +1,27 @@
+# cRPA interaction of the Fe-3d five-orbital (d) model of FeTe, one Fe site.
+# U: intra-orbital (diagonal) and inter-orbital U' (off-diagonal); J: Hund coupling.
+# Orbital order: Wannier90 d (l=2) order; it must match that of the hamiltonian it is used with.
+# Please cite the paper below (source/title/doi) when you use this set.
+material = "FeTe"
+source   = "T. Miyake, K. Nakamura, R. Arita, and M. Imada, J. Phys. Soc. Jpn. 79, 044705 (2010)"
+title    = "Comparison of Ab initio Low-Energy Models for LaFePO, LaFeAsO, BaFe2As2, LiFeAs, FeSe, and FeTe: Electron Correlation and Covalency"
+doi      = "10.1143/JPSJ.79.044705"
+arxiv    = "0911.3705"
+units    = "eV"
+orbitals = ["dz2", "dxz", "dyz", "dx2-y2", "dxy"]   # Wannier90 order
+
+U = [
+  [3.84, 2.56, 2.57, 2.44, 2.50],
+  [2.56, 2.88, 2.03, 2.29, 2.34],
+  [2.57, 2.03, 2.88, 2.29, 2.34],
+  [2.44, 2.29, 2.29, 3.59, 3.04],
+  [2.50, 2.34, 2.34, 3.04, 3.84],
+]
+
+J = [
+  [0.00, 0.37, 0.37, 0.66, 0.68],
+  [0.37, 0.00, 0.37, 0.49, 0.49],
+  [0.37, 0.37, 0.00, 0.49, 0.49],
+  [0.66, 0.49, 0.49, 0.00, 0.34],
+  [0.68, 0.49, 0.49, 0.34, 0.00],
+]

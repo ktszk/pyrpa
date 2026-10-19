@@ -16,6 +16,7 @@ import contextlib
 import io
 import pathlib
 import tempfile
+import tomllib
 
 import numpy as np
 
@@ -177,7 +178,7 @@ def test_read_UJ_stored_sets_feed_the_orbital_dependent_vertex(tmp_path):
     Umat, Jmat = P.read_UJ('FeSe', str(root / 'UJ'))
     assert Umat.shape == Jmat.shape == (5, 5)
     assert Umat.dtype == np.float64 and Umat.flags['F_CONTIGUOUS']
-    # yz/zx (orbitals 1,2) are degenerate, and both matrices are symmetric
+    # xz/yz (orbitals 1,2 in the Wannier90 d order) are degenerate, and both matrices are symmetric
     assert np.allclose(Umat, Umat.T) and np.allclose(Jmat, Jmat.T)
     assert Umat[1, 1] == Umat[2, 2]
     # the same set is reachable through a combined multi-material file
@@ -205,6 +206,40 @@ def test_read_UJ_stored_sets_feed_the_orbital_dependent_vertex(tmp_path):
         except err:
             continue
         raise AssertionError(f'read_UJ("Nonexistent", {where!r}) should raise {err.__name__}')
+
+
+def test_read_UJ_toml_bundled_sets_and_formats(tmp_path):
+    """The bundled sets are TOML with a source; TOML wins over JSON; TOML tables hold several materials."""
+    root = pathlib.Path(__file__).resolve().parents[1]
+    for f in sorted((root / 'UJ').glob('*.toml')):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            Umat, Jmat = P.read_UJ(f.stem, str(root / 'UJ'))
+        assert Umat.shape == Jmat.shape == (5, 5) and np.allclose(Umat, Umat.T) and np.allclose(Jmat, Jmat.T)
+        assert 'J. Phys. Soc. Jpn.' in out.getvalue()        # the reference is logged
+        meta = tomllib.loads(f.read_text())
+        assert meta['orbitals'] == ['dz2', 'dxz', 'dyz', 'dx2-y2', 'dxy']   # Wannier90 d order
+        assert Umat[1, 1] == Umat[2, 2]                       # xz/yz degenerate
+    assert len(list((root / 'UJ').glob('*.toml'))) == 6
+    # a .toml next to a .json of the same name is the one read
+    (tmp_path / 'X.json').write_text('{"U": [9.0], "J": [0.0]}')
+    (tmp_path / 'X.toml').write_text('U = [[1.0]]\nJ = [[0.0]]  # comment\n')
+    assert P.read_UJ('X', str(tmp_path))[0][0, 0] == 1.0
+    # multi-material TOML file (tables), also given by its own path as dirname
+    multi = tmp_path / 'sets.toml'
+    multi.write_text('# two sets\n[A]\nU = [1.0, 0.6, 0.6, 1.0]\nJ = [[0.0, 0.2], [0.2, 0.0]]\n'
+                     '[B]\nsource = "test"\nU = [[2.0]]\nJ = [[0.0]]\n')
+    UA, JA = P.read_UJ('A', str(multi))
+    assert np.array_equal(UA, [[1.0, 0.6], [0.6, 1.0]]) and np.array_equal(JA, [[0.0, 0.2], [0.2, 0.0]])
+    assert P.read_UJ('B', str(tmp_path / 'sets'))[0][0, 0] == 2.0
+    # an 'orbitals' list that does not match Norb is an error
+    (tmp_path / 'Bad.toml').write_text('orbitals = ["a", "b", "c"]\nU = [[1.0, 0.0], [0.0, 1.0]]\nJ = [[0.0, 0.0], [0.0, 0.0]]\n')
+    try:
+        P.read_UJ('Bad', str(tmp_path))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('orbitals of the wrong length were accepted')
 
 
 def test_expand_UJ_sites_replicates_one_site_on_every_site():

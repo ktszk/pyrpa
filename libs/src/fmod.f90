@@ -319,8 +319,8 @@ contains
 
     integer(c_int32_t) m_dim,p,m_act,idx,lwork,info,irs,j0
     integer(c_int32_t),parameter:: max_restart=200
-    real(c_double) beta,shift,lambda1,hij,res,thr
-    logical want_max
+    real(c_double) beta,shift,lambda1,hij,res,thr,keep_ar,keep_tol
+    logical want_max,sw_keep
     complex(c_double),allocatable:: V(:,:),w(:),x1(:),yd(:),vres(:),Vk(:,:)
     complex(c_double),allocatable:: H_mat(:,:),A_mat(:,:),eigenvals(:)
     complex(c_double),allocatable:: VL_dum(:,:),VR(:,:),zwork(:)
@@ -337,6 +337,7 @@ contains
     call set_v0(seed)
     j0=0
     want_max=.false.
+    sw_keep=.false.
     pass1: do irs=1,max_restart
        call arnoldi_loop(0.0d0,.false.,j0)
        call diagonalize('pass 1')
@@ -403,6 +404,10 @@ contains
                res/max(abs(lambda),1.0d-3)
           exit pass2
        end if
+       ! the restart must keep the Ritz pair that was picked: with classify it can lie below the
+       ! top half of the spectrum, which the threshold alone would throw away at every restart
+       sw_keep=.true.
+       keep_ar=dble(eigenvals(idx))
        call thick_restart(j0)
     end do pass2
     print'(A,F12.6,A,I0,A,ES9.2,A)','  eliash   =',lambda,'  (',irs,' Krylov spaces, residual ',&
@@ -442,6 +447,7 @@ contains
       else
          sel_wanted=(ar<=thr)
       end if
+      if(sw_keep)sel_wanted=sel_wanted .or. abs(ar-keep_ar)<=keep_tol
     end function sel_wanted
 
     subroutine thick_restart(jnext)
@@ -468,11 +474,18 @@ contains
       else
          thr=srt(k)+1.0d-12*max(abs(srt(1)),abs(srt(m_dim)))
       end if
+      ! eigenvalues of the real H from dgees vs those of zgeev: equal up to rounding
+      keep_tol=1.0d-8*max(abs(srt(1)),abs(srt(m_dim)),1.0d-300)
       call dgees('V','S',sel_wanted,m_dim,Hr,m_dim,sdim,wr,wi,Q,m_dim,work,lw,bwork,linfo)
       if(linfo/=0)then; print*,'DGEES failed in thick_restart: info=',linfo; stop; end if
       k=max(sdim,1)
       if(k<m_dim .and. abs(Hr(min(k+1,m_dim),k))>0.0d0)k=k+1   ! do not split a 2x2 block
-      if(k>=m_dim)k=m_dim-1
+      if(k>=m_dim)then
+         ! at most m-1 vectors are kept (one new direction is needed); step back over a whole
+         ! 2x2 block rather than splitting it, which would break A V_k = V_k T_k + v b^T
+         k=m_dim-1
+         if(k>1 .and. abs(Hr(k+1,k))>0.0d0)k=k-1
+      end if
       Qc(:,1:k)=cmplx(Q(:,1:k),0.0d0,c_double)
       call zgemm('N','N',ks%nvec,k,m_dim,(1.0d0,0.0d0),V,ks%nvec,Qc,m_dim,(0.0d0,0.0d0),Vk,ks%nvec)
       do ii=1,k

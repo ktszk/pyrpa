@@ -217,8 +217,9 @@ orb_dep = False  # use orbital dependence U,J (True: use Umat/Jmat matrices belo
 UJ_material = None  # with orb_dep=True, name of a stored cRPA parameter set loaded from UJ_dir instead of
 # writing Umat/Jmat out below, e.g. 'FeSe','FeTe','LiFeAs','BaFe2As2','LaFeAsO',
 # 'LaFeAsOnakamura'. None: use the Umat/Jmat given here
-UJ_dir = 'UJ'  # directory of per-material U/J files ({UJ_dir}/{UJ_material}.json), or a single
-# multi-material json file; the orbital order must match that of the hamiltonian.
+UJ_dir = 'UJ'  # directory of per-material U/J files ({UJ_dir}/{UJ_material}.toml; .json also read), or a
+# single multi-material TOML file (one [table] per material); each file records the reference
+# of its set (source/doi). The orbital order must match that of the hamiltonian.
 # The stored sets hold one site (5 Fe-d orbitals) and are copied onto every site
 # of a multi-site model (2-Fe, 10 orbitals) following site_prof
 Umat = None  # orbital-dependent U matrix (Norb x Norb, or one site worth of orbitals when

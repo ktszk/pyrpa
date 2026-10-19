@@ -16,10 +16,12 @@ It can calculate the following physical properties:
 
 # Requirements
 - Fortran compiler (tested: gfortran 13.3, AMD Flang (ROCm/aocc), ifx)
-- LAPACK, BLAS, and FFTW (tested: OpenBLAS, MKL, AOCL (BLIS and Flame))
+- LAPACK and BLAS (tested: OpenBLAS, MKL, AOCL (BLIS and Flame))
+- FFT: MKL's FFTW3-compatible interface, or the bundled pocketfft (BSD-3-Clause) otherwise;
+  upstream FFTW (GPL) is not used
 - OpenMP (for parallelization; bundled with the above compilers)
 - Make
-- Python 3.10 or later (tested: 3.13)
+- Python 3.11 or later (tested: 3.13; `tomllib` reads the U/J sets)
 - Python standard library
   - ctypes
 - Python external packages
@@ -79,3 +81,10 @@ make clean
 # Usage
 See [Doc/manual_EN.pdf](Doc/manual_EN.pdf) for detailed usage instructions,
 including input file format, calculation modes (`option`), and parameter descriptions.
+
+# License
+pyrpa is released under the MIT License; see [LICENSE](LICENSE).
+The bundled pocketfft header (`libs/src/pocketfft_hdronly.h`) is BSD-3-Clause; see
+[THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES).
+The stored U/J parameter sets in [UJ/](UJ/) are taken from published cRPA calculations;
+each file records its reference (`source`, `doi`), which should be cited when the set is used.
