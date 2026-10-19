@@ -135,12 +135,14 @@ set(CXXFLAGS -O3 -funroll-loops -fPIC -std=c++17)
 
 if(FCFAM STREQUAL "ifort")
   list(APPEND FFLAGS -mavx2 -qopenmp -heap-arrays)
-  set(BLAS_LIBS -lmkl_intel_lp64 -lmkl_sequential -lmkl_core)
+  # threaded MKL layer (same libiomp5 as -qopenmp): see the note in makefile
+  set(BLAS_LIBS -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core)
 elseif(FCFAM STREQUAL "ifx")
   # ifx is LLVM-based: -march=<target> emits vector code with no Intel CPUID
   # dispatch, so it runs at full width on AMD.  It rejects -mtune=znver*.
   list(APPEND FFLAGS -funroll-loops -qopenmp -init:snan -finline-functions -heap-arrays)
-  set(BLAS_LIBS -lmkl_intel_lp64 -lmkl_sequential -lmkl_core)
+  # threaded MKL layer (same libiomp5 as -qopenmp): see the note in makefile
+  set(BLAS_LIBS -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core)
 elseif(FCFAM STREQUAL "gfortran")
   list(APPEND FFLAGS -cpp -ffree-form -ffree-line-length-none -funroll-loops
                      -fopenmp -finline-functions -fimplicit-none

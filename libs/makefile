@@ -208,7 +208,11 @@ endif
 
 ifeq ($(FCFAM),ifort)
   FFLAGS_COMMON += -mavx2  -qopenmp -heap-arrays
-  LIBS := -lmkl_intel_lp64 -lmkl_sequential -lmkl_core $(FFT_LIBS)
+  # Threaded MKL layer (same libiomp5 as -qopenmp): FFTs, planned from serial code with
+  # dfftw_plan_with_nthreads, run on all threads; MKL stays single-threaded when called
+  # from inside our own OpenMP regions (MKL_DYNAMIC default), so those BLAS calls do not
+  # oversubscribe.  MKL_NUM_THREADS=1 restores the old sequential behaviour.
+  LIBS := -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core $(FFT_LIBS)
 endif
 ifeq ($(FCFAM),ifx)
   # ifx is LLVM-based: -march=$(ARCH) tunes for the target Zen core and emits
@@ -216,7 +220,11 @@ ifeq ($(FCFAM),ifx)
   # ifx does not accept -mtune=znver*, so -march alone carries the tuning.
   FFLAGS_COMMON += -march=$(ARCH) -funroll-loops \
                    -qopenmp -init:snan -finline-functions -heap-arrays
-  LIBS := -lmkl_intel_lp64 -lmkl_sequential -lmkl_core $(FFT_LIBS)
+  # Threaded MKL layer (same libiomp5 as -qopenmp): FFTs, planned from serial code with
+  # dfftw_plan_with_nthreads, run on all threads; MKL stays single-threaded when called
+  # from inside our own OpenMP regions (MKL_DYNAMIC default), so those BLAS calls do not
+  # oversubscribe.  MKL_NUM_THREADS=1 restores the old sequential behaviour.
+  LIBS := -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core $(FFT_LIBS)
 endif
 ifeq ($(FCFAM),gfortran)
   # gfortran needs preprocessing enabled when using -MMD

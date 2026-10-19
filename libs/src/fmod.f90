@@ -487,7 +487,10 @@ contains
          if(k>1 .and. abs(Hr(k+1,k))>0.0d0)k=k-1
       end if
       Qc(:,1:k)=cmplx(Q(:,1:k),0.0d0,c_double)
-      call zgemm('N','N',ks%nvec,k,m_dim,(1.0d0,0.0d0),V,ks%nvec,Qc,m_dim,(0.0d0,0.0d0),Vk,ks%nvec)
+      ! integer arguments as c_int64_t like every other BLAS call in this file (gfortran rejects
+      ! mixed kinds for one external within a file)
+      call zgemm('N','N',int(ks%nvec,c_int64_t),int(k,c_int64_t),int(m_dim,c_int64_t),(1.0d0,0.0d0),V,&
+           int(ks%nvec,c_int64_t),Qc,int(m_dim,c_int64_t),(0.0d0,0.0d0),Vk,int(ks%nvec,c_int64_t))
       do ii=1,k
          !$omp parallel do private(p)
          do p=1,ks%nvec
@@ -1046,6 +1049,26 @@ module fftw_plan_cache
   integer(c_int64_t),save :: plan_fwd=0, plan_bwd=0
 end module fftw_plan_cache
 
+subroutine fft_plan_threads()
+  !> Thread count for the FFTW plans created next (call it inside the fftw_plan_ops critical
+  !> section, right before planning): all OpenMP threads when planning from serial code, one
+  !> inside a parallel region (each thread then runs its own transform).  With MKL's FFTW
+  !> interface this needs the threaded MKL layer to take effect; the pocketfft wrapper accepts
+  !> the calls and chooses its thread count by itself (fft_wrapper.cpp).
+  use,intrinsic::iso_c_binding, only:c_int32_t
+  !$ use omp_lib
+  implicit none
+  logical,save:: initialized=.false.
+  integer(c_int32_t) iret,nt
+  if(.not.initialized)then
+     call dfftw_init_threads(iret)
+     initialized=.true.
+  end if
+  nt=1
+  !$ if(.not.omp_in_parallel()) nt=int(omp_get_max_threads(),c_int32_t)
+  call dfftw_plan_with_nthreads(nt)
+end subroutine fft_plan_threads
+
 subroutine init_fft_plans(cmat,tmp,Nx,Ny,Nz,Nw)
   use fftw_plan_cache
   use,intrinsic::iso_c_binding, only:c_int32_t,c_int64_t,c_double
@@ -1058,6 +1081,7 @@ subroutine init_fft_plans(cmat,tmp,Nx,Ny,Nz,Nw)
   if(plan_fwd/=0 .or. plan_bwd/=0)then
      print*,'WARNING(init_fft_plans): plan cache already in use; overwriting (plans leak).'
   end if
+  call fft_plan_threads()
   call dfftw_plan_dft(plan_fwd,4,Nlist,cmat,tmp,-1,64)
   call dfftw_plan_dft(plan_bwd,4,Nlist,cmat,tmp, 1,64)
   !$omp end critical(fftw_plan_ops)
@@ -1112,6 +1136,7 @@ subroutine FFT(cmat,tmp,Nx,Ny,Nz,Nw,SW)
         Inv=1
      end if
      !$omp critical(fftw_plan_ops)
+     call fft_plan_threads()
      call dfftw_plan_dft(plan,4,Nlist,cmat,tmp,Inv,64)
      !$omp end critical(fftw_plan_ops)
      call dfftw_execute(plan)
@@ -1156,6 +1181,7 @@ subroutine fft3d_batch(cmat,tmp,Nx,Ny,Nz,M,SW)
      Inv=1
   end if
   !$omp critical(fftw_plan_ops)
+  call fft_plan_threads()
   call dfftw_plan_many_dft(plan,3,Nlist,howmany,cmat,Nlist,1,dist,&
        tmp,Nlist,1,dist,Inv,64)
   !$omp end critical(fftw_plan_ops)
