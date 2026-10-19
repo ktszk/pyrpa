@@ -18,6 +18,41 @@
 ! Arnoldi therefore runs with a real inner product (get_inner) and real Ritz coefficients
 ! (real_ritz); a complex Krylov space mixes the two and silently returns wrong eigenvalues.
 
+module lin_eliash_op
+  !> The kernel of lin_eliash for the shared Arnoldi driver (eliash_krylov's arnoldi_two_pass).
+  !> It is passed to the driver as an argument, so it is a module procedure reading state that
+  !> lin_eliash points at, not an internal procedure of lin_eliash: passing an internal procedure
+  !> needs a trampoline on the stack, i.e. an executable stack, which ld.lld refuses to link (LLVM
+  !> flang) and glibc >= 2.41 refuses to dlopen.
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double
+  implicit none
+  integer(c_int64_t):: op_Nkall,op_Nk,op_Nw,op_Nchi,op_Norb,op_Nx,op_Ny,op_Nz,op_nvec
+  logical(1):: op_sw_pair
+  real(c_double):: op_weight
+  integer(c_int64_t),pointer,contiguous:: op_olist(:,:)=>null(),op_kmap(:,:)=>null(),&
+       op_invk(:,:)=>null(),op_iprm(:)=>null()
+  real(c_double),pointer,contiguous:: op_prt(:)=>null(),op_Smat(:,:)=>null(),op_Cmat(:,:)=>null()
+  complex(c_double),pointer,contiguous:: op_Gk(:,:,:,:)=>null(),op_chi(:,:,:,:)=>null(),&
+       op_fk(:,:,:,:)=>null()
+contains
+  subroutine apply_op(w_out,v_in)
+    !> one application of the Eliashberg kernel, w_out = (T/Nkall)*K*v_in; uses op_fk as scratch.
+    !> Flat dummies: the shared driver stores Krylov vectors as plain vectors, and the rank-4
+    !> kernels below pick up the (Nk,Nw,Norb,Norb) shape by sequence association.
+    complex(c_double),intent(in):: v_in(*)
+    complex(c_double),intent(out):: w_out(*)
+    integer(c_int64_t) q
+    call mkfk_trs_nsoc(op_fk,op_Gk,v_in,op_Nk,op_Nw,op_Norb)
+    call mkdelta_nsoc(w_out,op_fk,op_chi,op_Smat,op_Cmat,op_kmap,op_invk,op_prt,op_iprm,op_olist,&
+         op_Nkall,op_Nk,op_Nw,op_Nchi,op_Norb,op_Nx,op_Ny,op_Nz,op_sw_pair)
+    !$omp parallel do private(q)
+    do q=1,op_nvec
+       w_out(q)=w_out(q)*op_weight
+    end do
+    !$omp end parallel do
+  end subroutine apply_op
+end module lin_eliash_op
+
 subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,iprm,kmap,invk,temp,eps,&
      Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,arnoldi_m,lambda_out) bind(C)
   !> calculate linearized eliashberg equations with TRS without soc
@@ -50,34 +85,38 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,iprm,kmap,
   !!                      magnitude picks the band-basis seed (get_initial_delta), 0 = unit matrix.
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   use eliash_krylov
+  use lin_eliash_op
+  use grid_work, only:grid_work_free
   implicit none
   integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym
   integer(c_int64_t),intent(in):: arnoldi_m  !! Krylov subspace dimension (0=power method, >0=Arnoldi)
-  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
-  integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
+  integer(c_int64_t),intent(in),target,dimension(Nchi,2):: olist
+  integer(c_int64_t),intent(in),target,dimension(3,Nkall):: kmap,invk
   !! Inversion in the orbital basis is the signed permutation P_{m,iprm(m)}=prt(m):
   !! Delta_ml(-k) = dprt*prt(m)*prt(l)*Delta_{iprm(m),iprm(l)}(k).
   !! iprm=identity recovers the old diagonal-parity behaviour bit for bit.
-  integer(c_int64_t),intent(in),dimension(Norb):: iprm
+  integer(c_int64_t),intent(in),target,dimension(Norb):: iprm
   real(c_double),intent(in):: temp,eps
-  real(c_double),intent(in),dimension(Norb):: prt
-  real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
+  real(c_double),intent(in),target,dimension(Norb):: prt
+  real(c_double),intent(in),target,dimension(Nchi,Nchi):: Smat,Cmat
   real(c_double),intent(in),dimension(Nk,Norb):: init_delta
-  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
+  complex(c_double),intent(in),target,dimension(Nk,Nw,Norb,Norb):: Gk
   complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: delta
-  complex(c_double),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
+  complex(c_double),intent(inout),target,dimension(Nk,Nw,Nchi,Nchi):: chi
   real(c_double),intent(out):: lambda_out
 
   integer(c_int32_t) i_iter,i_eig,i
   integer(c_int32_t),parameter:: eig_max=2
   logical(1) sw_pair
   real(c_double) norm,inorm,weight,lambda_rq,lambda_prev,lambda_phys,lambda1,vec_err,proj
-  complex(c_double),dimension(Nk,Nw,Norb,Norb):: newdelta,fk,delta1
+  complex(c_double),allocatable,dimension(:,:,:,:):: newdelta,delta1
+  complex(c_double),allocatable,target,dimension(:,:,:,:):: fk
   !> vector geometry for the shared Krylov routines: Delta is kept on the Nk irreducible
   !> k-points, and invk(1,i) says which of them carries full-BZ point i
   type(kspace) ks
 
+  allocate(newdelta(Nk,Nw,Norb,Norb),fk(Nk,Nw,Norb,Norb),delta1(Nk,Nw,Norb,Norb))
   if(gap_sym>=0)then
      sw_pair=.true.
      print'(A7)','singlet'
@@ -96,7 +135,13 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,iprm,kmap,
      ! no branch test is passed: singlet and triplet are separate kernels here (sw_pair), so the
      ! largest eigenvalue of this kernel is already the one gap_sym asks for
      call get_initial_delta(newdelta,init_delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,gap_sym)
+     ! state of apply_op (module lin_eliash_op)
+     op_Nkall=Nkall; op_Nk=Nk; op_Nw=Nw; op_Nchi=Nchi; op_Norb=Norb; op_Nx=Nx; op_Ny=Ny; op_Nz=Nz
+     op_nvec=ks%nvec; op_sw_pair=sw_pair; op_weight=weight
+     op_olist=>olist; op_kmap=>kmap; op_invk=>invk; op_iprm=>iprm; op_prt=>prt
+     op_Smat=>Smat; op_Cmat=>Cmat; op_Gk=>Gk; op_chi=>chi; op_fk=>fk
      call arnoldi_two_pass(lambda_out,delta,newdelta,ks,arnoldi_m,eps,apply_op)
+     nullify(op_olist,op_kmap,op_invk,op_iprm,op_prt,op_Smat,op_Cmat,op_Gk,op_chi,op_fk)
   else !--- Power method (shift + deflation)
      eigenval_loop:do i_eig=1,eig_max !solve eig_val using power method, 1st eig is usually large negative value
         call get_initial_delta(delta,init_delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,gap_sym)
@@ -173,22 +218,7 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,iprm,kmap,
      delta(:,:,:,:)=newdelta(:,:,:,:)*inorm
      !$omp end parallel workshare
   end if
-contains
-  subroutine apply_op(w_out,v_in)
-    !> one application of the Eliashberg kernel, w_out = (T/Nkall)*K*v_in; uses host fk as scratch.
-    !> Flat dummies: the shared driver stores Krylov vectors as plain vectors, and the rank-4
-    !> kernels below pick up the (Nk,Nw,Norb,Norb) shape by sequence association.
-    complex(c_double),intent(in):: v_in(*)
-    complex(c_double),intent(out):: w_out(*)
-    integer(c_int32_t) q
-    call mkfk_trs_nsoc(fk,Gk,v_in,Nk,Nw,Norb)
-    call mkdelta_nsoc(w_out,fk,chi,Smat,Cmat,kmap,invk,prt,iprm,olist,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,sw_pair)
-    !$omp parallel do private(q)
-    do q=1,ks%nvec
-       w_out(q)=w_out(q)*weight
-    end do
-    !$omp end parallel do
-  end subroutine apply_op
+  call grid_work_free()   ! mkdelta_nsoc's work arrays, kept across the iterations
 end subroutine lin_eliash
 
 subroutine mkfk_trs_nsoc(fk,Gk,delta,Nk,Nw,Norb)
@@ -252,6 +282,7 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,iprm,olist
   !!@param        Nz,in: Number of kz mesh
   !!@param sw_pair,in: switch of singlet or triplet paring interacton
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  use grid_work, only:grid_work_get,tmpVdelta=>gw1,tmpfk=>gw2,tmp=>gw3  ! kept between calls
   implicit none
   integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
   integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
@@ -267,7 +298,6 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,iprm,olist
   
   integer(c_int32_t) i,j,k,n,l,m
   real(c_double) sgn,dprt
-  complex(c_double),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpVdelta,tmpfk,tmp
   complex(c_double),dimension(Norb,Norb):: dtrim
   logical(1),parameter:: sw_odd_freq=.false.
 
@@ -277,6 +307,7 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,iprm,olist
   ! so the odd-ω (orbital-antisymmetric) admixture of multi-orbital gaps is kept.  Since only the
   ! lower triangle is computed and the rest filled by conjugation, the map is real-linear only:
   ! lin_eliash therefore runs Arnoldi over the real space of Hermitian Δ (real inner product).
+  call grid_work_get(Nx,Ny,Nz,2*Nw)
   if(sw_pair)then
      sgn=1.0d0 !singlet Fk=F^T-k
      dprt=1.0d0 !gap parity even freq singlet is even
@@ -436,9 +467,10 @@ subroutine get_initial_delta(delta,init_delta,uni,kmap,invk,Nkall,Nk,Nw,Norb,gap
 
   integer(c_int32_t) i,j,l,m,n
   real(c_double) norm
-  complex(c_double),dimension(Nk,Norb,Norb):: delta0
+  complex(c_double),allocatable,dimension(:,:,:):: delta0
   complex(c_double),dimension(Norb,Norb):: tmpu
 
+  allocate(delta0(Nk,Norb,Norb))
   if(gap_sym==0)then
      !$omp parallel
      !$omp workshare

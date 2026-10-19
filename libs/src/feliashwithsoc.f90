@@ -36,6 +36,133 @@
 !   Arnoldi therefore uses a real inner product (get_inner) and real Ritz coefficients (real_ritz);
 !   a complex Krylov space mixes the two and silently returns wrong eigenvalues.
 
+module lin_eliash_soc_op
+  !> The kernel of lin_eliash_soc and its branch test, for the shared Arnoldi driver
+  !> (eliash_krylov's arnoldi_two_pass), plus the projections they apply.  They are module
+  !> procedures reading state that lin_eliash_soc points at, not internal procedures of
+  !> lin_eliash_soc, for the reason given in module lin_eliash_op (feliash.f90): passing an
+  !> internal procedure as an argument needs an executable stack.
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  implicit none
+  private
+  public:: apply_op,classify_branch,project_parity,project_spin
+  !! special values of gap_sym, as in lin_eliash_soc
+  integer(c_int64_t),parameter:: gap_unit=0,par_mix=-10
+  integer(c_int64_t),public:: op_Nkall,op_Nk,op_Ndk,op_Nw,op_Nchi,op_Norb,op_Nx,op_Ny,op_Nz,op_nvec,&
+       op_gap_sym
+  real(c_double),public:: op_pp,op_weight
+  logical,public:: op_su2
+  integer(c_int64_t),pointer,contiguous,public:: op_olist(:,:)=>null(),op_slist(:)=>null(),&
+       op_kmap(:,:)=>null(),op_invk(:,:)=>null(),op_invs(:)=>null(),op_invschi(:)=>null(),&
+       op_idk(:)=>null(),op_ipk(:)=>null()
+  real(c_double),pointer,contiguous,public:: op_Vmat(:,:)=>null(),op_sgnsig(:,:)=>null(),&
+       op_sgnsig2(:,:)=>null(),op_prt(:)=>null()
+  complex(c_double),pointer,contiguous,public:: op_Gk(:,:,:,:)=>null(),op_chi(:,:,:,:)=>null(),&
+       op_fk(:,:,:,:)=>null()
+contains
+  subroutine project_parity(d)
+    !> Impose the parity of the seed where it is not built in: Δ(-k) of the other k-points is
+    !> rebuilt from parity (Δ(-k) = pp·P Δ(k) P), but a k=-k point (TRIM) is stored once, so there
+    !> Δ_ab(K) <- [1 + pp·prt_a·prt_b]/2 · Δ_ab(K).  Without it an odd-parity triplet keeps a
+    !> spurious TRIM component.  Skipped for parity mixing, which is stored on the full BZ.
+    complex(c_double),intent(inout),dimension(op_Ndk,op_Nw,op_Norb,op_Norb):: d
+    integer(c_int32_t) ii,a,b
+    if(op_gap_sym==gap_unit .or. op_gap_sym==par_mix)return
+    !$omp parallel do private(a,b)
+    do ii=1,int(op_Nkall,c_int32_t)
+       if(op_ipk(ii)==0 .and. op_invk(3,ii)==ii)then
+          do b=1,int(op_Norb,c_int32_t)
+             do a=1,int(op_Norb,c_int32_t)
+                d(op_idk(ii),:,a,b)=0.5d0*(1.0d0+op_pp*op_prt(a)*op_prt(b))*d(op_idk(ii),:,a,b)
+             end do
+          end do
+       end if
+    end do
+    !$omp end parallel do
+  end subroutine project_parity
+
+  subroutine project_spin(d)
+    !> Spin-rotation-invariant case only: keep the spin structure of the seed, Δ = Δ_orb ⊗ χ with
+    !> χ = iσ_y (singlet, gap_sym>0) or σ_z iσ_y (S_z=0 triplet d_z, gap_sym<0):
+    !> Δ_{a↓,b↑} = ∓Δ_{a↑,b↓} (- singlet, + triplet), same-spin parts 0.  Δ↓↑ is copied from Δ↑↓
+    !> rather than averaged with it: Δ↑↓ carries the TRS gauge (its lower triangle is filled by
+    !> Hermiticity in mkdelta_soc), and mixing in the independently computed Δ↓↑ breaks that.
+    complex(c_double),intent(inout),dimension(op_Ndk,op_Nw,op_Norb,op_Norb):: d
+    integer(c_int32_t) a,b
+    real(c_double) sgs
+    if(.not.op_su2 .or. op_gap_sym==gap_unit .or. op_gap_sym==par_mix)return
+    sgs=merge(-1.0d0,1.0d0,op_gap_sym>0)
+    !$omp parallel do private(a)
+    do b=1,int(op_Norb,c_int32_t)
+       do a=1,int(op_Norb,c_int32_t)
+          if(op_slist(a)==op_slist(b))then
+             d(:,:,a,b)=0.0d0
+          else if(op_slist(a)==1)then
+             d(:,:,op_invs(a),op_invs(b))=sgs*d(:,:,a,b)
+          end if
+       end do
+    end do
+    !$omp end parallel do
+  end subroutine project_spin
+
+  subroutine apply_op(w_out,v_in)
+    !> one application of the Eliashberg kernel, w_out = (T/Nkall)*K*v_in; uses op_fk as scratch.
+    !> Flat dummies: the shared driver stores Krylov vectors as plain vectors, and the rank-4
+    !> routines below pick up the (Ndk,Nw,Norb,Norb) shape by sequence association.
+    complex(c_double),intent(in):: v_in(*)
+    complex(c_double),intent(out):: w_out(*)
+    integer(c_int32_t) q
+    call mkfk_trs_soc(op_fk,op_Gk,v_in,op_sgnsig,op_slist,op_invk,op_invs,op_idk,op_ipk,&
+         op_Nkall,op_Nk,op_Ndk,op_Nw,op_Norb,op_gap_sym)
+    call mkdelta_soc(w_out,op_fk,op_chi,op_Vmat,op_sgnsig,op_sgnsig2,op_prt,op_kmap,op_invk,op_invs,&
+         op_invschi,op_olist,op_slist,op_idk,op_ipk,&
+         op_Nkall,op_Nk,op_Ndk,op_Nw,op_Nchi,op_Norb,op_Nx,op_Ny,op_Nz,op_gap_sym)
+    call project_parity(w_out)
+    call project_spin(w_out)
+    !$omp parallel do private(q)
+    do q=1,op_nvec
+       w_out(q)=-w_out(q)*op_weight
+    end do
+    !$omp end parallel do
+  end subroutine apply_op
+
+  subroutine classify_branch(ok,x)
+    !> Branch test handed to the shared Arnoldi driver: does x have the spin character gap_sym
+    !> asks for?  With SOC a parity sector holds both the (pseudospin singlet, even w) and the
+    !> (pseudospin triplet, odd w) pairing and no exact symmetry separates them, so without this
+    !> the solver would return whichever is larger and lambda would jump as SOC goes to zero.
+    complex(c_double),intent(in):: x(*)
+    logical,intent(out):: ok
+    real(c_double) ws,wt
+    call get_spin_weight(ws,wt,x)
+    ok=merge(ws>wt,wt>ws,op_gap_sym>0)
+  end subroutine classify_branch
+
+  subroutine get_spin_weight(ws,wt,d)
+    !> Split |Delta|^2 into its spin-singlet weight ws and spin-triplet weight wt, by projecting
+    !> the opposite-spin block on Delta_du = -Delta_ud (singlet) and Delta_du = +Delta_ud (S_z=0
+    !> triplet); the equal-spin blocks are the S_z=+-1 triplet and go to wt.  Only ws vs wt is
+    !> used (which one dominates), so the overall normalisation does not matter.
+    complex(c_double),intent(in),dimension(op_Ndk,op_Nw,op_Norb,op_Norb):: d
+    real(c_double),intent(out):: ws,wt
+    integer(c_int32_t) a,b
+    ws=0.0d0
+    wt=0.0d0
+    do b=1,int(op_Norb,c_int32_t)
+       do a=1,int(op_Norb,c_int32_t)
+          if(op_slist(a)/=op_slist(b))then
+             if(op_slist(a)==1)then
+                ws=ws+sum(abs(d(:,:,a,b)-d(:,:,op_invs(a),op_invs(b)))**2)
+                wt=wt+sum(abs(d(:,:,a,b)+d(:,:,op_invs(a),op_invs(b)))**2)
+             end if
+          else
+             wt=wt+2.0d0*sum(abs(d(:,:,a,b))**2)   ! equal spin: S_z=+-1 triplet
+          end if
+       end do
+    end do
+  end subroutine get_spin_weight
+end module lin_eliash_soc_op
+
 subroutine lin_eliash_soc(delta_full,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,prt,olist,slist,kmap,invk,invs,invschi,&
      temp,eps,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,arnoldi_m,lambda_out) bind(C)
   !> calculate linearized eliashberg equations with soc and TRS
@@ -68,24 +195,26 @@ subroutine lin_eliash_soc(delta_full,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,p
   !!                      -10 = parity mixing.  See the notes at the top of this file.
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   use eliash_krylov
+  use lin_eliash_soc_op
+  use grid_work, only:grid_work_free
   implicit none
   integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym
   integer(c_int64_t),intent(in):: arnoldi_m  !! Krylov subspace dimension (0=power method, >0=Arnoldi)
   real(c_double),intent(out):: lambda_out
-  integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
-  integer(c_int64_t),intent(in),dimension(Norb):: slist,invs
-  integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
-  integer(c_int64_t),intent(in),dimension(Nchi):: invschi
+  integer(c_int64_t),intent(in),target,dimension(Nchi,2):: olist
+  integer(c_int64_t),intent(in),target,dimension(Norb):: slist,invs
+  integer(c_int64_t),intent(in),target,dimension(3,Nkall):: kmap,invk
+  integer(c_int64_t),intent(in),target,dimension(Nchi):: invschi
   real(c_double),intent(in):: temp,eps
-  real(c_double),intent(in),dimension(Nchi,Nchi):: Vmat
-  real(c_double),intent(in),dimension(Norb,Norb):: sgnsig
-  real(c_double),intent(in),dimension(Nchi,Nchi):: sgnsig2
-  real(c_double),intent(in),dimension(Norb):: prt
+  real(c_double),intent(in),target,dimension(Nchi,Nchi):: Vmat
+  real(c_double),intent(in),target,dimension(Norb,Norb):: sgnsig
+  real(c_double),intent(in),target,dimension(Nchi,Nchi):: sgnsig2
+  real(c_double),intent(in),target,dimension(Norb):: prt
   real(c_double),intent(in),dimension(Nk,Norb):: init_delta
-  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
+  complex(c_double),intent(in),target,dimension(Nk,Nw,Norb,Norb):: Gk
   complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(c_double),intent(out),dimension(Nkall,Nw,Norb,Norb):: delta_full
-  complex(c_double),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
+  complex(c_double),intent(inout),target,dimension(Nk,Nw,Nchi,Nchi):: chi
 
   integer(c_int32_t) i_iter,i_eig,count,i,l,m
   integer(c_int32_t),parameter:: eig_max=2
@@ -94,14 +223,16 @@ subroutine lin_eliash_soc(delta_full,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,p
   integer(c_int64_t),parameter:: gap_unit=0   !! unit-matrix seed: no parity and no spin projection
   integer(c_int64_t),parameter:: par_mix=-10  !! parity mixing: no parity, gap kept on the full BZ
   integer(c_int64_t) Ndk
-  integer(c_int64_t),dimension(Nkall):: idk,ipk
+  integer(c_int64_t),allocatable,target,dimension(:):: idk,ipk
   real(c_double) norm,inorm,norm2,weight,lambda_rq,vec_err,pp
   logical su2
-  complex(c_double),allocatable,dimension(:,:,:,:):: delta,newdelta,fk
+  complex(c_double),allocatable,dimension(:,:,:,:):: delta,newdelta
+  complex(c_double),allocatable,target,dimension(:,:,:,:):: fk
   !> vector geometry for the shared Krylov routines (idk says which stored point carries each
   !> full-BZ point, so norms and inner products still run over the whole BZ)
   type(kspace) ks
 
+  allocate(idk(Nkall),ipk(Nkall))
   lambda_out=0.0d0
   ! Δ is stored on Ndk points: idk(i) = stored index of full k-point i, ipk(i)=1 if Δ(k_i) is
   ! rebuilt by parity, Δ(-k) = pp·P Δ(k) P  (pp=+1 singlet, -1 triplet)
@@ -141,6 +272,13 @@ subroutine lin_eliash_soc(delta_full,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,p
   !$omp end parallel do
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
+  ! state of the kernel and the projections (module lin_eliash_soc_op)
+  op_Nkall=Nkall; op_Nk=Nk; op_Ndk=Ndk; op_Nw=Nw; op_Nchi=Nchi; op_Norb=Norb
+  op_Nx=Nx; op_Ny=Ny; op_Nz=Nz; op_nvec=ks%nvec; op_gap_sym=gap_sym
+  op_pp=pp; op_weight=weight; op_su2=su2
+  op_olist=>olist; op_slist=>slist; op_kmap=>kmap; op_invk=>invk; op_invs=>invs
+  op_invschi=>invschi; op_idk=>idk; op_ipk=>ipk; op_Vmat=>Vmat; op_sgnsig=>sgnsig
+  op_sgnsig2=>sgnsig2; op_prt=>prt; op_Gk=>Gk; op_chi=>chi; op_fk=>fk
   if(arnoldi_m>0)then !--- Arnoldi solver (shared with lin_eliash, see module eliash_krylov)
      call get_initial_delta_soc(newdelta,init_delta,uni,kmap,slist,invk,invs,idk,ipk,&
           Nkall,Nk,Ndk,Nw,Norb,gap_sym)
@@ -219,29 +357,11 @@ subroutine lin_eliash_soc(delta_full,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,p
      end do
   end do
   !$omp end parallel do
+  call grid_work_free()   ! mkdelta_soc's work arrays, kept across the iterations
+  nullify(op_olist,op_slist,op_kmap,op_invk,op_invs,op_invschi,op_idk,op_ipk,op_Vmat,op_sgnsig,&
+       op_sgnsig2,op_prt,op_Gk,op_chi,op_fk)
   deallocate(delta,newdelta,fk)
 contains
-  subroutine project_parity(d)
-    !> Impose the parity of the seed where it is not built in: Δ(-k) of the other k-points is
-    !> rebuilt from parity (Δ(-k) = pp·P Δ(k) P), but a k=-k point (TRIM) is stored once, so there
-    !> Δ_ab(K) <- [1 + pp·prt_a·prt_b]/2 · Δ_ab(K).  Without it an odd-parity triplet keeps a
-    !> spurious TRIM component.  Skipped for parity mixing, which is stored on the full BZ.
-    complex(c_double),intent(inout),dimension(Ndk,Nw,Norb,Norb):: d
-    integer(c_int32_t) ii,a,b
-    if(gap_sym==gap_unit .or. gap_sym==par_mix)return
-    !$omp parallel do private(a,b)
-    do ii=1,int(Nkall,c_int32_t)
-       if(ipk(ii)==0 .and. invk(3,ii)==ii)then
-          do b=1,int(Norb,c_int32_t)
-             do a=1,int(Norb,c_int32_t)
-                d(idk(ii),:,a,b)=0.5d0*(1.0d0+pp*prt(a)*prt(b))*d(idk(ii),:,a,b)
-             end do
-          end do
-       end if
-    end do
-    !$omp end parallel do
-  end subroutine project_parity
-
   logical function is_spin_rotation_invariant()
     !> true if G has no spin-flip part and equal up/down blocks (no SOC, no Zeeman field)
     integer(c_int32_t) a,b
@@ -259,86 +379,6 @@ contains
     end do
     is_spin_rotation_invariant=(dev<=tol)
   end function is_spin_rotation_invariant
-
-  subroutine project_spin(d)
-    !> Spin-rotation-invariant case only: keep the spin structure of the seed, Δ = Δ_orb ⊗ χ with
-    !> χ = iσ_y (singlet, gap_sym>0) or σ_z iσ_y (S_z=0 triplet d_z, gap_sym<0):
-    !> Δ_{a↓,b↑} = ∓Δ_{a↑,b↓} (- singlet, + triplet), same-spin parts 0.  Δ↓↑ is copied from Δ↑↓
-    !> rather than averaged with it: Δ↑↓ carries the TRS gauge (its lower triangle is filled by
-    !> Hermiticity in mkdelta_soc), and mixing in the independently computed Δ↓↑ breaks that.
-    complex(c_double),intent(inout),dimension(Ndk,Nw,Norb,Norb):: d
-    integer(c_int32_t) a,b
-    real(c_double) sgs
-    if(.not.su2 .or. gap_sym==gap_unit .or. gap_sym==par_mix)return
-    sgs=merge(-1.0d0,1.0d0,gap_sym>0)
-    !$omp parallel do private(a)
-    do b=1,int(Norb,c_int32_t)
-       do a=1,int(Norb,c_int32_t)
-          if(slist(a)==slist(b))then
-             d(:,:,a,b)=0.0d0
-          else if(slist(a)==1)then
-             d(:,:,invs(a),invs(b))=sgs*d(:,:,a,b)
-          end if
-       end do
-    end do
-    !$omp end parallel do
-  end subroutine project_spin
-
-  subroutine apply_op(w_out,v_in)
-    !> one application of the Eliashberg kernel, w_out = (T/Nkall)*K*v_in; uses host fk as scratch.
-    !> Flat dummies: the shared driver stores Krylov vectors as plain vectors, and the rank-4
-    !> routines below pick up the (Ndk,Nw,Norb,Norb) shape by sequence association.
-    complex(c_double),intent(in):: v_in(*)
-    complex(c_double),intent(out):: w_out(*)
-    integer(c_int32_t) q
-    call mkfk_trs_soc(fk,Gk,v_in,sgnsig,slist,invk,invs,idk,ipk,Nkall,Nk,Ndk,Nw,Norb,gap_sym)
-    call mkdelta_soc(w_out,fk,chi,Vmat,sgnsig,sgnsig2,prt,kmap,invk,invs,invschi,olist,slist,idk,ipk,&
-         Nkall,Nk,Ndk,Nw,Nchi,Norb,Nx,Ny,Nz,gap_sym)
-    call project_parity(w_out)
-    call project_spin(w_out)
-    !$omp parallel do private(q)
-    do q=1,ks%nvec
-       w_out(q)=-w_out(q)*weight
-    end do
-    !$omp end parallel do
-  end subroutine apply_op
-
-  subroutine classify_branch(ok,x)
-    !> Branch test handed to the shared Arnoldi driver: does x have the spin character gap_sym
-    !> asks for?  With SOC a parity sector holds both the (pseudospin singlet, even w) and the
-    !> (pseudospin triplet, odd w) pairing and no exact symmetry separates them, so without this
-    !> the solver would return whichever is larger and lambda would jump as SOC goes to zero.
-    complex(c_double),intent(in):: x(*)
-    logical,intent(out):: ok
-    real(c_double) ws,wt
-    call get_spin_weight(ws,wt,x)
-    ok=merge(ws>wt,wt>ws,gap_sym>0)
-  end subroutine classify_branch
-
-  subroutine get_spin_weight(ws,wt,d)
-    !> Split |Delta|^2 into its spin-singlet weight ws and spin-triplet weight wt, by projecting
-    !> the opposite-spin block on Delta_du = -Delta_ud (singlet) and Delta_du = +Delta_ud (S_z=0
-    !> triplet); the equal-spin blocks are the S_z=+-1 triplet and go to wt.  Only ws vs wt is
-    !> used (which one dominates), so the overall normalisation does not matter.
-    complex(c_double),intent(in),dimension(Ndk,Nw,Norb,Norb):: d
-    real(c_double),intent(out):: ws,wt
-    integer(c_int32_t) a,b
-    ws=0.0d0
-    wt=0.0d0
-    do b=1,int(Norb,c_int32_t)
-       do a=1,int(Norb,c_int32_t)
-          if(slist(a)/=slist(b))then
-             if(slist(a)==1)then
-                ws=ws+sum(abs(d(:,:,a,b)-d(:,:,invs(a),invs(b)))**2)
-                wt=wt+sum(abs(d(:,:,a,b)+d(:,:,invs(a),invs(b)))**2)
-             end if
-          else
-             wt=wt+2.0d0*sum(abs(d(:,:,a,b))**2)   ! equal spin: S_z=+-1 triplet
-          end if
-       end do
-    end do
-  end subroutine get_spin_weight
-
 end subroutine lin_eliash_soc
 
 subroutine mkfk_trs_soc(fk,Gk,delta,sgnsig,slist,invk,invs,idk,ipk,Nkall,Nk,Ndk,Nw,Norb,gap_sym)
@@ -419,6 +459,7 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,prt,kmap,invk,i
   !> new gap function Delta = sum V F.  delta (here F) and newdelta live on the Ndk stored k-points
   !> (get_delta_kmap_soc); F at the other points is rebuilt by parity, F(-k) = pp·P F(k) P.
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  use grid_work, only:grid_work_get,tmpVdelta=>gw1,tmpfk=>gw2,tmp=>gw3  ! kept between calls
   implicit none
   integer(c_int64_t),intent(in):: Nkall,Nk,Ndk,Nw,Nchi,Norb,Nx,Ny,Nz,gap_sym
   integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
@@ -435,8 +476,8 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,prt,kmap,invk,i
 
   integer(c_int32_t) i,j,k,n,l,m
   real(c_double) pp,sp,sm
-  complex(c_double),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpVdelta,tmpfk,tmp
   
+  call grid_work_get(Nx,Ny,Nz,2*Nw)
   pp=merge(1.0d0,-1.0d0,gap_sym>0) !parity used for k-points with ipk=1
   !$omp parallel workshare
   newdelta(:,:,:,:)=0.0d0

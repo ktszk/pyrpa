@@ -17,8 +17,9 @@ It can calculate the following physical properties:
 # Requirements
 - Fortran compiler (tested: gfortran 13.3, AMD Flang (ROCm/aocc), ifx)
 - LAPACK and BLAS (tested: OpenBLAS, MKL, AOCL (BLIS and Flame))
-- FFT: MKL's FFTW3-compatible interface, or the bundled pocketfft (BSD-3-Clause) otherwise;
-  upstream FFTW (GPL) is not used
+- FFT: MKL's FFTW3-compatible interface (ifx/ifort), AOCL-FFTZ (BSD-3-Clause, flang;
+  set `FFTZ_ROOT`, default `~/opt/aocl-fftz`), or the bundled pocketfft (BSD-3-Clause)
+  otherwise; upstream FFTW / AMD-FFTW (GPL) is not used
 - OpenMP (for parallelization; bundled with the above compilers)
 - Make
 - Python 3.11 or later (tested: 3.13; `tomllib` reads the U/J sets)

@@ -14,8 +14,9 @@ subroutine generate_irr_kpoint_inv(klist,kmap,invk_ft_list,Nk,Nx,Ny,Nz) bind(C)
   integer(c_int64_t),intent(out),dimension(3,Nx*Ny*Nz):: invk_ft_list,kmap
   real(c_double),intent(out),dimension(3,Nk)::klist
 
-  real(c_double),dimension(3,Nx*Ny*Nz):: all_k
+  real(c_double),allocatable,dimension(:,:):: all_k
 
+  allocate(all_k(3,Nx*Ny*Nz))
   call gen_allk(all_k,kmap) !get info of all k-points
   call gen_irr_k(klist) !get irreducible k-points' info
 

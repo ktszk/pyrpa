@@ -29,6 +29,13 @@ set(SL          "" CACHE STRING "Scalar library: MKL, AOCL, OpenBLAS (empty = fr
 set(ARCH        "" CACHE STRING "single -march target; builds libfmod.so (empty = use ARCH_LIST)")
 set(ARCH_LIST   "" CACHE STRING "-march targets to build (empty = detect_arch.sh)")
 option(AMDLIBM  "link AMD LibM on the flang path" ON)
+option(FFTZ     "use AOCL-FFTZ on the flang path when found (OFF = pocketfft)" ON)
+if(DEFINED ENV{FFTZ_ROOT})
+  set(_FFTZ_ROOT_DEFAULT "$ENV{FFTZ_ROOT}")
+else()
+  set(_FFTZ_ROOT_DEFAULT "$ENV{HOME}/opt/aocl-fftz")
+endif()
+set(FFTZ_ROOT "${_FFTZ_ROOT_DEFAULT}" CACHE PATH "AOCL-FFTZ install prefix")
 
 # ---- compiler auto-selection (MUST precede project(): enable_language pins it)
 if(NOT FC_COMPILER)
@@ -90,10 +97,23 @@ else()
   set(USE_MKL_FFT FALSE)
 endif()
 
+# AOCL-FFTZ (flang only; see the makefile): its FFTW3-compatible libfftw3.so
+# provides the dfftw_* entry points, so this path needs no C++ either.  Not used
+# with SL=MKL, which brings its own FFTW3 interface.
+set(USE_FFTZ FALSE)
+if(FCFAM STREQUAL "flang" AND FFTZ AND NOT SL STREQUAL "MKL")
+  if(EXISTS "${FFTZ_ROOT}/lib/libaocl_fftz.so")
+    set(USE_FFTZ TRUE)
+    set(FFTZ_LIBDIR "${FFTZ_ROOT}/lib")
+  else()
+    message(STATUS "AOCL-FFTZ not found under FFTZ_ROOT=${FFTZ_ROOT}; using pocketfft")
+  endif()
+endif()
+
 if(NOT CMAKE_Fortran_COMPILER)
   set(CMAKE_Fortran_COMPILER "${FC_COMPILER}")
 endif()
-if(USE_MKL_FFT)
+if(USE_MKL_FFT OR USE_FFTZ)
   project(pyrpa Fortran)
 else()
   if(NOT CMAKE_CXX_COMPILER)
@@ -106,6 +126,21 @@ else()
       message(STATUS "${_CXX_DEFAULT} not found; using g++ for fft_wrapper.cpp")
     endif()
     unset(_CXX_FOUND CACHE)
+  endif()
+  # clang++ (AOCC/ROCm) picks the newest GCC it finds for headers and
+  # libstdc++, which may be one installed without libstdc++ (e.g. GCC 14
+  # alongside a complete GCC 13); project()'s compiler check then dies with
+  # "unable to find library -lstdc++".  Point it at the GCC that g++ uses.
+  # Must be set before project(), hence CMAKE_CXX_FLAGS_INIT.
+  get_filename_component(_CXXNAME "${CMAKE_CXX_COMPILER}" NAME)
+  if(_CXXNAME MATCHES "clang")
+    execute_process(COMMAND g++ -print-file-name=crtbegin.o
+                    OUTPUT_VARIABLE _crtbegin OUTPUT_STRIP_TRAILING_WHITESPACE
+                    RESULT_VARIABLE _gxx_rc ERROR_QUIET)
+    if(_gxx_rc EQUAL 0 AND IS_ABSOLUTE "${_crtbegin}")
+      get_filename_component(_gcc_dir "${_crtbegin}" DIRECTORY)
+      string(APPEND CMAKE_CXX_FLAGS_INIT " --gcc-install-dir=${_gcc_dir}")
+    endif()
   endif()
   project(pyrpa Fortran CXX)
 endif()
@@ -167,6 +202,16 @@ else()  # flang / amdflang
   endif()
 endif()
 
+# AOCL-FFTZ library lookup: AOCL's lib dir holds AMD-FFTW's libfftw3.so (GPL)
+# under the very same soname, and `module load AMD/AOCL` puts it on
+# LD_LIBRARY_PATH, which beats a modern DT_RUNPATH.  So the FFTZ dir goes
+# *before* AOCL's in -L/-rpath, and --disable-new-dtags emits an old-style
+# DT_RPATH, which the loader searches before LD_LIBRARY_PATH.
+if(USE_FFTZ)
+  list(APPEND LINK_EXTRA "-L${FFTZ_LIBDIR}" "-Wl,--disable-new-dtags"
+                         "-Wl,-rpath,${FFTZ_LIBDIR}")
+endif()
+
 # AOCL location: `module load AMD/AOCL` exports AOCL_ROOT; -rpath keeps the .so
 # loadable from Python without the module loaded.
 if(DEFINED ENV{AOCL_ROOT})
@@ -189,20 +234,22 @@ endif()
 
 # ---- FFT backend -----------------------------------------------------------
 # MKL ships FFTW3-compatible Fortran entry points (dfftw_*), so the MKL path
-# needs no C++ wrapper; everything else uses the bundled pocketfft.  AOCL's
-# libfftw3 is upstream FFTW (GPL) and is deliberately not linked.
+# needs no C++ wrapper; flang uses AOCL-FFTZ (BSD-3-Clause) when found, and
+# everything else the bundled pocketfft.  AOCL's own libfftw3 is AMD-FFTW,
+# i.e. upstream FFTW (GPL), and is deliberately not linked.
 if(USE_MKL_FFT)
   set(FFT_SRC "")
   set(FFT_LIBS "")
+elseif(USE_FFTZ)
+  set(FFT_SRC "")
+  # Full path, not -lfftw3: LIBRARY_PATH may put AMD-FFTW (GPL) ahead of FFTZ.
+  set(FFT_LIBS "${FFTZ_LIBDIR}/libfftw3.so" -laocl_fftz)
 else()
   set(FFT_SRC "${CMAKE_CURRENT_SOURCE_DIR}/src/fft_wrapper.cpp")
   if(FCFAM STREQUAL "flang")
-    # ROCm clang++ defaults to newer GCC headers; point it at the installed GCC,
-    # and pass libstdc++ by full path since ld.lld skips GCC toolchain dirs.
-    execute_process(COMMAND g++ -print-file-name=crtbegin.o
-                    OUTPUT_VARIABLE _crtbegin OUTPUT_STRIP_TRAILING_WHITESPACE)
-    get_filename_component(_gcc_dir "${_crtbegin}" DIRECTORY)
-    list(APPEND CXXFLAGS "--gcc-install-dir=${_gcc_dir}")
+    # The C++ side already carries --gcc-install-dir (set before project());
+    # the link is driven by flang, so pass libstdc++ by full path since ld.lld
+    # skips GCC toolchain dirs.
     execute_process(COMMAND g++ -print-file-name=libstdc++.so
                     OUTPUT_VARIABLE FFT_LIBS OUTPUT_STRIP_TRAILING_WHITESPACE)
   else()
@@ -247,6 +294,8 @@ message(STATUS "Fortran compiler : ${CMAKE_Fortran_COMPILER} (family ${FCFAM})")
 message(STATUS "Scalar library   : ${SL} -> ${_blas}")
 if(USE_MKL_FFT)
   message(STATUS "FFT backend      : MKL (FFTW3 Fortran entry points)")
+elseif(USE_FFTZ)
+  message(STATUS "FFT backend      : AOCL-FFTZ (${FFTZ_LIBDIR})")
 else()
   message(STATUS "FFT backend      : pocketfft (bundled)")
 endif()

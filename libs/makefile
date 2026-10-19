@@ -8,8 +8,9 @@
 #
 # flang/amdflang (ROCm's LLVM flang) + AOCL is a fully supported alternative:
 #   module load AMD/ROCm AMD/AOCL && make FC=flang
-# AOCL supplies BLAS/LAPACK (libblis/libflame); the FFT comes from the bundled
-# pocketfft (see the FFT block below for why AOCL's own FFTW3 is not used).
+# AOCL supplies BLAS/LAPACK (libblis/libflame); the FFT comes from AOCL-FFTZ
+# when it is installed (FFTZ_ROOT, see the FFT block below), else from the
+# bundled pocketfft.
 #
 # --- Target CPU architecture -------------------------------------------------
 # ARCH selects the -march target. Default znver3 is the lowest common
@@ -132,12 +133,14 @@ OBJS := $(OBJDIR)/fmod.o $(filter-out $(OBJDIR)/fmod.o,$(OBJS))
 #   MKL provides its own FFTW3-compatible Fortran wrappers, under the ISSL --
 #   build them from $MKLROOT/interfaces/fftw3xf/ first.
 #   Everything else uses the bundled pocketfft (BSD-3-Clause) via fft_wrapper.cpp.
+#   flang uses AOCL-FFTZ (AMD's own FFT, BSD-3-Clause) through its FFTW3
+#   wrapper library when it is found, pocketfft otherwise.
 # ifort/ifx always use MKL; gfortran uses MKL only when SL=MKL.
 #
-# NOTE: AOCL does ship a libfftw3.so that already exports dfftw_plan_dft_ &c.,
-# so linking -lfftw3 would drop the C++ wrapper entirely -- but that is upstream
-# FFTW, which is GPL, and linking it would put libfmod.so as a whole under the
-# GPL. Deliberately not used; keep the FFT backend to MKL or pocketfft.
+# NOTE: AOCL also ships a libfftw3.so (AMD-FFTW) that exports dfftw_plan_dft_
+# &c. -- but that is upstream FFTW, which is GPL, and linking it would put
+# libfmod.so as a whole under the GPL. Deliberately not used. AOCL-FFTZ's
+# wrapper carries the same name (libfftw3.so) but is AMD's BSD code, see below.
 ifeq ($(FCFAM),ifort)
   USE_MKL_FFT := 1
 else ifeq ($(FCFAM),ifx)
@@ -148,10 +151,44 @@ else ifeq ($(FCFAM),gfortran)
   endif
 endif
 
+# --- AOCL-FFTZ (flang only) -------------------------------------------------
+# Not part of the AOCL 5.2 packages; built from github.com/amd/aocl-fftz with
+# -DBUILD_THIRD_PARTY_WRAPPERS=ON, which installs libaocl_fftz.so plus an
+# FFTW3-compatible libfftw3.so (threads included) exporting the legacy dfftw_*
+# Fortran entry points the sources call. Point FFTZ_ROOT at the install prefix;
+# a libaocl_fftz.so under $(AOCL_ROOT)/lib (newer AOCL releases) is also picked
+# up. `make FC=flang FFTZ=0` falls back to pocketfft.
+#
+# Library lookup: AOCL's lib dir holds AMD-FFTW's libfftw3.so (GPL) under the
+# very same soname, and `module load AMD/AOCL` puts that dir on
+# LD_LIBRARY_PATH, which beats a modern DT_RUNPATH. So the FFTZ dir is linked
+# with -L/-rpath *before* AOCL's, and --disable-new-dtags emits an old-style
+# DT_RPATH, which the loader searches before LD_LIBRARY_PATH.
+FFTZ ?= 1
+FFTZ_ROOT ?= $(HOME)/opt/aocl-fftz
+ifeq ($(FCFAM)$(FFTZ),flang1)
+  ifeq ($(SL),MKL)
+    # MKL brings its own FFTW3 interface; do not mix two dfftw_* providers.
+  else ifneq ($(wildcard $(FFTZ_ROOT)/lib/libaocl_fftz.so),)
+    FFTZ_LIBDIR := $(FFTZ_ROOT)/lib
+  else ifneq ($(wildcard $(AOCL_LIBDIR)/libaocl_fftz.so),)
+    $(warning libaocl_fftz.so found in AOCL_ROOT, but its libfftw3.so there may be \
+      AMD-FFTW (GPL); set FFTZ_ROOT to a standalone AOCL-FFTZ install. Using pocketfft.)
+  endif
+endif
+
 ifdef USE_MKL_FFT
   FFT_OBJ  :=
   FFT_DEP  :=
   FFT_LIBS :=
+else ifdef FFTZ_LIBDIR
+  FFT_OBJ  :=
+  FFT_DEP  :=
+  FFT_LDFLAGS := -L$(FFTZ_LIBDIR) -Wl,--disable-new-dtags -Wl,-rpath,$(FFTZ_LIBDIR)
+  # Wrapper by full path: ROCm's clang driver turns LIBRARY_PATH (which the
+  # AOCL module points at AMD-FFTW's dir) into -L flags ahead of ours, so
+  # -lfftw3 would silently pick up the GPL libfftw3.so.3.
+  FFT_LIBS := $(FFTZ_LIBDIR)/libfftw3.so -laocl_fftz
 else
   FFT_OBJ  := $(OBJDIR)/fft_wrapper.o
   FFT_DEP  :=
@@ -251,7 +288,8 @@ endif
 # the sequential layer to avoid clashing with flang's own libomp.
 ifeq ($(FCFAM),flang)
   FFLAGS_COMMON += -march=$(ARCH) -mtune=$(ARCH) -funroll-loops -fopenmp
-  LDFLAGS_EXTRA := $(AOCL_LDFLAGS)
+  # FFTZ's -L/-rpath must precede AOCL's (AMD-FFTW libfftw3.so lives there).
+  LDFLAGS_EXTRA := $(FFT_LDFLAGS) $(AOCL_LDFLAGS)
   LIBS := -lblis -lflame -lm -lpthread $(FFT_LIBS)
   ifeq ($(SL),MKL)
     LIBS := -lmkl_intel_lp64 -lmkl_sequential -lmkl_core $(FFT_LIBS)

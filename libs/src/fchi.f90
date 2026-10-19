@@ -554,8 +554,9 @@ subroutine chi0_conv_acc(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,coef,&
   integer(c_int32_t) i,j,k,l,m,n,iorb
   integer(c_int32_t) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(2*Nw)
   real(c_double) weight
-  complex(c_double),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmp,tmpgk13,tmpgk42
+  complex(c_double),allocatable,dimension(:,:,:,:):: tmp,tmpgk13,tmpgk42
 
+  allocate(tmp(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmpgk13(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmpgk42(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw))
   weight=coef*temp/dble(Nkall)
   call reverse_index(ii,ij,ik,iw,Nx,Ny,Nz,Nw)
   call init_fft_plans(tmpgk13,tmp,Nx,Ny,Nz,2*Nw)
@@ -683,8 +684,9 @@ subroutine chi0_ref_tau(chi,eig,uni,mu,kmap,invk,irr_chi,chi_map,olist,temp,&
   complex(c_double),allocatable:: U13(:,:),U42(:,:),rho(:,:,:)
   complex(c_double),dimension(Norb,Norb):: rhobar
   complex(c_double),dimension(Nw):: sawc
-  complex(c_double),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpA,tmpB,tmp
+  complex(c_double),allocatable,dimension(:,:,:,:):: tmpA,tmpB,tmp
 
+  allocate(tmpA(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmpB(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmp(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw))
   M32=int(2*Nw,c_int32_t)
   beta=1.0d0/temp
   dtau=beta/dble(M32)
@@ -936,10 +938,11 @@ subroutine get_chi0_sum(chi,Gk,klist,invk,irr_chi,chi_map,olist,temp,Nw,Nk,Nkall
 
   integer(c_int32_t) i,j,l,m,iq,iw,iorb
   integer(c_int32_t),dimension(2*Nw):: wshift
-  integer(c_int64_t),dimension(Nkall):: qshift
+  integer(c_int64_t),allocatable,dimension(:):: qshift
   real(c_double) weight
-  complex(c_double),dimension(Nkall,2*Nw):: tmpgk13,tmpgk42
+  complex(c_double),allocatable,dimension(:,:):: tmpgk13,tmpgk42
 
+  allocate(qshift(Nkall),tmpgk13(Nkall,2*Nw),tmpgk42(Nkall,2*Nw))
   !$omp parallel workshare
   chi(:,:,:,:)=0.0d0
   !$omp end parallel workshare

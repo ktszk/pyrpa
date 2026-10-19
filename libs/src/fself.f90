@@ -1,3 +1,23 @@
+module mkself_rn
+  !> Electron number n(mu) for mkself's chemical-potential search (flex_scf's solve_mu).
+  !> It is passed to solve_mu as an argument, so it is a module procedure reading state that
+  !> mkself points at, not an internal procedure of mkself: passing an internal procedure needs
+  !> a trampoline on the stack, i.e. an executable stack, which ld.lld refuses to link (LLVM
+  !> flang) and glibc >= 2.41 refuses to dlopen.
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double
+  implicit none
+  integer(c_int64_t):: rn_Nk,rn_Nw,rn_Norb,rn_Nkall
+  real(c_double):: rn_temp
+  real(c_double),pointer,contiguous:: rn_eig(:,:)=>null(),rn_kmult(:)=>null()
+  complex(c_double),pointer,contiguous:: rn_eig_gkinv(:,:,:)=>null()
+contains
+  subroutine get_rn(rn,rmu)
+    real(c_double),intent(in):: rmu
+    real(c_double),intent(out):: rn
+    call get_rn_mkself(rn,rmu,rn_eig,rn_kmult,rn_eig_gkinv,rn_temp,rn_Nk,rn_Nw,rn_Norb,rn_Nkall)
+  end subroutine get_rn
+end module mkself_rn
+
 subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb)
   !> This function obtains green function G0
   !!@param  Gk,out: green function
@@ -189,8 +209,9 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
 
   integer(c_int32_t) i,j,k,n,l,m
   real(c_double) weight
-  complex(c_double),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmpVsigma,tmp,tmpgk
+  complex(c_double),allocatable,dimension(:,:,:,:):: tmpVsigma,tmp,tmpgk
 
+  allocate(tmpVsigma(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmp(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmpgk(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw))
   weight=temp/dble(Nkall)
   !$omp parallel workshare
   sigmak(:,:,:,:)=0.0d0
@@ -280,6 +301,7 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
      sw_tail,sigma_scale) bind(C)
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   use flex_scf, only:solve_mu,diis_state,diis_init,diis_free,mix_sigma
+  use mkself_rn
   implicit none
   integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz,scf_loop,m_diis
   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
@@ -289,7 +311,7 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   integer(c_int64_t),intent(in):: sub_sigma
   real(c_double),intent(in):: temp,eps,pp,rfill,mu_init
   real(c_double),intent(in):: sigma_scale  !< multiply the sigma seed loaded via sw_in (U-annealing: ~(U_new/U_old)^2)
-  real(c_double),intent(in),dimension(Norb,Nk):: eig
+  real(c_double),intent(in),target,dimension(Norb,Nk):: eig
   real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
   real(c_double),intent(out):: mu
   complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni,hamk
@@ -299,23 +321,24 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   integer(c_int32_t),dimension(Nchi,Nchi,2)::chi_map
   integer(c_int32_t),dimension(Nchi*(Nchi+1)/2,2)::irr_chi
   real(c_double)esterr,mu_OLD,eps_sgm,maxchi0s_global,rescale_t
-  complex(c_double),dimension(Nk,Nw,Norb,Norb):: Gk,sigmak0
-  complex(c_double),dimension(Nk,Nw,Nchi,Nchi):: chi
+  complex(c_double),allocatable,dimension(:,:,:,:):: Gk,sigmak0
+  complex(c_double),allocatable,dimension(:,:,:,:):: chi
   ! DIIS
   type(diis_state):: diis   !! Pulay history for the sigma mixing (module flex_scf)
   ! bracket cache for renew_mu
   real(c_double):: muS_cache,muL_cache
   logical:: bracket_valid
   ! eigenvalues of H(k)+Sigma(k,iw) precomputed before mu search
-  complex(c_double),allocatable:: eig_gkinv(:,:,:)
+  complex(c_double),allocatable,target:: eig_gkinv(:,:,:)
   ! multiplicity of each irreducible k in the full BZ. The TRS reduction pairs k with -k,
   ! but the time-reversal invariant momenta (Gamma, X, M, Z, ...) are their own partner and
   ! therefore have multiplicity 1 while every other k has 2. An unweighted average over the
   ! wedge would over-weight the TRIMs; chi0 and Sigma already expand to the full BZ, so the
   ! filling has to be weighted the same way to stay consistent.
-  real(c_double),dimension(Nk):: kmult
+  real(c_double),allocatable,target,dimension(:):: kmult
   integer(c_int32_t) ik_mult
 
+  allocate(Gk(Nk,Nw,Norb,Norb),sigmak0(Nk,Nw,Norb,Norb),chi(Nk,Nw,Nchi,Nchi),kmult(Nk))
   kmult(:)=0.0d0
   do ik_mult=1,int(Nkall,c_int32_t)
      kmult(invk(1,ik_mult))=kmult(invk(1,ik_mult))+1.0d0
@@ -350,6 +373,9 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   call get_chi_map(chi_map,irr_chi,olist,Nchi)
   call diis_init(diis,m_diis,Nk,Nw,Norb)
   allocate(eig_gkinv(Norb,Nk,Nw))
+  ! state of get_rn (module mkself_rn)
+  rn_Nk=Nk; rn_Nw=Nw; rn_Norb=Norb; rn_Nkall=Nkall; rn_temp=temp
+  rn_eig=>eig; rn_kmult=>kmult; rn_eig_gkinv=>eig_gkinv
   bracket_valid=.false.
   muS_cache=0.0d0
   muL_cache=0.0d0
@@ -392,7 +418,8 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
      if(sub_sigma>0)then
         sub_self:block
           integer(c_int32_t) iw,l,m
-          complex(c_double),dimension(Nk,Norb,Norb):: sub_sigmak
+          complex(c_double),allocatable,dimension(:,:,:):: sub_sigmak
+          allocate(sub_sigmak(Nk,Norb,Norb))
           if(sub_sigma==1)then
              !$omp parallel
              do l=1,Norb
@@ -452,6 +479,7 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
      call io_sigma(.true.)
   end if
   call renew_mu()
+  nullify(rn_eig,rn_kmult,rn_eig_gkinv)
   deallocate(eig_gkinv)
 contains
   subroutine compare_sigma()
@@ -464,40 +492,6 @@ contains
     call precompute_eig_gkinv()   ! eigenvalues of H+Sigma, so get_rn needs no matrix inverse
     call solve_mu(mu,mu_OLD,bracket_valid,muS_cache,muL_cache,rfill,esterr,get_rn)
   end subroutine renew_mu
-  
-  subroutine get_rn(rn,rmu)
-    use constant
-    use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
-    real(c_double),intent(in):: rmu
-    real(c_double),intent(out):: rn
-
-    integer(c_int32_t) i,j,n
-    real(c_double) tmp,deltagk
-    complex(c_double) iw_im
-
-    ! n(μ) = (1/Nkall){Σ_{k,n} w_k f(ε_{kn}) + 2T·Σ_{k,j} w_k [G(k,iω_j) - G_0(k,iω_j)]}
-    ! w_k = kmult(k) is the multiplicity of the irreducible k in the full BZ (1 on the TRIMs,
-    ! 2 elsewhere); sum(w_k) = Nkall, so this is the exact full-BZ average.
-    ! non-interacting Fermi sum
-    tmp=0.0d0
-    do i=1,Nk
-       tmp=tmp+kmult(i)*sum(0.5d0*(1.0d0-tanh(0.5d0*(eig(:,i)-rmu)/temp)))
-    end do
-    ! correction from self-energy: use precomputed eigenvalues of H(k)+Sigma(k,iw): no getinv needed
-    deltagk=0.0d0
-    !$omp parallel do reduction(+:deltagk) private(n,i,iw_im)
-    do j=1,Nw
-       iw_im=cmplx(0.0d0,dble(2*j-1)*pi*temp,kind=c_double)
-       do i=1,Nk
-          do n=1,Norb
-             deltagk=deltagk+kmult(i)*dble(1.0d0/(rmu+iw_im-eig_gkinv(n,i,j)) &
-                                           -1.0d0/(rmu+iw_im-eig(n,i)))
-          end do
-       end do
-    end do
-    !$omp end parallel do
-    rn=(tmp+2*temp*deltagk)/Nkall
-  end subroutine get_rn
 
   subroutine precompute_eig_gkinv()
     use constant
@@ -565,6 +559,46 @@ contains
     end if
   end subroutine ck_sigma_meta
 end subroutine mkself
+
+subroutine get_rn_mkself(rn,rmu,eig,kmult,eig_gkinv,temp,Nk,Nw,Norb,Nkall)
+  !> n(mu) of mkself; called through get_rn (module mkself_rn), which supplies mkself's state
+  use constant
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  implicit none
+  integer(c_int64_t),intent(in):: Nk,Nw,Norb,Nkall
+  real(c_double),intent(in):: rmu,temp
+  real(c_double),intent(in),dimension(Norb,Nk):: eig
+  real(c_double),intent(in),dimension(Nk):: kmult
+  complex(c_double),intent(in),dimension(Norb,Nk,Nw):: eig_gkinv
+  real(c_double),intent(out):: rn
+
+  integer(c_int32_t) i,j,n
+  real(c_double) tmp,deltagk
+  complex(c_double) iw_im
+
+  ! n(μ) = (1/Nkall){Σ_{k,n} w_k f(ε_{kn}) + 2T·Σ_{k,j} w_k [G(k,iω_j) - G_0(k,iω_j)]}
+  ! w_k = kmult(k) is the multiplicity of the irreducible k in the full BZ (1 on the TRIMs,
+  ! 2 elsewhere); sum(w_k) = Nkall, so this is the exact full-BZ average.
+  ! non-interacting Fermi sum
+  tmp=0.0d0
+  do i=1,Nk
+     tmp=tmp+kmult(i)*sum(0.5d0*(1.0d0-tanh(0.5d0*(eig(:,i)-rmu)/temp)))
+  end do
+  ! correction from self-energy: use precomputed eigenvalues of H(k)+Sigma(k,iw): no getinv needed
+  deltagk=0.0d0
+  !$omp parallel do reduction(+:deltagk) private(n,i,iw_im)
+  do j=1,Nw
+     iw_im=cmplx(0.0d0,dble(2*j-1)*pi*temp,kind=c_double)
+     do i=1,Nk
+        do n=1,Norb
+           deltagk=deltagk+kmult(i)*dble(1.0d0/(rmu+iw_im-eig_gkinv(n,i,j)) &
+                                         -1.0d0/(rmu+iw_im-eig(n,i)))
+        end do
+     end do
+  end do
+  !$omp end parallel do
+  rn=(tmp+2*temp*deltagk)/Nkall
+end subroutine get_rn_mkself
 
 subroutine get_chis_chic(chis,chic,chi,Smat,Cmat,Nk,Nw,Nchi) bind(C)
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t

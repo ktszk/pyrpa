@@ -106,8 +106,9 @@ subroutine get_chi0_conv_soc(chi,Gk,kmap,invk,invs,irr_chi,chi_map,olist,&
   integer(c_int32_t) i,j,k,l,m,n,iorb
   integer(c_int32_t) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(2*Nw)
   real(c_double) weight
-  complex(c_double),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmp,tmpgk13,tmpgk42
+  complex(c_double),allocatable,dimension(:,:,:,:):: tmp,tmpgk13,tmpgk42
    
+  allocate(tmp(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmpgk13(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmpgk42(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw))
   weight=temp/dble(Nkall)
   call reverse_index(ii,ij,ik,iw,Nx,Ny,Nz,Nw)
   orb_loop:do iorb=1,Nchi*(Nchi+1)/2

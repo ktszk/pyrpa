@@ -183,10 +183,11 @@ subroutine calc_kn(K0,K1,K2,eig,veloc,kweight,tau,temp,mu,Nk,Norb) bind(C)
   real(c_double),intent(in),dimension(3,Norb,Nk):: veloc
   real(c_double),intent(out),dimension(3,3):: K0,K1,K2
 
-  real(c_double),dimension(Norb,Nk):: dfermi
+  real(c_double),allocatable,dimension(:,:):: dfermi
   integer(c_int32_t) i,j,l,m
   real(c_double) tmp,temp_safe
 
+  allocate(dfermi(Norb,Nk))
   temp_safe=max(temp,1.0d-12)
 
   ! -df/de = 0.25*(1-tanh^2((e-mu)/2T))/T  [numerically stable derivative of Fermi-Dirac]

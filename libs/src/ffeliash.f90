@@ -51,6 +51,7 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,iprm,kmap,invk,mu
   !!                      (u=M[Δ]/‖M[Δ]‖) while a is driven by a secant root-find on the
   !!                      Rayleigh gain g(a)=<Δ,M[Δ]>/<Δ,Δ>=1. Bypasses DIIS when true.
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t,c_bool
+  use grid_work, only:grid_work_free
   implicit none
   integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,m_diis
   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
@@ -82,10 +83,11 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,iprm,kmap,invk,mu
   real(c_double),allocatable,dimension(:,:):: B_diis
   real(c_double),allocatable,dimension(:):: rhs_diis
   integer(c_int32_t),allocatable,dimension(:):: ipiv_diis
-  complex(c_double),dimension(Nk,Nw,Norb,Norb):: newdelta,fk,Gk0,v0
+  complex(c_double),allocatable,dimension(:,:,:,:):: newdelta,fk,Gk0,v0
   complex(c_double),allocatable,dimension(:,:,:,:):: Vdelta,Vsigma
 
   ! All FLEX vertex / chi0 routines expect (Nk,Nw,Nchi,Nchi) ordering.
+  allocate(newdelta(Nk,Nw,Norb,Norb),fk(Nk,Nw,Norb,Norb),Gk0(Nk,Nw,Norb,Norb),v0(Nk,Nw,Norb,Norb))
   allocate(Vdelta(Nk,Nw,Nchi,Nchi),Vsigma(Nk,Nw,Nchi,Nchi))
   ! DIIS: history length is at least 1 (slot for current iterate, used for linear-mixing fallback).
   m_diis_eff=max(int(m_diis,c_int32_t),1)
@@ -313,6 +315,7 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,iprm,kmap,invk,mu
 
   deallocate(xout_hist,res_hist,B_diis,rhs_diis,ipiv_diis)
   deallocate(Vdelta,Vsigma)
+  call grid_work_free()   ! mkdelta_nsoc's work arrays, kept across the iterations
 end subroutine eliashberg
 
 subroutine mkgreliah_trs_nsoc(Gk,Gk0,fk,delta,Nk,Nw,Norb)
@@ -521,10 +524,11 @@ subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,prt,iprm,temp
   integer(c_int32_t) i,j,k,l,m,n,iorb
   integer(c_int32_t) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(2*Nw)
   real(c_double) weight,sgn,dprt
-  complex(c_double),dimension(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw):: tmp,tmpfk14,tmpfk23
+  complex(c_double),allocatable,dimension(:,:,:,:):: tmp,tmpfk14,tmpfk23
   
   ! sgn: F(-k,ω) = sgn·F^T(k,ω);  dprt: Δ(k,-ω) = dprt·Δ*(k,ω)
   ! singlet: F(-k)=+F^T(k), even-ω gap; triplet: F(-k)=-F^T(k), odd-ω gap
+  allocate(tmp(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmpfk14(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmpfk23(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw))
   if(sw_pair)then
      sgn=1.0d0 !singlet Fk=F^T-k
      dprt=1.0d0 !gap parity even freq singlet is even

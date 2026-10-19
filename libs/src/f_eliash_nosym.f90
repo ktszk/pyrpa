@@ -43,8 +43,9 @@ subroutine get_kshift_nosym(iks,kmap,ksgn,iQ,Nkall,Nx,Ny,Nz)
   integer(c_int64_t),intent(out),dimension(Nkall):: iks
 
   integer(c_int64_t) i
-  integer(c_int64_t),dimension(0:Nx-1,0:Ny-1,0:Nz-1):: iflat
+  integer(c_int64_t),allocatable,dimension(:,:,:):: iflat
 
+  allocate(iflat(0:Nx-1,0:Ny-1,0:Nz-1))
   if(Nkall/=Nx*Ny*Nz)then
      print*,'Error(get_kshift_nosym): Nkall /= Nx*Ny*Nz; nosym routines need the full BZ'
      stop
@@ -437,11 +438,12 @@ subroutine lin_eliash_nosym(delta,chi,Gk,init_delta,Vmat,olist,kmap,iQ,temp,eps,
 
   integer(c_int32_t) i_iter,i_eig
   integer(c_int32_t),parameter:: eig_max=2
-  integer(c_int64_t),dimension(Nkall):: ikq,ikm,ikmq
+  integer(c_int64_t),allocatable,dimension(:):: ikq,ikm,ikmq
   integer(c_int64_t),dimension(3),parameter:: iQ0=(/0_c_int64_t,0_c_int64_t,0_c_int64_t/)
   real(c_double) norm,inorm,weight,lambda_rq,lambda_prev,lambda_phys,lambda1,vec_err,proj
   complex(c_double),allocatable,dimension(:,:,:,:):: newdelta,fk,delta1
 
+  allocate(ikq(Nkall),ikm(Nkall),ikmq(Nkall))
   allocate(newdelta(Nkall,Nw,Norb,Norb),fk(Nkall,Nw,Norb,Norb),delta1(Nkall,Nw,Norb,Norb))
   weight=temp/dble(Nkall)
   lambda1=0.0d0
@@ -791,10 +793,11 @@ subroutine conv_delta_orb_to_band_nosym(deltab,delta,uni,kmap,iQ,Norb,Nkall,Nw,N
 
   integer(c_int32_t) i
   integer(c_int64_t),intent(in),dimension(3):: iQ
-  integer(c_int64_t),dimension(Nkall):: ikq,ikm
+  integer(c_int64_t),allocatable,dimension(:):: ikq,ikm
   integer(c_int64_t),dimension(3),parameter:: iQ0=(/0_c_int64_t,0_c_int64_t,0_c_int64_t/)
   complex(c_double),dimension(Norb,Norb):: matL,matR,tmpm
 
+  allocate(ikq(Nkall),ikm(Nkall))
   call get_kshift_nosym(ikq,kmap,1_c_int64_t,iQ,Nkall,Nx,Ny,Nz)
   call get_kshift_nosym(ikm,kmap,-1_c_int64_t,iQ0,Nkall,Nx,Ny,Nz)
   !$omp parallel do private(i,matL,matR,tmpm)

@@ -95,6 +95,11 @@ module eliash_krylov
      real(c_double),allocatable:: wk(:)
   end type kspace
 
+  ! The callbacks below must be module (or external) procedures, never internal ones, which
+  ! carry their state in module variables (see lin_eliash_op in feliash.f90).  Passing an internal
+  ! procedure as an argument needs a trampoline on the stack: the library then requires an
+  ! executable stack, which ld.lld refuses to link (LLVM flang) and glibc >= 2.41 refuses to
+  ! dlopen.  Classic flang (AOCC) also mishandles them -- see arnoldi_loop.
   abstract interface
      subroutine eliash_op_if(w_out,v_in)
        !> one application of the linearized Eliashberg kernel, w_out = (T/Nkall) K v_in
@@ -110,6 +115,14 @@ module eliash_krylov
        logical,intent(out):: ok
      end subroutine eliash_class_if
   end interface
+
+  ! State of the dgees selection callback sel_wanted, set by thick_restart just before the call.
+  ! It lives here, not in arnoldi_two_pass, because the callback cannot be an internal procedure:
+  ! that needs an executable stack (see above), and classic flang (AOCC) hands an internal
+  ! procedure its host link as a hidden trailing argument, which LAPACK, calling select(ar,ai)
+  ! with two arguments, never passes.
+  real(c_double):: sel_thr,sel_keep_ar,sel_keep_tol
+  logical:: sel_want_max,sel_keep
 contains
 
   subroutine kspace_init(ks,idk,nkall,nd,nw,norb)
@@ -178,6 +191,18 @@ contains
     !$omp end parallel do
     kv_err=sqrt(2.0d0*min(sp,sm))
   end function kv_err
+
+  logical function sel_wanted(ar,ai)
+    !> dgees selection: the wanted end of the spectrum (threshold sel_thr set by thick_restart);
+    !> ai is not needed, the two members of a complex pair share ar
+    real(c_double),intent(in):: ar,ai
+    if(sel_want_max)then
+       sel_wanted=(ar>=sel_thr)
+    else
+       sel_wanted=(ar<=sel_thr)
+    end if
+    if(sel_keep)sel_wanted=sel_wanted .or. abs(ar-sel_keep_ar)<=sel_keep_tol
+  end function sel_wanted
 
   subroutine real_ritz(y,n)
     !> Rotate the Ritz coefficients y of a real Hessenberg matrix to be real, which for a real
@@ -339,7 +364,7 @@ contains
     want_max=.false.
     sw_keep=.false.
     pass1: do irs=1,max_restart
-       call arnoldi_loop(0.0d0,.false.,j0)
+       call arnoldi_loop(0.0d0,.false.,j0,apply_op)
        call diagonalize('pass 1')
        if(irs==1)then
           ! early exit: if the first space already resolved the wanted branch at a clearly
@@ -384,7 +409,7 @@ contains
     j0=0
     want_max=.true.
     pass2: do irs=1,max_restart
-       call arnoldi_loop(shift,.true.,j0)
+       call arnoldi_loop(shift,.true.,j0,apply_op)
        call diagonalize('pass 2')
        call pick_branch(idx,x,eigenvals,VR,m_dim,V,ks,m_act,shift,classify)
        if(idx==0)then
@@ -415,7 +440,7 @@ contains
     ! x solves the DEFLATED operator P A P (P = 1 - x1 x1^T), not A itself:
     ! A x = lambda x + c x1 with c = <x1, A x>, so the eigenvector of A is x + c/(lambda_+ - lambda_-) x1
     if(abs(lambda-lambda1)>1.0d-12)then    ! lambda_+ = lambda_- (e.g. V=0): nothing to undo
-       call apply_op(w,x)
+       call call_op(apply_op,w,x)           ! not a direct call: see arnoldi_loop
        hij=kv_dot(ks,x1,w)/(lambda-lambda1)
        !$omp parallel do private(p)
        do p=1,ks%nvec
@@ -437,18 +462,6 @@ contains
          ritz_res=abs(H_mat(m_act+1,m_act))*abs(VR(m_act,i))/max(sqrt(sum(abs(VR(1:m_act,i))**2)),1.0d-300)
       end if
     end function ritz_res
-
-    logical function sel_wanted(ar,ai)
-      !> dgees selection: the wanted end of the spectrum (threshold thr set by thick_restart);
-      !> ai is not needed, the two members of a complex pair share ar
-      real(c_double),intent(in):: ar,ai
-      if(want_max)then
-         sel_wanted=(ar>=thr)
-      else
-         sel_wanted=(ar<=thr)
-      end if
-      if(sw_keep)sel_wanted=sel_wanted .or. abs(ar-keep_ar)<=keep_tol
-    end function sel_wanted
 
     subroutine thick_restart(jnext)
       !> Krylov-Schur restart: real Schur form H = Q T Q^T with the wanted eigenvalues in the
@@ -476,6 +489,11 @@ contains
       end if
       ! eigenvalues of the real H from dgees vs those of zgeev: equal up to rounding
       keep_tol=1.0d-8*max(abs(srt(1)),abs(srt(m_dim)),1.0d-300)
+      sel_thr=thr
+      sel_want_max=want_max
+      sel_keep=sw_keep
+      sel_keep_ar=keep_ar
+      sel_keep_tol=keep_tol
       call dgees('V','S',sel_wanted,m_dim,Hr,m_dim,sdim,wr,wi,Q,m_dim,work,lw,bwork,linfo)
       if(linfo/=0)then; print*,'DGEES failed in thick_restart: info=',linfo; stop; end if
       k=max(sdim,1)
@@ -566,20 +584,30 @@ contains
       !$omp end parallel do
     end subroutine deflate
 
-    subroutine arnoldi_loop(shft,sw_deflate,jstart)
+    subroutine arnoldi_loop(shft,sw_deflate,jstart,op)
       !> expand the basis from column jstart to m: w = (A + shft) v_j, optionally deflated, then
       !> Gram-Schmidt against v_0..v_j applied twice (a thick restart keeps old vectors, whose
       !> orthogonality a single sweep would slowly lose).  The last new direction is kept in
       !> vres for the next restart.  jstart=0 starts a fresh factorization.
+      !> The kernel comes in as an explicit argument (op = the host's apply_op) instead of by
+      !> host association: AOCC flang (classic flang, 5.0/5.1) loses the static chain of an
+      !> INTERNAL apply_op when it is called through host association from an internal
+      !> procedure, AND, once it has been passed on to an internal procedure, when the host then
+      !> calls it directly.  The kernel then reads its host variables (Nk, Nw, Norb, ...) from
+      !> garbage -- a segfault, or a near-endless zeroing loop that looks like an OpenMP hang.
+      !> The callers now pass module procedures (see eliash_op_if), which have no static chain,
+      !> but every call of apply_op still goes through an internal procedure that gets it as an
+      !> explicit argument (here, or call_op), so an internal kernel cannot bring the bug back.
       real(c_double),intent(in):: shft
       logical,intent(in):: sw_deflate
       integer(c_int32_t),intent(in):: jstart
+      procedure(eliash_op_if):: op
       integer(c_int32_t) jj,kk,q,isw
       real(c_double) hjj
       if(jstart==0)H_mat=(0.0d0,0.0d0)
       m_act=m_dim
       do jj=jstart,m_dim-1
-         call apply_op(w,V(1,jj))
+         call op(w,V(1,jj))
          if(shft/=0.0d0)then
             !$omp parallel do private(q)
             do q=1,ks%nvec
@@ -621,6 +649,14 @@ contains
          end if
       end do
     end subroutine arnoldi_loop
+
+    subroutine call_op(op,y,v)
+      !> y = op(v), for the host body: see arnoldi_loop for why apply_op is never called directly
+      procedure(eliash_op_if):: op
+      complex(c_double),intent(out):: y(*)
+      complex(c_double),intent(in):: v(*)
+      call op(y,v)
+    end subroutine call_op
 
     subroutine diagonalize(tag)
       !> Ritz values and coefficients of the m_act x m_act projected matrix
@@ -716,9 +752,10 @@ contains
     integer(c_int32_t) i,j,l,m,kerr,iwerr,lerr,merr,ih,jh,idx_i,idx_j,info,n_cur
     real(c_double) est,eps_reg
     complex(c_double) cksigm
-    complex(c_double),dimension(Nk,Nw,Norb,Norb):: sigma_diis
+    complex(c_double),allocatable,dimension(:,:,:,:):: sigma_diis
 
     ! --- store this iteration's output and residual in the circular buffer ---
+    allocate(sigma_diis(Nk,Nw,Norb,Norb))
     st%i_hist=mod(st%i_hist,st%m)+1
     st%n_hist=min(st%n_hist+1,st%m)
     st%xout(:,:,:,:,st%i_hist)=sigmak(:,:,:,:)
@@ -1048,6 +1085,31 @@ module fftw_plan_cache
   implicit none
   integer(c_int64_t),save :: plan_fwd=0, plan_bwd=0
 end module fftw_plan_cache
+
+module grid_work
+  !> FFT work arrays on the k-mesh x frequency grid, (0:Nx-1,0:Ny-1,0:Nz-1,Nt), kept between
+  !> calls of the gap-equation kernels mkdelta_nsoc / mkdelta_soc, which run once per Arnoldi or
+  !> power step.  Allocating them in every call costs a fresh mmap of ~GB and its page faults each
+  !> time (~10% of a 128x128, Nw=1024 Eliashberg run).  The solver that calls the kernel releases
+  !> them when it is done (grid_work_free).
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double
+  implicit none
+  complex(c_double),allocatable,dimension(:,:,:,:):: gw1,gw2,gw3
+contains
+  subroutine grid_work_get(Nx,Ny,Nz,Nt)
+    !> make gw1..gw3 (0:Nx-1,0:Ny-1,0:Nz-1,Nt), reusing them when the shape already matches
+    integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nt
+    if(allocated(gw1))then
+       if(all(ubound(gw1)==[Nx-1,Ny-1,Nz-1,Nt]))return
+       call grid_work_free()
+    end if
+    allocate(gw1(0:Nx-1,0:Ny-1,0:Nz-1,Nt),gw2(0:Nx-1,0:Ny-1,0:Nz-1,Nt),gw3(0:Nx-1,0:Ny-1,0:Nz-1,Nt))
+  end subroutine grid_work_get
+
+  subroutine grid_work_free()
+    if(allocated(gw1))deallocate(gw1,gw2,gw3)
+  end subroutine grid_work_free
+end module grid_work
 
 subroutine fft_plan_threads()
   !> Thread count for the FFTW plans created next (call it inside the fftw_plan_ops critical
