@@ -1177,9 +1177,10 @@ subroutine FFT(cmat,tmp,Nx,Ny,Nz,Nw,SW)
   logical,intent(in):: SW
   complex(c_double),intent(inout),dimension(Nx,Ny,Nz,Nw):: cmat,tmp
 
-  integer(c_int64_t) plan
+  integer(c_int64_t) plan,n
   integer(c_int32_t) Inv
   integer(c_int32_t),dimension(4):: Nlist
+  real(c_double) scl
 
   Nlist=(/int(Nx,c_int32_t),int(Ny,c_int32_t),int(Nz,c_int32_t),int(Nw,c_int32_t)/)
   if(plan_fwd /= 0)then
@@ -1206,11 +1207,17 @@ subroutine FFT(cmat,tmp,Nx,Ny,Nz,Nw,SW)
      call dfftw_destroy_plan(plan)
      !$omp end critical(fftw_plan_ops)
   end if
-  if(.not. SW)then
-     cmat(:,:,:,:)=tmp(:,:,:,:)/product(Nlist)
-  else
-     cmat(:,:,:,:)=tmp(:,:,:,:)
-  end if
+  ! Copy back in parallel: a serial pass over the whole array was the largest serial part of a
+  ! FLEX run.  Scale by a REAL factor: tmp/product(Nlist) is complex/integer, i.e. a full complex
+  ! division per element (a __divdc3 call with flang), and the int32 product overflows on large
+  ! meshes.  Inside an OpenMP region (no cached plan) the loop runs on the calling thread only.
+  scl=1.0d0
+  if(.not. SW)scl=1.0d0/(dble(Nx)*dble(Ny)*dble(Nz)*dble(Nw))
+  !$omp parallel do
+  do n=1,Nw
+     cmat(:,:,:,n)=tmp(:,:,:,n)*scl
+  end do
+  !$omp end parallel do
 end subroutine FFT
 
 subroutine fft3d_batch(cmat,tmp,Nx,Ny,Nz,M,SW)
@@ -1230,8 +1237,9 @@ subroutine fft3d_batch(cmat,tmp,Nx,Ny,Nz,M,SW)
   logical,intent(in):: SW
   complex(c_double),intent(inout),dimension(Nx,Ny,Nz,M):: cmat,tmp
 
-  integer(c_int64_t) plan
+  integer(c_int64_t) plan,n
   integer(c_int32_t) Inv,dist,howmany
+  real(c_double) scl
   integer(c_int32_t),dimension(3):: Nlist
 
   Nlist=(/int(Nx,c_int32_t),int(Ny,c_int32_t),int(Nz,c_int32_t)/)
@@ -1251,11 +1259,14 @@ subroutine fft3d_batch(cmat,tmp,Nx,Ny,Nz,M,SW)
   !$omp critical(fftw_plan_ops)
   call dfftw_destroy_plan(plan)
   !$omp end critical(fftw_plan_ops)
-  if(SW)then
-     cmat(:,:,:,:)=tmp(:,:,:,:)
-  else
-     cmat(:,:,:,:)=tmp(:,:,:,:)/dble(dist)
-  end if
+  ! parallel copy-back with a real scale factor, as in FFT
+  scl=1.0d0
+  if(.not. SW)scl=1.0d0/(dble(Nx)*dble(Ny)*dble(Nz))
+  !$omp parallel do
+  do n=1,M
+     cmat(:,:,:,n)=tmp(:,:,:,n)*scl
+  end do
+  !$omp end parallel do
 end subroutine fft3d_batch
 
 subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
