@@ -619,6 +619,347 @@ def test_hall_coefficient_survives_a_singular_conductivity():
 
 
 # --------------------------------------------------------------------------- #
+#  FLEX quasiparticle transport (tau_mode='flex', plibs.flex_quasiparticles)
+# --------------------------------------------------------------------------- #
+def _write_sigma_wannier(path, sig_r, rvec_s, temp, mu, Niw=40):
+    """A self_en_wannier.npz in the layout of output_self_wannier."""
+    iw = (2*np.arange(Niw)+1)*np.pi*temp
+    np.savez(path, sigma=np.ascontiguousarray(sig_r), rvec=np.asarray(rvec_s, dtype=np.int64),
+             iw=iw, mu=mu, temp=temp)
+    return iw
+
+
+def _local_sigma(Norb, iw, f):
+    """k-independent, orbital-diagonal Sigma(iw_n) = f(iw_n) on R = 0: [Norb,Norb,Niw,1]."""
+    sig = np.zeros((Norb, Norb, len(iw), 1), dtype=np.complex128)
+    for a in range(Norb):
+        sig[a, a, :, 0] = f(1j*iw)
+    return sig
+
+
+def test_pade_batch_reproduces_rational_functions():
+    """Each row is continued at its own points.  Exactly-rational data (a
+    constant or linear Sigma: the impurity and Fermi-liquid limits) must not
+    run the continued fraction through 0/0 into NaN."""
+    temp = 0.01
+    iw = 1j*np.pi*temp*(2*np.arange(30)+1)
+    z = np.array([[0.0, 0.03, -0.07], [0.01, -0.02, 0.2], [0.0, 0.5, -0.5]], dtype=np.complex128)
+    fs = [lambda x: 0.3/(x-0.05+0.02j)+0.5/(x+0.1+0.05j),
+          lambda x: (1-1/0.4)*x-0.01j+0.02,
+          lambda x: -0.01j+0*x]
+    out = F.pade_batch(np.array([f(iw) for f in fs]), iw, z)
+    ref = np.array([f(zz) for f, zz in zip(fs, z)])
+    assert np.all(np.isfinite(out))
+    assert np.abs(out-ref).max() < 1e-9
+
+
+def test_sigma_band_projection_matches_gen_green():
+    """Sigma_nn from the FFT-folded Wannier Sigma(R) must be the band-diagonal
+    self-energy of the very G that gen_green builds from the same file layout
+    (spectrum_on_path's Fourier sum): [iw + mu - E_n - (U^H G^-1 U)_nn].
+    R-vectors beyond the mesh test the R mod N folding."""
+    import libs.plibs as P
+    import libs.plibs._conductivity as C
+    rvec, ham_r = _multiorbital_model(Norb=3, seed=5)
+    Norb, Nx, Ny, Nz, Niw = 3, 4, 3, 2, 3
+    rng = np.random.default_rng(1)
+    rvec_s = np.array([[0, 0, 0], [1, 0, 0], [-1, 2, 0], [0, -1, 1], [5, 1, -3]], dtype=np.int64)
+    sig_r = rng.standard_normal((Norb, Norb, Niw, len(rvec_s)))+1j*rng.standard_normal((Norb, Norb, Niw, len(rvec_s)))
+    Nk, klist = P.gen_klist(Nx, Ny, Nz, sw_pp=False)
+    eig, uni = P.get_eigs(klist, ham_r, [], rvec)
+    snn = C._sigma_band_diag(sig_r, rvec_s, uni, Nx, Ny, Nz)
+    temp, mu = 0.05, 0.1
+    phase = np.exp(-2j*np.pi*klist.dot(rvec_s.T))
+    selfen = np.ascontiguousarray(np.einsum('mnwr,kr->mnwk', sig_r, phase))
+    G = F.gen_green(selfen, F.gen_ham(klist, ham_r, rvec), mu, temp)
+    iw = 1j*np.pi*temp*(2*np.arange(Niw)+1)
+    for k in range(Nk):
+        U = uni[k].conj().T
+        for n in range(Niw):
+            ginv = U.conj().T @ np.linalg.inv(G[:, :, n, k]) @ U
+            ref = iw[n]+mu-eig[k]-np.diag(ginv)
+            assert np.abs(snn[k, :, n]-ref).max() < 1e-10
+
+
+def _flex_boltzmann_pair(tmp_path, sig_fn, N=12, TK=300., fill=0.4, gamma_imp=0.0):
+    """Run calc_conductivity_Boltzmann with tau_mode='flex' on a local Sigma(iw)
+    = sig_fn(iw), mu_FLEX set to the bare-band mu at this filling."""
+    import libs.plibs as P
+    units = P.unit_constants(True)
+    rvec, ham_r = _multiorbital_model(Norb=2, seed=7, t=0.3)
+    avec = np.eye(3)*4.0
+    temp = TK*units.kb
+    Nk, eig, _, kw = P.get_emesh(N, N, N, ham_r, [], rvec, avec.T*units.ihbar, sw_veloc=True)
+    mu = P.calc_mu(eig, Nk, fill, temp, kw)
+    fname = str(tmp_path/'self_en_wannier.npz')
+    iw = (2*np.arange(40)+1)*np.pi*temp
+    _write_sigma_wannier(fname, _local_sigma(2, iw, sig_fn), [[0, 0, 0]], temp, mu)
+    tau_kw = dict(tau_mode='flex', epa_file=None, dos_delta=0.01,
+                  flex_kw=dict(gamma_imp=gamma_imp, fname=fname))
+    res = P.calc_conductivity_Boltzmann(rvec, ham_r, [], avec, N, N, N, fill, temp, 1.0, units, tau_kw)
+    return res, dict(P=P, units=units, rvec=rvec, ham_r=ham_r, avec=avec, temp=temp, mu=mu, N=N, fill=fill)
+
+
+def test_flex_impurity_limit_equals_constant_tau(tmp_path):
+    """Sigma = -i Gamma (impurity limit): Z = 1, no band shift, and every
+    transport tensor must equal the constant-tau run with tau = hbar/(2 Gamma)
+    -- the Drude correspondence 1/tau = 2 Gamma."""
+    gam = 2.0e-3
+    res, m = _flex_boltzmann_pair(tmp_path, lambda z: -1j*gam+0*z)
+    units = m['units']
+    tau = units.hbar/(2*gam)/units.tau_unit
+    ref = m['P'].calc_conductivity_Boltzmann(m['rvec'], m['ham_r'], [], m['avec'], m['N'], m['N'], m['N'],
+                                             m['fill'], m['temp'], tau, units, dict(tau_mode='const'))
+    assert abs(res['mu']-ref['mu']) < 1e-12
+    for key in ('sigma', 'kappa2', 'Seebeck'):
+        assert np.abs(res[key]-ref[key]).max() < 1e-9*np.abs(ref[key]).max(), key
+
+
+def test_inverse_on_the_conducting_directions():
+    """Regular tensor: the plain inverse.  sigma_zz = 0: the inverse of the in-plane block,
+    zero along z, and z reported as the dead direction."""
+    import libs.plibs._conductivity as C
+    rng = np.random.default_rng(4)
+    a = rng.standard_normal((3, 3))
+    M = a.dot(a.T)+np.eye(3)
+    inv, dead = C._inv_conducting(M)
+    assert np.abs(inv-np.linalg.inv(M)).max() < 1e-12*np.abs(np.linalg.inv(M)).max() and dead == ''
+    M[2, :] = M[:, 2] = 0.0
+    inv, dead = C._inv_conducting(M)
+    ref = np.zeros((3, 3))
+    ref[:2, :2] = np.linalg.inv(M[:2, :2])
+    assert np.abs(inv-ref).max() < 1e-12*np.abs(ref).max() and dead == 'z'
+    assert C._inv_conducting(M*1e-8)[1] == 'z'                     # the cut is relative
+
+
+def test_strictly_2d_model_keeps_the_in_plane_thermoelectric_tensors():
+    """No z hopping and Nz = 1: sigma_zz = 0 exactly.  Seebeck and kappa(full) used to be
+    discarded altogether; in plane they must equal the 2x2-block formulas, 0 along z."""
+    import libs.plibs as P
+    units = P.unit_constants(True)
+    rvec, ham_r = _multiorbital_model(Norb=2, seed=7, t=0.3)
+    ham_r[3] = ham_r[6] = 0.0                                     # R = +-z
+    avec, N, temp, tau = np.eye(3)*4.0, 16, 300*units.kb, 10.0
+    res = P.calc_conductivity_Boltzmann(rvec, ham_r, [], avec, N, N, 1, 0.4, temp, tau, units,
+                                        dict(tau_mode='const'))
+    Nk, eig, vk, kw = P.get_emesh(N, N, 1, ham_r, [], rvec, avec.T*units.ihbar, sw_veloc=True)
+    mu = P.calc_mu(eig, Nk, 0.4, temp, kw)
+    K0, K1, K2 = F.calc_Kn(eig, vk, kw, temp, mu, eig*0.+tau)
+    assert np.abs(K0[2]).max() == 0.0
+    b = np.ix_([0, 1], [0, 1])
+    S = np.zeros((3, 3))
+    S[b] = -units.kb*np.linalg.inv(K0[b]).dot(K1[b])/temp
+    assert np.abs(res['Seebeck']-S).max() < 1e-10*np.abs(S).max()
+    k2 = K2[b]-K1[b].dot(np.linalg.inv(K0[b]).dot(K1[b]))
+    pref = res['kappa'][0, 0]/K2[0, 0]
+    assert np.abs(res['kappa2'][b]-pref*k2).max() < 1e-10*np.abs(pref*k2).max()
+
+
+def test_tau_const_is_needed_only_by_the_modes_it_scales(tmp_path):
+    """tau_mode='flex' derives tau from Sigma, so tau_const may be None there;
+    'const' still rejects it."""
+    gam = 2.0e-3
+    res, m = _flex_boltzmann_pair(tmp_path, lambda z: -1j*gam+0*z)
+    args = (m['rvec'], m['ham_r'], [], m['avec'], m['N'], m['N'], m['N'], m['fill'], m['temp'], None, m['units'])
+    flex_kw = dict(fname=str(tmp_path/'self_en_wannier.npz'))
+    res_none = m['P'].calc_conductivity_Boltzmann(*args, dict(tau_mode='flex', flex_kw=flex_kw))
+    assert np.abs(res_none['sigma']-res['sigma']).max() < 1e-12*np.abs(res['sigma']).max()
+    assert m['P'].calc_conductivity_Boltzmann(*args, dict(tau_mode='const')) is None
+    assert m['P'].get_hall_coe(*args, dict(tau_mode='const')) is None
+
+
+def test_flex_mass_renormalization_rescales_temperature(tmp_path):
+    """Sigma^R(e) = (1-1/Z0) e - i gamma: quasiparticles e* = Z0 xi, v* = Z0 v,
+    tau* = hbar/(2 Z0 gamma).  Substituting xi = e*/Z0 in the kernels gives
+    exactly K_n^flex(T) = Z0^n K_n^bare(T/Z0) with tau = hbar/(2 gamma) at the same
+    mu, so sigma(T) = sigma_bare(T/Z0) and S(T) = S_bare(T/Z0): the 1/Z
+    enhancement of the thermopower of a heavy Fermi liquid."""
+    import libs.plibs as P
+    Z0, gam = 0.4, 2.0e-3
+    rvec, ham_r = _multiorbital_model(Norb=2, seed=7, t=0.3)
+    avec, N = np.eye(3)*4.0, 12
+    units = P.unit_constants(True)
+    temp = 300.*units.kb
+    Nk, eig, vk, kw = P.get_emesh(N, N, N, ham_r, [], rvec, avec.T*units.ihbar, sw_veloc=True)
+    mu = P.calc_mu(eig, Nk, 0.4, temp, kw)
+    fname = str(tmp_path/'self_en_wannier.npz')
+    iw = (2*np.arange(40)+1)*np.pi*temp
+    _write_sigma_wannier(fname, _local_sigma(2, iw, lambda z: (1-1/Z0)*z-1j*gam), [[0, 0, 0]], temp, mu)
+    qp = P.flex_quasiparticles(eig, N, N, N, ham_r, [], rvec, temp, units, fname=fname)
+    assert np.abs(qp['Z']-Z0).max() < 1e-8
+    assert np.abs(qp['eig']-mu-Z0*(eig-mu)).max() < 1e-8
+    K = F.calc_Kn(qp['eig'], vk*qp['Z'][:, :, None], kw, temp, mu, qp['tau'])
+    Kb = F.calc_Kn(eig, vk, kw, temp/Z0, mu, eig*0.+units.hbar/(2*gam)/units.tau_unit)
+    for n in range(3):
+        assert np.abs(K[n]-Z0**n*Kb[n]).max() < 1e-8*np.abs(Kb[n]).max(), n
+
+
+def _check_flex_mesh_continuation(tmp_path, stamp):
+    """k-dependent, orbital-diagonal Sigma_aa(k, z) = s_a(k) z - i g_a(k) with s_a < 0, g_a > 0
+    (nearest-neighbour Fourier series).  Continuing on the FLEX mesh and interpolating
+    Sigma^R(k, e) multilinearly must give, on a finer transport mesh, exactly the
+    band-projected Z = 1/(1 - <n|s|n>) and Gamma = <n|g|n> of the multilinear interpolants
+    s(k), g(k) of the mesh values.  Without the 'mesh' stamp the mesh is taken from the R
+    extent (here 3x3x1)."""
+    import libs.plibs as P
+    units = P.unit_constants(True)
+    rvec, ham_r = _multiorbital_model(Norb=2, seed=7, t=0.3)
+    temp, Norb, Niw = 0.02, 2, 40
+    rs = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]], dtype=np.int64)
+    s0, s1 = np.array([-0.8, -1.5]), np.array([0.2, -0.3])     # s_a(k) = s0 + s1 (cos 2pi kx + cos 2pi ky)
+    g0, g1 = np.array([0.03, 0.05]), np.array([0.01, -0.02])
+    iw = (2*np.arange(Niw)+1)*np.pi*temp
+    sig = np.zeros((Norb, Norb, Niw, len(rs)), dtype=np.complex128)
+    for a in range(Norb):
+        sig[a, a, :, 0] = s0[a]*1j*iw-1j*g0[a]
+        sig[a, a, :, 1:] = (0.5*(s1[a]*1j*iw-1j*g1[a]))[:, None]
+    fname = str(tmp_path/'s.npz')
+    extra = dict(mesh=np.array([6, 6, 1])) if stamp else {}
+    np.savez(fname, sigma=sig, rvec=rs, iw=iw, mu=0.0, temp=temp, **extra)
+    N = 8
+    Nk, eig, _ = P.get_emesh(N, N, 1, ham_r, [], rvec, np.eye(3))
+    qp = P.flex_quasiparticles(eig, N, N, 1, ham_r, [], rvec, temp, units, fname=fname)
+    _, kl = P.gen_klist(N, N, 1, sw_pp=False)
+    _, uni = P.get_eigs(kl, ham_r, [], rvec)
+    m = 6 if stamp else 3
+
+    def lin(k):   # multilinear interpolant of cos(2 pi k) through the mesh points j/m
+        x = np.mod(k, 1.0)*m
+        j = np.floor(x)
+        return (1-(x-j))*np.cos(2*np.pi*j/m)+(x-j)*np.cos(2*np.pi*(j+1)/m)
+    c = lin(kl[:, 0])+lin(kl[:, 1])
+    w = np.abs(uni)**2                                           # weight of orbital a in band n
+    s = np.einsum('kna,ka->kn', w, s0+s1*c[:, None])
+    g = np.einsum('kna,ka->kn', w, g0+g1*c[:, None])
+    assert np.abs(qp['Z']-1/(1-s)).max() < 1e-8
+    assert np.abs(qp['gamma']-g).max() < 1e-8
+
+
+def test_flex_continues_on_the_self_energy_mesh_then_interpolates(tmp_path):
+    _check_flex_mesh_continuation(tmp_path, stamp=True)
+
+
+def test_flex_infers_the_self_energy_mesh_of_an_unstamped_file(tmp_path):
+    _check_flex_mesh_continuation(tmp_path, stamp=False)
+
+
+def test_flex_rejects_a_self_energy_at_another_temperature(tmp_path):
+    """Sigma(iw_n) belongs to the Matsubara mesh of its own T."""
+    import libs.plibs as P
+    units = P.unit_constants(True)
+    rvec, ham_r = _multiorbital_model(Norb=2, seed=7)
+    Nk, eig, _ = P.get_emesh(4, 4, 4, ham_r, [], rvec, np.eye(3))
+    fname = str(tmp_path/'s.npz')
+    _write_sigma_wannier(fname, _local_sigma(2, np.arange(3)+1., lambda z: 0*z), [[0, 0, 0]], 0.02, 0.0, Niw=3)
+    try:
+        P.flex_quasiparticles(eig, 4, 4, 4, ham_r, [], rvec, 0.01, units, fname=fname)
+    except ValueError as e:
+        assert 'rerun FLEX' in str(e)
+    else:
+        raise AssertionError('a temperature mismatch was accepted')
+
+
+def _trs_expansion_case(invs=None, slist=None, Norb=2, Nx=4, Ny=3, Nz=2, Nw=3, seed=2):
+    """A random Sigma(k, iw) on the full mesh that obeys time reversal
+    S(-k)[a,b] = s_a s_b S(k)[inv b, inv a] (S(-k) = S(k)^T without SOC), its
+    irreducible part, and the expansion of that part."""
+    import libs.plibs._wannier_io as W
+    rng = np.random.default_rng(seed)
+    X = rng.standard_normal((Norb, Norb, Nw, Nx, Ny, Nz))+1j*rng.standard_normal((Norb, Norb, Nw, Nx, Ny, Nz))
+    Xm = X[..., (-np.arange(Nx)) % Nx, :, :][..., (-np.arange(Ny)) % Ny, :][..., (-np.arange(Nz)) % Nz]
+    if invs is None:
+        TXm = Xm.swapaxes(0, 1)
+    else:
+        p = np.asarray(invs)-1
+        TXm = (np.outer(slist, slist)[:, :, None, None, None, None]*Xm[p][:, p]).swapaxes(0, 1)
+    S = 0.5*(X+TXm)
+    _, kmap, invk = F.gen_irr_k_TRS(Nx, Ny, Nz)
+    d = invk[:, 1] == 0
+    irr = np.zeros((Norb, Norb, Nw, invk[:, 0].max()), dtype=np.complex128)
+    irr[..., invk[d, 0]-1] = S[..., kmap[d, 0], kmap[d, 1], kmap[d, 2]]
+    return S, W._irr_to_full_kgrid_normal(irr, invk, kmap, Nx, Ny, Nz, invs, slist)
+
+
+def test_self_energy_trs_expansion_is_a_transpose_not_a_conjugate():
+    """The Wannier export of Sigma must expand the irreducible k-points with the
+    rule of the Fortran FLEX loops: same iw_n, orbital pair transposed (and
+    spin-flipped with SOC).  A complex conjugate puts Sigma(-iw_n) there and
+    makes Im Sigma(iw_n > 0) positive -- acausal -- on every TRS partner."""
+    S, full = _trs_expansion_case()
+    assert np.abs(full-S).max() < 1e-14
+    S, full = _trs_expansion_case(invs=[2, 1, 4, 3], slist=[1, -1, 1, -1], Norb=4)
+    assert np.abs(full-S).max() < 1e-14
+
+
+# --------------------------------------------------------------------------- #
+#  EPA relaxation time (tau_mode='epa', flibs.calc_tau_epa)
+# --------------------------------------------------------------------------- #
+def _write_epa_file(path, seed=0):
+    """An epa.x (job='egrid') file in epa.f90's layout -- valence grid with a NEGATIVE step
+    (downwards from the VBM), conduction grid upwards -- and an ASYMMETRIC |g|^2 so that an
+    initial/final swap shows.  Returns the table in [grid, initial, final, mode] order."""
+    rng = np.random.default_rng(seed)
+    edge, step, nbin, nm = [1.0, 1.6], [-0.2, 0.25], [5, 4], 3
+    wcm = np.array([150.0, 250.0, 400.0])
+    g = np.zeros((2, 5, 5, nm))
+    lines = [f'{2:8d}{nm:8d}'] + [f'{e:14.8f}{s:14.8f}{n:8d}' for e, s, n in zip(edge, step, nbin)]
+    lines.append(''.join(f'{w:18.8e}' for w in wcm))
+    for ii in range(2):
+        for jj in range(nbin[ii]):          # epa.f90: ii, jj (initial), kk (final), gavg(:,kk,jj,ii)
+            for kk in range(nbin[ii]):
+                g[ii, jj, kk] = rng.uniform(0.01, 0.05, nm)*(1.0+jj)
+                lines.append(f'{ii+1:8d}{jj+1:8d}{kk+1:8d}' + ''.join(f'{x:18.8e}' for x in g[ii, jj, kk]))
+    open(path, 'w').write('\n'.join(lines)+'\n')
+    return g
+
+
+def _tau_epa_reference(eig, g, wavg, edge, step, nbin, mu, temp, dos_e, dos):
+    """numpy transcription of epa_calc (Samsonidze's EPA patch to BoltzTraP2) in eV, hbar = 1:
+    grid by the midgap, bins clamped into the grid, rho interpolated at e +- w, tau <= 1 ns."""
+    inv = np.zeros(eig.shape)
+    ii = np.where(eig < np.sum(edge)/len(edge), 0, 1)
+    def binof(e):
+        return np.clip((e-np.asarray(edge)[ii])/np.asarray(step)[ii], 1e-12,
+                       np.asarray(nbin)[ii]-1e-12).astype(int)
+    jj = binof(eig)
+    for nu, w in enumerate(wavg):
+        nb = 1/np.expm1(w/temp)
+        fa, fe = 1/(np.exp((eig+w-mu)/temp)+1), 1/(np.exp((eig-w-mu)/temp)+1)
+        inv += g[ii, jj, binof(eig+w), nu]*(nb+fa)*np.interp(eig+w, dos_e, dos, left=0, right=0) \
+            + g[ii, jj, binof(eig-w), nu]*(nb+1-fe)*np.interp(eig-w, dos_e, dos, left=0, right=0)
+    return 1/np.maximum(2*np.pi*inv, 6.582119569e-7)
+
+
+def test_epa_reader_keeps_the_initial_final_order_of_epa_x(tmp_path):
+    import libs.plibs._wannier_io as W
+    g = _write_epa_file(str(tmp_path/'x.epa.e'))
+    ngrid, nm, edge, step, nbin, wavg, gavg = W.read_epa_output(str(tmp_path/'x.epa.e'))
+    assert (ngrid, nm) == (2, 3) and list(nbin) == [5, 4] and step[0] < 0
+    assert np.abs(gavg-g).max() < 1e-7*np.abs(g).max()                           # 8-digit text
+    assert np.abs(wavg-np.array([150.0, 250.0, 400.0])*1.23981e-4).max() < 1e-12
+
+
+def test_epa_tau_matches_the_reference_rate_in_both_bands(tmp_path):
+    """Valence (negative step) and conduction states, including ones beyond the tabulated
+    grids, against the reference rate with the same DOS.  The valence DOS used to come out
+    negative (divided by the signed step), which dropped every valence term and returned
+    tau = 1e15 hbar/eV for the whole valence band."""
+    import libs.plibs._wannier_io as W
+    _write_epa_file(str(tmp_path/'x.epa.e'))
+    ngrid, nm, edge, step, nbin, wavg, gavg = W.read_epa_output(str(tmp_path/'x.epa.e'))
+    rng = np.random.default_rng(1)
+    eig = np.sort(np.concatenate([rng.uniform(-0.6, 1.0, (4000, 1)),          # valence, past its grid
+                                  rng.uniform(1.6, 3.0, (4000, 1))], axis=1), axis=0)
+    temp, mu = 0.025, 1.55
+    tau = F.calc_tau_epa(eig, gavg, wavg, edge, step, nbin, mu, temp)
+    dos, e0, de = F.epa_dos(eig, step)
+    assert abs(dos.sum()*de-2.0) < 1e-12                                         # two bands per spin
+    ref = _tau_epa_reference(eig, gavg, wavg, edge, step, nbin, mu, temp, e0+de*np.arange(len(dos)), dos)
+    assert np.abs(tau/ref-1).max() < 1e-10
+    assert tau[:, 0].max() < 1e5                                                 # no valence state at the cap
+
+
+# --------------------------------------------------------------------------- #
 #  standalone runner (no pytest required)
 # --------------------------------------------------------------------------- #
 if __name__ == '__main__':

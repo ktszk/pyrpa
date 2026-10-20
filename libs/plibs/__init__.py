@@ -16,6 +16,7 @@ Functions are organized in submodules by physical topic:
   _conductivity: Boltzmann and linear-response transport drivers (tau models, Hall, optics)
   _fermiology : Cyclotron mass, dHvA frequencies of extremal orbits, band masses on a path
   _impurity   : Impurity supercell, exact diagonalization and the unfolded spectrum
+  _phonon_pairing: Phonon-mediated pairing interaction from EPA data for the Eliashberg equation
 """
 from ._symmetry import *
 from ._lattice import *
@@ -36,3 +37,4 @@ from ._units import *
 from ._conductivity import *
 from ._fermiology import *
 from ._impurity import *
+from ._phonon_pairing import *

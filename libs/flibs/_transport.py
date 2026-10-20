@@ -5,7 +5,7 @@ import libs.flibs._loader as _loader
 # Public API of this submodule; keeps `from ._x import *` in __init__.py from
 # re-exporting numpy, scipy, ctypes and the sibling packages imported above.
 __all__ = [
-    'calc_Lij', 'calc_Lij_wl', 'calc_Kn', 'calc_sigma_hall', 'calc_k0_band', 'calc_tdf', 'calc_tau_epa'
+    'calc_Lij', 'calc_Lij_wl', 'calc_Kn', 'calc_sigma_hall', 'calc_k0_band', 'calc_tdf', 'calc_tau_epa', 'epa_dos'
 ]
 
 # --- ctypes signatures: set once at import.
@@ -90,11 +90,14 @@ _loader._lib.calc_tau_epa.argtypes = [
     _loader.c_array(np.float64),  # eig
     _loader.c_array(np.float64),  # edge
     _loader.c_array(np.float64),  # step
+    _loader.c_array(np.float64),  # dos
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),      # e0, de
     ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),      # mu, temp
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),        # Nk, Norb
     ctypes.POINTER(ctypes.c_int64),                          # nmodes
     _loader.c_array(np.int64),    # nbin
-    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)         # ngrid, nbin_max
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),        # ngrid, nbin_max
+    ctypes.POINTER(ctypes.c_int64)                           # Ndos
 ]
 _loader._lib.calc_tau_epa.restype = None
 
@@ -275,17 +278,38 @@ def calc_tdf(eig: np.ndarray, veloc: np.ndarray, kweight: np.ndarray,
     return tdf
 
 
+def epa_dos(eig: np.ndarray, step: np.ndarray, nsub: int = 8) -> tuple[np.ndarray, float, float]:
+    """
+    @brief Electronic DOS per spin per unit cell for the EPA rate, on a grid nsub times finer
+    than the finest EPA bin (linear, cloud-in-cell deposition of the eigenvalues, so the
+    integral is the number of bands).  The EPA bins themselves are far too coarse for rho:
+    bin-averaging it removes the band-edge onset that makes tau long there.
+    @param  eig: Eigenvalues [Nk, Norb] (eV) on a uniform k-mesh
+    @param step: EPA grid steps [ngrid] (eV)
+    @return (dos [Ndos] (1/eV), e0, de): values on e0 + i*de
+    """
+    de = float(np.abs(step).min())/nsub
+    e0 = float(eig.min())-de
+    x = (np.ravel(eig)-e0)/de
+    i = np.floor(x).astype(np.int64)
+    t = x-i
+    dos = np.zeros(int(i.max())+3)
+    np.add.at(dos, i, 1.0-t)
+    np.add.at(dos, i+1, t)
+    return dos/(len(eig)*de), e0, de
+
+
 def calc_tau_epa(eig: np.ndarray, gavg: np.ndarray, wavg: np.ndarray,
                  edge: np.ndarray, step: np.ndarray, nbin: np.ndarray,
                  mu: float, temp: float) -> np.ndarray:
     """
     @brief Compute EPA relaxation time from epa.x (job='egrid') output, using the
-    energy-conserving EPA rate (Samsonidze-Kozinsky):
+    energy-conserving EPA rate (Samsonidze-Kozinsky) as their BoltzTraP epa_calc does:
     1/tau(e) = 2*pi*sum_nu { g2(e,e+w)[nB+f(e+w)]rho(e+w) + g2(e,e-w)[nB+1-f(e-w)]rho(e-w) },
-    with rho the electronic DOS per spin per unit cell (binned from eig).
-    Final states falling outside the tabulated EPA energy grid are dropped.
-    @param   eig: Eigenvalues [Nk, Norb] float64 (eV)
-    @param  gavg: EPA averaged |g|^2 [ngrid, nbin_max, nbin_max, nmodes] float64 (eV^2)
+    with rho the electronic DOS per spin per unit cell (epa_dos, interpolated at e +- w),
+    g2 constant per EPA bin, bins clamped into the grids and tau <= 1 ns.
+    @param   eig: Eigenvalues [Nk, Norb] float64 (eV), uniform k-mesh
+    @param  gavg: EPA averaged |g|^2 [ngrid, initial bin, final bin, nmodes] float64 (eV^2)
     @param  wavg: Averaged phonon frequencies per mode [nmodes] float64 (eV)
     @param  edge: Grid edges [ngrid] float64 (eV)
     @param  step: Grid steps [ngrid] float64 (eV)
@@ -294,16 +318,22 @@ def calc_tau_epa(eig: np.ndarray, gavg: np.ndarray, wavg: np.ndarray,
     @param  temp: Temperature kB*T (eV)
     @return  tau: Relaxation time [Nk, Norb] float64 (hbar/eV units)
     """
+    eig = np.ascontiguousarray(eig, dtype=np.float64)
     Nk = len(eig)
     Norb = eig.shape[1]
     ngrid = len(edge)
     nmodes = len(wavg)
     nbin_max = int(np.max(nbin))
+    dos, e0, de = epa_dos(eig, step)
     tau = np.zeros((Nk, Norb), dtype=np.float64)
     nbin_i64 = np.ascontiguousarray(nbin, dtype=np.int64)
-    _loader._lib.calc_tau_epa(tau, gavg, wavg, eig, edge, step,
+    _loader._lib.calc_tau_epa(tau, np.ascontiguousarray(gavg, dtype=np.float64),
+                              np.ascontiguousarray(wavg, dtype=np.float64), eig,
+                              np.ascontiguousarray(edge, dtype=np.float64),
+                              np.ascontiguousarray(step, dtype=np.float64), dos,
+                              _loader.dbl(e0), _loader.dbl(de),
                               _loader.dbl(mu), _loader.dbl(temp),
                               _loader.i64(Nk), _loader.i64(Norb),
                               _loader.i64(nmodes), nbin_i64,
-                              _loader.i64(ngrid), _loader.i64(nbin_max))
+                              _loader.i64(ngrid), _loader.i64(nbin_max), _loader.i64(len(dos)))
     return tau

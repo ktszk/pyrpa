@@ -423,27 +423,35 @@ subroutine calc_tdf(tdf,eig,veloc,kweight,tau,Nw,Nk,Norb) bind(C)
   !$omp end parallel do
 end subroutine calc_tdf
 
-subroutine calc_tau_epa(tau,gavg,wavg,eig,edge,step,mu,temp,&
-     Nk,Norb,nmodes,nbin,ngrid,nbin_max) bind(C)
+subroutine calc_tau_epa(tau,gavg,wavg,eig,edge,step,dos,e0,de,mu,temp,&
+     Nk,Norb,nmodes,nbin,ngrid,nbin_max,Ndos) bind(C)
   !> calc_tau_epa
   !> Compute EPA relaxation time from epa.x output (job='egrid'), following the
   !> energy-conserving EPA rate (Samsonidze & Kozinsky, Adv. Energy Mater. 8,
-  !> 1800246 (2018)):
+  !> 1800246 (2018)) as their BoltzTraP implementation (epa_calc) evaluates it:
   !>
   !>   1/tau(e) = 2*pi * sum_nu { <|g_nu(e, e+w_nu)|^2> * [nB(w_nu) +   f(e+w_nu)] * rho(e+w_nu)
   !>                            + <|g_nu(e, e-w_nu)|^2> * [nB(w_nu) + 1-f(e-w_nu)] * rho(e-w_nu) }
   !>
   !> The final state is fixed by energy conservation to e +- w_nu (phonon
-  !> absorption / emission) and weighted by the electronic DOS rho there.
-  !> rho is per spin per unit cell, computed here from ``eig`` by linear
-  !> (cloud-in-cell) binning onto the EPA energy bins.  With hbar = 1 and
-  !> energies in eV, tau is returned in units of hbar/eV.
+  !> absorption / emission) and weighted by the electronic DOS rho there, read
+  !> by linear interpolation from a fine DOS (the caller's dos, per spin per unit
+  !> cell): averaging rho over the coarse EPA bins would wipe out its band-edge
+  !> onset and with it most of the energy dependence of tau.  <|g|^2> is constant
+  !> in each EPA bin.  A state is assigned to the valence grid below the midgap
+  !> sum(edge)/ngrid and to the conduction grid above it, and its bins (initial
+  !> and final) are clamped into the grid, so states beyond the tabulated range
+  !> take the outermost bin.  1/tau is floored at 1e9 s^-1 (tau <= 1 ns), the cap
+  !> of epa_calc.  With hbar = 1 and energies in eV, tau is returned in hbar/eV.
   !!@param        tau,out: relaxation time [Norb,Nk] (hbar/eV)
-  !!@param       gavg, in: EPA averaged |g|^2 [nmodes,nbin_max,nbin_max,ngrid] (eV^2)
+  !!@param       gavg, in: EPA averaged |g|^2 [nmodes,final bin,initial bin,ngrid] (eV^2),
+  !!                       i.e. epa.f90's own gavg(nu,kk,jj,ii)
   !!@param       wavg, in: averaged phonon freq per mode [nmodes] (eV)
   !!@param        eig, in: electronic eigenvalues [Norb,Nk] (eV)
   !!@param       edge, in: grid edges [ngrid] (eV)
-  !!@param       step, in: grid steps [ngrid] (eV)
+  !!@param       step, in: grid steps [ngrid] (eV; negative = downwards, the valence grid)
+  !!@param        dos, in: electronic DOS per spin per unit cell on e0 + (i-1)*de [Ndos] (1/eV)
+  !!@param     e0,de, in: first node and spacing of the DOS grid (eV)
   !!@param         mu, in: chemical potential (eV)
   !!@param       temp, in: temperature kB*T (eV)
   !!@param         Nk, in: number of k-points
@@ -452,65 +460,32 @@ subroutine calc_tau_epa(tau,gavg,wavg,eig,edge,step,mu,temp,&
   !!@param       nbin, in: number of bins per grid [ngrid]
   !!@param      ngrid, in: number of energy grids (typically 2)
   !!@param   nbin_max, in: max(nbin) — leading dimension for gavg
+  !!@param       Ndos, in: number of DOS grid points
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
-  integer(c_int64_t),intent(in):: Nk,Norb,nmodes,ngrid,nbin_max
+  integer(c_int64_t),intent(in):: Nk,Norb,nmodes,ngrid,nbin_max,Ndos
   integer(c_int64_t),intent(in),dimension(ngrid):: nbin
-  real(c_double),intent(in):: mu,temp
+  real(c_double),intent(in):: mu,temp,e0,de
   real(c_double),intent(in),dimension(ngrid):: edge,step
   real(c_double),intent(in),dimension(nmodes):: wavg
   real(c_double),intent(in),dimension(nmodes,nbin_max,nbin_max,ngrid):: gavg
+  real(c_double),intent(in),dimension(Ndos):: dos
   real(c_double),intent(in),dimension(Norb,Nk):: eig
   real(c_double),intent(out),dimension(Norb,Nk):: tau
 
-  integer(c_int32_t) ik,ib,ig,ig_found,jbin,kk,nu,isgn
-  real(c_double) eps,gamma,w,nB,ff,xb,xf,g2,ef,dosv,xc,wlo
+  integer(c_int32_t) ik,ib,ig,jbin,kk,nu,isgn
+  real(c_double) eps,gamma,w,nB,ff,xb,xf,g2,ef,dosv,emid
   real(c_double),parameter:: pi=acos(-1.0d0)
-  real(c_double),parameter:: tau_max=1.0d+15
+  real(c_double),parameter:: gamma_min=6.582119569d-7  ! hbar*1e9 s^-1 in eV: tau <= 1 ns
   real(c_double),parameter:: xcut=500.0d0
-  real(c_double),dimension(nbin_max,ngrid):: dos
 
-  ! --- electronic DOS per spin per unit cell on the EPA bins -----------------
-  ! rho(bin) = (1/Nk) sum_{k,band} delta(e_bin - e_kn), delta -> linear
-  ! (cloud-in-cell) weighting between the two adjacent bin centers, so the
-  ! energy integral of rho over the grid is preserved.
-  dos(:,:)=0.0d0
-  do ig=1,int(ngrid)
-     do ik=1,int(Nk)
-        do ib=1,int(Norb)
-           xc=(eig(ib,ik)-edge(ig))/step(ig)-0.5d0   ! fractional bin-center coordinate
-           kk=int(floor(xc))+1                       ! lower bin
-           wlo=1.0d0-(xc-dble(kk-1))                 ! weight of lower bin
-           if(kk>=1 .and. kk<=int(nbin(ig)))   dos(kk,ig)=dos(kk,ig)+wlo
-           if(kk+1>=1 .and. kk+1<=int(nbin(ig))) dos(kk+1,ig)=dos(kk+1,ig)+(1.0d0-wlo)
-        end do
-     end do
-  end do
-  dos(:,:)=dos(:,:)/dble(Nk)
-  do ig=1,int(ngrid)
-     dos(:,ig)=dos(:,ig)/step(ig)                    ! states / (eV spin cell)
-  end do
-
-  !$omp parallel do private(ik,ib,ig,ig_found,jbin,kk,nu,isgn,eps,gamma,w,nB,ff,xb,xf,g2,ef,dosv)
+  emid=sum(edge)/dble(ngrid)
+  !$omp parallel do private(ik,ib,ig,jbin,kk,nu,isgn,eps,gamma,w,nB,ff,xb,xf,g2,ef,dosv)
   do ik=1,Nk
      do ib=1,Norb
         eps=eig(ib,ik)
-        ! find which grid & bin this state belongs to
-        jbin=-1
-        ig_found=-1
-        do ig=1,ngrid
-           jbin=int((eps-edge(ig))/step(ig))+1
-           if(jbin>=1 .and. jbin<=int(nbin(ig)))then
-              ig_found=ig
-              exit
-           end if
-           jbin=-1
-        end do
-        if(jbin<1)then
-           tau(ib,ik)=tau_max
-           cycle
-        end if
-
+        ig=merge(1,int(ngrid),eps<emid .or. ngrid==1)
+        jbin=epa_bin(eps,ig)
         gamma=0.0d0
         do nu=1,nmodes
            w=wavg(nu)
@@ -526,12 +501,10 @@ subroutine calc_tau_epa(tau,gavg,wavg,eig,edge,step,mu,temp,&
            ! isgn=-1: phonon emission   (final e-w, factor nB+1-f)
            do isgn=1,-1,-2
               ef=eps+dble(isgn)*w
-              kk=int((ef-edge(ig_found))/step(ig_found))+1
-              if(kk<1 .or. kk>int(nbin(ig_found))) cycle  ! final state outside grid
-              g2=gavg(nu,kk,jbin,ig_found)
-              if(abs(g2)<1.0d-30) cycle
-              dosv=dos(kk,ig_found)
-              if(dosv<1.0d-30) cycle
+              kk=epa_bin(ef,ig)
+              g2=gavg(nu,kk,jbin,ig)
+              dosv=dos_at(ef)
+              if(dosv<=0.0d0) cycle
 
               ! Fermi distribution f(ef)
               xf=(ef-mu)/temp
@@ -547,14 +520,32 @@ subroutine calc_tau_epa(tau,gavg,wavg,eig,edge,step,mu,temp,&
               end if
            end do
         end do
-
-        gamma=2.0d0*pi*gamma
-        if(gamma>1.0d-30)then
-           tau(ib,ik)=1.0d0/gamma
-        else
-           tau(ib,ik)=tau_max
-        end if
+        tau(ib,ik)=1.0d0/max(2.0d0*pi*gamma,gamma_min)
      end do
   end do
   !$omp end parallel do
+contains
+  integer(c_int32_t) function epa_bin(e,igr)
+    !> EPA bin of energy e in grid igr, clamped into 1..nbin(igr) (as epa_calc)
+    real(c_double),intent(in):: e
+    integer(c_int32_t),intent(in):: igr
+    real(c_double) x
+    x=(e-edge(igr))/step(igr)
+    x=min(max(x,1.0d-12),dble(nbin(igr))-1.0d-12)
+    epa_bin=int(x)+1
+  end function epa_bin
+  real(c_double) function dos_at(e)
+    !> linear interpolation of the DOS grid, 0 outside it
+    real(c_double),intent(in):: e
+    real(c_double) x,t
+    integer(c_int64_t) i
+    x=(e-e0)/de
+    if(x<0.0d0 .or. x>dble(Ndos-1))then
+       dos_at=0.0d0
+       return
+    end if
+    i=min(int(x,c_int64_t),Ndos-2)
+    t=x-dble(i)
+    dos_at=(1.0d0-t)*dos(i+1)+t*dos(i+2)
+  end function dos_at
 end subroutine calc_tau_epa

@@ -6,7 +6,7 @@ import libs.flibs._loader as _loader
 # re-exporting numpy, scipy, ctypes and the sibling packages imported above.
 __all__ = [
     'gen_Green0', 'gen_green', 'gen_green_from_eig', 'gen_tr_Greenw_0', 'gen_dos', 'get_a', 'get_QP',
-    'pade_with_trace'
+    'pade_with_trace', 'pade_batch'
 ]
 
 # --- ctypes signatures: set once at import.
@@ -83,6 +83,15 @@ _loader._lib.pade_with_trace.argtypes = [
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)            # Nw, Norb
 ]
 _loader._lib.pade_with_trace.restype = None
+_loader._lib.pade_batch.argtypes = [
+    _loader.c_array(np.complex128),  # arrayout (out)
+    _loader.c_array(np.complex128),  # arrayin
+    _loader.c_array(np.complex128),  # iwlist
+    _loader.c_array(np.complex128),  # zlist
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),           # Nd, Niw
+    ctypes.POINTER(ctypes.c_int64)                                            # Nz
+]
+_loader._lib.pade_batch.restype = None
 
 
 def gen_Green0(eig: np.ndarray, uni: np.ndarray,
@@ -229,4 +238,22 @@ def pade_with_trace(A: np.ndarray, iwlist: np.ndarray, wlist: np.ndarray) -> np.
     B = np.zeros((Nk, Nw), dtype=np.complex128)
     _loader._lib.pade_with_trace(A, B, iwlist, wlist, _loader.i64(Nk), _loader.i64(Niw),
                                  _loader.i64(Nw), _loader.i64(Norb))
+    return B
+
+
+def pade_batch(A: np.ndarray, iwlist: np.ndarray, zlist: np.ndarray) -> np.ndarray:
+    """
+    @brief Pade continuation of many independent scalar functions, each evaluated at its own points.
+    @param      A: Data on the Matsubara points [Nd, Niw] complex128
+    @param iwlist: Matsubara points [Niw] complex128 (i*w_n)
+    @param  zlist: Evaluation points per function [Nd, Nz] complex128
+    @return     B: Continued values B[d, j] = A_d(zlist[d, j]) [Nd, Nz] complex128
+    """
+    A = np.ascontiguousarray(A, dtype=np.complex128)
+    iwlist = np.ascontiguousarray(iwlist, dtype=np.complex128)
+    zlist = np.ascontiguousarray(zlist, dtype=np.complex128)
+    Nd, Niw = A.shape
+    Nz = zlist.shape[1]
+    B = np.zeros((Nd, Nz), dtype=np.complex128)
+    _loader._lib.pade_batch(B, A, iwlist, zlist, _loader.i64(Nd), _loader.i64(Niw), _loader.i64(Nz))
     return B

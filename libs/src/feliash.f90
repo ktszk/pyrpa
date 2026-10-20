@@ -53,7 +53,7 @@ contains
   end subroutine apply_op
 end module lin_eliash_op
 
-subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,iprm,kmap,invk,temp,eps,&
+subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,vph,olist,prt,iprm,kmap,invk,temp,eps,&
      Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,arnoldi_m,lambda_out) bind(C)
   !> calculate linearized eliashberg equations with TRS without soc
   !!@param     delta,out: gap function
@@ -66,6 +66,9 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,iprm,kmap,
   !!@param init_delta,in: band basis initial gap function
   !!@param       Smat,in: S-matrix
   !!@param       Cmat,in: C-matrix
+  !!@param        vph,in: k-independent pairing term added to V_Delta(q,iv_j) [Nw,Nchi,Nchi] in
+  !!                       the singlet/triplet channel gap_sym selects (j=1: v=0), e.g. the
+  !!                       phonon-mediated attraction of plibs.epa_pairing_vertex; 0 = none
   !!@param      olist,in: property of chi footnote
   !!@param       kmap,in: property of k-points
   !!@param       invk,in: list of reverse k-points
@@ -99,6 +102,7 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,iprm,kmap,
   real(c_double),intent(in):: temp,eps
   real(c_double),intent(in),target,dimension(Norb):: prt
   real(c_double),intent(in),target,dimension(Nchi,Nchi):: Smat,Cmat
+  real(c_double),intent(in),dimension(Nw,Nchi,Nchi):: vph
   real(c_double),intent(in),dimension(Nk,Norb):: init_delta
   complex(c_double),intent(in),target,dimension(Nk,Nw,Norb,Norb):: Gk
   complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
@@ -107,6 +111,7 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,iprm,kmap,
   real(c_double),intent(out):: lambda_out
 
   integer(c_int32_t) i_iter,i_eig,i
+  integer(c_int64_t) ivj,ivm,ivl
   integer(c_int32_t),parameter:: eig_max=2
   logical(1) sw_pair
   real(c_double) norm,inorm,weight,lambda_rq,lambda_prev,lambda_phys,lambda1,vec_err,proj
@@ -129,6 +134,17 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,olist,prt,iprm,kmap,
   lambda1=0.0d0
   lambda_out=0.0d0
   call get_V_delta_nsoc_flex(chi,Smat,Cmat,Nk,Nw,Nchi,sw_pair)
+  if(any(vph/=0.0d0))then !extra k-independent pairing (e.g. phonons), vanishing as v -> inf
+     !$omp parallel do collapse(2) private(ivm,ivl,ivj)
+     do ivl=1,Nchi
+        do ivm=1,Nchi
+           do ivj=1,Nw
+              chi(:,ivj,ivm,ivl)=chi(:,ivj,ivm,ivl)+vph(ivj,ivm,ivl)
+           end do
+        end do
+     end do
+     !$omp end parallel do
+  end if
   print'(A15,2E16.8)','V_delta max is ',maxval(dble(chi)),maxval(aimag(chi))
   print'(A15,2E16.8)','V_delta min is ',minval(dble(chi)),minval(aimag(chi))
   if(arnoldi_m>0)then !--- Arnoldi solver (shared with lin_eliash_soc, see module eliash_krylov)

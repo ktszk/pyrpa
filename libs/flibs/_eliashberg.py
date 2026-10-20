@@ -20,6 +20,7 @@ _loader._lib.lin_eliash.argtypes = [
     _loader.c_array(np.float64),     # init_delta
     _loader.c_array(np.float64),     # Smat
     _loader.c_array(np.float64),     # Cmat
+    _loader.c_array(np.float64),     # vph (extra k-independent pairing, Nchi x Nchi x Nw)
     _loader.f_array(np.int64),       # olist
     _loader.c_array(np.float64),     # prt
     _loader.c_array(np.int64),       # iprm (inversion orbital permutation)
@@ -204,7 +205,8 @@ def linearized_eliashberg(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init
                           Smat: np.ndarray, Cmat: np.ndarray, olist: np.ndarray, plist: np.ndarray,
                           kmap: np.ndarray, invk: np.ndarray, Nx: int, Ny: int, Nz: int,
                           temp: float, gap_sym: int, eps: float = 1.0e-5, itemax: int = 300,
-                          arnoldi_m: int = 10, iperm: np.ndarray | None = None) -> tuple[np.ndarray, float]:
+                          arnoldi_m: int = 10, iperm: np.ndarray | None = None,
+                          vph: np.ndarray | None = None) -> tuple[np.ndarray, float]:
     """
     @brief Solve the linearized Eliashberg gap equation (without SOC) to obtain the superconducting gap function.
     @param        chi: Irreducible susceptibility [Nchi, Nchi, Nw, Nk] complex128
@@ -226,6 +228,9 @@ def linearized_eliashberg(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init
     @param      iperm: Orbital permutation of the inversion operator [Norb] int64.
                        None = identity, i.e. the diagonal-parity convention. Use
                        plibs.inversion_op() to obtain (plist, iperm) for multi-site cells.
+    @param        vph: k-independent term added to the pairing interaction V_Delta(q, iv_j)
+                       [Nchi, Nchi, Nw] float64 (j = 0: v = 0), in the channel gap_sym selects;
+                       None = none.  plibs.epa_pairing_vertex builds the phonon one.
     @return    delta: Linearized gap function [Norb, Norb, Nw, Nkall] complex128
     @return   lambda_eliash: Physical (largest) Eliashberg eigenvalue (>1 means T<Tc)
     """
@@ -235,7 +240,11 @@ def linearized_eliashberg(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init
     lambda_out = ctypes.c_double(0.0)
     iprm = np.arange(Norb, dtype=np.int64) if iperm is None else np.asarray(iperm, dtype=np.int64)
     iprm = iprm + 1   # Fortran is 1-based
-    _loader._lib.lin_eliash(delta, chi, Gk, uni, init_delta, Smat, Cmat, olist, plist, iprm, kmap, invk,
+    # vph(Nw,Nchi,Nchi) in Fortran order is the C-order [Nchi, Nchi, Nw] array, vph[l, m, j] = vph(j, m, l)
+    vph = np.zeros((Nchi, Nchi, Nw)) if vph is None else np.ascontiguousarray(vph, dtype=np.float64)
+    if vph.shape != (Nchi, Nchi, Nw):
+        raise ValueError(f'vph has shape {vph.shape}, expected {(Nchi, Nchi, Nw)}')
+    _loader._lib.lin_eliash(delta, chi, Gk, uni, init_delta, Smat, Cmat, vph, olist, plist, iprm, kmap, invk,
                             _loader.dbl(temp), _loader.dbl(eps), _loader.i64(Nkall),
                             _loader.i64(Nk), _loader.i64(Nw), _loader.i64(Nchi),
                             _loader.i64(Norb), _loader.i64(Nx), _loader.i64(Ny),

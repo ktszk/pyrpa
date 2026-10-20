@@ -128,3 +128,72 @@ subroutine pade_with_trace(arrayin,arrayout,iwlist,wlist,Nk,Niw,Nw,Norb) bind(C)
      end do
   end do
 end subroutine pade_with_trace
+
+subroutine pade_batch(arrayout,arrayin,iwlist,zlist,Nd,Niw,Nz) bind(C)
+  !> Pade continuation of Nd independent functions, each evaluated at its OWN
+  !> Nz points (zlist(:,d)).  Same Thiele continued fraction as get_a/get_QP,
+  !> but the recursion runs serially per function and OpenMP is over the Nd
+  !> functions: get_a/get_QP open a parallel region per recursion step, which
+  !> costs far more than the O(Niw^2) work of one small fit.
+  !!@param arrayout,out: continued values f_d(zlist(:,d)) [Nz,Nd]
+  !!@param   arrayin,in: data f_d(iwlist) [Niw,Nd]
+  !!@param    iwlist,in: Matsubara points [Niw]
+  !!@param     zlist,in: evaluation points per function [Nz,Nd]
+  !!@param        Nd,in: The number of functions
+  !!@param       Niw,in: The number of Matsubara points
+  !!@param        Nz,in: The number of evaluation points per function
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double
+  implicit none
+  integer(c_int64_t),intent(in):: Nd,Niw,Nz
+  complex(c_double),intent(in),dimension(Niw,Nd):: arrayin
+  complex(c_double),intent(in),dimension(Niw):: iwlist
+  complex(c_double),intent(in),dimension(Nz,Nd):: zlist
+  complex(c_double),intent(out),dimension(Nz,Nd):: arrayout
+
+  integer(c_int64_t) d,i,j,nterm
+  complex(c_double),dimension(Niw):: a,g0,g1
+  complex(c_double) p0,p1,q0,q1,p,q
+
+  !$omp parallel do private(d,i,j,nterm,a,g0,g1,p0,p1,q0,q1,p,q)
+  do d=1,Nd
+     ! continued-fraction coefficients (Thiele reciprocal differences, as get_a).
+     ! Unlike get_a the fraction is TRUNCATED at the first vanishing coefficient
+     ! (|a_i z_i| <= 1e-12, a_i*z is dimensionless for i>=2): data that is exactly
+     ! a low-order rational function (a constant or linear Sigma, the CPA/impurity
+     ! limits) otherwise drives the later reciprocal differences through 0/0 and
+     ! the round-off garbage behind it turns the continuation into NaN.
+     g0(:)=arrayin(:,d)
+     a(:)=0.0d0
+     a(1)=g0(1)
+     nterm=Niw
+     do i=2,Niw
+        do j=1,Niw
+           if(g0(j)==(0.0d0,0.0d0))then
+              g1(j)=0.0d0
+           else
+              g1(j)=(g0(i-1)-g0(j))/((iwlist(j)-iwlist(i-1))*g0(j))
+           end if
+        end do
+        g0(:)=g1(:)
+        a(i)=g1(i)
+        if(abs(a(i)*iwlist(i))<=1.0d-12)then
+           nterm=i-1
+           exit
+        end if
+     end do
+     ! P_N/Q_N three-term recursion (as get_QP)
+     do j=1,Nz
+        q0=1.0d0; q1=1.0d0
+        p0=0.0d0; p1=a(1)
+        p=p1; q=q1
+        do i=2,nterm
+           p=p1+a(i)*(zlist(j,d)-iwlist(i-1))*p0
+           q=q1+a(i)*(zlist(j,d)-iwlist(i-1))*q0
+           p0=p1; p1=p
+           q0=q1; q1=q
+        end do
+        arrayout(j,d)=p/q
+     end do
+  end do
+  !$omp end parallel do
+end subroutine pade_batch

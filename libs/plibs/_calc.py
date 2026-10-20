@@ -907,7 +907,8 @@ def calc_flex_soc(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np
                                        sigma_scale=sigma_scale)
     if sw_out_self:
         np.savez('self_en', sigmak, mu_self)
-        _wannier_io.output_self_wannier(sigmak, mu_self, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
+        _wannier_io.output_self_wannier(sigmak, mu_self, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp,
+                                        invs=invs, slist=slist)
 
 
 def calc_lin_eliashberg_eq(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray,
@@ -917,7 +918,8 @@ def calc_lin_eliashberg_eq(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray
                            Jmat: np.ndarray | None = None, eps: float = 1.0e-4, pp: float = 0.5, m_diis: int = 5,
                            sw_rescale: bool = True, sw_tail: bool = False, sigma_scale: float = 1.0,
                            sw_gap_extrapolate: bool = False, iperm: np.ndarray | None = None,
-                           gap_extrap_points: int = 4, gap_extrap_order: int = 1) -> None:
+                           gap_extrap_points: int = 4, gap_extrap_order: int = 1,
+                           epa_pair_file: str | None = None, epa_pair_scale: float = 1.0) -> None:
     """
     @brief Solve the linearized Eliashberg equation (no SOC) and report lambda.
 
@@ -956,6 +958,9 @@ def calc_lin_eliashberg_eq(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray
     @param   iperm: orbital permutation of the inversion operator (None = identity)
     @param gap_extrap_points: number of Matsubara slices used by that extrapolation
     @param gap_extrap_order: polynomial order of that fit
+    @param epa_pair_file: epa.x (job='egrid') output; adds the phonon-mediated attraction built from it
+                          (plibs.epa_pairing_vertex) to the spin/charge-fluctuation pairing.  None: off
+    @param epa_pair_scale: factor on that phonon coupling
     @return None
     """
     state = _prepare_kspace_state(Nx, Ny, Nz, ham_r, S_r, rvec, need_ham=sw_self)
@@ -982,9 +987,14 @@ def calc_lin_eliashberg_eq(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray
                     f2.write(f'{k[0]:6.4f} {k[1]:6.4f} {chicq[i].real:11.4e}\n')
     except OSError as e:
         print(f"Error: Failed to write 'chis.dat' or 'chic.dat': {e}", flush=True)
+    vph = None
+    if epa_pair_file:
+        import libs.plibs._phonon_pairing as _phonon_pairing   # deferred: _phonon_pairing imports _bands
+        vph, _ = _phonon_pairing.epa_pairing_vertex(epa_pair_file, ham_r, S_r, rvec, Nx, Ny, Nz, chiolist, site,
+                                                    green_state['mu_self'], temp, Nw, gap_sym, epa_pair_scale)
     gap, lambda_eliash = flibs.linearized_eliashberg(chi, Gk, state['uni'], init_delta, Smat, Cmat, chiolist, plist,
                                                      state['kmap'], state['invk'], Nx, Ny, Nz, temp, gap_sym,
-                                                     iperm=iperm)
+                                                     iperm=iperm, vph=vph)
     print(f'Stoner factor = {stoner:.6f}, lambda_eliash = {lambda_eliash:.6f}', flush=True)
     if sw_out_self:
         np.save('gap', gap)

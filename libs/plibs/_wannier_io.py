@@ -23,7 +23,9 @@ def read_epa_output(filename: str) -> tuple[int, int, np.ndarray, np.ndarray, np
     @return    step: Grid steps [ngrid] (eV)
     @return    nbin: Number of bins per grid [ngrid] int64
     @return    wavg: Averaged phonon frequencies [nmodes] (eV)
-    @return    gavg: EPA averaged |g|^2 [ngrid, nbin_max, nbin_max, nmodes] (eV^2)
+    @return    gavg: EPA averaged |g|^2 [ngrid, initial bin, final bin, nmodes] (eV^2), the
+                     file's own order (epa.f90 writes  ii jj kk gavg(:,kk,jj,ii)  with jj the
+                     initial-state and kk the final-state bin); calc_tau_epa reads it so
     """
     cm2ev = 1.23981e-4
     with open(filename) as f:
@@ -48,7 +50,7 @@ def read_epa_output(filename: str) -> tuple[int, int, np.ndarray, np.ndarray, np
             jj = int(tokens[1]) - 1
             kk = int(tokens[2]) - 1
             g2 = np.array(tokens[3:3+nmodes], dtype=np.float64)
-            gavg[ii, kk, jj, :] = g2  # eV^2
+            gavg[ii, jj, kk, :] = g2  # eV^2, [grid, initial, final, mode]
     return ngrid, nmodes, edge, step, nbin, wavg, gavg
 
 
@@ -71,6 +73,40 @@ def _irr_to_full_kgrid(data_irr: np.ndarray, invk: np.ndarray, kmap: np.ndarray,
     full[..., ix_arr[d], iy_arr[d], iz_arr[d]] = data_irr[..., ik_arr[d]]
     # TRS-related k-points: apply complex conjugation (TRS: f(k) = f*(-k))
     full[..., ix_arr[t], iy_arr[t], iz_arr[t]] = np.conj(data_irr[..., ik_arr[t]])
+    return full
+
+
+def _irr_to_full_kgrid_normal(data_irr: np.ndarray, invk: np.ndarray, kmap: np.ndarray, Nx: int, Ny: int,
+                              Nz: int, invs: np.ndarray | None = None,
+                              slist: np.ndarray | None = None) -> np.ndarray:
+    """
+    @brief Expand a normal-state G-like quantity (the self-energy) from the irreducible k-points
+           to the full BZ, with the time-reversal rule the Fortran FLEX loops use.
+    Time reversal maps k -> -k at the SAME iw_n and transposes the orbital pair:
+    Sigma(-k, iw)[a, b] = s_a s_b Sigma(k, iw)[inv(b), inv(a)] (fselfwithsoc.f90 calc_sigma_soc),
+    which without SOC (invs = identity, s = 1) is Sigma(-k, iw) = Sigma(k, iw)^T (fself.f90).
+    It is NOT the complex conjugate: Sigma^*(k, iw_n) is the value at -iw_n, so conjugating
+    flips the sign of Im Sigma(iw_n > 0) -- an acausal self-energy -- on every TRS partner.
+    @param data_irr: (Norb, Norb, ..., Nk_irr) complex128
+    @param     invk: [Nkall, 3] int64 — col-0: Fortran 1-based irr-k index, col-1: 0=direct / !=0=TRS partner
+    @param     kmap: [Nkall, 3] int64 — FFT grid indices (ix, iy, iz), 0-based
+    @param     invs: spin-flip partner of each orbital [Norb], Fortran 1-based (SOC only)
+    @param    slist: spin sign +-1 of each orbital [Norb] (SOC only)
+    @return    full: (Norb, Norb, ..., Nx, Ny, Nz) complex128
+    """
+    ik_arr = invk[:, 0] - 1
+    is_tr = invk[:, 1] != 0
+    ix_arr, iy_arr, iz_arr = kmap[:, 0], kmap[:, 1], kmap[:, 2]
+    full = np.zeros(data_irr.shape[:-1] + (Nx, Ny, Nz), dtype=np.complex128)
+    d = np.where(~is_tr)[0]
+    t = np.where(is_tr)[0]
+    full[..., ix_arr[d], iy_arr[d], iz_arr[d]] = data_irr[..., ik_arr[d]]
+    src = data_irr[..., ik_arr[t]]
+    if invs is not None:
+        p = np.asarray(invs, dtype=np.int64) - 1
+        sg = np.outer(slist, slist).astype(np.float64)
+        src = sg.reshape(sg.shape + (1,)*(src.ndim-2)) * src[p][:, p]
+    full[..., ix_arr[t], iy_arr[t], iz_arr[t]] = src.swapaxes(0, 1)
     return full
 
 
@@ -152,7 +188,8 @@ def _write_wannier_dat(fname: str, data_out: np.ndarray, rvec_kept: np.ndarray, 
 
 def output_self_wannier(sigmak: np.ndarray, mu_self: float, kmap: np.ndarray, invk: np.ndarray,
                         Nx: int, Ny: int, Nz: int, Nw: int, temp: float, N_cut: int = 64,
-                        zero_tol: float = 1e-5, fname: str = 'self_en_wannier') -> None:
+                        zero_tol: float = 1e-5, fname: str = 'self_en_wannier',
+                        invs: np.ndarray | None = None, slist: np.ndarray | None = None) -> None:
     """
     @brief Convert self-energy Sigma(k, iw_n) -> Sigma(R, iw_n) in Wannier-real-space format.
     R-vectors are all grid points with at least one non-zero (orbital, Matsubara) component
@@ -175,8 +212,10 @@ def output_self_wannier(sigmak: np.ndarray, mu_self: float, kmap: np.ndarray, in
     @param    N_cut: number of leading Matsubara frequencies to keep (default 64)
     @param zero_tol: Re/Im components below zero_tol * max|Sigma| are set to 0 (default 1e-5)
     @param    fname: output file base name
+    @param     invs: spin-flip partner of each orbital, Fortran 1-based (SOC runs; None without SOC)
+    @param    slist: spin sign +-1 of each orbital (SOC runs)
     """
-    sigma_full = _irr_to_full_kgrid(sigmak, invk, kmap, Nx, Ny, Nz)
+    sigma_full = _irr_to_full_kgrid_normal(sigmak, invk, kmap, Nx, Ny, Nz, invs, slist)
     s11_iw0 = sigma_full[0, 0, 0]
     print(f'[Pre-FFT] Sigma_11(iw_0): Gamma={sigma_full[0, 0, 0, 0, 0, 0]:.6e}, '
           f'max|..|={np.abs(s11_iw0).max():.6e}', flush=True)
@@ -187,7 +226,8 @@ def output_self_wannier(sigmak: np.ndarray, mu_self: float, kmap: np.ndarray, in
     N_cut_used = data_out.shape[2]
     iw_grid    = (2 * np.arange(N_cut_used) + 1) * np.pi * temp
     try:
-        np.savez(fname, sigma=data_out, rvec=rvec_kept, iw=iw_grid, mu=mu_self, temp=temp)
+        np.savez(fname, sigma=data_out, rvec=rvec_kept, iw=iw_grid, mu=mu_self, temp=temp,
+                 mesh=np.array([Nx, Ny, Nz], dtype=np.int64))
     except OSError as e:
         print(f'Error: Failed to write {fname}.npz: {e}', flush=True)
     _write_wannier_dat(fname, data_out, rvec_kept, iw_grid, Nw,

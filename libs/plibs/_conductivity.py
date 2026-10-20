@@ -5,6 +5,7 @@ Boltzmann / linear-response transport drivers: relaxation-time models, weak-fiel
 coefficient with carrier analysis, thermoelectric tensors, optical constants and colours.
 """
 import os
+import warnings
 import numpy as np
 import scipy.linalg as sclin
 import scipy.constants as scconst
@@ -12,6 +13,7 @@ import libs.flibs as flibs
 import libs.plibs._units as _units
 import libs.plibs._bands as _bands
 import libs.plibs._calc as _calc
+import libs.plibs._lattice as _lattice
 import libs.plibs._color as _color
 import libs.plibs._optical as _optical
 import libs.plibs._response as _response
@@ -20,8 +22,8 @@ import libs.plibs._wannier_io as _wannier_io
 # Public API of this submodule; keeps `from ._x import *` in __init__.py from
 # re-exporting numpy, scipy, ctypes and the sibling packages imported above.
 __all__ = [
-    'print_matrix', 'build_tau', 'print_tau_summary', 'get_hall_coe', 'calc_conductivity_Boltzmann',
-    'calc_conductivity_lrt'
+    'print_matrix', 'build_tau', 'flex_quasiparticles', 'print_tau_summary', 'get_hall_coe',
+    'calc_conductivity_Boltzmann', 'calc_conductivity_lrt'
 ]
 
 
@@ -30,6 +32,39 @@ def print_matrix(label: str, mat: np.ndarray, width: float = 10, prec: int = 3, 
     print(label, flush=True)
     for row in np.asarray(mat).round(ndigits):
         print(f" {row[0]:{width}.{prec}e} {row[1]:{width}.{prec}e} {row[2]:{width}.{prec}e}", flush=True)
+
+
+# tau_modes whose tau is scaled by tau_const ('epa' and 'flex' derive tau on their own)
+_TAU_CONST_MODES = ('const', 'e2', 'dos')
+
+
+def _tau_const_ok(tau_const: float | None, tau_kw: dict) -> bool:
+    """tau_const must be positive only where the tau_mode uses it; None is allowed otherwise."""
+    if tau_kw.get('tau_mode') in _TAU_CONST_MODES and (tau_const is None or tau_const <= 0):
+        print(f"Error: Relaxation time (tau_const) must be positive for tau_mode='{tau_kw.get('tau_mode')}' "
+              f"({tau_const})", flush=True)
+        return False
+    return True
+
+
+def _inv_conducting(M: np.ndarray, rtol: float = 1.0e-12) -> tuple[np.ndarray, str]:
+    """
+    Inverse of a 3x3 transport tensor (K0, sigma, L11) on the directions that conduct, and a
+    label of those that do not ('' if none).  A strictly 2D model, or Nz = 1 (only kz = 0, where
+    v_z = dE/dkz vanishes), has sigma_zz = 0 exactly: the full inverse does not exist, yet the
+    in-plane S, Peltier, kappa and Lorenz are well defined, and the SVD pseudo-inverse with the
+    singular values below rtol*max dropped gives exactly the inverse of that block (the
+    ordinary inverse when M is regular).  Quantities along a dead direction come out 0.
+    """
+    u, sv, vh = np.linalg.svd(M)
+    keep = sv > rtol*sv.max() if sv.max() > 0 else np.zeros(3, dtype=bool)
+    inv = (vh[keep].conj().T/sv[keep]).dot(u[:, keep].conj().T)
+    dead = []
+    for v in vh[~keep]:
+        a = int(np.argmax(np.abs(v)))
+        dead.append('xyz'[a] if abs(v[a]) > 1.0-1.0e-8 else
+                    '(' + ', '.join(f'{c:.2f}' for c in np.real_if_close(v)) + ')')
+    return inv, ', '.join(dead)
 
 
 def build_tau(tau_mode: str, units: _units.Units, eig: np.ndarray, mu: float, temp: float, tau_const: float,
@@ -47,6 +82,7 @@ def build_tau(tau_mode: str, units: _units.Units, eig: np.ndarray, mu: float, te
     number; only a k-dependent tau makes R_H(T) meaningful.
 
     tau_mode: 'const', 'e2' (Fermi liquid), 'dos' (DOS ratio) or 'epa' (needs epa_file);
+    'flex' is not a tau alone and is handled by flex_quasiparticles.
     dos_delta is the Lorentzian broadening [eV] of the DOS used by 'dos'.
     Returns (tau, label).
     '''
@@ -82,7 +118,351 @@ def build_tau(tau_mode: str, units: _units.Units, eig: np.ndarray, mu: float, te
         return (tau_const*dos_mu/dos_e,
                 f'DOS-ratio tau: tau = tau_const*D(mu)/D(e), tau(mu) = {tau_const} '
                 + units.tau_label)
-    raise ValueError(f"unknown tau_mode '{tau_mode}' (use 'const', 'e2', 'dos' or 'epa')")
+    if tau_mode == 'flex':
+        raise ValueError("tau_mode='flex' renormalizes the bands as well as tau; "
+                         "use flex_quasiparticles (the Boltzmann drivers do this) instead of build_tau")
+    raise ValueError(f"unknown tau_mode '{tau_mode}' (use 'const', 'e2', 'dos', 'epa' or 'flex')")
+
+
+def _fold_index(rvec_s: np.ndarray, Nx: int, Ny: int, Nz: int) -> np.ndarray:
+    '''Flat index of R mod (Nx, Ny, Nz) on the C-ordered mesh of gen_klist(sw_pp=False).'''
+    return ((rvec_s[:, 0] % Nx)*Ny+rvec_s[:, 1] % Ny)*Nz+rvec_s[:, 2] % Nz
+
+
+def _sigma_k(sig_w: np.ndarray, idx: np.ndarray, Nx: int, Ny: int, Nz: int) -> np.ndarray:
+    '''
+    Sigma(k) = sum_R Sigma(R) e^{-2 pi i k.R} [Nk, Norb, Norb] at the points of the (Nx, Ny, Nz)
+    mesh, for ONE frequency sig_w [Norb, Norb, Nr]: at k = m/N the phase depends on R only through
+    R mod N (idx, from _fold_index), so folding R onto the mesh and one FFT give that sum exactly.
+    '''
+    Norb, _, Nr = sig_w.shape
+    buf = np.zeros((Nx*Ny*Nz, Norb*Norb), dtype=np.complex128)
+    np.add.at(buf, idx, sig_w.reshape(Norb*Norb, Nr).T)
+    return np.fft.fftn(buf.reshape(Nx, Ny, Nz, Norb*Norb), axes=(0, 1, 2)).reshape(-1, Norb, Norb)
+
+
+def _band_diag_linear(sig_m: np.ndarray, mesh: tuple, klist: np.ndarray, uni: np.ndarray) -> np.ndarray:
+    '''
+    Sigma_nn(k, e) [Nk, Norb, Ne] at the points klist [Nk, 3] (fractional) from Sigma(k_m, e)
+    [Nm, Norb, Norb, Ne] on the periodic mesh `mesh` (gen_klist order), multilinear in k and
+    projected with the eigenvectors uni (as _sigma_band_diag).  A convex combination of the
+    mesh values, so what holds at every mesh point -- a negative semidefinite anti-Hermitian
+    part (causality), dRe Sigma/de < 1 (Z > 0) -- holds everywhere; a Fourier interpolation of
+    the real-axis Sigma^R, much sharper in k than Sigma(iw_n), rings and breaks both.
+    '''
+    m = np.array(mesh)
+    x = np.mod(klist, 1.0)*m
+    i0 = np.floor(x).astype(np.int64) % m
+    t = np.where(m == 1, 0.0, x-np.floor(x))   # a single-point direction is constant
+    corners = []
+    for c in np.ndindex(2, 2, 2):
+        c = np.array(c)
+        if np.any((c == 1) & (m == 1)):
+            continue
+        wgt = np.prod(np.where(c == 1, t, 1.0-t), axis=1)
+        i = (i0+c) % m
+        corners.append((wgt, (i[:, 0]*m[1]+i[:, 1])*m[2]+i[:, 2]))
+    Nk, Norb = uni.shape[:2]
+    snn = np.empty((Nk, Norb, sig_m.shape[3]), dtype=np.complex128)
+    for e in range(sig_m.shape[3]):   # one energy at a time: Sigma(k) is Nk*Norb^2 per energy
+        sk = sum(wgt[:, None, None]*sig_m[idx, :, :, e] for wgt, idx in corners)
+        snn[:, :, e] = np.einsum('kna,kab,knb->kn', uni, sk, uni.conj(), optimize=True)
+    return snn
+
+
+def _sigma_band_diag(sig_r: np.ndarray, rvec_s: np.ndarray, uni: np.ndarray, Nx: int, Ny: int,
+                     Nz: int) -> np.ndarray:
+    '''
+    Band-diagonal self-energy Sigma_nn(k, w) = <n k|Sigma(k, w)|n k> [Nk, Norb, Nw] on the
+    periodic mesh of _lattice.gen_klist(Nx, Ny, Nz, sw_pp=False), from the Wannier-R form
+    sig_r [Norb, Norb, Nw, Nr] (self_en_wannier.npz, or its real-axis continuation).  sig_r is
+    in the same orbital layout as gen_ham's H(k) (it goes straight into gen_green with it), so
+    the eigenvectors of that H(k) project it directly.  uni[k] holds them as conjugated rows
+    (U = uni[k]^H).  Sigma(k) = sum_R Sigma(R) e^{-2 pi i k.R} (as spectrum_on_path).
+    '''
+    Norb, _, Nw, Nr = sig_r.shape
+    idx = _fold_index(rvec_s, Nx, Ny, Nz)
+    snn = np.empty((Nx*Ny*Nz, Norb, Nw), dtype=np.complex128)
+    for n in range(Nw):   # one frequency at a time: Sigma(k) itself is Nk*Norb^2 per frequency
+        sk = _sigma_k(sig_r[:, :, n, :], idx, Nx, Ny, Nz)
+        snn[:, :, n] = np.einsum('kna,kab,knb->kn', uni, sk, uni.conj(), optimize=True)
+    return snn
+
+
+def _self_mesh(npz: np.lib.npyio.NpzFile, fname: str) -> tuple:
+    '''
+    The k-mesh FLEX solved Sigma on.  Exports carry it ('mesh'); for older files it is the
+    extent of the stored R (exact unless zero_tol dropped the outermost shell, in which case
+    the mesh comes out coarser and its points are no longer FLEX's own).
+    '''
+    if 'mesh' in npz.files:
+        return tuple(int(n) for n in npz['mesh'])
+    r = np.asarray(npz['rvec'], dtype=np.int64)
+    mesh = tuple(int(n) for n in r.max(axis=0)-r.min(axis=0)+1)
+    print(f"{fname}: no 'mesh' stamp, FLEX k-mesh taken as {mesh[0]}x{mesh[1]}x{mesh[2]} from the R "
+          'extent; rerun FLEX (sw_out_self=True) to store it', flush=True)
+    return mesh
+
+
+def _repair_causal(s: np.ndarray, zl: np.ndarray, tol: float) -> np.ndarray:
+    '''
+    s [Norb, Norb, Ne] on the real energies zl (zl[:3] = -h, 0, h, then an ascending grid)
+    made causal: on the grid, every run of energies whose anti-Hermitian part has a positive
+    eigenvalue (> tol) is replaced by the linear interpolation between the causal energies
+    bounding it (the nearest one at a grid edge); -h, 0, h are then re-read from the grid if
+    any of them was acausal or sits in a repaired run.  The run is first widened over the flanks of the dip, while the
+    margin -lambda_max grows outward: its zero crossings would pin Gamma ~ 0 into the
+    interpolation.  No causal grid energy: eigenvalues clipped to <= 0 instead.
+    '''
+    lmax = np.linalg.eigvalsh(np.moveaxis((s-np.conj(s.swapaxes(0, 1)))/2j, 2, 0)).max(axis=1)
+    e = zl.real
+    good = lmax[3:] <= tol
+    if not good.any():
+        w, v = np.linalg.eigh(np.moveaxis((s-np.conj(s.swapaxes(0, 1)))/2j, 2, 0))
+        a = np.einsum('eij,ej,ekj->eik', v, np.minimum(w, 0.0), v.conj())
+        return (s+np.conj(s.swapaxes(0, 1)))/2.0+1j*np.moveaxis(a, 0, 2)
+    g = s[:, :, 3:].copy()
+    eg, mg = e[3:], -lmax[3:]
+    bad = ~good
+    for j in np.where(np.diff(bad.astype(np.int8)) == 1)[0]:     # good j, bad j+1: left flank
+        while j > 0 and mg[j-1] > mg[j]:
+            bad[j] = True
+            j -= 1
+    for j in np.where(np.diff(bad.astype(np.int8)) == -1)[0]+1:  # bad j-1, good j: right flank
+        while j < len(mg)-1 and mg[j+1] > mg[j]:
+            bad[j] = True
+            j += 1
+    good = ~bad
+    if not good.any():                      # the flanks swallowed the grid: keep the causal points
+        good = lmax[3:] <= tol
+    ig = np.where(good)[0]
+    for j in np.where(~good)[0]:
+        lo, hi = ig[ig < j], ig[ig > j]
+        if len(lo) and len(hi):
+            t = (eg[j]-eg[lo[-1]])/(eg[hi[0]]-eg[lo[-1]])
+            g[:, :, j] = (1.0-t)*s[:, :, 3+lo[-1]]+t*s[:, :, 3+hi[0]]
+        else:
+            g[:, :, j] = s[:, :, 3+(lo[-1] if len(lo) else hi[0])]
+    out = np.concatenate([s[:, :, :3], g], axis=2)
+    jb = np.clip(np.searchsorted(eg, e[:3])-1, 0, len(eg)-2)   # grid interval holding -h, 0, h
+    if (lmax[:3] > tol).any() or not (good[jb].all() and good[jb+1].all()):
+        t = (e[:3]-eg[jb])/(eg[jb+1]-eg[jb])
+        out[:, :, :3] = (1.0-t)*g[:, :, jb]+t*g[:, :, jb+1]
+    return out
+
+
+def _causal_retarded(sig_c: np.ndarray, iwl: np.ndarray, zl: np.ndarray, uni_c: np.ndarray, near: np.ndarray,
+                     h: float, orders: np.ndarray, block: int) -> tuple:
+    '''
+    Sigma^R(k, e) [Nk, Norb, Norb, Ne] on the real energies zl (zl[:3] = -h, 0, h) by a Pade
+    ensemble of the orbital matrix elements, at the k of FLEX's own mesh (sig_c [Nk, Norb, Norb,
+    Niw] is the solver's data there, not an interpolation, so the continuation sees no
+    interpolation noise).  An order is accepted at k when it is CAUSAL: the anti-Hermitian part
+    (Sigma - Sigma^H)/2i is negative semidefinite at every e, and Z > 0 on the bands near the
+    Fermi level (near [Nk, Norb]; Z from the slope of Re Sigma_nn over +-h; Z > 1 is allowed:
+    away from the Fermi surface -Im Sigma need not be smallest at e = 0).  The element-wise
+    median of the accepted orders is used, their mean (a convex combination, causal again)
+    when the median is not.  k-points where no order is accepted (orders agreeing on a narrow
+    acausal dip are the typical case, far from the Fermi surface) take the plain median and
+    REPAIR it: on each energy interval where it is acausal the matrix is replaced by the linear
+    interpolation between the causal energies at the ends (a convex combination, so causal);
+    with no causal energy at all, the eigenvalues of its anti-Hermitian part are clipped to <= 0.
+    Low orders are not tried there: they are causal but too smooth, and would put a vanishing
+    Gamma at large |e| into the k-interpolation.
+    Returns (Sigma^R, number of accepted orders [Nk] (0: repaired), spread of
+    -Im Sigma_nn(0) over the accepted orders [Nk]).
+    '''
+    Nk, Norb, _, _ = sig_c.shape
+    Ne = len(zl)
+    out = np.empty((Nk, Norb, Norb, Ne), dtype=np.complex128)
+    nok = np.zeros(Nk, dtype=np.int64)
+    spread = np.zeros(Nk)
+    tol = 1.0e-8*np.abs(sig_c[..., 0]).max()
+    antiherm = lambda s: (s-np.conj(s.swapaxes(1, 2)))/2j
+
+    def causal(s, u, nr):   # s [nk, Norb, Norb, Ne] -> bool [nk]
+        lmax = np.linalg.eigvalsh(np.moveaxis(antiherm(s), 3, 1)).max(axis=(1, 2))
+        snn = np.einsum('kna,kabe,knb->kne', u, s[..., :3], u.conj())
+        slope = (snn[..., 2].real-snn[..., 0].real)/(2.0*h)
+        return np.isfinite(s).all(axis=(1, 2, 3)) & (lmax <= tol) & ((slope < 1.0) | ~nr).all(axis=1)
+
+    def ensemble(kk, ords):   # continuations of the k-points kk with the orders ords
+        nb = len(kk)
+        data = sig_c[kk].reshape(nb*Norb*Norb, -1)
+        zz = np.tile(zl, (nb*Norb*Norb, 1))
+        trial = np.empty((len(ords), nb, Norb, Norb, Ne), dtype=np.complex128)
+        ok = np.zeros((len(ords), nb), dtype=bool)
+        for i, n in enumerate(ords):
+            trial[i] = flibs.pade_batch(data[:, :n], iwl[:n], zz).reshape(nb, Norb, Norb, Ne)
+            ok[i] = causal(trial[i], uni_c[kk], near[kk])
+        with np.errstate(invalid='ignore', divide='ignore'), warnings.catch_warnings():
+            warnings.simplefilter('ignore', RuntimeWarning)   # all-NaN slices: k without an accepted order
+            raw = np.nanmedian(np.where(np.isfinite(trial), trial.real, np.nan), axis=0) \
+                + 1j*np.nanmedian(np.where(np.isfinite(trial), trial.imag, np.nan), axis=0)
+            trial[~ok] = complex(np.nan, np.nan)   # a bare np.nan would leave Im = 0 in the medians
+            med = np.nanmedian(trial.real, axis=0)+1j*np.nanmedian(trial.imag, axis=0)
+            avg = np.nanmean(trial, axis=0)
+            g0 = -np.einsum('kna,okab,knb->okn', uni_c[kk], trial[..., 1], uni_c[kk].conj()).imag
+            sp = (np.nanmax(g0, axis=0)-np.nanmin(g0, axis=0))/np.maximum(np.abs(np.nanmedian(g0, axis=0)), 1e-300)
+            sp = np.nan_to_num(np.nanmax(np.where(near[kk], sp, np.nan), axis=1))   # widest band near E_F
+        res = np.where(causal(np.nan_to_num(med), uni_c[kk], near[kk])[:, None, None, None], med, avg)
+        return res, ok.sum(axis=0), sp, raw
+
+    allk = np.arange(Nk)
+    raw = np.empty_like(out)
+    for k0 in range(0, Nk, block):
+        kk = allk[k0:k0+block]
+        out[kk], nok[kk], spread[kk], raw[kk] = ensemble(kk, orders)
+    for k in allk[nok == 0]:
+        out[k] = _repair_causal(np.nan_to_num(raw[k]), zl, tol)
+    return out, nok, spread
+
+
+def flex_quasiparticles(eig: np.ndarray, Nx: int, Ny: int, Nz: int, ham_r: np.ndarray, S_r: np.ndarray,
+                        rvec: np.ndarray, temp: float, units: _units.Units, gamma_imp: float = 0.0,
+                        n_pade: int = 40, ewin: float = 20.0, de: float = 0.25,
+                        fname: str = 'self_en_wannier.npz') -> dict:
+    '''
+    Quasiparticle Boltzmann parameters (tau_mode='flex') from the FLEX self-energy.
+
+    Sigma(k, iw_n) is continued to the real axis ON FLEX'S OWN k-mesh, where it is the solver's
+    data rather than a Fourier interpolation (interpolated data put spurious near-axis Pade
+    poles on ~10% of the states, whatever the arithmetic precision): the orbital matrix
+    Sigma^R(k, e) is built on an energy grid by a causal Pade ensemble (_causal_retarded),
+    interpolated multilinearly in k onto the transport mesh (which keeps it causal, unlike a
+    Fourier interpolation of the sharp real-axis Sigma^R) and projected on the bands.  Around
+    the Fermi level the pole of G_nn = 1/(e - xi - Sigma_nn(e)), xi = E - mu_FLEX, gives
+        Z = 1/(1 - dRe Sigma^R/de|_0),   e* = Z (xi + Re Sigma^R(0)),
+        Gamma = -Im Sigma^R(e*) + gamma_imp,   tau* = hbar/(2 Z Gamma),
+    and the bubble (bare current vertex v) in this limit equals Boltzmann transport with
+    energies e*, velocities Z v, inverse mass Z m^-1 and lifetime tau*:
+    sigma ~ (Z v)^2 tau* = Z v^2 hbar/(2 Gamma) for each state.  Gamma is taken at e*, not
+    at 0, so its particle-hole asymmetry -- what the Seebeck coefficient feeds on -- is kept.
+    No current-vertex correction (d Sigma/dk, backflow): that is the Kubo bubble, not the
+    conserving response.
+
+    eig: band energies of the caller's mesh [Nk, Norb] (checked against this mesh's own,
+    so the returned arrays line up with the caller's velocities).
+    gamma_imp: extra k-independent damping [eV] (impurity scattering, Matthiessen's rule);
+    n_pade: highest Pade order (Matsubara points); orders n_pade/2 .. n_pade are combined.
+    ewin, de: the real-energy grid is -ewin*T .. ewin*T in steps of de*T; e* is clipped to it
+    (states farther out carry no -df/de weight) and Gamma(e*) is interpolated linearly on it.
+    Returns a dict: eig (= mu + e*), Z, gamma, tau [tau_unit] (all [Nk, Norb]), mu (= the
+    FLEX chemical potential, the Fermi level of e*) and a label.
+    '''
+    if len(S_r) != 0:
+        raise ValueError("tau_mode='flex' needs an orthogonal (non-MLO) basis, as FLEX does")
+    try:
+        npz = np.load(fname)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"tau_mode='flex' needs '{fname}' (run FLEX with sw_out_self=True)") from None
+    sig_r, rvec_s, iw = npz['sigma'], np.asarray(npz['rvec'], dtype=np.int64), npz['iw']
+    mu_self, temp_self = float(npz['mu']), float(npz['temp'])
+    # Sigma lives on the Matsubara mesh of ITS temperature; transport at another T would
+    # silently mix two temperatures (the Fermi window here, the scattering there)
+    if not np.isclose(temp_self, temp, rtol=1.0e-6, atol=0.0):
+        raise ValueError(f"'{fname}' was written at T = {temp_self:.6e} eV but transport runs at "
+                         f"T = {temp:.6e} eV: rerun FLEX at this temperature")
+    Norb = ham_r.shape[1]
+    if sig_r.shape[0] != Norb:
+        raise ValueError(f"'{fname}' has Norb = {sig_r.shape[0]}, the Hamiltonian {Norb}")
+    Nk, klist = _lattice.gen_klist(Nx, Ny, Nz, sw_pp=False)
+    eig0, uni = _bands.get_eigs(klist, ham_r, S_r, rvec)
+    if eig0.shape != eig.shape or not np.allclose(eig0, eig):
+        raise ValueError('flex_quasiparticles: the caller\'s band energies are not on the '
+                         'gen_klist(Nx, Ny, Nz, sw_pp=False) mesh')
+    Npd = min(n_pade, len(iw))
+    if Npd < 2:
+        raise ValueError(f"tau_mode='flex' needs at least 2 Matsubara points (n_pade = {n_pade})")
+    iwl = 1j*iw[:Npd]
+    # --- Sigma^R on FLEX's mesh ------------------------------------------------
+    # energies: -h, 0, h (Z and Re Sigma(0) from a central difference, h << T) and the grid
+    # Gamma(e*) is read from
+    h = 0.1*temp
+    Ng = int(round(ewin/de))
+    egrid = de*temp*np.arange(-Ng, Ng+1)
+    zl = np.concatenate([[-h, 0.0, h], egrid]).astype(np.complex128)
+    mx, my, mz = _self_mesh(npz, fname)
+    idx = _fold_index(rvec_s, mx, my, mz)
+    sig_c = np.stack([_sigma_k(sig_r[:, :, n, :], idx, mx, my, mz) for n in range(Npd)], axis=-1)
+    _, klist_c = _lattice.gen_klist(mx, my, mz, sw_pp=False)
+    eig_c, uni_c = _bands.get_eigs(klist_c, ham_r, S_r, rvec)
+    near = np.abs(eig_c-mu_self) < ewin*temp
+    orders = np.unique(np.linspace(max(2, Npd//2), Npd, 8).astype(np.int64))
+    block = max(1, int(2.5e8//(16*Norb*Norb*len(zl)*(len(orders)+3))))   # ~250 MB of trial continuations
+    sig_ret, nok, spread = _causal_retarded(sig_c, iwl, zl, uni_c, near, h, orders, block)
+    # --- interpolate onto the transport mesh, project on the bands ---------------
+    snn = _band_diag_linear(sig_ret, (mx, my, mz), klist, uni).reshape(Nk*Norb, len(zl))
+    xi = eig.ravel()-mu_self
+    resig0 = snn[:, 1].real
+    with np.errstate(divide='ignore'):
+        zr = 1.0/(1.0-(snn[:, 2].real-snn[:, 0].real)/(2.0*h))
+    # Z > 1 (allowed away from the Fermi surface, see _causal_retarded): clipped to (0, 1]
+    zbad = ~((zr > 0.0) & (zr <= 1.0))
+    Z = np.where(zbad, np.clip(np.nan_to_num(zr, nan=1.0, posinf=1.0, neginf=1.0), 1.0e-3, 1.0), zr)
+    estar = Z*(xi+resig0)
+    x = np.clip(estar, egrid[0], egrid[-1])
+    j = np.clip(np.floor((x-egrid[0])/(de*temp)).astype(np.int64), 0, 2*Ng-1)
+    t = (x-egrid[j])/(de*temp)
+    rows = np.arange(Nk*Norb)
+    gam = -((1.0-t)*snn[rows, 3+j].imag+t*snn[rows, 4+j].imag)
+    gfloor = 1.0e-3*temp
+    gtot = gam+gamma_imp
+    gam = np.maximum(gtot, gfloor)
+    tau = units.hbar/(2.0*Z*gam)/units.tau_unit
+    # --- report, over the states that carry the Fermi window ----------------
+    w = 0.25*(1.-np.tanh(0.5*estar/temp)**2)/temp
+    sel = w > 0.01*w.max()
+    wa = lambda x: (w*x).sum()/w.sum()
+    print(f'FLEX quasiparticles from {fname}: mu_FLEX = {mu_self:.4f} eV, Pade on the FLEX mesh '
+          f'{mx}x{my}x{mz}, orders {orders.min()}..{orders.max()} ({len(orders)}), real-energy grid '
+          f'+-{ewin:g}T / {de:g}T, gamma_imp = {gamma_imp:.3e} eV', flush=True)
+    print(f'  Fermi-window averages: <Z> = {wa(Z):.4f}  <Gamma> = {wa(gam):.4e} eV  '
+          f'<Re Sigma(0)> = {wa(resig0):.4e} eV', flush=True)
+    print(f'  Z range [{Z[sel].min():.4f}, {Z[sel].max():.4f}],  Gamma range '
+          f'[{gam[sel].min():.4e}, {gam[sel].max():.4e}] eV over {sel.sum()} states', flush=True)
+    nfb = (nok == 0).sum()
+    print(f'  Pade causal in {nok.mean()/len(orders)*100:.1f}% of the orders (FLEX-mesh average); '
+          f'<spread of Gamma(0) over orders / Gamma> = {spread[nok > 0].mean() if (nok > 0).any() else 0.0:.3e}',
+          flush=True)
+    nz, nfl = zbad[sel].sum(), (gtot < gfloor)[sel].sum()
+    if nfb or nz or nfl:
+        print(f'  WARNING: {nfb} of {len(nok)} FLEX k-points had no causal Pade order (acausal energies of '
+              f'the median repaired by interpolation); in the Fermi window {nz} states had Z outside (0, 1] (clipped) '
+              f'and {nfl} sit on the Gamma floor {gfloor:.1e} eV (add gamma_imp if these dominate)', flush=True)
+    return {'eig': (mu_self+estar).reshape(Nk, Norb), 'Z': Z.reshape(Nk, Norb),
+            'gamma': gam.reshape(Nk, Norb), 'tau': tau.reshape(Nk, Norb), 'mu': mu_self,
+            'label': f'FLEX quasiparticles: tau* = hbar/(2 Z Gamma(e*)), Pade on the FLEX mesh, orders '
+                     f'{orders.min()}..{orders.max()}'
+                     + (f', gamma_imp = {gamma_imp:.3e} eV' if gamma_imp else '')}
+
+
+def _carrier_state(eig: np.ndarray, vk: np.ndarray, imass: np.ndarray | None, Nk: int, kweight: np.ndarray,
+                   fill: float, temp: float, tau_const: float, units: _units.Units, tau_kw: dict,
+                   rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray, Nx: int, Ny: int,
+                   Nz: int, Nw: int) -> tuple:
+    '''
+    (eig, vk, imass, mu, tau, tau_label) the Boltzmann kernels run on.  For every tau_mode
+    but 'flex' these are the bare bands, mu fixed by fill, and build_tau; 'flex' replaces
+    them with the FLEX quasiparticles (renormalized energies and velocities, the FLEX mu).
+    tau_kw['flex_kw'] holds the keyword arguments of flex_quasiparticles.
+    '''
+    tau_kw = dict(tau_kw)
+    flex_kw = tau_kw.pop('flex_kw', None) or {}
+    if tau_kw.get('tau_mode') == 'flex':
+        qp = flex_quasiparticles(eig, Nx, Ny, Nz, ham_r, S_r, rvec, temp, units, **flex_kw)
+        # Luttinger check: the quasiparticle Fermi volume should hold the electrons FLEX
+        # fixed mu_FLEX with; a large mismatch means e* = Z(xi + Re Sigma(0)) is not a good
+        # description of this Fermi surface (Gamma ~ band scale, or a poor continuation)
+        nqp = (flibs.get_ffermi(qp['eig'], qp['mu'], temp).sum(axis=1)*kweight).sum()/kweight.sum()
+        print(f'  quasiparticle filling = {nqp:.4f}  (fill = {fill:.4f})', flush=True)
+        Zv = qp['Z'][:, :, None]
+        return (qp['eig'], vk*Zv, None if imass is None else imass*Zv[..., None], qp['mu'], qp['tau'],
+                qp['label'])
+    mu = _bands.calc_mu(eig, Nk, fill, temp, kweight)
+    tau, tau_label = build_tau(units=units, eig=eig, mu=mu, temp=temp, tau_const=tau_const, rvec=rvec, ham_r=ham_r,
+                               S_r=S_r, avec=avec, Nx=Nx, Ny=Ny, Nz=Nz, Nw=Nw, **tau_kw)
+    return eig, vk, imass, mu, tau, tau_label
 
 
 def print_tau_summary(tau: np.ndarray, eig: np.ndarray, mu: float, temp: float, label: str, indent: str = '  ',
@@ -119,9 +499,8 @@ def _hall_at_mesh(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np
                                                    sw_veloc=True, sw_mass=True)
     Vuc = sclin.det(avec)*1e-30
     wsum = kweight.sum()          # NOT Nk: stays correct if a symmetry-reduced mesh is ever used
-    mu = _bands.calc_mu(eig, Nk, fill, temp, kweight)
-    tau, tau_label = build_tau(units=units, eig=eig, mu=mu, temp=temp, tau_const=tau_const, rvec=rvec, ham_r=ham_r,
-                               S_r=S_r, avec=avec, Nx=Nx, Ny=Ny, Nz=Nz, Nw=Nw, **tau_kw)
+    eig, vk, imass, mu, tau, tau_label = _carrier_state(eig, vk, imass, Nk, kweight, fill, temp, tau_const, units,
+                                                        tau_kw, rvec, ham_r, S_r, avec, Nx, Ny, Nz, Nw)
     K0, K1, K2 = flibs.calc_Kn(eig, vk, kweight, temp, mu, tau)
     # Full Hall kernel S[n,a,b,g] for the three field directions g, band resolved.
     # The tensor (rather than the single B||z scalar) is what allows the proper
@@ -177,7 +556,7 @@ def _hall_at_mesh(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np
 
 
 def get_hall_coe(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray, Nx: int, Ny: int, Nz: int,
-                 fill: float, temp: float, tau_const: float, units: _units.Units, tau_kw: dict, Nw: int = 300,
+                 fill: float, temp: float, tau_const: float | None, units: _units.Units, tau_kw: dict, Nw: int = 300,
                  with_spin: bool = False, mesh_list: list | None = None) -> list | None:
     '''
     Weak-field Hall coefficient R_H and the Hall carrier density n_H=1/(e|R_H|).
@@ -188,14 +567,14 @@ def get_hall_coe(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.
     more slowly than sigma and can come out with the WRONG SIGN on an
     under-converged mesh, so a single-mesh number is not usable on its own.
     tau_kw: keyword arguments of build_tau selecting the relaxation-time model
-    (tau_mode, epa_file, dos_delta).
+    (tau_mode, epa_file, dos_delta; flex_kw for tau_mode='flex', see flex_quasiparticles).
+    tau_const: [tau_unit], used by tau_mode 'const', 'e2' and 'dos'; may be None for 'epa'/'flex'.
     '''
     # Parameter validation
     if temp <= 0:
         print("Error: Temperature (temp) is non-positive", flush=True)
         return
-    if tau_const <= 0:
-        print("Error: Relaxation time (tau_const) is non-positive", flush=True)
+    if not _tau_const_ok(tau_const, tau_kw):
         return
     if sclin.det(avec) <= 0:
         print("Error: Unit cell volume (Vuc) is non-positive", flush=True)
@@ -287,12 +666,14 @@ def get_hall_coe(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.
 
 
 def calc_conductivity_Boltzmann(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: np.ndarray, Nx: int,
-                                Ny: int, Nz: int, fill: float, temp: float, tau_const: float, units: _units.Units,
-                                tau_kw: dict, Nw: int = 300, with_spin: bool = False,
+                                Ny: int, Nz: int, fill: float, temp: float, tau_const: float | None,
+                                units: _units.Units, tau_kw: dict, Nw: int = 300, with_spin: bool = False,
                                 sw_tdf: bool = False) -> dict | None:
     '''
     calculate conductivities using Boltzmann equations
-    tau_kw: keyword arguments of build_tau (tau_mode, epa_file, dos_delta)
+    tau_kw: keyword arguments of build_tau (tau_mode, epa_file, dos_delta), plus flex_kw
+    (keyword arguments of flex_quasiparticles) for tau_mode='flex'
+    tau_const: [tau_unit], used by tau_mode 'const', 'e2' and 'dos'; may be None for 'epa'/'flex'
     sw_tdf: compute the transport distribution function first, then energy-integrate
     Returns a dict of the tensors (sigma, kappa, kappa2, sigmaS, Seebeck, Peltier, Lorenz,
     Lorenz2, PF, mu); with sw_tdf also the transport distribution 'tdf' [Nw,3,3] on the
@@ -303,8 +684,7 @@ def calc_conductivity_Boltzmann(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.nda
     if temp <= 0:
         print("Error: Temperature (temp) is non-positive", flush=True)
         return
-    if tau_const <= 0:
-        print("Error: Relaxation time (tau_const) is non-positive", flush=True)
+    if not _tau_const_ok(tau_const, tau_kw):
         return
 
     Nk, eig, vk, kweight = _bands.get_emesh(Nx, Ny, Nz, ham_r, S_r, rvec, avec.T*units.ihbar, sw_veloc=True)
@@ -318,9 +698,8 @@ def calc_conductivity_Boltzmann(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.nda
     wsum = kweight.sum()
     iNV = 1./(wsum*Vuc)
     itemp = 1./temp
-    mu = _bands.calc_mu(eig, Nk, fill, temp, kweight)
-    tau, tau_label = build_tau(units=units, eig=eig, mu=mu, temp=temp, tau_const=tau_const, rvec=rvec, ham_r=ham_r,
-                               S_r=S_r, avec=avec, Nx=Nx, Ny=Ny, Nz=Nz, Nw=Nw, **tau_kw)
+    eig, vk, _, mu, tau, tau_label = _carrier_state(eig, vk, None, Nk, kweight, fill, temp, tau_const, units,
+                                                    tau_kw, rvec, ham_r, S_r, avec, Nx, Ny, Nz, Nw)
     print(f"T = {temp/units.kb:.3f} K", flush=True)
     print(f"mu = {mu:.4f} eV", flush=True)
     print_tau_summary(tau, eig, mu, temp, tau_label, indent='', tau_label=units.tau_label)
@@ -339,27 +718,19 @@ def calc_conductivity_Boltzmann(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.nda
     sigma = gsp*units.tau_unit*units.eC*K0*iNV  # e cancels eV->J so units work out to S/m
     kappa = gsp*units.tau_unit*units.eC*units.kb*K2*iNV*itemp
 
-    # Handle sclin.inv() failures
-    try:
-        K0_inv = sclin.inv(K0)
-        kappa2 = gsp*units.tau_unit*units.eC*units.kb*(K2-K1.dot(K0_inv.dot(K1)))*iNV*itemp
-        Seebeck = -units.kb*K0_inv.dot(K1)*itemp
-        Peltier = K1.dot(K0_inv)
-    except np.linalg.LinAlgError:
-        print("Error: K0 is a singular matrix. Cannot compute Seebeck coefficient and Peltier", flush=True)
-        kappa2 = kappa.copy()
-        Seebeck = np.zeros_like(K0)
-        Peltier = np.zeros_like(K0)
-
-    try:
-        sigma_inv = sclin.inv(sigma*temp)
-        # Lorenz tensor L = kb * kappa . (sigma*T)^-1 (matrix product, not element-wise)
-        Lorenz = units.kb*kappa.dot(sigma_inv)
-        Lorenz2 = units.kb*kappa2.dot(sigma_inv)
-    except np.linalg.LinAlgError:
-        print("Warning: sigma*temp is a singular matrix. Cannot compute Lorenz coefficient", flush=True)
-        Lorenz = np.zeros_like(sigma)
-        Lorenz2 = np.zeros_like(sigma)
+    # inverses on the conducting directions only (see _inv_conducting): a direction without
+    # conduction gets S = Peltier = L = 0 instead of discarding every component
+    K0_inv, dead = _inv_conducting(K0)
+    if dead:
+        print(f"Note: no conduction along {dead} (sigma = 0 there, e.g. a 2D model or Nz = 1); "
+              "Seebeck, Peltier and Lorenz are given on the conducting directions, 0 along it", flush=True)
+    kappa2 = gsp*units.tau_unit*units.eC*units.kb*(K2-K1.dot(K0_inv.dot(K1)))*iNV*itemp
+    Seebeck = -units.kb*K0_inv.dot(K1)*itemp
+    Peltier = K1.dot(K0_inv)
+    sigma_inv = _inv_conducting(sigma*temp)[0]
+    # Lorenz tensor L = kb * kappa . (sigma*T)^-1 (matrix product, not element-wise)
+    Lorenz = units.kb*kappa.dot(sigma_inv)
+    Lorenz2 = units.kb*kappa2.dot(sigma_inv)
     sigmaS = gsp*units.tau_unit*units.kb*units.eC*K1*iNV*itemp
     PF = sigma*Seebeck**2
     print_matrix('sigma matrix (S/m)', sigma)
@@ -421,36 +792,30 @@ def calc_conductivity_lrt(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, 
     # kappa = kappaSconst*(L22 - L12.L11^-1.L12)  (cf. Boltzmann K2-K1.K0^-1.K1).
     # The subtraction is done on the bare L tensors (all share the same prefactor),
     # so kappa2 carries the same kappaSconst as the L22-only kappa.
-    try:
-        kappa2 = kappaSconst*np.array([l22-l12.dot(sclin.inv(l11).dot(l12))
-                                       for l11, l12, l22 in zip(L11, L12, L22)])
-    except np.linalg.LinAlgError:
-        print("Warning: L11 is a singular matrix. Cannot subtract thermoelectric backflow from kappa", flush=True)
-        kappa2 = kappa.copy()
-    # Handle sclin.inv() failures
-    try:
-        Seebeck = np.array([-sclin.inv(s).dot(sS) for s, sS in zip(sigma, sigmaS)])
-    except np.linalg.LinAlgError:
-        print("Warning: sigma is a singular matrix. Cannot compute Seebeck coefficient", flush=True)
-        Seebeck = np.zeros_like(sigma)
+    # inverses on the conducting directions only (see _inv_conducting), frequency by frequency
+    inv_w = [_inv_conducting(l11) for l11 in L11]
+    dead = sorted({d for _, d in inv_w if d})
+    if dead:
+        print(f"Note: no conduction along {'; '.join(dead)} at some frequencies (e.g. a 2D model or Nz = 1); "
+              "Seebeck, kappa backflow and Lorenz are given on the conducting directions", flush=True)
+    kappa2 = kappaSconst*np.array([l22-l12.dot(li.dot(l12)) for (li, _), l12, l22 in zip(inv_w, L12, L22)])
+    # sigma = sigmaconst*L11, so sigma^-1 = L11^-1/sigmaconst on the same directions
+    Seebeck = np.array([-(li/sigmaconst).dot(sS) for (li, _), sS in zip(inv_w, sigmaS)])
     print_matrix('sigma matrix (S/m)', sigma[0].real)
     print_matrix('kappa matrix (L22 only) (W/m/K)', kappa[0].real)
     print_matrix('kappa matrix (full) (W/m/K)', kappa2[0].real)
     print_matrix('sigmaS matrix (A/m/K)', sigmaS[0].real)
     print('Lorenz number (Wohm/K^2) (fe 2.44e-8)', flush=True)
-    try:
-        # Lorenz tensor L = kb * kappa . (sigma*T)^-1 (matrix product, not element-wise)
-        sigmaT_inv = sclin.inv(sigma[0]*temp)
-        Lorenz_matrix = (units.kb*kappa[0].dot(sigmaT_inv)).real.round(10)
-        Lorenz_matrix2 = (units.kb*kappa2[0].dot(sigmaT_inv)).real.round(10)
-        print(' (L22 only):', flush=True)
-        for lor in Lorenz_matrix:
-            print(f" {lor[0]:9.2e} {lor[1]:9.2e} {lor[2]:9.2e}", flush=True)
-        print(' (full):', flush=True)
-        for lor in Lorenz_matrix2:
-            print(f" {lor[0]:9.2e} {lor[1]:9.2e} {lor[2]:9.2e}", flush=True)
-    except np.linalg.LinAlgError:
-        print("Warning: Failed to compute Lorenz coefficient (singular matrix)", flush=True)
+    # Lorenz tensor L = kb * kappa . (sigma*T)^-1 (matrix product, not element-wise)
+    sigmaT_inv = _inv_conducting(sigma[0]*temp)[0]
+    Lorenz_matrix = (units.kb*kappa[0].dot(sigmaT_inv)).real.round(10)
+    Lorenz_matrix2 = (units.kb*kappa2[0].dot(sigmaT_inv)).real.round(10)
+    print(' (L22 only):', flush=True)
+    for lor in Lorenz_matrix:
+        print(f" {lor[0]:9.2e} {lor[1]:9.2e} {lor[2]:9.2e}", flush=True)
+    print(' (full):', flush=True)
+    for lor in Lorenz_matrix2:
+        print(f" {lor[0]:9.2e} {lor[1]:9.2e} {lor[2]:9.2e}", flush=True)
     print_matrix('Seebeck coefficient matrix (V/K)', Seebeck[0].real)
     # dielectric function (relative permittivity) from the optical conductivity,
     # SI convention: eps(w) = 1 + i*sigma(w)/(eps0*w_rad) = 1 + i*hbar*sigma/(eps0*w),

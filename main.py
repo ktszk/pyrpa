@@ -238,7 +238,19 @@ tau_mode = 'const'  # relaxation time model for the Boltzmann transport modes (o
 #         tau = tau_const on the Fermi level.
 # 'dos'  : tau inversely proportional to the DOS at the state's energy (golden-rule scattering
 #         rate), used as a ratio: tau(e) = tau_const*D(mu)/D(e), i.e. tau_const on the Fermi level.
+# 'flex' : FLEX quasiparticles from self_en_wannier.npz (FLEX run with sw_out_self=True at the
+#         SAME temperature). Sigma(k,iw_n) is Pade-continued on the FLEX k-mesh, interpolated
+#         multilinearly onto the transport mesh and projected on the bands: Z, Re Sigma(0) and
+#         Gamma(e*) = -Im Sigma^R at the quasiparticle energy e* give the energies e*, velocities
+#         Z*v and tau* = hbar/(2 Z Gamma); mu is the FLEX one (fill is not used). tau_const is
+#         ignored. Bubble only (no current-vertex correction).
 epa_file = None  # path to the epa.x (job='egrid') output read when tau_mode='epa'
+epa_pair_file = None  # epa.x (job='egrid') output: adds the phonon-mediated attraction built from it to the
+# linearized Eliashberg pairing (option 15, no SOC), on top of the spin/charge fluctuations. None: off.
+# Isotropic s-wave, normalized to the EPA lambda = 2 N_F sum_nu <g^2>/w_nu; no phonon self-energy.
+epa_pair_scale = 1.0  # factor on that phonon coupling (e.g. to scan the phonon / spin-fluctuation balance)
+flex_gamma_imp = 0.0  # tau_mode='flex': extra impurity damping Gamma_imp [eV] added to -Im Sigma^R (Matthiessen)
+flex_npade = 40  # tau_mode='flex': number of Matsubara points used in the Pade continuation of Sigma
 hall_mesh_list = None  # k-mesh convergence sweep for the Hall coefficient (option 5), e.g. [20,30,40]
 # or [(20,20,10),(30,30,15)]. sigma^(1) converges much more slowly than sigma
 # and can come out with the wrong SIGN on a coarse mesh, so check before use.
@@ -477,9 +489,10 @@ def main() -> None:
     if Emin >= Emax:
         print(f"Error: Emin >= Emax ({Emin} >= {Emax})", flush=True)
         return
-    # tau_const check
-    if tau_const <= 0:
-        print(f"Error: Relaxation time (tau_const) is non-positive ({tau_const})", flush=True)
+    # tau_const check (only the tau_modes scaled by it; 'epa' and 'flex' ignore it)
+    if tau_mode in ('const', 'e2', 'dos') and (tau_const is None or tau_const <= 0):
+        print(f"Error: Relaxation time (tau_const) must be positive for tau_mode='{tau_mode}' ({tau_const})",
+              flush=True)
         return
     # =========================================
 
@@ -754,7 +767,8 @@ def main() -> None:
             plots.plot_path_map(spa_length, xticks, xlabel, wlist, Akw)
     elif option == CalcMode.CONDUCTIVITY_BT:  # calc conductivity
         # relaxation-time model; dos_delta is the DOS broadening of tau_mode='dos'
-        tau_kw = dict(tau_mode=tau_mode, epa_file=epa_file, dos_delta=delta)
+        tau_kw = dict(tau_mode=tau_mode, epa_file=epa_file, dos_delta=delta,
+                      flex_kw=dict(gamma_imp=flex_gamma_imp, n_pade=flex_npade))
         plibs.get_hall_coe(rvec, ham_r, S_r, avec, Nx, Ny, Nz, fill, temp, tau_const, units, tau_kw,
                            with_spin=sw_soc, mesh_list=hall_mesh_list)
         res = plibs.calc_conductivity_Boltzmann(rvec, ham_r, S_r, avec, Nx, Ny, Nz, fill, temp, tau_const, units,
@@ -925,6 +939,9 @@ def main() -> None:
                                     m_diis=m_diis_num, sw_rescale=sw_rescale_flex,
                                     sigma_scale=sigma_in_scale)
             elif option == CalcMode.LIN_ELIASHBERG:  # calc gap function
+                if epa_pair_file:
+                    print('Warning: epa_pair_file (phonon pairing) is implemented without SOC only; ignored here',
+                          flush=True)
                 plibs.calc_lin_eliash_soc(Nx, Ny, Nz, Nw, ham_r, S_r, rvec, mu, temp, chiolist, slist, plist, invs, site,
                                           orb_dep, U, J, fill, gap_sym, sw_self, sw_from_file, sw_out_self, sw_in_self,
                                           Umat if orb_dep else None, Jmat if orb_dep else None,
@@ -945,7 +962,8 @@ def main() -> None:
                 plibs.calc_lin_eliashberg_eq(Nx, Ny, Nz, Nw, ham_r, S_r, rvec, chiolist, site, plist, mu, temp, gap_sym, sw_self,
                                              orb_dep, U, J, fill, sw_from_file, sw_out_self, sw_in_self,
                                              Umat if orb_dep else None, Jmat if orb_dep else None,
-                                             sw_tail=sw_chi0_tail, sigma_scale=sigma_in_scale, iperm=iperm)
+                                             sw_tail=sw_chi0_tail, sigma_scale=sigma_in_scale, iperm=iperm,
+                                             epa_pair_file=epa_pair_file, epa_pair_scale=epa_pair_scale)
             elif option == CalcMode.GAP_FUNCTION:  # post gap calculation, output gap function/anomalous green's function
                 sig = plibs.output_Fk(Nx, Ny, Nz, Nw, ham_r, S_r, rvec, plist, mu, temp, sw_self, iperm=iperm)
                 if sig is not None:
