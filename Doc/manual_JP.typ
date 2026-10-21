@@ -598,6 +598,8 @@ $ phi_Gamma (bold(k)) = sum_(bold(R) in "shell") K_Gamma (hat(bold(R))) e^(i bol
 
 `main.py` はこのための格子を自動的に登録します（`plibs.set_harmonic_lattice(avec, rvec)`）。`plibs.lattice_harmonic()` で単独の調和関数を直接構成でき, `gap_symms(..., avec=, rvec=)` で格子を明示的に渡すこともできます。模型の $bold(R)$ 集合が指定した対称性を担えない場合は, 警告を出して従来の簡約座標の形状因子にフォールバックします。
 
+$s^plus.minus$（`gap_sym=2`）だけは例外で, シェルを対称性からは決められません。$A_(1g)$ はどのシェルも担うため $K_Gamma$ で選別できず, 既定では*簡約座標*で書いたシードパターン $(1, plus.minus 1, 0)$ の長さを代用しています。この代用は基底に依存し, 中心格子では $(1,1,0)$ がデカルトの $[110]$ ではないためカットオフが膨らんで遠方のシェルが選ばれます（$"KFe"_2"As"_2$: 2-Fe セルで $4a$, 1-Fe セルで $2 sqrt(2) a_"Fe"$。どちらも $Gamma$ とゾーンコーナーのポケットの間で符号が変わりません）。どのボンドに符号反転を置くかは対称性ではなく物理の選択なので, シェルの $|bold(R)|$ は `gap_rcut`（`main.py`; 内部的には `set_harmonic_lattice(..., s_rcut=)`）で [Å] 単位で明示できます。鉄系では結晶軸 $a$（$"KFe"_2"As"_2$ なら 3.825 Å）が $s^plus.minus$ のシェルで, この 1 つの値で 2-Fe セル（面内第 1 シェル）と 1-Fe セル（第 2 = 対角シェル）の両方が同じ $2 cos(k'_x a_"Fe") cos(k'_y a_"Fe")$ になります。実際に使われたシェルの $|bold(R)|$ は `get_initial_gap` がログに出力します。
+
 注意点が 2 つあります。カイラルな組は 2 つの相方で同じシェルを共有する必要があります（そうしないと, 両者を混ぜる回転に対して $|phi|$ が不変になりません。六方晶の $E_(2g)$ は相方ごとに別シェルを使うと 77% ずれます）。これはコード側で自動的に処理します。もう一つは*多サイト*セルで, ペアリングのボンドは $bold(R)$ ではなく $bold(R) + bold(tau)_j - bold(tau)_i$ なので, サブ格子の位相が依然として欠けます。鉄系の 2-Fe セルのように反転がサイトを入れ替える模型では, 軌道基底のルート（`eil_gap_orbital` / `eil_gap_file` と Nagai–Nakamura のバンド射影）を使ってください。
 
 == $bold(k)$空間の設定
@@ -655,7 +657,7 @@ $ phi_Gamma (bold(k)) = sum_(bold(R) in "shell") K_Gamma (hat(bold(R))) e^(i bol
 - `eil_imp_gamma` （float, eV）: 非磁性不純物散乱率 $Gamma$（$0$=clean）。
 - `eil_imp_c` （float）: T 行列 $cot delta_0$ — 大=Born 極限, $0$=ユニタリ極限。
 - `eil_fs_width` （float, eV）: フェルミ面のガウス幅。
-- `eil_zeeman` （float, eV）: LDOS 用 Zeeman（Maki）場（表面: $d_[110]$ ZEBS を $plus.minus h$ に分裂; 渦: コア状態をスピン分裂）。
+- `eil_zeeman` （float, eV）: LDOS 用 Zeeman（Maki）場（表面: $d_[110]$ ZEBS を $plus.minus h$ に分裂; 渦: コア状態をスピン分裂; 自己無撞着周期格子 `eil_vort_lattice_sc`: ギャップ方程式に入る Pauli 対破壊として自己無撞着に扱う）。
 
 *一様（option=24）:*
 

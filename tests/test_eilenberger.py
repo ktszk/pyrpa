@@ -365,6 +365,52 @@ def test_lattice_symmetry_gap_anisotropy_resolved():
     assert dd > 1e-4 and dd > 30 * ds                    # d-wave clearly anisotropic vs s-wave
 
 
+def _scaling_slope(st, coupling, T, om, gs, eps=0.02, **kw):
+    """(dF/de, d2F/de2) of lattice_free_energy under Delta -> (1+e) Delta about the
+    converged state: a free energy consistent with the gap equation has dF/de = 0."""
+    F = []
+    for sc in (1.0, 1.0 + eps, 1.0 - eps):
+        s2 = dict(st); s2['absD'] = st['absD'] * sc
+        F.append(V.lattice_free_energy(s2, coupling, T, om, gs, **kw))
+    return (F[1] - F[2]) / (2 * eps), (F[1] + F[2] - 2 * F[0]) / eps ** 2
+
+
+def test_lattice_zeeman_pauli():
+    """Zeeman (Pauli) depairing in the self-consistent periodic lattice: the s-wave lattice
+    gap is suppressed by h and gone above the Clogston field h = Delta0/sqrt2, and the
+    'coupling' free energy (the default at h != 0) is stationary at the converged state
+    -- its amplitude derivative is the solver's own spin-averaged gap equation."""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    D0 = S._bulk_gap(0.6, T, om, E.form_factor(np.linspace(0, 2 * np.pi, 180, endpoint=False), 's'))
+    amp = {}
+    for hr in (0.0, 0.3, 0.75):
+        st = V.solve_lattice_sc(0.6, T, om, gap_sym='s', field=0.2, lattice='triangular',
+                                Ng=12, nbeta=16, itemax=200, eps=1e-6, h=hr * D0)
+        amp[hr] = st['absD'].mean() / st['Dbulk']
+        if hr == 0.3:
+            d1, d2 = _scaling_slope(st, 0.6, T, om, 's', nbeta=16)
+            assert abs(d1) < 0.01 * abs(d2)
+    assert amp[0.0] > amp[0.3] > 0.3 and amp[0.75] < 1e-6
+
+
+def test_lattice_free_energy_fs_theta0():
+    """With a FS the free energy must rotate the trajectories by the same theta0 the
+    lattice was solved with (it used to drop it): the 'coupling' functional is then
+    stationary at a theta0 = pi/8 d-wave state on the anisotropic 'tb' FS, and theta0=None
+    picks the state's own rotation."""
+    wc, T = 0.5, 8e-4
+    om = E.matsubara(T, wc)
+    fm = E.build_model_fs('tb', Nth=48, mu=-1.0, params=1.0)
+    th = np.pi / 8
+    st = V.solve_lattice_sc(0.6, T, om, gap_sym='d', field=0.2, Ng=12, nbeta=8,
+                            itemax=200, eps=1e-6, theta0=th, fs=fm)
+    d1, d2 = _scaling_slope(st, 0.6, T, om, 'd', fs=fm, method='coupling')
+    assert abs(d1) < 0.01 * abs(d2)
+    assert (V.lattice_free_energy(st, 0.6, T, om, 'd', fs=fm)
+            == V.lattice_free_energy(st, 0.6, T, om, 'd', fs=fm, theta0=th))
+
+
 def test_lattice_symmetry_wannier_fs_rotation():
     """theta0 rotates the WHOLE crystal (Wannier/model FS + gap) rigidly against the vortex
     lattice -- not just the model gap.  Decisive invariance check on the C4-symmetric 'tb'

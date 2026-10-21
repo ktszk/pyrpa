@@ -554,9 +554,12 @@ _CART_CHIRAL = {6: (1, 3), 7: (4, 5), -3: (-1, -2)}   # chiral = partner_1 + i *
 
 _HARM_AVEC = None
 _HARM_RVEC = None
+_HARM_SRCUT = None      # explicit |R| for the A1g ('s') shell, see set_harmonic_lattice
+_HARM_LAST_RC = None    # |R| of the shell lattice_harmonic actually used (reporting only)
 
 
-def set_harmonic_lattice(avec: np.ndarray | None = None, rvec: np.ndarray | None = None) -> None:
+def set_harmonic_lattice(avec: np.ndarray | None = None, rvec: np.ndarray | None = None,
+                         s_rcut: float | None = None) -> None:
     """
     @brief Register the lattice that gap_symms uses to build its harmonics in the
     CARTESIAN basis (see lattice_harmonic).  main.py calls this once; with nothing
@@ -564,10 +567,23 @@ def set_harmonic_lattice(avec: np.ndarray | None = None, rvec: np.ndarray | None
     the labelled symmetry only for a tetragonal / orthogonal single-site lattice.
     @param avec: primitive translation vectors as rows [3,3] in Angstrom (None clears)
     @param rvec: R-vectors of the model [Nr,3] as integer fractional indices
+    @param s_rcut: |R| in Angstrom naming the shell of the A1g kind ('s', gap_sym=2).
+                   None keeps the seed-pattern cutoff of _CART_SEED.  K annihilates the
+                   shells that do not belong to a d/p harmonic, but EVERY shell carries
+                   A1g, so for s+- the shell is a physical choice (which bond the sign
+                   change sits on), not a symmetry one -- and the seed-pattern cutoff
+                   that stands in for it is basis dependent: on a centred cell the
+                   FRACTIONAL (1,1,0) is not the Cartesian [110], so the cutoff inflates
+                   and a far shell is picked.  For the iron pnictides the s+- shell is
+                   the crystal axis a (3.825 A for KFe2As2): the in-plane 1st shell of a
+                   2-Fe cell, the 2nd (diagonal) one of a 1-Fe cell -- the same number
+                   gives 2 cos(k'_x a_Fe) cos(k'_y a_Fe) in both, which is the harmonic
+                   that changes sign between the Gamma and the zone-corner pocket.
     """
-    global _HARM_AVEC, _HARM_RVEC
+    global _HARM_AVEC, _HARM_RVEC, _HARM_SRCUT
     _HARM_AVEC = None if avec is None else np.asarray(avec, dtype=np.float64)
     _HARM_RVEC = None if rvec is None else np.asarray(rvec, dtype=np.float64)
+    _HARM_SRCUT = None if s_rcut is None else float(s_rcut)
 
 
 def _seed_rcut(kind: str, avec: np.ndarray) -> float:
@@ -619,6 +635,7 @@ def lattice_harmonic(klist: np.ndarray, avec: np.ndarray, rvec: np.ndarray, kind
             continue
         K = _CART_K[kind](Rc[sel] / d[sel][:, None])
         if np.abs(K).max() > 1.0e-12:
+            globals()['_HARM_LAST_RC'] = float(rc)
             break
     else:
         raise ValueError(f"lattice_harmonic: {kind} vanishes on every R shell of this "
@@ -650,6 +667,8 @@ def _cart_gap_row(klist: np.ndarray, gap_sym: int, avec: np.ndarray,
         return (_cart_gap_row(klist, g1, avec, rvec, rcut=rc)
                 + 1.0j * _cart_gap_row(klist, g2, avec, rvec, rcut=rc))
     kind, sgn, rms = _CART_GAP[gap_sym]
+    if kind == 's' and rcut is None and _HARM_SRCUT is not None:
+        rcut = _HARM_SRCUT          # A1g: the shell is a physical choice, see set_harmonic_lattice
     return sgn * lattice_harmonic(klist, avec, rvec, kind, rms=rms, rcut=rcut)
 
 
@@ -748,7 +767,12 @@ def get_initial_gap(klist: np.ndarray, Norb: int, gap_sym: int,
     else:
         gapsym = ['s', 'px', 'py', 'p+ip']
         print('gap symmetry is '+gapsym[-gap_sym], flush=True)
+    globals()['_HARM_LAST_RC'] = None
     row = gap_symms(klist, Norb, gap_sym, avec=avec, rvec=rvec)
+    if _HARM_LAST_RC is not None:
+        # Which R shell the Cartesian harmonic ended up on -- for A1g (s+-) this is the
+        # bond the sign change sits on, so it is worth seeing in the log (set_harmonic_lattice).
+        print(f'  Cartesian harmonic built on the |R| = {_HARM_LAST_RC:.4f} A shell', flush=True)
     # The linearized Eliashberg seed is passed to Fortran as real(c_double) and the
     # kernel itself is real, so a CHIRAL harmonic cannot be used as a seed: the two
     # members of a degenerate pair (e.g. dxz and dyz) must be obtained from separate

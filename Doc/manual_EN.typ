@@ -597,6 +597,8 @@ with $K_Gamma$ the Cartesian harmonic ($hat(n)_x^2 - hat(n)_y^2$, $hat(n)_x hat(
 
 `main.py` registers the lattice for this automatically (`plibs.set_harmonic_lattice(avec, rvec)`); `plibs.lattice_harmonic()` builds one harmonic directly, and `gap_symms(..., avec=, rvec=)` takes the lattice explicitly. If the model's $bold(R)$ set is too small to carry the requested symmetry, a warning is printed and the fractional form factor is used instead.
 
+$s^plus.minus$ (`gap_sym=2`) is the one case the shell cannot be fixed by symmetry: every shell carries $A_(1g)$, so $K_Gamma$ cannot discriminate, and the default stands in for it with the length of the *fractional* seed pattern $(1, plus.minus 1, 0)$. That stand-in is basis dependent -- on a centred cell $(1,1,0)$ is not the Cartesian $[110]$, so the cutoff inflates and a far shell is taken ($"KFe"_2"As"_2$: $4a$ for the 2-Fe cell, $2 sqrt(2) a_"Fe"$ for the 1-Fe one; neither changes sign between the $Gamma$ and the zone-corner pocket). Which bond the sign change sits on is a physical choice, so the shell $|bold(R)|$ can be named explicitly in Angstrom with `gap_rcut` (`main.py`; `set_harmonic_lattice(..., s_rcut=)` internally). For the iron pnictides that shell is the crystal axis $a$ (3.825 A for $"KFe"_2"As"_2$): one number gives the same $2 cos(k'_x a_"Fe") cos(k'_y a_"Fe")$ in the 2-Fe cell (in-plane 1st shell) and in the 1-Fe cell (2nd, diagonal shell). `get_initial_gap` prints the $|bold(R)|$ of the shell actually used.
+
 Two caveats remain. The shell of a chiral pair is shared between its two partners (otherwise $|phi|$ is not invariant under the rotation that mixes them — hexagonal $E_(2g)$ fails by 77% with per-partner shells), which the code does automatically. And for a *multi-site* cell the pairing bond is $bold(R) + bold(tau)_j - bold(tau)_i$ rather than $bold(R)$, so the sublattice phase is still missing: for the 2-Fe cell of the iron-based systems, or any model where inversion exchanges sites, use the orbital-basis route (`eil_gap_orbital` / `eil_gap_file` with the Nagai–Nakamura band projection).
 
 == $bold(k)$-Space Settings
@@ -654,7 +656,7 @@ These drive the quasiclassical Eilenberger solvers. The temperature is the globa
 - `eil_imp_gamma` (float, unit: eV): the non-magnetic impurity scattering rate $Gamma$ ($0$ = clean).
 - `eil_imp_c` (float): the T-matrix $cot delta_0$ — large = Born limit, $0$ = unitary limit.
 - `eil_fs_width` (float, unit: eV): the Gaussian Fermi-surface broadening.
-- `eil_zeeman` (float, unit: eV): the Zeeman (Maki) field for the LDOS (surface: splits the $d_[110]$ ZEBS into $plus.minus h$; vortex: spin-splits the core states).
+- `eil_zeeman` (float, unit: eV): the Zeeman (Maki) field for the LDOS (surface: splits the $d_[110]$ ZEBS into $plus.minus h$; vortex: spin-splits the core states; self-consistent periodic lattice `eil_vort_lattice_sc`: enters the gap equation as self-consistent Pauli depairing).
 
 *Homogeneous (option=24):*
 

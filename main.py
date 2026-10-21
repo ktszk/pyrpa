@@ -165,6 +165,12 @@ U, J = 0.6, 0.075
 # U,J=1.8,0.225
 # 0:s,1:dx2-y2,2:spm,3:dxy,-1:px,-2:py,-3:p+ip  (also drives ALL eilenberger modes; model FS/cylinder maps the int -> continuum harmonic, 2 spm -> s)
 gap_sym = 2
+# gap_rcut=3.825  # |R| [A] naming the shell of the s+- harmonic (gap_sym=2 only; None=seed-pattern
+# cutoff of _CART_SEED).  Every shell carries A1g, so for s+- the shell is a physical
+# choice and the seed-pattern stand-in is basis dependent (a centred cell inflates it
+# and a far shell is picked).  For KFe2As2 use the crystal axis a=3.825: it gives the
+# SAME harmonic 2cos(k'_x a_Fe)cos(k'_y a_Fe) in the 1-Fe (5-orbital) and 2-Fe
+# (10-orbital) models -- the one that changes sign between Gamma and the corner pocket.
 
 # use calculation of magnetic susceptibility at superconducting state
 # delta0=1.e-2 #maximum gap size for calculating susceptibility in SC state; set to 0 for normal state
@@ -292,7 +298,7 @@ eil_fs_nkz = 1  # k_z slices stacked into the FS (eil_fs_kind='wannier' or a 3D 
 eil_fs_traj = None  # trajectory reduction for the VORTEX/lattice solvers, whose cost is linear in the number of FS points (a 3D FS has 10^3-10^4 vs the 24 directions of the model cylinder): None=use every point, int=number of beta bins, (nbeta,nv,nphi)=full control (direction / |v_par| quantile / phi bins). default (48,4,8) reduces a 1920-direction FS to 176 with an x17.7 speedup, the bulk gap to 0.5% and the vortex-core LDOS peak to 0.2%. Raise until the answer stops moving. Not used by the surface solver (it needs k_par and the band index for the specular partner)
 eil_pair_gauge = 'trs'  # pair-partner gauge of the band gap projection: 'trs' (default; spinless/real hoppings, phi=u^dag.Delta.u, gauge invariant), 'soc' (spinful basis, time-reversed partner (i sigma_y)u*), 'diag' (legacy independently diagonalized u(-k); GAUGE DEPENDENT, comparison only). The condition is time-reversal symmetry of the NORMAL state H(k), not of Delta: a CHIRAL order parameter is fine (its winding is passed through to phi), a time-reversal-broken NORMAL state (ferromagnetic SC, Zeeman inside H, Haldane-type hoppings) is not -- check_pair_partner warns when |<u(-k)|T u(k)>| < 1
 eil_spin_order = 'block'  # basis ordering for eil_pair_gauge='soc': 'block'=[orb1..orbN up, orb1..orbN dn], 'interleave'=[orb1 up, orb1 dn, ...]
-eil_zeeman = 0.0  # Zeeman (Maki) field [eV] for the LDOS (surface: splits the d[110] ZEBS into +-h; vortex: spin-splits the core bound states)
+eil_zeeman = 0.0  # Zeeman (Maki) field [eV] for the LDOS (surface: splits the d[110] ZEBS into +-h; vortex: spin-splits the core bound states; periodic lattice (eil_vort_lattice_sc): self-consistent Pauli depairing)
 # ----- EILENBERGER inhomogeneous (surface & vortex, Riccati; model cylindrical FS) -----
 eil_ldos = True  # True: also compute the real-frequency LDOS (bound/core states) (surface & vortex)
 eil_surf_beta = 0.785398  # surface orientation [rad]: 0=[100], pi/4(0.7854)=[110] (d-wave ZEBS)
@@ -344,6 +350,10 @@ try:
     kscale
 except NameError:
     kscale = 1.0
+try:
+    gap_rcut
+except NameError:
+    gap_rcut = None
 try:
     abc
 except NameError:
@@ -634,7 +644,7 @@ def main() -> None:
     # lattice (plibs.lattice_harmonic).  Identical to the old fractional formulas on
     # an orthogonal single-site lattice, and correctly labelled on fcc/bcc/hexagonal
     # ones, where cos(2 pi k_x) etc. do not transform as the harmonic they name.
-    plibs.set_harmonic_lattice(avec, rvec)
+    plibs.set_harmonic_lattice(avec, rvec, s_rcut=gap_rcut)
     if omp_check:  # OMP properties
         print("OpenMP mode", flush=True)
         print(f"Number of OpenMP threads = {omp_num}", flush=True)
@@ -754,11 +764,16 @@ def main() -> None:
         plots.plot_FS(clist, klist, color_option)
     elif option == CalcMode.FERMI_3D:  # 3D Fermi surface plot (color_option=GAP: the Eilenberger pairing gap Re[phi(k)])
         polys, centers, blist = plibs.gen_3d_surf_points(Nx, rvec, ham_r, S_r, mu, kscale, bvec)
-        gorb = (plibs.gap_orbital_from_wannier(eil_gap_file, eil_gap_iw, eil_gap_navg)  # RPA/FLEX gap as form factor
-                if eil_gap_file else eil_gap_orbital)
+        # the gap is only needed for the GAP coloring: do not touch eil_gap_file otherwise
+        if color_option == ColorMode.GAP:
+            gorb = (plibs.gap_orbital_from_wannier(eil_gap_file, eil_gap_iw, eil_gap_navg)  # RPA/FLEX gap as form factor
+                    if eil_gap_file else eil_gap_orbital)
+            gauge_kw = set_eil_gauge(len(ham_r[0]))
+        else:
+            gorb, gauge_kw = None, None
         fspolys, fscenters, fscolors = plots.set_init_3dfsplot(color_option, polys, centers, blist, avec, rvec, ham_r,
                                                                S_r, olist, gap_sym, delta0, gorb,
-                                                               set_eil_gauge(len(ham_r[0])), ihbar=ihbar)
+                                                               gauge_kw, ihbar=ihbar)
         plots.plot_3d_surf(fspolys, fscenters, fscolors, color_option, bvec)
     elif option == CalcMode.SPECTRUM:  # plot spectrum
         spec = plibs.spectrum_on_path(k_sets, kmesh, bvec, mu, ham_r, S_r, rvec, Emin, Emax, delta, Nw, temp, sw_self)
@@ -1041,7 +1056,7 @@ def main() -> None:
             plibs.calc_vortex_lattice_sc(eil_coupling, temp, eil_wc, gap_sym=gap_sym,
                                          field_list=eil_field_list, lattice=eil_lattice, kb=kb, fs=eil_fs_obj,
                                          kappa=(None if eil_kappa >= 1e3 else eil_kappa), Vw=eil_nvortex,
-                                         self_consistent_A=eil_vort_scA, bdir=eil_field_dir)
+                                         self_consistent_A=eil_vort_scA, bdir=eil_field_dir, h=eil_zeeman)
         elif eil_field_list is not None:  # sweep B/Hc2 on the TRUE periodic lattice -> <N(0)>(B) (d~sqrt(B) Volovik)
             plibs.calc_vortex_lattice_periodic(eil_coupling, temp, eil_wc, gap_sym=gap_sym,
                                                field_list=eil_field_list, kappa=eil_kappa, lattice=eil_lattice, kb=kb,

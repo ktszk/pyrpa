@@ -1263,6 +1263,42 @@ def test_set_harmonic_lattice_switches_the_route_and_survives_a_tiny_r_set():
     assert np.abs(P.gap_symms(kf, 1, 1)[0] - frac).max() == 0.0
 
 
+def test_s_rcut_names_the_apm_shell_and_matches_the_1fe_and_2fe_cells():
+    """A1g is carried by EVERY shell, so K cannot pick one out and the seed-pattern
+    cutoff stands in for it -- but that cutoff is fractional, so on a body-centred cell
+    it inflates and a far shell is taken (KFe2As2: 4a for the 2-Fe cell, 2*sqrt(2)*a_Fe
+    for the 1-Fe one).  s_rcut names the shell instead: one number, the crystal axis a,
+    gives the SAME s+- harmonic in both cells -- the one that changes sign between the
+    Gamma pocket and the zone corner."""
+    a = 3.825                                   # crystal axis (2-Fe cell)
+    a1fe = a / np.sqrt(2.0)                     # Fe-Fe (1-Fe cell)
+    deg = np.array([90., 90., 90.])
+    v2, _ = P.get_ptv(np.array([a, a, 13.78]), deg, 2)          # 2-Fe (10-orbital)
+    v1, _ = P.get_ptv(np.array([a1fe, a1fe, 6.89]), deg, 2)     # 1-Fe (5-orbital)
+    R45 = np.array([[1., 1., 0.], [-1., 1., 0.], [0., 0., np.sqrt(2.)]]) / np.sqrt(2.)
+    g = np.linspace(-np.pi / a, np.pi / a, 21)
+    KX, KY = np.meshgrid(g, g)
+    kc = np.stack([KX.ravel(), KY.ravel(), np.zeros(KX.size)], axis=1)   # crystal Cartesian
+
+    def phi(avec, kcart):                       # 2 pi k_frac = avec . k_cart
+        return P.gap_symms((np.asarray(kcart) @ avec.T) / (2 * np.pi), 1, 2)[0]
+
+    try:
+        P.set_harmonic_lattice(v2, _HARM_RVEC, s_rcut=a)
+        p2 = phi(v2, kc)
+        P.set_harmonic_lattice(v1, _HARM_RVEC, s_rcut=a)
+        p1 = phi(v1, kc @ R45.T)                # the 1-Fe model axes are rotated by 45 deg
+        assert np.abs(p2 - p1).max() < 1e-10                    # same harmonic in both cells
+        assert np.abs(p2 - (np.cos(a * kc[:, 0]) + np.cos(a * kc[:, 1]))).max() < 1e-10
+        corner = np.array([[np.pi / a, np.pi / a, 0.]])         # 1-Fe (pi,0): electron pocket
+        P.set_harmonic_lattice(v2, _HARM_RVEC, s_rcut=a)
+        assert phi(v2, np.zeros((1, 3)))[0] > 1.9               # Gamma
+        assert phi(v2, corner)[0] < -1.9                        # sign change = s+-
+        assert abs(P._response._HARM_LAST_RC - a) < 1e-6        # the shell really used
+    finally:
+        P.set_harmonic_lattice(None, None)
+
+
 # --------------------------------------------------------------------------- #
 #  SOC counterparts.  The SOC entry points had no coverage at all, which is how
 #  a missing ndpointer in lin_eliash_soc.argtypes (the `prt` slot) survived: it

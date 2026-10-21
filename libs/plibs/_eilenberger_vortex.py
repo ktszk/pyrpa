@@ -1472,13 +1472,22 @@ def _maxwell_A(jx: np.ndarray, jy: np.ndarray, g: np.ndarray) -> tuple:
     return np.fft.ifft2(Ax).real, np.fft.ifft2(Ay).real
 
 
+def _zeeman_sectors(om: np.ndarray, h: float) -> tuple[np.ndarray, float]:
+    """Frequency axis of both spin sectors (w + i h, w - i h) stacked, and the spin-average
+    weight 1/2; h = 0 returns the axis untouched (weight 1), bit for bit the old path."""
+    if h == 0.0:
+        return om, 1.0
+    om = np.asarray(om, dtype=np.complex128)
+    return np.concatenate([om + 1j * h, om - 1j * h]), 0.5
+
+
 def solve_lattice_sc(coupling: float, temp: float, omega: np.ndarray, gap_sym: str = 'd', field: float = 0.2,
                      lattice: str = 'square', Ng: int = 20, nbeta: int = 16, hvf: float = 1.0, fs: dict | None = None,
                      kappa: float | None = None, Vw: int = 1, Lchord: float = 6.0, bdir: np.ndarray | None = None,
                      ds_xi: float = 0.3, itemax: int = 60, mix: float = 0.4, eps: float = 3.0e-3,
                      anderson: bool = True, m_and: int = 4, seed_profile: np.ndarray | None = None,
                      self_consistent_A: bool = False, mixA: float = 0.3, shape: str | None = None,
-                     theta0: float = 0.0) -> dict | None:
+                     theta0: float = 0.0, h: float = 0.0) -> dict | None:
     """
     @brief Self-consistent complex order parameter Psi(r)=|Psi|(r) e^{i chi(r)} of a
     true periodic vortex lattice, je-style: formulation A (phase kept in Delta) with
@@ -1528,7 +1537,16 @@ def solve_lattice_sc(coupling: float, temp: float, omega: np.ndarray, gap_sym: s
     (transverse, Coulomb gauge, _maxwell_A) is updated together with Delta (mixA).  This
     captures the spatial superfluid-density variation (current suppressed at cores) that
     the bare-grad(chi) London A misses; reduces to it when |Psi| is uniform.
-    @return state dict (X,Y,absD,Psi,chi,Dbulk,xi,a,...) for lattice_dos_sc
+    @param h: spin-singlet Zeeman (Maki) energy mu*B [same units as Dbulk] -- Pauli
+    paramagnetic depairing of the lattice.  The two spin sectors see w_n + i sigma h
+    on top of the Doppler shift; each sector's negative-frequency half is the conjugate
+    of its positive half (f(-z) = f(z*)*, the h=0 relation continued to complex z), so
+    the gap equation and the free energy take Re of (1/2) sum_sigma f(w_n + i sigma h)
+    over w_n > 0.  Both sectors are kept: unlike the uniform state, the Doppler shift
+    makes f(w - i h) != f(w + i h)* in general.  Dbulk, xi (hence the B/Hc2 unit) and the
+    London calibration stay the ZERO-Zeeman bulk values, so h only adds depairing.  h is
+    an independent knob: for a physical field put h = mu_B B with B = field * B_xi.
+    @return state dict (X,Y,absD,Psi,chi,Dbulk,xi,a,...,h) for lattice_dos_sc
     """
     _reject_chiral_ff(gap_sym, 'solve_lattice_sc')
     bfull = np.linspace(0.0, 2.0 * np.pi, 180, endpoint=False)
@@ -1606,6 +1624,7 @@ def solve_lattice_sc(coupling: float, temp: float, omega: np.ndarray, gap_sym: s
     # inside riccati_chords_bc, so no [ns,Nanch,Nw] array is ever built.
     dom_dir = [None if dch is None else 1j * hvfarr[ib] * dch
                for ib, (_, _, _, _, dch) in enumerate(chord)]
+    om_s, wsp = _zeeman_sectors(omega, h)              # spin sectors (Zeeman), one kernel call
 
     def gap_map(Af: np.ndarray | None,
                 dom_use: np.ndarray | None) -> np.ndarray | tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -1616,11 +1635,11 @@ def solve_lattice_sc(coupling: float, temp: float, omega: np.ndarray, gap_sym: s
             px, py, eichi, proj, _ = chord[ib]
             base = phi[ib] * _periodic_eval(Af, g, px, py) * eichi
             # only the anchor row is needed, so ask the kernel for that row alone
-            gch, f = flibs.riccati_chords_bc(omega, base, hvfarr[ib], ds,
+            gch, f = flibs.riccati_chords_bc(om_s, base, hvfarr[ib], ds,
                                              dom=dom_use[ib], row=ic)
-            accf += proj * f.sum(axis=1)
+            accf += proj * wsp * f.sum(axis=1)
             if scA:                                    # supercurrent <v_F Im g> at the anchor
-                img = gch.imag.sum(axis=1)
+                img = wsp * gch.imag.sum(axis=1)
                 cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
                 curx += wt_dir[ib] * hvfarr[ib] * cb * img
                 cury += wt_dir[ib] * hvfarr[ib] * sb * img
@@ -1663,12 +1682,13 @@ def solve_lattice_sc(coupling: float, temp: float, omega: np.ndarray, gap_sym: s
     return dict(X=X, Y=Y, absD=A, Psi=A * np.exp(1j * chi_grid), chi=chi_grid,
                 Dbulk=Dbulk, xi=xi, a=a, S=g['S'], geom=g, b1=g['b1'], b2=g['b2'],
                 a1=g['a1'], a2=g['a2'], acell=a, kappa=kappa, Vw=Vw, theta0=theta0,
-                Afield=((Axf, Ayf) if scA else None), iters=it + 1, err=err)
+                Afield=((Axf, Ayf) if scA else None), iters=it + 1, err=err, h=h)
 
 
 def lattice_dos_sc(state: dict, gap_sym: int | str | None, wlist: np.ndarray, delta: float | None = None,
                    nbeta: int = 24, hvf: float = 1.0, fs: dict | None = None, bdir: np.ndarray | None = None,
-                   Lchord: float = 6.0, ds_xi: float = 0.3, theta0: float | None = None) -> np.ndarray:
+                   Lchord: float = 6.0, ds_xi: float = 0.3, theta0: float | None = None,
+                   h: float | None = None) -> np.ndarray:
     """
     @brief Spatially-averaged DOS N(w)/N0 of the je-style self-consistent periodic
     vortex lattice (formulation A): the same per-grid-point anchored trajectories as
@@ -1690,6 +1710,8 @@ def lattice_dos_sc(state: dict, gap_sym: int | str | None, wlist: np.ndarray, de
     @param   ds_xi: Riccati integration step along the chord in units of xi
     @param  theta0: rotation angle of the crystal relative to the lattice [rad] (None = the angle stored in
                     state)
+    @param       h: Zeeman energy (None = the h the state was solved with); spin-split
+                    N = (1/2) sum_sigma N(w - sigma h), as in vortex_ldos2d
     @return N(w)/N0 [Nw]
     """
     A = state['absD']; xi = state['xi']
@@ -1705,6 +1727,7 @@ def lattice_dos_sc(state: dict, gap_sym: int | str | None, wlist: np.ndarray, de
         delta = 0.03 * Dbulk
     zomega = delta - 1j * np.asarray(wlist)
     Nw = zomega.size
+    z_s, wsp = _zeeman_sectors(zomega, state.get('h', 0.0) if h is None else h)
     th0 = state.get('theta0', 0.0) if theta0 is None else theta0  # same rotation the gap was solved on
     if fs is not None:
         # trajectories in the plane PERPENDICULAR to B (fs_field_frame; bdir=None is
@@ -1733,14 +1756,18 @@ def lattice_dos_sc(state: dict, gap_sym: int | str | None, wlist: np.ndarray, de
         dom = (None if lam is None else
                -1j * hvfarr[ib] * (cb * _periodic_eval(Axg, g, px, py)
                                    + sb * _periodic_eval(Ayg, g, px, py)))
-        gg, _ = flibs.riccati_chords_bc(zomega, base, hvfarr[ib], ds, dom=dom, row=ic)
-        gsum += wt_dir[ib] * gg.real.mean(axis=0)       # <Re g> over anchors
+        gg, _ = flibs.riccati_chords_bc(z_s, base, hvfarr[ib], ds, dom=dom, row=ic)
+        gm = gg.real.mean(axis=0)                       # <Re g> over anchors
+        if wsp != 1.0:                                  # spin average of the two sectors
+            gm = wsp * (gm[:Nw] + gm[Nw:])
+        gsum += wt_dir[ib] * gm
     return gsum
 
 
 def lattice_free_energy(state: dict, coupling: float, temp: float, omega: np.ndarray, gap_sym: int | str | None,
                         nbeta: int = 24, hvf: float = 1.0, fs: dict | None = None, bdir: np.ndarray | None = None,
-                        Lchord: float = 6.0, ds_xi: float = 0.3, theta0: float = 0.0) -> np.ndarray:
+                        Lchord: float = 6.0, ds_xi: float = 0.3, theta0: float | None = None,
+                        h: float | None = None, method: str | None = None, nq: int = 8) -> np.ndarray:
     """
     @brief Electronic (condensation) free energy of the converged formulation-A vortex
     lattice, in the quasiclassical Eilenberger functional of Ichioka-Machida
@@ -1766,6 +1793,23 @@ def lattice_free_energy(state: dict, coupling: float, temp: float, omega: np.nda
     @param   Lchord: trajectory (chord) length in units of xi
     @param    ds_xi: Riccati integration step along the chord in units of xi
     @param   theta0: rotation angle of the crystal (FS + gap) relative to the vortex lattice [rad]
+                     (None = the theta0 the state was solved with).  With a FS it rotates the
+                     trajectories exactly as in solve_lattice_sc.
+    @param        h: Zeeman energy (None = the h the state was solved with), spin-averaged over
+                     the sectors w_n +- i h.  F stays F_s - F_n at the same h, so the normal-state
+                     spin polarization cancels.
+    @param   method: 'im' = the Ichioka-Machida I above.  Its 2Re(Delta* f)/Re(1+g) takes the
+                     real parts separately, which is exact for the uniform state only on the real
+                     Matsubara axis: with h != 0 it misses the uniform 2Re(R - w~) (by 2% at h=0.4 Delta).
+                     'coupling' = the exact functional by coupling-constant (amplitude) integration,
+                         F = <|Delta|^2>/coupling - 2T sum_{wn>0} int_0^1 (ds/s) <2 Re(s Delta* f[s Delta])>,
+                     whose amplitude derivative IS the solver's gap equation, so it is stationary at
+                     the converged state, exact for the uniform state at any h, and the right one for
+                     the Pauli first-order transition.  The finite-kappa A(r), if any, is held fixed
+                     along s.  Default: 'im' at h = 0 (every earlier result), 'coupling' at h != 0.
+                     The two do NOT agree in the lattice even at h = 0, so compare free energies
+                     across h only within ONE method.
+    @param       nq: Gauss-Legendre points in s for method='coupling' (cost ~nq x 'im')
     @return F_el/(N0 Delta0^2) (dimensionless)
     """
     A = state['absD']; g = state['geom']; xi = state['xi']; Dbulk = state['Dbulk']
@@ -1774,6 +1818,10 @@ def lattice_free_energy(state: dict, coupling: float, temp: float, omega: np.nda
     Afield = state.get('Afield')
     Axg, Ayg = (Afield if Afield is not None
                 else (_london_A(g, lam, Vw) if lam is not None else (None, None)))
+    if theta0 is None:
+        theta0 = state.get('theta0', 0.0)
+    if h is None:
+        h = state.get('h', 0.0)
     if fs is not None:
         # trajectories in the plane PERPENDICULAR to B (fs_field_frame; bdir=None is
         # the c axis and reproduces the historical (x,y) set bit for bit).  The
@@ -1781,7 +1829,7 @@ def lattice_free_energy(state: dict, coupling: float, temp: float, omega: np.nda
         # area preserving, so v.p_s is form invariant in the scaled plane -- see the
         # derivation in solve_vortex2d.
         _fr = _eilenberger.fs_field_frame(fs, bdir, gap_sym)
-        dirs = _fr['dirs']; phi = _fr['phi']
+        dirs = _fr['dirs'] + theta0; phi = _fr['phi']   # same rigid rotation as the solver
         hvfarr = np.asarray(_fr['vabs']); wt_dir = np.asarray(_fr['nf']); nbd = len(dirs)
     else:
         dirs = np.linspace(0.0, 2.0 * np.pi, nbeta, endpoint=False)
@@ -1792,6 +1840,16 @@ def lattice_free_energy(state: dict, coupling: float, temp: float, omega: np.nda
     s = np.linspace(-L, L, ns)
     ax = X.ravel(); ay = Y.ravel(); Nanch = ax.size
     Nw = len(omega)
+    om_s, wsp = _zeeman_sectors(omega, h)
+    if method is None:
+        method = 'im' if h == 0.0 else 'coupling'
+    if method == 'im':
+        sq, wq = np.array([1.0]), np.array([1.0])
+    elif method == 'coupling':                          # Gauss-Legendre on s in (0, 1)
+        sq, wq = np.polynomial.legendre.leggauss(nq)
+        sq = 0.5 * (sq + 1.0); wq = 0.5 * wq
+    else:
+        raise ValueError(f"lattice_free_energy: unknown method {method!r}")
     Isum = 0.0                                          # sum_n <I>_{r,FS}
     for ib in range(nbd):
         cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
@@ -1801,10 +1859,14 @@ def lattice_free_energy(state: dict, coupling: float, temp: float, omega: np.nda
         dom = (None if lam is None else
                -1j * hvfarr[ib] * (cb * _periodic_eval(Axg, g, px, py)
                                    + sb * _periodic_eval(Ayg, g, px, py)))
-        gc, fc = flibs.riccati_chords_bc(omega, Dl, hvfarr[ib], ds, dom=dom, row=ic)
         Dia = Dl[ic]                                                # Delta at the anchor [Nanch]
-        Ii = 2.0 * np.real(np.conj(Dia)[:, None] * fc) / (1.0 + gc).real           # [Nanch, Nw]
-        Isum += wt_dir[ib] * Ii.sum(axis=1).mean()                  # sum_n, FS-weight, <>_r
+        for sk, wk in zip(sq, wq):
+            gc, fc = flibs.riccati_chords_bc(om_s, sk * Dl, hvfarr[ib], ds, dom=dom, row=ic)
+            if method == 'im':
+                Ii = 2.0 * np.real(np.conj(Dia)[:, None] * fc) / (1.0 + gc).real   # [Nanch, Nw]
+            else:                                   # (1/s) <2Re(s Delta* f[s Delta])>
+                Ii = wk * 2.0 * np.real(np.conj(Dia)[:, None] * fc)
+            Isum += wt_dir[ib] * wsp * Ii.sum(axis=1).mean()        # sum_n (+spin avg), FS-weight, <>_r
     cond = (np.abs(A) ** 2).mean() / (coupling * Dbulk ** 2)        # condensation cost
     return cond - 2.0 * temp * Isum / Dbulk ** 2
 
@@ -1819,7 +1881,8 @@ def _apex_angle(ratio: float) -> np.ndarray:
 def calc_vortex_lattice_symmetry(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
                                  field_list: np.ndarray | None = None, kb: float = 1.0, Ng: int = 28, nbeta: int = 36,
                                  fs: dict | None = None, n_ratio: int = 5, n_theta: int = 4,
-                                 ratio_range: tuple = (0.5, None)) -> list:
+                                 ratio_range: tuple = (0.5, None),
+                                 h: float | collections.abc.Callable = 0.0) -> list:
     """
     @brief Vortex-lattice SYMMETRY by minimizing the Eilenberger free energy
     (Ichioka-Machida functional) over the lattice geometry, the proper full-quasiclassical
@@ -1847,6 +1910,9 @@ def calc_vortex_lattice_symmetry(coupling: float, temp: float, wc: float, gap_sy
     @param     n_ratio: number of cell aspect ratios Dly/Dlx scanned
     @param     n_theta: number of gap orientations theta0 scanned in [0, pi/4]
     @param ratio_range: (min, max) of Dly/Dlx (max None = sqrt(3)/2, triangular)
+    @param           h: Zeeman energy, a number or a callable field -> h (h = mu_B B grows with
+                        the field; see solve_lattice_sc for the unit).  F then uses the 'coupling'
+                        functional.
     @return list of (field, best_ratio, best_apex_deg, best_theta0_deg, Fmin)
     """
     omega = _eilenberger.matsubara(temp, wc)
@@ -1860,6 +1926,7 @@ def calc_vortex_lattice_symmetry(coupling: float, temp: float, wc: float, gap_sy
           f"{', FS+v_F' if fs is not None else ''}", flush=True)
     out = []
     for b in field_list:
+        hb = h(b) if callable(h) else h
         best = (None, None, None, 1e30)
         for r in ratios:
             seed = None
@@ -1867,7 +1934,7 @@ def calc_vortex_lattice_symmetry(coupling: float, temp: float, wc: float, gap_sy
                 st = solve_lattice_sc(coupling, temp, omega, gap_sym=gap_sym, field=b,
                                       shape=(0.5, r), theta0=th, Ng=Ng, nbeta=nbeta,
                                       kappa=None, itemax=180, mix=0.4, eps=8e-4,
-                                      seed_profile=seed, fs=fs)
+                                      seed_profile=seed, fs=fs, h=hb)
                 if st is None:
                     continue
                 seed = st['absD'] / st['Dbulk']            # warm start within the ratio
@@ -1887,7 +1954,8 @@ def calc_vortex_lattice_symmetry(coupling: float, temp: float, wc: float, gap_sy
 def calc_vortex_lattice_sc(coupling: float, temp: float, wc: float, gap_sym: str = 'd',
                            field_list: np.ndarray | None = None, lattice: str = 'square', kb: float = 1.0,
                            Ng: int = 20, nbeta: int = 16, fs: dict | None = None, kappa: float | None = None,
-                           Vw: int = 1, self_consistent_A: bool = False, bdir: np.ndarray | None = None) -> list:
+                           Vw: int = 1, self_consistent_A: bool = False, bdir: np.ndarray | None = None,
+                           h: float | collections.abc.Callable = 0.0) -> list:
     """
     @brief Driver: je-style self-consistent PERIODIC vortex lattice (formulation A).
     Sweeps B/Hc2, self-consistently solves the complex order parameter Psi(r) (true
@@ -1912,6 +1980,8 @@ def calc_vortex_lattice_sc(coupling: float, temp: float, wc: float, gap_sym: str
     @param       bdir: field / vortex-line direction (need not be normalized; None = c axis)
     @return results: list of (B/Hc2, @<N(0)@>/N0)
     the actual quasiclassical current (je A_renew) instead of the analytic London A.
+    @param h: Zeeman energy, a number or a callable field -> h (Pauli depairing; the
+    lattice DOS is then spin split).
     Writes the converged |Psi|(r) for the largest field to lattice_sc_op.dat.
     """
     omega = _eilenberger.matsubara(temp, wc)
@@ -1928,7 +1998,8 @@ def calc_vortex_lattice_sc(coupling: float, temp: float, wc: float, gap_sym: str
     for b in field_list:
         st = solve_lattice_sc(coupling, temp, omega, gap_sym=gap_sym, field=b,
                               lattice=lattice, Ng=Ng, nbeta=nbeta, fs=fs, kappa=kappa,
-                              Vw=Vw, seed_profile=seed, self_consistent_A=self_consistent_A, bdir=bdir)
+                              Vw=Vw, seed_profile=seed, self_consistent_A=self_consistent_A, bdir=bdir,
+                              h=(h(b) if callable(h) else h))
         if st is None or st['Dbulk'] <= 0:
             print(f"  B/Hc2={b:.3f}: normal", flush=True)
             continue

@@ -201,3 +201,6 @@ libs/.arch_cache
 
 # doxygen output (doxygen Doxyfile)
 Doc/api/
+
+# calculation results per material
+results/
