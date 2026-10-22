@@ -821,6 +821,86 @@ def test_static_chi0_matches_exact_lindhard_one_orbital():
         assert abs(got.imag) < 1e-12
 
 
+def _complex_two_orbital(N=24):
+    """Two-orbital square lattice whose H(k) is genuinely complex (time-reversal
+    symmetric, H(-k) = H(k)*): the inter-orbital term i*0.4 sin kx + 0.2 cos ky.
+    With real H(k) the BdG eigenvectors can be taken real and an eigenvector-phase
+    (gauge) error in the SC bubble stays invisible -- this model exposes it."""
+    Nk, klist = P.gen_klist(N, N, 1, sw_pp=False)
+    kx, ky = 2 * np.pi * klist[:, 0], 2 * np.pi * klist[:, 1]
+    hamk = np.zeros((Nk, 2, 2), dtype=np.complex128)
+    hamk[:, 0, 0] = -2.0 * (np.cos(kx) + np.cos(ky))
+    hamk[:, 1, 1] = -1.0 * (np.cos(kx) + np.cos(ky)) + 0.3
+    hamk[:, 0, 1] = 0.4j * np.sin(kx) + 0.2 * np.cos(ky)
+    hamk[:, 1, 0] = np.conj(hamk[:, 0, 1])
+    olist, _ = P.get_chi_orb_list(2, [1])
+    return Nk, klist, hamk, olist
+
+
+def _sc_bubble(ub, eb, temp, qs, olist, wl, idelta):
+    c = F.get_chi_irr_sc(ub, eb, F.get_ffermi(eb, 0.0, temp), qs, olist, wl, idelta, temp, False)
+    return c[:, :, :, 0] + c[:, :, :, 1]
+
+
+def test_chi0_sc_is_gauge_invariant_for_complex_hamiltonian():
+    """Each BdG eigenvector carries an arbitrary phase from LAPACK; no susceptibility
+    may depend on it.  The old F.F-dagger term paired h(l)p(l) without a conjugate,
+    picked up exp(2i theta), and on a complex multi-orbital H(k) turned 1/T1T into
+    gauge noise of either sign (negative at low T for the 000AsP model)."""
+    Nk, klist, hamk, olist = _complex_two_orbital()
+    mu, temp, idelta = -0.5, 0.01, 2.0e-3
+    dk = np.broadcast_to(0.1 * np.eye(2, dtype=np.complex128), (Nk, 2, 2)).copy()
+    eb, ub = F.get_eig(F.mkBdGhamk(hamk - mu * np.eye(2), dk))
+    ph = np.exp(2j * np.pi * np.random.default_rng(3).random((Nk, 4)))
+    ub2 = np.ascontiguousarray(ub * ph[:, :, None])               # ub[k, n, :] = state n
+    wl = np.array([0.0, 1.0e-3])
+    for q in ([0.0, 0.0, 0.0], [0.25, 0.0, 0.0], [0.375, 0.125, 0.0]):
+        qs = F.get_qshift(klist, np.array(q))
+        a = _sc_bubble(ub, eb, temp, qs, olist, wl, idelta)
+        b = _sc_bubble(ub2, eb, temp, qs, olist, wl, idelta)
+        assert np.abs(a - b).max() < 1e-10 * np.abs(a).max()
+
+
+def test_chi0_sc_complex_multiorbital_reduces_to_normal_state():
+    """Delta -> 0 must give the normal-state chi0 element by element, also when H(k)
+    is complex and the orbital pair order matters (the hole part swaps it)."""
+    Nk, klist, hamk, olist = _complex_two_orbital()
+    mu, temp, idelta = -0.5, 0.02, 2.0e-3
+    eig, uni = F.get_eig(hamk)
+    wl = np.array([0.0, 1.0e-3])
+    dk = np.broadcast_to(1e-9 * np.eye(2, dtype=np.complex128), (Nk, 2, 2)).copy()
+    eb, ub = F.get_eig(F.mkBdGhamk(hamk - mu * np.eye(2), dk))
+    for q in ([0.25, 0.0, 0.0], [0.5, 0.5, 0.0]):
+        qs = F.get_qshift(klist, np.array(q))
+        normal = F.get_chi_irr(uni, eig, F.get_ffermi(eig, mu, temp), qs, olist, wl, idelta, temp)
+        sc = _sc_bubble(ub, eb, temp, qs, olist, wl, idelta)
+        assert np.abs(sc - normal).max() < 1e-6 * np.abs(normal).max()
+
+
+def test_chi0_sc_singlet_spin_response_is_yosida_suppressed_complex_multiorbital():
+    """A full s-wave gap far above T must suppress the uniform static spin response
+    (Yosida) on a complex multi-orbital H(k) too, and the dynamic q-summed response
+    at w0 << 2Delta must be small and non-negative (it is a relaxation rate)."""
+    Nk, klist, hamk, olist = _complex_two_orbital()
+    mu, temp, idelta, d0 = -0.5, 0.01, 2.0e-3, 0.15
+    eig, uni = F.get_eig(hamk)
+    dk = np.broadcast_to(d0 * np.eye(2, dtype=np.complex128), (Nk, 2, 2)).copy()
+    eb, ub = F.get_eig(F.mkBdGhamk(hamk - mu * np.eye(2), dk))
+    wl = np.array([0.0, 1.0e-3])
+    def tr(c):
+        return F.get_tr_chi(c, c, olist)[1]
+    qs = F.get_qshift(klist, np.zeros(3))
+    k_n = tr(F.get_chi_irr(uni, eig, F.get_ffermi(eig, mu, temp), qs, olist, wl, idelta, temp))[0].real
+    k_s = tr(_sc_bubble(ub, eb, temp, qs, olist, wl, idelta))[0].real
+    assert k_s < 0.02 * k_n
+    r_n = r_s = 0.0
+    for q in klist[::7]:
+        qs = F.get_qshift(klist, q)
+        r_n += tr(F.get_chi_irr(uni, eig, F.get_ffermi(eig, mu, temp), qs, olist, wl, idelta, temp))[1].imag
+        r_s += tr(_sc_bubble(ub, eb, temp, qs, olist, wl, idelta))[1].imag
+    assert -1e-3 * r_n < r_s < 0.1 * r_n
+
+
 def test_chi0_sc_reduces_to_normal_state_at_zero_gap():
     """The BdG susceptibility must go over into the normal-state chi0 as the gap
     is switched off, continuously (the +-E Bogoliubov branches are degenerate at

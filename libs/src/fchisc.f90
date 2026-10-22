@@ -55,12 +55,25 @@ contains
   function irr_chi_sc(Nk,Norb,Nchi,uni,eig,ffermi,ol,temp,qshift,w,idelta,eps,sw_spsym)
     !> Irreducible spin susceptibility in the SC state, evaluated in BdG eigenbasis.
     !>
-    !> Splits into a normal (G·G) and anomalous (F·F†) contribution:
-    !>   chi_{ij}(q,w) = (1/Nk) Σ_k Σ_{l,m=1..2Norb} weight(l,m,k,q,w)
-    !>                * [ B_i A_j + sgn * R_i P_j ]
+    !> In the Nambu basis ψ_k = (c_{k↑}, c†_{-k↓}) the spin density S_z(q) is
+    !> Σ_k ψ†_{k+q} ψ_k: the ↓ part, -c†_{k+q,a↓} c_{k,b↓} = +c_{k,b↓} c†_{k+q,a↓}, is
+    !> a hole-hole bilinear (orbital pair swapped, k relabelled -k-q).  Its matrix
+    !> element between BdG state l at k+q and m at k, for chi index i = (a,b), is
+    !>   X_i = p*(a,l,k+q) p(b,m,k)  +  h*(b,l,k+q) h(a,m,k)
+    !> (p = particle rows 1..Norb, h = hole rows Norb+1..2Norb of uni), and
+    !>   chi_{ij}(q,w) = (1/Nk) Σ_k Σ_{l,m=1..2Norb} weight(l,m,k,q,w) * X_i X_j* / 2
     !>   l : BdG band at k+q,  m : BdG band at k
     !>   weight = [f_l(k+q) - f_m(k)] / [w + E_m(k) - E_l(k+q) + iδ]   (= -Π_0 convention)
     !>   degenerate static limit: lim → f(1-f)/T = -∂f/∂E   (intra-band)
+    !> The 1/2 keeps the old normalisation (one spin species, = chi0 at Δ=0).
+    !> chi(1) holds the pp·pp + hh·hh ("G·G") terms, chi(2) the pp·hh cross ("F·F†")
+    !> terms, which vanish at Δ=0 because each BdG state is then pure p or pure h.
+    !> Every state enters each product once plain and once conjugated, so the result
+    !> is invariant under the arbitrary phase LAPACK gives each eigenvector.  The
+    !> earlier F·F† term, h(l,k+q)p(l,k+q) * p*(m,k)h*(m,k), was not: it picked up
+    !> e^{2iθ_l - 2iθ_m}, harmless only for real eigenvectors (real H(k), as in the
+    !> one-orbital tests) and gauge noise of either sign for a complex multi-orbital
+    !> H(k), where it drove 1/T1T negative at low T.
     !>
     !> Sign convention from spin-space symmetry.  What sgn selects is unambiguous:
     !>   sw_spsym = .false. → sgn = +1  FF cancels GG at T=0 → Yosida suppression
@@ -77,9 +90,7 @@ contains
     !> for d∥ẑ".  That is the wrong component -- for d∥ẑ it is χ_xx=χ_yy that is
     !> preserved and χ_zz that is suppressed, exactly like the singlet.  Only the
     !> label was wrong; the arithmetic below is unchanged.
-    !> At Δ→0, BdG eigenvectors become block-diagonal in Nambu space, so P/R
-    !> cannot both be non-zero for the same (l,m); FF vanishes and GG reduces to
-    !> the normal-state expression.
+    !> sgn multiplies the cross terms; the arithmetic choice it encodes is unchanged.
     !!@param        Nk: The number of k-points
     !!@param      Norb: The number of orbitals
     !!@param      Nchi: The footnote of chi
@@ -106,12 +117,10 @@ contains
     integer(c_int32_t) i,k,l,m,nchi32
     real(c_double) temp_safe,w_eps,sgn,el,em,fl,fm,pocc
     complex(c_double) weight
-    ! A,B : matrix-element vectors for the normal G·G contribution.
-    !       chi += weight * B(i)*A(j) accumulates u*(o1_i,l,k+q) u(o1_j,l,k+q)
-    !                                           * u(o2_i,m,k)   u*(o2_j,m,k)
-    ! P,R : matrix-element vectors for the anomalous F·F† contribution
-    !       (mix upper Norb / lower Norb across k+q and k).
+    ! B,P : the particle and hole halves of X_i (see above); A,R their conjugates,
+    !       so chi += w/2 * x * conj(y)^T over (x,y) in {B,P}x{B,P}.
     complex(c_double),dimension(Nchi):: A_vec,B_vec,P_vec,R_vec
+    complex(c_double) whalf
     complex(c_double),dimension(2,Nchi,Nchi):: chi,irr_chi_sc
 
     if(sw_spsym)then
@@ -123,7 +132,7 @@ contains
     w_eps=1.0d-12                 ! threshold to detect static (w≈0) branch
     nchi32=int(Nchi,c_int32_t)
     chi(:,:,:)=0.0d0
-    !$omp parallel do reduction(+:chi) private(l,m,i,weight,A_vec,B_vec,P_vec,R_vec,el,em,fl,fm,pocc)
+    !$omp parallel do reduction(+:chi) private(l,m,i,weight,whalf,A_vec,B_vec,P_vec,R_vec,el,em,fl,fm,pocc)
     kloop: do k=1,Nk
        band1_loop: do l=1,2*Norb       ! BdG band index at k+q
           band2_loop: do m=1,2*Norb    ! BdG band index at k
@@ -150,15 +159,18 @@ contains
              !                a∈[Norb+1..2Norb] = hole component  (c†_↓)
              ! ol(i,1)=o1_i, ol(i,2)=o2_i are the orbital indices for chi index i.
              do i=1,nchi32
-                A_vec(i)=uni(ol(i,1),l,qshift(k))*conjg(uni(ol(i,2),m,k))         ! u(o1,l,k+q) u*(o2,m,k)
-                B_vec(i)=conjg(uni(ol(i,1),l,qshift(k)))*uni(ol(i,2),m,k)         ! conjugate of A_vec
-                P_vec(i)=uni(ol(i,1),l,qshift(k))*conjg(uni(ol(i,2)+Norb,m,k))    ! particle@k+q × hole@k
-                R_vec(i)=uni(ol(i,2)+Norb,l,qshift(k))*conjg(uni(ol(i,1),m,k))    ! hole@k+q × particle@k
+                B_vec(i)=conjg(uni(ol(i,1),l,qshift(k)))*uni(ol(i,2),m,k)              ! p*(o1,l,k+q) p(o2,m,k)
+                P_vec(i)=conjg(uni(ol(i,2)+Norb,l,qshift(k)))*uni(ol(i,1)+Norb,m,k)    ! h*(o2,l,k+q) h(o1,m,k)
              end do
+             A_vec(:)=conjg(B_vec(:))
+             R_vec(:)=conjg(P_vec(:))
              ! ----- accumulate rank-1 outer products ------------------------------
              ! zgeru: chi := chi + alpha * x * y^T  (no conjugation on y)
-             call zgeru(nchi32,nchi32,weight,B_vec,1,A_vec,1,chi(1,:,:),nchi32)          ! G·G part
-             call zgeru(nchi32,nchi32,sgn*weight,R_vec,1,P_vec,1,chi(2,:,:),nchi32)      ! F·F† part
+             whalf=0.5d0*weight
+             call zgeru(nchi32,nchi32,whalf,B_vec,1,A_vec,1,chi(1,:,:),nchi32)          ! pp·pp
+             call zgeru(nchi32,nchi32,whalf,P_vec,1,R_vec,1,chi(1,:,:),nchi32)          ! hh·hh
+             call zgeru(nchi32,nchi32,sgn*whalf,B_vec,1,R_vec,1,chi(2,:,:),nchi32)      ! pp·hh cross
+             call zgeru(nchi32,nchi32,sgn*whalf,P_vec,1,A_vec,1,chi(2,:,:),nchi32)      ! hh·pp cross
           end do band2_loop
        end do band1_loop
     end do kloop
