@@ -286,7 +286,17 @@ subroutine get_chi_map_soc(chi_map,irr_chi,olist,invs,Nchi,Norb)
   end do
 end subroutine get_chi_map_soc
 
-subroutine get_chis_chic_soc(chic,chiszz,chispm,chi,Vmat,orb_list,olist,slist,invs,Nk,Nw,Nchi,Norb) bind(C)
+subroutine get_chis_chic_soc(chic,chiszz,chispm,chisxx,chisyy,chi,Vmat,orb_list,olist,slist,invs,Nk,Nw,Nchi,Norb) bind(C)
+  !> Static RPA chi = (1 - chi0 V)^-1 chi0 of the SOC basis resolved into channels, orbital pair
+  !> by orbital pair (orb_list).  For chi index l = (o1,o2) with spins (s1,s2), and m = (o3,o4)
+  !> with (s3,s4), the element (l,m) correlates c^dag_{o2} c_{o1} with c^dag_{o3} c_{o4}, so with
+  !> S^mu = (1/2) c^dag sigma^mu c the channels are (1/4) sum sigma^mu_{s2 s1} sigma^nu_{s3 s4} chi_lm:
+  !>   chiszz: s1=s2, s3=s4, sign s1*s3            (x 1/4)
+  !>   chispm: (s1,s2)=(s3,s4)=(+,-), i.e. <S^- S^+> with S^+ = c^dag_up c_dn (no 1/4)
+  !>   chisxx: s1/=s2, s3/=s4, all four spin-flip combinations with +   (x 1/4)
+  !>   chisyy: as chisxx but - when (s3,s4) = (s2,s1): the <S^+S^+>, <S^-S^-> parts  (x 1/4)
+  !>   chic  : s1=s2, s3=s4, all with +           (x 1/2)
+  !> With spin-rotation symmetry <S^+S^+> = 0 and chispm = 2 chiszz, so chisxx = chisyy = chiszz.
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nk,Nw,Nchi,Norb
@@ -295,7 +305,7 @@ subroutine get_chis_chic_soc(chic,chiszz,chispm,chi,Vmat,orb_list,olist,slist,in
   integer(c_int64_t),dimension(Nchi):: orb_list
   real(c_double),intent(in),dimension(Nchi,Nchi):: Vmat
   complex(c_double),intent(in),dimension(Nk,Nw,Nchi,Nchi):: chi
-  complex(c_double),intent(out),dimension(Nk,Nchi/4,Nchi/4):: chiszz,chic,chispm
+  complex(c_double),intent(out),dimension(Nk,Nchi/4,Nchi/4):: chiszz,chic,chispm,chisxx,chisyy
 
   integer(c_int32_t) i,l,m,info
   integer(c_int32_t),dimension(Nchi):: ipiv
@@ -318,6 +328,14 @@ subroutine get_chis_chic_soc(chic,chiszz,chispm,chi,Vmat,orb_list,olist,slist,in
                  chispm(i,orb_list(l),orb_list(m))=chispm(i,orb_list(l),orb_list(m))+cmat2(m,l)
               end if
            end if
+           if(slist(olist(l,1))/=slist(olist(l,2)) .and. slist(olist(m,1))/=slist(olist(m,2)))then !spin flip x spin flip
+              chisxx(i,orb_list(l),orb_list(m))=chisxx(i,orb_list(l),orb_list(m))+cmat2(m,l)
+              if(slist(olist(l,1))==slist(olist(m,1)))then !<S^-S^+>, <S^+S^->
+                 chisyy(i,orb_list(l),orb_list(m))=chisyy(i,orb_list(l),orb_list(m))+cmat2(m,l)
+              else !<S^+S^+>, <S^-S^->: sigma^y_{s2s1} sigma^y_{s3s4} = -1
+                 chisyy(i,orb_list(l),orb_list(m))=chisyy(i,orb_list(l),orb_list(m))-cmat2(m,l)
+              end if
+           end if
            if(slist(olist(l,1))==slist(olist(l,2)) .and. slist(olist(m,1))==slist(olist(m,2)))then
               chic(i,orb_list(l),orb_list(m))=chic(i,orb_list(l),orb_list(m))+cmat2(m,l)
               if(slist(olist(l,1))==slist(olist(m,1)))then
@@ -330,5 +348,7 @@ subroutine get_chis_chic_soc(chic,chiszz,chispm,chi,Vmat,orb_list,olist,slist,in
      end do
   end do qloop
   chic(:,:,:)=chic(:,:,:)*0.5d0
-  chiszz(:,:,:)=chiszz(:,:,:)*0.25
+  chiszz(:,:,:)=chiszz(:,:,:)*0.25d0
+  chisxx(:,:,:)=chisxx(:,:,:)*0.25d0
+  chisyy(:,:,:)=chisyy(:,:,:)*0.25d0
 end subroutine get_chis_chic_soc

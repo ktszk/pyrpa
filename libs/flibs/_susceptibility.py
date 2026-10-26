@@ -180,6 +180,8 @@ _loader._lib.get_chis_chic_soc.argtypes = [
     _loader.c_array(np.complex128),  # chic (out)
     _loader.c_array(np.complex128),  # chiszz (out)
     _loader.c_array(np.complex128),  # chispm (out)
+    _loader.c_array(np.complex128),  # chisxx (out)
+    _loader.c_array(np.complex128),  # chisyy (out)
     _loader.c_array(np.complex128),  # chi
     _loader.c_array(np.float64),     # Vmat
     _loader.c_array(np.int64),       # orb_list
@@ -573,10 +575,13 @@ def get_chi0_nosym(Gk: np.ndarray, olist: np.ndarray, kmap: np.ndarray, temp: fl
 
 
 def get_chis_chic_soc(chi: np.ndarray, Vmat: np.ndarray, olist: np.ndarray, slist: np.ndarray,
-                      invs: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+                      invs: np.ndarray) -> tuple[np.ndarray, ...]:
     """
-    @brief Decompose the SOC susceptibility into charge (chic), longitudinal
-    spin (chiszz) and transverse (chispm) channels.
+    @brief Decompose the static SOC RPA susceptibility into charge (chic), longitudinal
+    spin (chiszz), transverse (chispm = <S^- S^+>) and Cartesian transverse (chisxx,
+    chisyy) channels.  chiszz, chisxx and chisyy share the normalization of S = sigma/2,
+    so with spin-rotation symmetry chisxx = chisyy = chiszz (and chispm = 2 chiszz);
+    SOC splits them, and chisxx != chisyy needs <S^+S^+> != 0 (in-plane anisotropy).
     @param    chi: Full susceptibility [Nchi, Nchi, Nk, Nw] complex128
     @param   Vmat: SOC interaction matrix [Nchi, Nchi] float64
     @param  olist: Orbital-pair list of chi [Nchi, 2] int64 (1-based)
@@ -585,30 +590,35 @@ def get_chis_chic_soc(chi: np.ndarray, Vmat: np.ndarray, olist: np.ndarray, slis
     @return  chic: Charge susceptibility [Nchi/4, Nchi/4, Nk] complex128
     @return chiszz: Longitudinal spin susceptibility [Nchi/4, Nchi/4, Nk] complex128
     @return chispm: Transverse spin susceptibility [Nchi/4, Nchi/4, Nk] complex128
+    @return chisxx: S^x S^x spin susceptibility [Nchi/4, Nchi/4, Nk] complex128
+    @return chisyy: S^y S^y spin susceptibility [Nchi/4, Nchi/4, Nk] complex128
     """
     def get_orb_list(olist: np.ndarray, slist: np.ndarray, invs: np.ndarray) -> np.ndarray:
-        orb_list = np.zeros(Nchi, dtype=np.int64)
-        orbs = np.where(slist == 1)
+        # Spinless orbital-pair index of every chi index.  The orbitals are those chiolist
+        # actually carries (up-spin representatives), not every up orbital of the model: a
+        # chiolist restricted to the correlated orbitals (d-p, periodic Anderson) has Nchi/4 =
+        # Ncorr^2 output pairs, and indexing them by all Norb/2 orbitals wrote past the end of the
+        # [Nchi/4, Nchi/4] outputs whenever a correlated orbital was not among the first ones.
+        up = lambda o: (o if slist[o - 1] == 1 else invs[o - 1]) - 1
+        orbs = sorted({up(o) for ol in olist for o in ol})
+        if len(orbs)**2 != Nchi // 4 or 4*(Nchi // 4) != Nchi:
+            raise ValueError(f'get_chis_chic_soc: chiolist must hold every spin combination of its orbitals '
+                             f'({len(orbs)} orbitals -> {4*len(orbs)**2} pairs), got Nchi = {Nchi}')
         o1, o2 = np.meshgrid(orbs, orbs)
-        orb_chi = np.array([o1.flatten(), o2.flatten()]).T
-        for i, ol in enumerate(olist):
-            o1_val = (ol[0] if slist[ol[0] - 1] == 1 else invs[ol[0] - 1]) - 1
-            o2_val = (ol[1] if slist[ol[1] - 1] == 1 else invs[ol[1] - 1]) - 1
-            for j, ob2 in enumerate(orb_chi):
-                if o1_val == ob2[0] and o2_val == ob2[1]:
-                    orb_list[i] = j + 1
-                    break
-        return orb_list
+        pos = {(a, b): j + 1 for j, (a, b) in enumerate(zip(o1.flatten(), o2.flatten()))}
+        return np.array([pos[(up(ol[0]), up(ol[1]))] for ol in olist], dtype=np.int64)
     Norb, Nchi = len(slist), len(olist)
     Nk, Nw = len(chi[0, 0, 0]), len(chi[0, 0])
     orb_list = get_orb_list(olist, slist, invs)
     chic = np.zeros((int(Nchi / 4), int(Nchi / 4), Nk), dtype=np.complex128)
     chiszz = np.zeros((int(Nchi / 4), int(Nchi / 4), Nk), dtype=np.complex128)
     chispm = np.zeros((int(Nchi / 4), int(Nchi / 4), Nk), dtype=np.complex128)
-    _loader._lib.get_chis_chic_soc(chic, chiszz, chispm, chi, Vmat, orb_list, olist, slist, invs,
+    chisxx = np.zeros((int(Nchi / 4), int(Nchi / 4), Nk), dtype=np.complex128)
+    chisyy = np.zeros((int(Nchi / 4), int(Nchi / 4), Nk), dtype=np.complex128)
+    _loader._lib.get_chis_chic_soc(chic, chiszz, chispm, chisxx, chisyy, chi, Vmat, orb_list, olist, slist, invs,
                                    _loader.i64(Nk), _loader.i64(Nw),
                                    _loader.i64(Nchi), _loader.i64(Norb))
-    return chic, chiszz, chispm
+    return chic, chiszz, chispm, chisxx, chisyy
 
 
 def get_chis_chic(chi: np.ndarray, Smat: np.ndarray, Cmat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

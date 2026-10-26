@@ -261,13 +261,22 @@ contains
                                               ! one apply_op, but not free
     integer(c_int32_t) ii,jj,n,itry,itmp
     integer(c_int32_t),dimension(m_act):: iord
+    real(c_double) emax
     complex(c_double),dimension(m_act):: y    ! Ritz coefficients of the candidate, phase fixed
     logical ok
 
-    ! candidates: a physical eigenvalue must be positive (lambda<0 is a repulsive solution)
+    ! candidates: a physical eigenvalue must be positive (lambda<0 is a repulsive solution) and
+    ! REAL.  The kernel is real-linear, so a Ritz value with a finite imaginary part belongs to a
+    ! complex-conjugate pair of the projected problem, and its Ritz vector (built from real
+    ! coefficients, real_ritz) is no eigenvector of the kernel.  Such pairs show up once the Krylov
+    ! space nears the problem size (0.010 +- 0.0027i next to genuine values with |Im| ~ 1e-18), and
+    ! with a branch test they could be picked: their mixed character can pass it.
+    emax=maxval(abs(eigenvals(1:m_act)))
     n=0
     do ii=1,m_act
-       if(dble(eigenvals(ii))-shift>0.0d0)then; n=n+1; iord(n)=ii; end if
+       if(dble(eigenvals(ii))-shift>0.0d0 .and. abs(aimag(eigenvals(ii)))<=1.0d-8*emax)then
+          n=n+1; iord(n)=ii
+       end if
     end do
     idx=0
     if(n==0)return

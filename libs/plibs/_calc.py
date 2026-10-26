@@ -1019,8 +1019,9 @@ def calc_lin_eliash_soc(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S
     vertex Vmat replaces the S/C pair, and chi0 comes back with the sign tables
     (sgnsig, sgnsig2) and the inverse orbital map invschi that the SOC pairing
     kernel needs.  Because spin is no longer a good quantum number, chi_s splits
-    into a longitudinal (chi_szz) and a transverse (chi_spm) channel and both are
-    written to 'chis.dat'; 'chic.dat' holds the charge channel.  Returns early
+    into a longitudinal (chi_szz) and transverse (chi_spm = <S^-S^+>, chi_sxx, chi_syy)
+    channels, written to 'chis.dat' as columns  kx ky chi_szz chi_spm chi_sxx chi_syy
+    (chi_szz/xx/yy with S = sigma/2: all equal without SOC); 'chic.dat' holds the charge channel.  Returns early
     when the self-energy could not be prepared.
 
     lambda_eliash is reported exactly as in the non-SOC path: the Fortran driver
@@ -1069,15 +1070,18 @@ def calc_lin_eliash_soc(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S
     sw_eig = True  # True: leading eigenvalue (most-unstable mode); False: trace
     chi, sgnsig, sgnsig2, invschi = flibs.get_chi0_soc(Vmat, Gk, chiolist, slist, state['kmap'], state['invk'], invs,
                                                        temp, Nx, Ny, Nz)
-    chic, chiszz, chispm = flibs.get_chis_chic_soc(chi, Vmat, chiolist, slist, invs)
+    chic, chiszz, chispm, chisxx, chisyy = flibs.get_chis_chic_soc(chi, Vmat, chiolist, slist, invs)
     chiszzq = flibs.get_eig_or_tr_chi(chiszz, state['invk'], sw_eig)
     chispmq = flibs.get_eig_or_tr_chi(chispm, state['invk'], sw_eig)
+    chisxxq = flibs.get_eig_or_tr_chi(chisxx, state['invk'], sw_eig)
+    chisyyq = flibs.get_eig_or_tr_chi(chisyy, state['invk'], sw_eig)
     chicq = flibs.get_eig_or_tr_chi(chic, state['invk'], sw_eig)
     try:
         with open('chis.dat', 'w') as f, open('chic.dat', 'w') as f2:
             for i, k in enumerate(state['kmap']):
                 if k[2] == 0.0:
-                    f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chiszzq[i].real:11.4e} {chispmq[i].real:11.4e}\n')
+                    f.write(f'{k[0]:6.4f} {k[1]:6.4f} {chiszzq[i].real:11.4e} {chispmq[i].real:11.4e} '
+                            f'{chisxxq[i].real:11.4e} {chisyyq[i].real:11.4e}\n')
                     f2.write(f'{k[0]:6.4f} {k[1]:6.4f} {chicq[i].real:11.4e}\n')
     except OSError as e:
         print(f"Error: Failed to write 'chis.dat' or 'chic.dat': {e}", flush=True)

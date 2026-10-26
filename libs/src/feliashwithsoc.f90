@@ -26,7 +26,9 @@
 !                    singlet/triplet of lin_eliash are reproduced exactly.
 !     select_branch  with SOC, Arnoldi returns the largest eigenvalue whose Ritz vector carries the
 !                    spin character of gap_sym rather than the largest of the parity sector, so
-!                    lambda stays continuous as the SOC strength goes to zero.
+!                    lambda stays continuous as the SOC strength goes to zero.  The character is
+!                    measured on the pair amplitude F = G Delta G (Fermi-level weighted), not on
+!                    Delta, whose undamped high-w_n tail is inter-orbital triplet with SOC.
 !   The power method (arnoldi_m = 0) has no branch tracking and converges to the dominant state of
 !   the sector, so use Arnoldi when SOC is present.
 !
@@ -131,15 +133,31 @@ contains
     !> asks for?  With SOC a parity sector holds both the (pseudospin singlet, even w) and the
     !> (pseudospin triplet, odd w) pairing and no exact symmetry separates them, so without this
     !> the solver would return whichever is larger and lambda would jump as SOC goes to zero.
+    !> The spin character is read off the pair amplitude F = G Delta G^T(-k), not off Delta:
+    !> Delta does not decay with w_n (the instantaneous U, J vertex keeps a constant tail), and
+    !> with SOC that tail is largely inter-orbital real-spin triplet, so summed over all w_n it
+    !> outweighs the low-energy part that decides the pairing.  For the Sr2RuO4 d-wave with SOC,
+    !> Delta was 79% "triplet" over all w_n but 92% singlet in its four lowest w_n, and the test
+    !> threw the d state (lambda 0.54) away for a weaker one (0.12).  F ~ 1/w_n^2 weights the Fermi
+    !> level.  op_fk is apply_op's scratch, free between kernel applications.
+    !> The wanted character must also DOMINATE (dominance x the other weight), not just exceed
+    !> 50%: a Krylov space that has grown to the size of the problem holds Ritz vectors that are
+    !> roughly equal mixtures and not eigenvectors of the kernel at all, and with a 50% cut any
+    !> change of weighting decides them either way (one at SOC = 1e-8 was 36%/64% in F, 56%/44% in
+    !> Delta).  True eigenvectors are pure at small SOC and stay well above this with a realistic one
+    !> (the Sr2RuO4 d-wave: 92% singlet at low w_n).
     complex(c_double),intent(in):: x(*)
     logical,intent(out):: ok
+    real(c_double),parameter:: dominance=2.0d0
     real(c_double) ws,wt
-    call get_spin_weight(ws,wt,x)
-    ok=merge(ws>wt,wt>ws,op_gap_sym>0)
+    call mkfk_trs_soc(op_fk,op_Gk,x,op_sgnsig,op_slist,op_invk,op_invs,op_idk,op_ipk,&
+         op_Nkall,op_Nk,op_Ndk,op_Nw,op_Norb,op_gap_sym)
+    call get_spin_weight(ws,wt,op_fk)
+    ok=merge(ws>dominance*wt,wt>dominance*ws,op_gap_sym>0)
   end subroutine classify_branch
 
   subroutine get_spin_weight(ws,wt,d)
-    !> Split |Delta|^2 into its spin-singlet weight ws and spin-triplet weight wt, by projecting
+    !> Split |d|^2 (d = F for classify_branch) into its spin-singlet weight ws and spin-triplet weight wt, by projecting
     !> the opposite-spin block on Delta_du = -Delta_ud (singlet) and Delta_du = +Delta_ud (S_z=0
     !> triplet); the equal-spin blocks are the S_z=+-1 triplet and go to wt.  Only ws vs wt is
     !> used (which one dominates), so the overall normalisation does not matter.

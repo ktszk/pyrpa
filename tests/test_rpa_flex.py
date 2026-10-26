@@ -1403,6 +1403,163 @@ def test_get_chi0_soc_returns_the_four_soc_tables():
     assert sorted(invschi.tolist()) == list(range(1, Nchi + 1))
 
 
+def _soc_spin_channels(rvec, ham_r, Nx=8, Nw=8, temp=0.05, U=0.8, J=0.1):
+    """Static RPA spin channels of get_chis_chic_soc for a spinful model [up orbs, down orbs]."""
+    Norb = ham_r.shape[1]
+    klist, kmap, invk = F.gen_irr_k_TRS(Nx, Nx, 1)
+    eig, uni = F.get_eig(F.gen_ham(klist, ham_r, rvec))
+    mu = P.calc_mu(eig, len(klist), fill=Norb/2.0, temp=temp)
+    Gk = F.gen_Green0(eig, uni, mu=mu, temp=temp, Nw=Nw)
+    slist = np.ones(Norb, dtype=np.int64)
+    slist[(Norb + 1)//2:] = -1
+    invs = np.concatenate([np.arange((Norb + 1)//2, Norb), np.arange((Norb + 1)//2)]) + 1
+    olist, site = P.get_chi_orb_list(Norb, [Norb])
+    Vmat = F.gen_Vmatrix(olist, slist, site, invs, U=U, J=J)
+    with _silence_stdout():
+        chi, *_ = F.get_chi0_soc(Vmat, Gk, olist, slist, kmap, invk, invs, temp, Nx, Nx, 1)
+    return dict(zip(('c', 'zz', 'pm', 'xx', 'yy'), F.get_chis_chic_soc(chi, Vmat, olist, slist, invs)))
+
+
+def _spin_rotated(ham_r, axis, theta):
+    """H(R) with the spin frame rotated by theta about axis, basis [orb up..., orb down...]."""
+    s = {'x': np.array([[0, 1], [1, 0]]), 'y': np.array([[0, -1j], [1j, 0]]), 'z': np.diag([1, -1])}[axis]
+    R = np.kron(np.cos(theta/2)*np.eye(2) - 1j*np.sin(theta/2)*s, np.eye(ham_r.shape[1]//2))
+    return np.ascontiguousarray(np.einsum('ab,rbc,dc->rad', R, ham_r, R.conj()))
+
+
+def test_soc_chis_xx_yy_follow_zz_under_spin_rotations():
+    """chisxx / chisyy of get_chis_chic_soc are tied to the established chiszz: rotating the spin
+    frame of the whole model by pi/2 about y (x) carries S^x (S^y) into S^z, so chiszz of the rotated
+    model must equal chisxx (chisyy) of the original, and a pi/2 turn about z swaps xx and yy (the
+    Kanamori vertex is spin-rotation invariant).  An L.S-like on-site SOC with its axis in the xz
+    plane makes all three channels different, so none of this holds by accident.  Without SOC the
+    channels coincide and chispm = <S^-S^+> = 2 chiszz."""
+    import _tools as T
+    root = pathlib.Path(__file__).resolve().parent.parent
+    rvec, ham_r, Norb, _ = P.import_hoppings(str(root / 'inputs' / 'hop2_soc.input'), 1)
+    rvec = np.vstack([rvec, [[0.0, 0.0, 0.0]]])
+    hs = np.concatenate([ham_r, np.zeros((1, Norb, Norb), dtype=np.complex128)])
+    hs[-1] += np.kron(0.6*np.diag([1, -1]) + 0.8*np.array([[0, 1], [1, 0]]), 0.3*np.array([[0, -1j], [1j, 0]]))
+    hs = np.ascontiguousarray(hs)
+    c = _soc_spin_channels(rvec, hs)
+    n = np.abs(c['zz']).max()
+    assert np.abs(c['xx'] - c['yy']).max() > 0.1*n and np.abs(c['xx'] - c['zz']).max() > 0.05*n
+    for axis, src, dst in (('y', 'zz', 'xx'), ('x', 'zz', 'yy'), ('z', 'xx', 'yy')):
+        r = _soc_spin_channels(rvec, _spin_rotated(hs, axis, np.pi/2))
+        assert np.abs(r[src] - c[dst]).max() < 1e-12*n, axis
+    m = T.one_orbital_square(Nx=8, Ny=8, Nw=8, temp=0.05, mu=0.0, tx=1.0, ty=1.0)
+    ham2, _, _, _ = P.spin_double_model(m['ham_r'], [])
+    ns = _soc_spin_channels(m['rvec'], np.ascontiguousarray(ham2))
+    n0 = np.abs(ns['zz']).max()
+    assert np.abs(ns['xx'] - ns['zz']).max() < 1e-12*n0 and np.abs(ns['yy'] - ns['zz']).max() < 1e-12*n0
+    assert np.abs(ns['pm'] - 2*ns['zz']).max() < 1e-12*n0
+
+
+def _dp_model(soc=False):
+    """Three-orbital d-p (Emery-like) square lattice, orbital order [px, py, d] -- the correlated d
+    LAST, which is what a correlated-subspace chiolist has to cope with (periodic Anderson models
+    put f after the conduction orbitals).  soc=True spin-doubles it and adds an L.S-like p-orbital
+    SOC with its axis in the xz plane, so S_z is not conserved."""
+    terms = {}
+
+    def hop(R, a, b, t):
+        for RR, aa, bb, tt in ((tuple(R), a, b, t), (tuple(-np.array(R)), b, a, np.conj(t))):
+            terms.setdefault(RR, np.zeros((3, 3), dtype=np.complex128))[aa, bb] += tt
+    terms[(0, 0, 0)] = np.diag([-2.5, -2.5, 0.0]).astype(np.complex128)
+    for R, a, b, t in (((0, 0, 0), 2, 0, 1.2), ((-1, 0, 0), 2, 0, -1.2), ((0, 0, 0), 2, 1, 1.2),
+                       ((0, -1, 0), 2, 1, -1.2), ((0, 0, 0), 0, 1, 0.5), ((1, 0, 0), 0, 1, -0.5),
+                       ((0, -1, 0), 0, 1, -0.5), ((1, -1, 0), 0, 1, 0.5)):
+        hop(R, a, b, t)
+    rvec = np.array(list(terms.keys()), dtype=np.float64)
+    ham = np.array(list(terms.values()))
+    if not soc:
+        return rvec, np.ascontiguousarray(ham), None, None
+    h2, _, slist, invs = P.spin_double_model(ham, [])
+    h2 = np.array(h2)
+    tauy = np.zeros((3, 3), dtype=np.complex128)
+    tauy[0, 1], tauy[1, 0] = -1j, 1j
+    h2[[i for i, r in enumerate(rvec) if not r.any()][0]] += \
+        np.kron(0.6*np.diag([1, -1]) + 0.8*np.array([[0, 1], [1, 0]]), 0.3*tauy)
+    return rvec, np.ascontiguousarray(h2), slist, invs
+
+
+def test_correlated_subspace_chiolist_matches_the_full_basis_without_soc():
+    """A chiolist holding only the correlated d pairs must give what the full basis gives with U
+    on d alone: the same chi0_dd, Eliashberg eigenvalue and FLEX self-energy, Sigma and Delta
+    vanishing on the uncorrelated p orbitals."""
+    N, Nw, temp, U, fill = 8, 32, 0.05, 1.5, 2.5
+    rvec, ham_r, _, _ = _dp_model()
+    klist, kmap, invk = F.gen_irr_k_TRS(N, N, 1)
+    hamk = F.gen_ham(klist, ham_r, rvec)
+    eig, uni = F.get_eig(hamk)
+    mu = P.calc_mu(eig, len(klist), fill, temp)
+    Gk = F.gen_Green0(eig, uni, mu, temp, Nw)
+    olA, siA = P.get_chi_orb_list(3, [3])
+    SA, CA = F.gen_SCmatrix_orb(olA, siA, np.diag([0.0, 0.0, U]), np.zeros((3, 3)))
+    olB = np.asfortranarray(np.array([[3, 3]], dtype=np.int64))
+    siB = np.ones(1, dtype=np.int64)
+    SB, CB = F.gen_SCmatrix(olB, siB, U, 0.0)
+    out = {}
+    with _silence_stdout():
+        for lab, ol, si, S, C in (('A', olA, siA, SA, CA), ('B', olB, siB, SB, CB)):
+            chi, _ = F.get_chi0(S, C, Gk, ol, kmap, invk, temp, N, N, 1)
+            g, lam = F.linearized_eliashberg(chi.copy(), Gk, uni, P.get_initial_gap(klist, 3, 1), S, C, ol,
+                                             F.get_plist(rvec, ham_r), kmap, invk, N, N, 1, temp, 1, eps=1e-10)
+            sig, mus = F.mkself(S, C, kmap, invk, ol, hamk, eig, uni, mu, fill, temp, Nw, N, N, 1,
+                                False, False, eps=1e-9, scf_loop=300)
+            out[lab] = (chi, lam, g, sig, mus)
+    (cA, lA, gA, sA, mA), (cB, lB, gB, sB, mB) = out['A'], out['B']
+    iA = [i for i, (a, b) in enumerate(np.asarray(olA)) if a == 3 and b == 3][0]
+    assert np.abs(cA[iA, iA] - cB[0, 0]).max() < 1e-13*np.abs(cB).max()
+    assert abs(lA - lB) < 1e-9*abs(lA)
+    assert np.abs(sA - sB).max() < 1e-12*np.abs(sA).max() and abs(mA - mB) < 1e-12
+    assert np.abs(sB[:2]).max() == 0.0 and np.abs(sB[:, :2]).max() == 0.0
+    assert max(np.abs(gB[:2]).max(), np.abs(gB[:, :2]).max()) < 1e-10*np.abs(gB).max()
+
+
+def test_correlated_subspace_chiolist_matches_the_full_basis_with_soc():
+    """The same with SOC.  get_chis_chic_soc used to index the spinless pairs by every up orbital of
+    the model, so a chiolist of the correlated d alone (d LAST) wrote past its [Nchi/4, Nchi/4]
+    outputs; it must now return the d-d block of the full-basis channels, all five of them
+    (xx, yy and zz differ here), and the SOC Eliashberg and FLEX must agree as well."""
+    N, Nw, temp, U, fill, Norb = 8, 32, 0.05, 1.5, 5.0, 6
+    rvec, h2, slist, invs = _dp_model(soc=True)
+    klist, kmap, invk = F.gen_irr_k_TRS(N, N, 1)
+    hamk = F.gen_ham(klist, h2, rvec)
+    eig, uni = F.get_eig(hamk)
+    mu = P.calc_mu(eig, len(klist), fill, temp)
+    Gk = F.gen_Green0(eig, uni, mu, temp, Nw)
+    olA, siA = P.get_chi_orb_list(Norb, [Norb])
+    Um = np.zeros((Norb, Norb))
+    Um[np.ix_([2, 5], [2, 5])] = U                       # U on d up / d down only
+    VA = F.gen_Vmatrix_orb(olA, slist, siA, invs, Um, np.zeros((Norb, Norb)))
+    olB = np.asfortranarray(np.array([[a, b] for b in (3, 6) for a in (3, 6)], dtype=np.int64))
+    siB = np.ones(4, dtype=np.int64)
+    VB = F.gen_Vmatrix(olB, slist, siB, invs, U, 0.0)
+    out = {}
+    with _silence_stdout():
+        for lab, ol, si, V in (('A', olA, siA, VA), ('B', olB, siB, VB)):
+            chi, sg, sg2, isc = F.get_chi0_soc(V, Gk, ol, slist, kmap, invk, invs, temp, N, N, 1)
+            ch = F.get_chis_chic_soc(chi, V, ol, slist, invs)
+            _, lam = F.linearized_eliashberg_soc(chi.copy(), Gk, uni, P.get_initial_gap(klist, Norb, 1), V, sg, sg2,
+                                                 F.get_plist(rvec, h2), slist, ol, kmap, invk, invs, isc,
+                                                 N, N, 1, temp, 1, eps=1e-10)
+            sig, mus = F.mkself_soc(V, kmap, invk, invs, ol, slist, hamk, eig, uni, mu, fill, temp, Nw,
+                                    N, N, 1, False, False, eps=1e-9, scf_loop=300)
+            out[lab] = (ch, lam, sig, mus)
+    (chA, lA, sA, mA), (chB, lB, sB, mB) = out['A'], out['B']
+    jd = 2*3 + 2                                          # spinless (d, d) pair in the 3x3 grid of A
+    for a, b in zip(chA, chB):
+        assert b.shape[:2] == (1, 1)
+        assert np.abs(a[jd, jd] - b[0, 0]).max() < 1e-12*np.abs(a[jd, jd]).max()
+    zz, xx, yy = (np.abs(chB[i][0, 0]).max() for i in (1, 3, 4))
+    assert abs(xx - yy) > 1e-3*zz and abs(xx - zz) > 1e-3*zz           # a genuinely anisotropic case
+    assert abs(lA - lB) < 1e-9*abs(lA)
+    assert np.abs(sA - sB).max() < 1e-12*np.abs(sA).max() and abs(mA - mB) < 1e-12
+    p = [0, 1, 3, 4]
+    assert np.abs(sB[np.ix_(p, list(range(Norb)))]).max() == 0.0
+
+
 def test_linearized_eliashberg_soc_returns_lambda_and_finite_gap():
     """The SOC solver must return (gap, lambda) like the non-SOC one, both finite.
 
