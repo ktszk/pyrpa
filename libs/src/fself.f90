@@ -196,6 +196,7 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
   !!@param      Ny,in: Number of ky mesh
   !!@param      Nz,in: Number of kz mesh
   use numerics, only:drop_roundoff
+  use freq_grid
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
@@ -208,60 +209,67 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
   complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: sigmak
 
   integer(c_int32_t) i,j,k,n,l,m
+  integer(c_int64_t) jp,jm,j0
   real(c_double) weight
   complex(c_double),allocatable,dimension(:,:,:,:):: tmpVsigma,tmp,tmpgk
 
-  allocate(tmpVsigma(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmp(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmpgk(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw))
+  allocate(tmpVsigma(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)),tmp(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)),&
+       tmpgk(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)))
   weight=temp/dble(Nkall)
   !$omp parallel workshare
   sigmak(:,:,:,:)=0.0d0
   !$omp end parallel workshare
-  call init_fft_plans(tmpVsigma,tmp,Nx,Ny,Nz,2*Nw)
+  call fg_plans_init(tmpVsigma,tmp,Nx,Ny,Nz,Nw)
+  j0=fg_pos(FG_BOSON,1_c_int64_t)   ! v=0
   do l=1,Nchi
      do m=1,Nchi
         !$omp parallel
         !$omp do
         do i=1,Nkall !j=1>iw=0, j=Nw>iw=inf
            if(invk(2,i)==0)then
-              tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vsigma(invk(1,i),1,m,l) !Vsigma(k,iw)
+              tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),j0)=Vsigma(invk(1,i),1,m,l) !Vsigma(k,iw)
            else if(invk(2,i)==1)then
-              tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vsigma(invk(1,i),1,l,m) !Vsigma(-k,iw)
+              tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),j0)=Vsigma(invk(1,i),1,l,m) !Vsigma(-k,iw)
            end if
-           tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=1.5d0*Smat(m,l)-0.5d0*Cmat(m,l)
         end do
         !$omp end do
-        !$omp do private(i)
+        !$omp do private(i,jp,jm)
         do j=2,Nw
+           jp=fg_pos(FG_BOSON,j)
+           jm=fg_neg(FG_BOSON,j,Nw)
            do i=1,Nkall
               if(invk(2,i)==0)then
-                 tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vsigma(invk(1,i),j,m,l) !Vsigma(k,iw)
-                 tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vsigma(invk(1,i),j,l,m)) !Vsigma(k,-iw)ml=Vsigma^*lm(k,iw)
+                 tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),jp)=Vsigma(invk(1,i),j,m,l) !Vsigma(k,iw)
+                 tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),jm)=conjg(Vsigma(invk(1,i),j,l,m)) !Vsigma(k,-iw)ml=Vsigma^*lm(k,iw)
               else if(invk(2,i)==1)then
-                 tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vsigma(invk(1,i),j,l,m) !Vsigma(-k,iw)=Vsigma(-k,iw)^T
-                 tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vsigma(invk(1,i),j,m,l)) !Vsigma(-k,-iw)=Vsigma^*(k,iw)
+                 tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),jp)=Vsigma(invk(1,i),j,l,m) !Vsigma(-k,iw)=Vsigma(-k,iw)^T
+                 tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),jm)=conjg(Vsigma(invk(1,i),j,m,l)) !Vsigma(-k,-iw)=Vsigma^*(k,iw)
               end if
            end do
         end do
         !$omp end do
-        !$omp do private(i)
+        !$omp do private(i,jp,jm)
         do j=1,Nw
+           jp=fg_pos(FG_FERMION,j)
+           jm=fg_neg(FG_FERMION,j,Nw)
            do i=1,Nkall
               if(invk(2,i)==0)then
-                 tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(m,2),olist(l,2)) !G42(iw)
-                 tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(l,2),olist(m,2))) !G42(k,-iw)=G^*24(k,iw)
+                 tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),jp)=Gk(invk(1,i),j,olist(m,2),olist(l,2)) !G42(iw)
+                 tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),jm)=conjg(Gk(invk(1,i),j,olist(l,2),olist(m,2))) !G42(k,-iw)=G^*24(k,iw)
               else if(invk(2,i)==1)then
-                 tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(l,2),olist(m,2)) !G42(-k,iw)=G24(k,iw)
-                 tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(m,2),olist(l,2))) !G42(-k,-iw)=G^*42(k,iw)
+                 tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),jp)=Gk(invk(1,i),j,olist(l,2),olist(m,2)) !G42(-k,iw)=G24(k,iw)
+                 tmpgk(kmap(1,i),kmap(2,i),kmap(3,i),jm)=conjg(Gk(invk(1,i),j,olist(m,2),olist(l,2))) !G42(-k,-iw)=G^*42(k,iw)
               end if
            end do
         end do
         !$omp end do
         !$omp end parallel
-        call FFT(tmpVsigma,tmp,Nx,Ny,Nz,2*Nw,.true.)
-        call FFT(tmpgk,tmp,Nx,Ny,Nz,2*Nw,.true.)
+        call fg_set_static(tmpVsigma,cmplx(1.5d0*Smat(m,l)-0.5d0*Cmat(m,l),0.0d0,kind=c_double),Nx,Ny,Nz,Nw)
+        call fg_forward(tmpVsigma,tmp,Nx,Ny,Nz,Nw)
+        call fg_forward(tmpgk,tmp,Nx,Ny,Nz,Nw)
         !$omp parallel
         !$omp do private(i,j,k,n)
-        do n=1,2*Nw
+        do n=1,int(fg_nt(Nw),c_int32_t)
            do k=0,Nz-1
               do j=0,Ny-1
                  do i=0,Nx-1
@@ -275,13 +283,14 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
       tmpgk=cmplx(0.0d0,0.0d0,kind=c_double)
         !$omp end workshare
         !$omp end parallel
-        call FFT(tmp,tmpgk,Nx,Ny,Nz,2*Nw,.false.)
-        !$omp parallel do private(i,j)
+        call fg_backward(tmp,tmpgk,Nx,Ny,Nz,Nw)
+        !$omp parallel do private(i,j,jp)
         do j=1,Nw
+           jp=fg_pos(FG_FERMION,j)
            do i=1,Nkall
               if(invk(2,i)==0)then
                  sigmak(invk(1,i),j,olist(m,1),olist(l,1))=sigmak(invk(1,i),j,olist(m,1),olist(l,1))&
-                      +tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)
+                      +tmp(kmap(1,i),kmap(2,i),kmap(3,i),jp)
               end if
            end do
         end do
@@ -289,7 +298,7 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
      end do
   end do
 
-  call destroy_fft_plans()
+  call fg_plans_free()
   !$omp parallel workshare
   sigmak(:,:,:,:)=sigmak(:,:,:,:)*weight
   !$omp end parallel workshare

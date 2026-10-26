@@ -1278,6 +1278,134 @@ subroutine fft3d_batch(cmat,tmp,Nx,Ny,Nz,M,SW)
   !$omp end parallel do
 end subroutine fft3d_batch
 
+module freq_grid
+  !> The frequency grid of the FFT-convolution kernels (chi0, Sigma, gap equation): where a stored
+  !> Matsubara frequency sits in the (k-mesh x frequency) work array, and the transform of that
+  !> array between (k, i w) and (R, tau).  The kernels only call these, so the grid can be switched
+  !> (uniform Matsubara now, the IR basis next) without touching them -- see Doc/design_freq_grid.md.
+  !>
+  !> Uniform Matsubara grid (the only one so far).  The work array holds 2*Nw frequencies on a
+  !> circular index: fermionic w_n (n = 0..Nw-1) at n+1 and -w_n at 2*Nw-n; bosonic v_m
+  !> (m = 0..Nw-1) at m+1 and -v_m at 2*Nw-m+1 (m >= 1); index Nw+1 is the w -> infinity slot
+  !> that the kernels fill with the bare (instantaneous) vertex.  The (k, w) <-> (R, tau)
+  !> transform is one 4D FFT: splitting it into a k-FFT and a frequency FFT is as fast with MKL
+  !> and pocketfft but twice as slow with AOCL-FFTZ (strided 1D transforms), so the boundary is
+  !> the whole (k, w) transform, not the frequency axis alone.
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
+  implicit none
+  private
+  integer(c_int32_t),parameter,public:: FG_FERMION=1, FG_BOSON=2
+  public:: fg_nt,fg_pos,fg_neg,fg_set_static,fg_forward,fg_backward,fg_reverse,fg_plans_init,fg_plans_free
+  !> stored frequency j (1-based: j=1 is w_0 / v_0) -> work-array index of +w_j / -w_j
+  interface fg_pos
+     module procedure fg_pos_i32,fg_pos_i64
+  end interface fg_pos
+  interface fg_neg
+     module procedure fg_neg_i32,fg_neg_i64
+  end interface fg_neg
+contains
+  pure function fg_nt(Nw) result(nt)
+    !> length of the frequency axis of the work array
+    integer(c_int64_t),intent(in):: Nw
+    integer(c_int64_t) nt
+    nt=2*Nw
+  end function fg_nt
+
+  pure function fg_pos_i64(stat,j) result(p)
+    integer(c_int32_t),intent(in):: stat
+    integer(c_int64_t),intent(in):: j
+    integer(c_int64_t) p
+    p=j                            ! +w_{j-1} / +v_{j-1} (stat: same slot for both)
+    if(.false.)p=p+stat
+  end function fg_pos_i64
+
+  pure function fg_pos_i32(stat,j) result(p)
+    integer(c_int32_t),intent(in):: stat,j
+    integer(c_int64_t) p
+    p=fg_pos_i64(stat,int(j,c_int64_t))
+  end function fg_pos_i32
+
+  pure function fg_neg_i64(stat,j,Nw) result(p)
+    integer(c_int32_t),intent(in):: stat
+    integer(c_int64_t),intent(in):: j,Nw
+    integer(c_int64_t) p
+    if(stat==FG_FERMION)then
+       p=2*Nw-j+1                   ! -w_{j-1} = w_{-j}
+    else if(j==1)then
+       p=1                          ! v_0 is its own partner
+    else
+       p=2*Nw-j+2                   ! -v_{j-1}
+    end if
+  end function fg_neg_i64
+
+  pure function fg_neg_i32(stat,j,Nw) result(p)
+    integer(c_int32_t),intent(in):: stat,j
+    integer(c_int64_t),intent(in):: Nw
+    integer(c_int64_t) p
+    p=fg_neg_i64(stat,int(j,c_int64_t),Nw)
+  end function fg_neg_i32
+
+  pure function fg_inf(Nw) result(p)
+    !> index of the w -> infinity slot (uniform Matsubara grid only; the kernels go through fg_set_static)
+    integer(c_int64_t),intent(in):: Nw
+    integer(c_int64_t) p
+    p=Nw+1
+  end function fg_inf
+
+  subroutine fg_set_static(work,val,Nx,Ny,Nz,Nw)
+    !> Put the instantaneous (frequency independent, k independent) part val of a bosonic vertex
+    !> into its bosonic work array, i.e. the bare U, J combination the dressed vertex tends to as
+    !> v -> infinity.  Uniform Matsubara grid: it fills the v -> infinity slot (index Nw+1) at every
+    !> mesh point, so the circular convolution carries it along with the dynamic part.  A grid that
+    !> transforms only the dynamic part (IR) keeps it apart instead: the kernel then adds its Fock-
+    !> like contribution, V(inf) times the other factor at R = 0, tau = 0^-, separately.
+    !> Call outside an OpenMP parallel region, after the dynamic part has been scattered.
+    integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nw
+    complex(c_double),intent(in):: val
+    complex(c_double),intent(inout):: work(Nx*Ny*Nz,fg_nt(Nw))
+    integer(c_int64_t) i,p
+    p=fg_inf(Nw)
+    !$omp parallel do
+    do i=1,Nx*Ny*Nz
+       work(i,p)=val
+    end do
+    !$omp end parallel do
+  end subroutine fg_set_static
+
+  subroutine fg_forward(work,tmp,Nx,Ny,Nz,Nw)
+    !> (k, i w) -> (R, tau), in place in work (tmp is scratch); unnormalized
+    integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nw
+    complex(c_double),intent(inout):: work(*),tmp(*)
+    call FFT(work,tmp,Nx,Ny,Nz,fg_nt(Nw),.true.)
+  end subroutine fg_forward
+
+  subroutine fg_backward(work,tmp,Nx,Ny,Nz,Nw)
+    !> (R, tau) -> (k, i w), in place in work (tmp is scratch); normalized by 1/(Nk*2Nw)
+    integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nw
+    complex(c_double),intent(inout):: work(*),tmp(*)
+    call FFT(work,tmp,Nx,Ny,Nz,fg_nt(Nw),.false.)
+  end subroutine fg_backward
+
+  subroutine fg_reverse(ii,ij,ik,iw,Nx,Ny,Nz,Nw)
+    !> index tables of (-R, -tau): ii/ij/ik on the mesh, iw on the frequency axis (fg_nt(Nw) long)
+    use numerics, only:reverse_index
+    integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nw
+    integer(c_int32_t),intent(out):: ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(fg_nt(Nw))
+    call reverse_index(ii,ij,ik,iw,Nx,Ny,Nz,Nw)
+  end subroutine fg_reverse
+
+  subroutine fg_plans_init(work,tmp,Nx,Ny,Nz,Nw)
+    !> prepare the transforms for work arrays of this shape (cached FFT plans)
+    integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nw
+    complex(c_double),intent(inout):: work(*),tmp(*)
+    call init_fft_plans(work,tmp,Nx,Ny,Nz,fg_nt(Nw))
+  end subroutine fg_plans_init
+
+  subroutine fg_plans_free()
+    call destroy_fft_plans()
+  end subroutine fg_plans_free
+end module freq_grid
+
 subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)
   !> This function generate model hamiltonian from hoppings
   !!@param ham_k,out: k-space Hamiltonian

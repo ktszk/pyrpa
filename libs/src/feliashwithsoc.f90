@@ -478,6 +478,7 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,prt,kmap,invk,i
   !> (get_delta_kmap_soc); F at the other points is rebuilt by parity, F(-k) = pp·P F(k) P.
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   use grid_work, only:grid_work_get,tmpVdelta=>gw1,tmpfk=>gw2,tmp=>gw3  ! kept between calls
+  use freq_grid
   implicit none
   integer(c_int64_t),intent(in):: Nkall,Nk,Ndk,Nw,Nchi,Norb,Nx,Ny,Nz,gap_sym
   integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
@@ -493,9 +494,11 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,prt,kmap,invk,i
   complex(c_double),intent(out),dimension(Ndk,Nw,Norb,Norb):: newdelta
 
   integer(c_int32_t) i,j,k,n,l,m
+  integer(c_int64_t) jp,jm,j0
   real(c_double) pp,sp,sm
   
-  call grid_work_get(Nx,Ny,Nz,2*Nw)
+  call grid_work_get(Nx,Ny,Nz,fg_nt(Nw))
+  j0=fg_pos(FG_BOSON,1_c_int64_t)   ! v=0
   pp=merge(1.0d0,-1.0d0,gap_sym>0) !parity used for k-points with ipk=1
   !$omp parallel workshare
   newdelta(:,:,:,:)=0.0d0
@@ -510,31 +513,34 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,prt,kmap,invk,i
                  !$omp do private(i)
                  do i=1,Nkall
                     if(invk(2,i)==0)then !k,0
-                       tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vdelta(invk(1,i),1,m,l) !j=1 corresponds to w_n=0
+                       tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j0)=Vdelta(invk(1,i),1,m,l) !j=1 corresponds to w_n=0
                     else if(invk(2,i)==1)then !-k,0
                        ! V(-q)_{ml} = s_{m1}s_{m2}s_{l1}s_{l2} * V(q)_{invschi(l),invschi(m)}  (TRS+SOC)
-                       tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=sgnsig2(m,l)*Vdelta(invk(1,i),1,invschi(l),invschi(m)) !V^ml(-q,0)=V^lm(q,0)
+                       tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j0)=sgnsig2(m,l)*Vdelta(invk(1,i),1,invschi(l),invschi(m)) !V^ml(-q,0)=V^lm(q,0)
                     end if
-                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=-0.5d0*Vmat(m,l) !Nw+1 consider w_n=>inf limit (bare -V/2)
                  end do
                  !$omp end do
-                 !$omp do private(i,j)
+                 !$omp do private(i,j,jp,jm)
                  do j=2,Nw
+                    jp=fg_pos(FG_BOSON,j)
+                    jm=fg_neg(FG_BOSON,j,Nw)
                     do i=1,Nkall
                        if(invk(2,i)==0)then !k,iw,k,-iw
-                          tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vdelta(invk(1,i),j,m,l)
-                          tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vdelta(invk(1,i),j,l,m)) !V^ml(q,-iw)=V^*lm(q,iw)
+                          tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),jp)=Vdelta(invk(1,i),j,m,l)
+                          tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),jm)=conjg(Vdelta(invk(1,i),j,l,m)) !V^ml(q,-iw)=V^*lm(q,iw)
                        else if(invk(2,i)==1)then !-k,iw, -k,-iw
-                          tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)=&
+                          tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),jp)=&
                                sgnsig2(m,l)*Vdelta(invk(1,i),j,invschi(l),invschi(m)) !V^ml(-q,iw)=V^lm(q,iw)
-                          tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=&
+                          tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),jm)=&
                                sgnsig2(m,l)*conjg(Vdelta(invk(1,i),j,invschi(m),invschi(l))) !V^ml(-q,-iw)=V^*ml(q,iw)
                        end if
                     end do
                  end do
                  !$omp end do
-                 !$omp do private(i,j,sp,sm)
+                 !$omp do private(i,j,sp,sm,jp,jm)
                  do j=1,Nw
+                    jp=fg_pos(FG_FERMION,j)
+                    jm=fg_neg(FG_FERMION,j,Nw)
                     do i=1,Nkall
                        ! ipk=1 marks a k-point whose F is not stored but rebuilt from its partner
                        ! by parity, F_ab(k) = pp*prt(a)*prt(b)*F_ab(-k); sp does that for F(k) and
@@ -542,20 +548,21 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,prt,kmap,invk,i
                        ! point in the parity-mixing mode, where both factors are 1.
                        sp=merge(pp*prt(olist(l,2))*prt(olist(m,1)),1.0d0,ipk(i)==1)
                        sm=merge(pp*prt(olist(l,2))*prt(olist(m,1)),1.0d0,ipk(invk(3,i))==1)
-                       tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),j)=sp*delta(idk(i),j,olist(l,2),olist(m,1))
-                       tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=-sm*delta(idk(invk(3,i)),j,olist(m,1),olist(l,2)) !F(k,-ω)=-F^T(-k,ω): anomalous GF Matsubara symmetry
+                       tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),jp)=sp*delta(idk(i),j,olist(l,2),olist(m,1))
+                       tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),jm)=-sm*delta(idk(invk(3,i)),j,olist(m,1),olist(l,2)) !F(k,-ω)=-F^T(-k,ω): anomalous GF Matsubara symmetry
                     end do
                  end do
                  !$omp end do
                  !$omp end parallel
-                 call FFT(tmpVdelta,tmp,Nx,Ny,Nz,2*Nw,.true.)
-                 call FFT(tmpfk,tmp,Nx,Ny,Nz,2*Nw,.true.)
+                 call fg_set_static(tmpVdelta,cmplx(-0.5d0*Vmat(m,l),0.0d0,kind=c_double),Nx,Ny,Nz,Nw) !bare -V/2
+                 call fg_forward(tmpVdelta,tmp,Nx,Ny,Nz,Nw)
+                 call fg_forward(tmpfk,tmp,Nx,Ny,Nz,Nw)
                  !$omp parallel
                  !$omp workshare
                  tmp(:,:,:,:)=0.0d0
                  !$omp end workshare
                  !$omp do private(i,j,k)
-                 do n=1,2*Nw
+                 do n=1,int(fg_nt(Nw),c_int32_t)
                     do k=0,Nz-1
                        do j=0,Ny-1
                           do i=0,Nx-1
@@ -569,13 +576,14 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,prt,kmap,invk,i
                  tmpfk(:,:,:,:)=0.0d0
                  !$omp end workshare
                  !$omp end parallel
-                 call FFT(tmp,tmpfk,Nx,Ny,Nz,2*Nw,.false.)
-                 !$omp parallel do private(i)
+                 call fg_backward(tmp,tmpfk,Nx,Ny,Nz,Nw)
+                 !$omp parallel do private(i,jp)
                  do j=1,Nw
+                    jp=fg_pos(FG_FERMION,j)
                     do i=1,Nkall
                        if(ipk(i)==1)cycle !only stored points
                        newdelta(idk(i),j,olist(l,1),olist(m,2))=newdelta(idk(i),j,olist(l,1),olist(m,2))&
-                            +tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)
+                            +tmp(kmap(1,i),kmap(2,i),kmap(3,i),jp)
                     end do
                  end do
                  !$omp end parallel do

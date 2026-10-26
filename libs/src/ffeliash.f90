@@ -505,7 +505,8 @@ subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,prt,iprm,temp
   !>     tmpfk23 stores F_{lm}(k,iω) directly (other leg).
   !>   - FFT both to real space, multiply tmpfk14(r,τ)·tmpfk23(-r,-τ), inverse FFT.
   !>   - Result is the χ^FF bubble at chi-orbital pair (l,m) and its mirror (m,l) via Hermitian conjugate.
-  use numerics, only:drop_roundoff,reverse_index
+  use numerics, only:drop_roundoff
+  use freq_grid
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
@@ -522,13 +523,15 @@ subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,prt,iprm,temp
   complex(c_double),intent(out),dimension(Nk,Nw,Nchi,Nchi):: chi
 
   integer(c_int32_t) i,j,k,l,m,n,iorb
-  integer(c_int32_t) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(2*Nw)
+  integer(c_int32_t) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(fg_nt(Nw))
+  integer(c_int64_t) jp,jm
   real(c_double) weight,sgn,dprt
   complex(c_double),allocatable,dimension(:,:,:,:):: tmp,tmpfk14,tmpfk23
   
   ! sgn: F(-k,ω) = sgn·F^T(k,ω);  dprt: Δ(k,-ω) = dprt·Δ*(k,ω)
   ! singlet: F(-k)=+F^T(k), even-ω gap; triplet: F(-k)=-F^T(k), odd-ω gap
-  allocate(tmp(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmpfk14(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmpfk23(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw))
+  allocate(tmp(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)),tmpfk14(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)),&
+       tmpfk23(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)))
   if(sw_pair)then
      sgn=1.0d0 !singlet Fk=F^T-k
      dprt=1.0d0 !gap parity even freq singlet is even
@@ -537,38 +540,40 @@ subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,prt,iprm,temp
      dprt=-1.0d0 !gap parity even freq triplet is odd
   end if
   weight=temp/dble(Nkall)
-  call reverse_index(ii,ij,ik,iw,Nx,Ny,Nz,Nw)
-  call init_fft_plans(tmpfk14,tmp,Nx,Ny,Nz,2*Nw)
+  call fg_reverse(ii,ij,ik,iw,Nx,Ny,Nz,Nw)
+  call fg_plans_init(tmpfk14,tmp,Nx,Ny,Nz,Nw)
   orb_loop:do iorb=1,Nchi*(Nchi+1)/2
      l=irr_chi(iorb,1)
      m=irr_chi(iorb,2)
      !use symmetry G^lm(k,iw)=G^ml(k,-iw) from Hermitian symmetry of Hamiltonian
-     !$omp parallel do private(i)
+     !$omp parallel do private(i,jp,jm)
      w_loop_Gk_to_tmp:do j=1,Nw
+        jp=fg_pos(FG_FERMION,j)
+        jm=fg_neg(FG_FERMION,j,Nw)
         k_loop_Gk_to_tmp:do i=1,Nkall
            if(invk(2,i)==0)then
               !iw
-              tmpfk14(kmap(1,i),kmap(2,i),kmap(3,i),j)=conjg(Fk(invk(1,i),j,olist(m,2),olist(l,1))) !F^+14(k,iw)
-              tmpfk23(kmap(1,i),kmap(2,i),kmap(3,i),j)=Fk(invk(1,i),j,olist(l,2),olist(m,1)) !F23(k,iw)
+              tmpfk14(kmap(1,i),kmap(2,i),kmap(3,i),jp)=conjg(Fk(invk(1,i),j,olist(m,2),olist(l,1))) !F^+14(k,iw)
+              tmpfk23(kmap(1,i),kmap(2,i),kmap(3,i),jp)=Fk(invk(1,i),j,olist(l,2),olist(m,1)) !F23(k,iw)
               !-iw
-              tmpfk14(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=prt(olist(l,1))*prt(olist(m,2))*sgn*dprt*conjg(Fk(invk(1,i),j,iprm(olist(l,1)),iprm(olist(m,2)))) !F^+14(k,-iw)=sgnF^*14(k,iw)
-              tmpfk23(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=prt(olist(m,1))*prt(olist(l,2))*sgn*dprt*Fk(invk(1,i),j,iprm(olist(m,1)),iprm(olist(l,2))) !F23(k,-iw)=sgnF32(k,iw)
+              tmpfk14(kmap(1,i),kmap(2,i),kmap(3,i),jm)=prt(olist(l,1))*prt(olist(m,2))*sgn*dprt*conjg(Fk(invk(1,i),j,iprm(olist(l,1)),iprm(olist(m,2)))) !F^+14(k,-iw)=sgnF^*14(k,iw)
+              tmpfk23(kmap(1,i),kmap(2,i),kmap(3,i),jm)=prt(olist(m,1))*prt(olist(l,2))*sgn*dprt*Fk(invk(1,i),j,iprm(olist(m,1)),iprm(olist(l,2))) !F23(k,-iw)=sgnF32(k,iw)
            else if(invk(2,i)==1)then
               !iw
-              tmpfk14(kmap(1,i),kmap(2,i),kmap(3,i),j)=conjg(Fk(invk(1,i),j,olist(m,1),olist(l,1))) !F^+14(-k,iw)=F41(k,iw)
-              tmpfk23(kmap(1,i),kmap(2,i),kmap(3,i),j)=Fk(invk(1,i),j,olist(l,2),olist(m,2)) !F23(-k,iw)=F^23(k,iw)
+              tmpfk14(kmap(1,i),kmap(2,i),kmap(3,i),jp)=conjg(Fk(invk(1,i),j,olist(m,1),olist(l,1))) !F^+14(-k,iw)=F41(k,iw)
+              tmpfk23(kmap(1,i),kmap(2,i),kmap(3,i),jp)=Fk(invk(1,i),j,olist(l,2),olist(m,2)) !F23(-k,iw)=F^23(k,iw)
               !-iw
-              tmpfk14(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=prt(olist(l,1))*prt(olist(m,2))*sgn*dprt*conjg(Fk(invk(1,i),j,iprm(olist(l,1)),iprm(olist(m,2)))) !F^+14(-k,-iw)
-              tmpfk23(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=prt(olist(m,1))*prt(olist(l,2))*sgn*dprt*Fk(invk(1,i),j,iprm(olist(l,2)),iprm(olist(m,1))) !F23(-k,-iw)
+              tmpfk14(kmap(1,i),kmap(2,i),kmap(3,i),jm)=prt(olist(l,1))*prt(olist(m,2))*sgn*dprt*conjg(Fk(invk(1,i),j,iprm(olist(l,1)),iprm(olist(m,2)))) !F^+14(-k,-iw)
+              tmpfk23(kmap(1,i),kmap(2,i),kmap(3,i),jm)=prt(olist(m,1))*prt(olist(l,2))*sgn*dprt*Fk(invk(1,i),j,iprm(olist(l,2)),iprm(olist(m,1))) !F23(-k,-iw)
            end if
         end do k_loop_Gk_to_tmp
      end do w_loop_Gk_to_tmp
      !$omp end parallel do
-     call FFT(tmpfk14,tmp,Nx,Ny,Nz,2*Nw,.true.)
-     call FFT(tmpfk23,tmp,Nx,Ny,Nz,2*Nw,.true.)
+     call fg_forward(tmpfk14,tmp,Nx,Ny,Nz,Nw)
+     call fg_forward(tmpfk23,tmp,Nx,Ny,Nz,Nw)
      !calculate G(r)G(-r)
      !$omp parallel do private(i,j,k)
-     w_loop_conv:do n=1,2*Nw
+     w_loop_conv:do n=1,int(fg_nt(Nw),c_int32_t)
         z_loop:do k=0,Nz-1
            y_loop:do j=0,Ny-1
               !$omp simd
@@ -580,12 +585,13 @@ subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,prt,iprm,temp
         end do z_loop
      end do w_loop_conv
      !$omp end parallel do
-     call FFT(tmp,tmpfk14,Nx,Ny,Nz,2*Nw,.false.)
-     !$omp parallel do private(i,j)
+     call fg_backward(tmp,tmpfk14,Nx,Ny,Nz,Nw)
+     !$omp parallel do private(i,j,jp)
      w_loop_tmp_to_chi:do j=1,Nw
+        jp=fg_pos(FG_BOSON,j)
         k_loop_tmp_to_chi:do i=1,Nkall
            if(invk(2,i)==0)then
-              chi(invk(1,i),j,m,l)=tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight
+              chi(invk(1,i),j,m,l)=tmp(kmap(1,i),kmap(2,i),kmap(3,i),jp)*weight
            end if
         end do k_loop_tmp_to_chi
      end do w_loop_tmp_to_chi
@@ -594,5 +600,5 @@ subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,prt,iprm,temp
      call drop_roundoff(chi(1,1,m,l),Nk*Nw)
      chi(:,:,chi_map(m,l,1),chi_map(m,l,2))=conjg(chi(:,:,m,l))
   end do orb_loop
-  call destroy_fft_plans()
+  call fg_plans_free()
 end subroutine get_chi0_conv_ff

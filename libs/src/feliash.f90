@@ -299,6 +299,7 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,iprm,olist
   !!@param sw_pair,in: switch of singlet or triplet paring interacton
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   use grid_work, only:grid_work_get,tmpVdelta=>gw1,tmpfk=>gw2,tmp=>gw3  ! kept between calls
+  use freq_grid
   implicit none
   integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
   integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
@@ -313,6 +314,7 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,iprm,olist
   complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: newdelta
   
   integer(c_int32_t) i,j,k,n,l,m
+  integer(c_int64_t) jp,jm,j0
   real(c_double) sgn,dprt
   complex(c_double),dimension(Norb,Norb):: dtrim
   logical(1),parameter:: sw_odd_freq=.false.
@@ -323,7 +325,8 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,iprm,olist
   ! so the odd-ω (orbital-antisymmetric) admixture of multi-orbital gaps is kept.  Since only the
   ! lower triangle is computed and the rest filled by conjugation, the map is real-linear only:
   ! lin_eliash therefore runs Arnoldi over the real space of Hermitian Δ (real inner product).
-  call grid_work_get(Nx,Ny,Nz,2*Nw)
+  call grid_work_get(Nx,Ny,Nz,fg_nt(Nw))
+  j0=fg_pos(FG_BOSON,1_c_int64_t)   ! v=0
   if(sw_pair)then
      sgn=1.0d0 !singlet Fk=F^T-k
      dprt=1.0d0 !gap parity even freq singlet is even
@@ -345,52 +348,56 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,iprm,olist
            !$omp do private(i)
            do i=1,Nkall
               if(invk(2,i)==0)then !k,0
-                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vdelta(invk(1,i),1,m,l) !j=1 corresponds to w_n=0
+                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j0)=Vdelta(invk(1,i),1,m,l) !j=1 corresponds to w_n=0
               else if(invk(2,i)==1)then !-k,0
-                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),1)=Vdelta(invk(1,i),1,l,m) !V^ml(-q,0)=V^lm(q,0)
+                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j0)=Vdelta(invk(1,i),1,l,m) !V^ml(-q,0)=V^lm(q,0)
               end if
-              tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=0.5d0*(Smat(m,l)+sgn*Cmat(m,l)) !Nw+1 consider w_n=>inf limit
            end do
            !$omp end do
-           !$omp do private(i,j)
+           !$omp do private(i,j,jp,jm)
            do j=2,Nw
+              jp=fg_pos(FG_BOSON,j)
+              jm=fg_neg(FG_BOSON,j,Nw)
               do i=1,Nkall
                  if(invk(2,i)==0)then !k,iw,k,-iw
-                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vdelta(invk(1,i),j,m,l)
-                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vdelta(invk(1,i),j,l,m)) !V^ml(q,-iw)=V^*lm(q,iw)
+                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),jp)=Vdelta(invk(1,i),j,m,l)
+                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),jm)=conjg(Vdelta(invk(1,i),j,l,m)) !V^ml(q,-iw)=V^*lm(q,iw)
                  else if(invk(2,i)==1)then !-k,iw, -k,-iw
-                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vdelta(invk(1,i),j,l,m) !V^ml(-q,iw)=V^lm(q,iw)
-                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vdelta(invk(1,i),j,m,l)) !V^ml(-q,-iw)=V^*ml(q,iw)
+                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),jp)=Vdelta(invk(1,i),j,l,m) !V^ml(-q,iw)=V^lm(q,iw)
+                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),jm)=conjg(Vdelta(invk(1,i),j,m,l)) !V^ml(-q,-iw)=V^*ml(q,iw)
                  end if
               end do
            end do
            !$omp end do
-           !$omp do private(i,j)
+           !$omp do private(i,j,jp,jm)
            do j=1,Nw
+              jp=fg_pos(FG_FERMION,j)
+              jm=fg_neg(FG_FERMION,j,Nw)
               do i=1,Nkall
                  ! The single-inversion terms below carry P = signed permutation, i.e.
                  ! p_m p_l on the amplitude AND iprm on the orbital indices. The
                  ! F(-k,-w) term applies P twice (P^2=1), so it needs neither.
                  if(invk(2,i)==0)then !k
-                    tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),j)=delta(invk(1,i),j,olist(l,2),olist(m,1))
-                    tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgn*dprt*prt(olist(l,2))*prt(olist(m,1))*&
+                    tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),jp)=delta(invk(1,i),j,olist(l,2),olist(m,1))
+                    tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),jm)=sgn*dprt*prt(olist(l,2))*prt(olist(m,1))*&
                          conjg(delta(invk(1,i),j,iprm(olist(l,2)),iprm(olist(m,1)))) !F(k,-w)=sgn*dprt*p*p*F^*(k,w) (no soc only)
                  else if(invk(2,i)==1)then !-k
-                    tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),j)=prt(olist(l,2))*prt(olist(m,1))*dprt*delta(invk(1,i),j,iprm(olist(l,2)),iprm(olist(m,1))) !F(-k,w)=p*p*dprt*F(k,w)
-                    tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=sgn*delta(invk(1,i),j,olist(m,1),olist(l,2)) !F(-k,-w)=sgn*F(k,w)
+                    tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),jp)=prt(olist(l,2))*prt(olist(m,1))*dprt*delta(invk(1,i),j,iprm(olist(l,2)),iprm(olist(m,1))) !F(-k,w)=p*p*dprt*F(k,w)
+                    tmpfk(kmap(1,i),kmap(2,i),kmap(3,i),jm)=sgn*delta(invk(1,i),j,olist(m,1),olist(l,2)) !F(-k,-w)=sgn*F(k,w)
                  end if
               end do
            end do
            !$omp end do
            !$omp end parallel
-           call FFT(tmpVdelta,tmp,Nx,Ny,Nz,2*Nw,.true.)
-           call FFT(tmpfk,tmp,Nx,Ny,Nz,2*Nw,.true.)
+           call fg_set_static(tmpVdelta,cmplx(0.5d0*(Smat(m,l)+sgn*Cmat(m,l)),0.0d0,kind=c_double),Nx,Ny,Nz,Nw) !bare vertex
+           call fg_forward(tmpVdelta,tmp,Nx,Ny,Nz,Nw)
+           call fg_forward(tmpfk,tmp,Nx,Ny,Nz,Nw)
            !$omp parallel
            !$omp workshare
            tmp(:,:,:,:)=0.0d0
            !$omp end workshare
            !$omp do private(i,j,k)
-           do n=1,2*Nw
+           do n=1,int(fg_nt(Nw),c_int32_t)
               do k=0,Nz-1
                  do j=0,Ny-1
                     !$omp simd
@@ -406,13 +413,14 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,iprm,olist
            tmpfk(:,:,:,:)=0.0d0
            !$omp end workshare
            !$omp end parallel
-           call FFT(tmp,tmpfk,Nx,Ny,Nz,2*Nw,.false.)
-           !$omp parallel do private(i)
+           call fg_backward(tmp,tmpfk,Nx,Ny,Nz,Nw)
+           !$omp parallel do private(i,jp)
            do j=1,Nw
+              jp=fg_pos(FG_FERMION,j)
               do i=1,Nkall
                  if(invk(2,i)==0)then
                     newdelta(invk(1,i),j,olist(l,1),olist(m,2))=newdelta(invk(1,i),j,olist(l,1),olist(m,2))&
-                         +tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)
+                         +tmp(kmap(1,i),kmap(2,i),kmap(3,i),jp)
                  end if
               end do
            end do

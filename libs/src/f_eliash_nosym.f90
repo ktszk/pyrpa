@@ -82,7 +82,8 @@ subroutine get_chi0_nosym(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nkall,Norb,Nchi) bi
   !!@param  Nkall,in: Number of all k-points
   !!@param   Norb,in: Number of orbitals (spin included)
   !!@param   Nchi,in: Number of chi index
-  use numerics, only:drop_roundoff,reverse_index
+  use numerics, only:drop_roundoff
+  use freq_grid
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nx,Ny,Nz
@@ -93,32 +94,36 @@ subroutine get_chi0_nosym(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nkall,Norb,Nchi) bi
   complex(c_double),intent(out),dimension(Nkall,Nw,Nchi,Nchi):: chi
 
   integer(c_int32_t) i,j,k,l,m,n
-  integer(c_int32_t) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(2*Nw)
+  integer(c_int32_t) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(fg_nt(Nw))
+  integer(c_int64_t) jp,jm
   real(c_double) weight
   complex(c_double),allocatable,dimension(:,:,:,:):: tmp,tmpgk13,tmpgk42
 
   weight=temp/dble(Nkall)
-  allocate(tmp(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmpgk13(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmpgk42(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw))
+  allocate(tmp(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)),tmpgk13(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)),&
+       tmpgk42(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)))
   ! ii,ij,ik,iw: index of -r and -tau (iw also maps v_n -> -v_n on the bosonic grid)
-  call reverse_index(ii,ij,ik,iw,Nx,Ny,Nz,Nw)
-  call init_fft_plans(tmpgk13,tmp,Nx,Ny,Nz,2*Nw)
+  call fg_reverse(ii,ij,ik,iw,Nx,Ny,Nz,Nw)
+  call fg_plans_init(tmpgk13,tmp,Nx,Ny,Nz,Nw)
   l_loop:do l=1,Nchi
      m_loop:do m=1,l
-        !$omp parallel do private(i,j)
+        !$omp parallel do private(i,j,jp,jm)
         do j=1,Nw
+           jp=fg_pos(FG_FERMION,j)
+           jm=fg_neg(FG_FERMION,j,Nw)
            do i=1,Nkall
-              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(l,1),olist(m,1)) !G13(k,iw)
-              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(i,j,olist(m,2),olist(l,2)) !G42(k,iw)
-              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(m,1),olist(l,1))) !G13(k,-iw)=G^*31(k,iw)
-              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(i,j,olist(l,2),olist(m,2))) !G42(k,-iw)=G^*24(k,iw)
+              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),jp)=Gk(i,j,olist(l,1),olist(m,1)) !G13(k,iw)
+              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),jp)=Gk(i,j,olist(m,2),olist(l,2)) !G42(k,iw)
+              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),jm)=conjg(Gk(i,j,olist(m,1),olist(l,1))) !G13(k,-iw)=G^*31(k,iw)
+              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),jm)=conjg(Gk(i,j,olist(l,2),olist(m,2))) !G42(k,-iw)=G^*24(k,iw)
            end do
         end do
         !$omp end parallel do
-        call FFT(tmpgk13,tmp,Nx,Ny,Nz,2*Nw,.true.)
-        call FFT(tmpgk42,tmp,Nx,Ny,Nz,2*Nw,.true.)
+        call fg_forward(tmpgk13,tmp,Nx,Ny,Nz,Nw)
+        call fg_forward(tmpgk42,tmp,Nx,Ny,Nz,Nw)
         !calculate G(r)G(-r)
         !$omp parallel do private(i,j,k)
-        do n=1,2*Nw
+        do n=1,int(fg_nt(Nw),c_int32_t)
            do k=0,Nz-1
               do j=0,Ny-1
                  !$omp simd
@@ -130,11 +135,12 @@ subroutine get_chi0_nosym(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nkall,Norb,Nchi) bi
            end do
         end do
         !$omp end parallel do
-        call FFT(tmp,tmpgk13,Nx,Ny,Nz,2*Nw,.false.)
-        !$omp parallel do private(i,j)
+        call fg_backward(tmp,tmpgk13,Nx,Ny,Nz,Nw)
+        !$omp parallel do private(i,j,jp)
         do j=1,Nw
+           jp=fg_pos(FG_BOSON,j)
            do i=1,Nkall
-              chi(i,j,m,l)=tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight
+              chi(i,j,m,l)=tmp(kmap(1,i),kmap(2,i),kmap(3,i),jp)*weight
               chi(i,j,l,m)=conjg(tmp(kmap(1,i),kmap(2,i),kmap(3,i),iw(j)))*weight !chi^lm(q,iv)=chi^*ml(q,-iv)
            end do
         end do
@@ -144,7 +150,7 @@ subroutine get_chi0_nosym(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nkall,Norb,Nchi) bi
         if(l/=m)call drop_roundoff(chi(1,1,l,m),Nkall*Nw)
      end do m_loop
   end do l_loop
-  call destroy_fft_plans()
+  call fg_plans_free()
   deallocate(tmp,tmpgk13,tmpgk42)
 end subroutine get_chi0_nosym
 
@@ -201,6 +207,7 @@ subroutine mkdelta_nosym(newdelta,fk,Vdelta,Vmat,kmap,ikmq,olist,Nkall,Nw,Nchi,N
   !!@param       Nx,in: Number of kx mesh
   !!@param       Ny,in: Number of ky mesh
   !!@param       Nz,in: Number of kz mesh
+  use freq_grid
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nkall,Nw,Nchi,Norb,Nx,Ny,Nz
@@ -213,6 +220,7 @@ subroutine mkdelta_nosym(newdelta,fk,Vdelta,Vmat,kmap,ikmq,olist,Nkall,Nw,Nchi,N
   complex(c_double),intent(out),dimension(Nkall,Nw,Norb,Norb):: newdelta
 
   integer(c_int32_t) i,j,k,n,l,m,a,b,c,d
+  integer(c_int64_t) jp,jm
   integer(c_int32_t),dimension(Norb,Norb):: ichi
   real(c_double) vmax
   logical,dimension(Nchi,Nchi):: nzv
@@ -234,22 +242,25 @@ subroutine mkdelta_nosym(newdelta,fk,Vdelta,Vmat,kmap,ikmq,olist,Nkall,Nw,Nchi,N
   do l=1,Nchi
      ichi(olist(l,1),olist(l,2))=l
   end do
-  allocate(tmpVdelta(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmpdel(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmp(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw))
-  allocate(fr(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw,Norb,Norb))
-  call init_fft_plans(tmpVdelta,tmp,Nx,Ny,Nz,2*Nw)
+  allocate(tmpVdelta(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)),tmpdel(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)),&
+       tmp(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)))
+  allocate(fr(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw),Norb,Norb))
+  call fg_plans_init(tmpVdelta,tmp,Nx,Ny,Nz,Nw)
 
   ! F_ab(r,tau) for every orbital pair
   do b=1,Norb
      do a=1,Norb
-        !$omp parallel do private(i,j)
+        !$omp parallel do private(i,j,jp,jm)
         do j=1,Nw
+           jp=fg_pos(FG_FERMION,j)
+           jm=fg_neg(FG_FERMION,j,Nw)
            do i=1,Nkall
-              tmpdel(kmap(1,i),kmap(2,i),kmap(3,i),j)=fk(i,j,a,b)
-              tmpdel(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=-fk(ikmq(i),j,b,a) !F_ab(k,-iw)=-F_ba(-k-Q,iw)
+              tmpdel(kmap(1,i),kmap(2,i),kmap(3,i),jp)=fk(i,j,a,b)
+              tmpdel(kmap(1,i),kmap(2,i),kmap(3,i),jm)=-fk(ikmq(i),j,b,a) !F_ab(k,-iw)=-F_ba(-k-Q,iw)
            end do
         end do
         !$omp end parallel do
-        call FFT(tmpdel,tmp,Nx,Ny,Nz,2*Nw,.true.)
+        call fg_forward(tmpdel,tmp,Nx,Ny,Nz,Nw)
         !$omp parallel workshare
         fr(:,:,:,:,a,b)=tmpdel(:,:,:,:)
         !$omp end parallel workshare
@@ -270,29 +281,27 @@ subroutine mkdelta_nosym(newdelta,fk,Vdelta,Vmat,kmap,ikmq,olist,Nkall,Nw,Nchi,N
               if(m==0)cycle
               if(.not.nzv(m,l))cycle
               !$omp parallel
-              !$omp do private(i,j)
+              !$omp do private(i,j,jp)
               do j=1,Nw
+                 jp=fg_pos(FG_BOSON,j)
                  do i=1,Nkall
-                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j)=Vdelta(i,j,m,l)
+                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),jp)=Vdelta(i,j,m,l)
                  end do
               end do
               !$omp end do
-              !$omp do private(i,j)
+              !$omp do private(i,j,jm)
               do j=2,Nw
+                 jm=fg_neg(FG_BOSON,j,Nw)
                  do i=1,Nkall
-                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+2)=conjg(Vdelta(i,j,l,m)) !V^ml(q,-iv)=V^*lm(q,iv)
+                    tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),jm)=conjg(Vdelta(i,j,l,m)) !V^ml(q,-iv)=V^*lm(q,iv)
                  end do
-              end do
-              !$omp end do
-              !$omp do private(i)
-              do i=1,Nkall
-                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),Nw+1)=-0.5d0*Vmat(m,l) !Nw+1 consider w_n=>inf limit (bare -V/2)
               end do
               !$omp end do
               !$omp end parallel
-              call FFT(tmpVdelta,tmp,Nx,Ny,Nz,2*Nw,.true.)
+              call fg_set_static(tmpVdelta,cmplx(-0.5d0*Vmat(m,l),0.0d0,kind=c_double),Nx,Ny,Nz,Nw) !bare -V/2
+              call fg_forward(tmpVdelta,tmp,Nx,Ny,Nz,Nw)
               !$omp parallel do private(i,j,k)
-              do n=1,2*Nw
+              do n=1,int(fg_nt(Nw),c_int32_t)
                  do k=0,Nz-1
                     do j=0,Ny-1
                        !$omp simd
@@ -306,17 +315,18 @@ subroutine mkdelta_nosym(newdelta,fk,Vdelta,Vmat,kmap,ikmq,olist,Nkall,Nw,Nchi,N
               !$omp end parallel do
            end do
         end do
-        call FFT(tmpdel,tmp,Nx,Ny,Nz,2*Nw,.false.)
-        !$omp parallel do private(i,j)
+        call fg_backward(tmpdel,tmp,Nx,Ny,Nz,Nw)
+        !$omp parallel do private(i,j,jp)
         do j=1,Nw
+           jp=fg_pos(FG_FERMION,j)
            do i=1,Nkall
-              newdelta(i,j,a,d)=tmpdel(kmap(1,i),kmap(2,i),kmap(3,i),j)
+              newdelta(i,j,a,d)=tmpdel(kmap(1,i),kmap(2,i),kmap(3,i),jp)
            end do
         end do
         !$omp end parallel do
      end do a_loop
   end do d_loop
-  call destroy_fft_plans()
+  call fg_plans_free()
   deallocate(tmpVdelta,tmpdel,tmp,fr)
 end subroutine mkdelta_nosym
 

@@ -540,7 +540,7 @@ subroutine chi0_conv_acc(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,coef,&
   !> without a second chi-sized work array.  The small-value thresholding is
   !> applied by the callers (chi0_threshold) after the final combination.
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
-  use numerics, only:reverse_index
+  use freq_grid
   implicit none
   integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
@@ -552,44 +552,48 @@ subroutine chi0_conv_acc(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,coef,&
   complex(c_double),intent(inout),dimension(Nk,Nw,Nchi,Nchi):: chi
 
   integer(c_int32_t) i,j,k,l,m,n,iorb
-  integer(c_int32_t) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(2*Nw)
+  integer(c_int32_t) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(fg_nt(Nw))
+  integer(c_int64_t) jp,jm
   real(c_double) weight
   complex(c_double),allocatable,dimension(:,:,:,:):: tmp,tmpgk13,tmpgk42
 
-  allocate(tmp(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmpgk13(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmpgk42(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw))
+  allocate(tmp(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)),tmpgk13(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)),&
+       tmpgk42(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)))
   weight=coef*temp/dble(Nkall)
-  call reverse_index(ii,ij,ik,iw,Nx,Ny,Nz,Nw)
-  call init_fft_plans(tmpgk13,tmp,Nx,Ny,Nz,2*Nw)
+  call fg_reverse(ii,ij,ik,iw,Nx,Ny,Nz,Nw)
+  call fg_plans_init(tmpgk13,tmp,Nx,Ny,Nz,Nw)
   orb_loop:do iorb=1,Nchi*(Nchi+1)/2
      l=irr_chi(iorb,1)
      m=irr_chi(iorb,2)
      !use symmetry G^lm(k,iw)=G^ml(k,-iw) from Hermitian symmetry of Hamiltonian
-     !$omp parallel do private(i)
+     !$omp parallel do private(i,jp,jm)
      w_loop_Gk_to_tmp:do j=1,Nw
+        jp=fg_pos(FG_FERMION,j)
+        jm=fg_neg(FG_FERMION,j,Nw)
         k_loop_Gk_to_tmp:do i=1,Nkall
            if(invk(2,i)==0)then
               !iw
-              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(l,1),olist(m,1)) !G13(k,iw)
-              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(m,2),olist(l,2)) !G42(k,iw)
+              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),jp)=Gk(invk(1,i),j,olist(l,1),olist(m,1)) !G13(k,iw)
+              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),jp)=Gk(invk(1,i),j,olist(m,2),olist(l,2)) !G42(k,iw)
               !-iw
-              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(m,1),olist(l,1))) !G13(k,-iw)=G^*31(k,iw)
-              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(l,2),olist(m,2))) !G42(k,-iw)=G^*24(k,iw)
+              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),jm)=conjg(Gk(invk(1,i),j,olist(m,1),olist(l,1))) !G13(k,-iw)=G^*31(k,iw)
+              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),jm)=conjg(Gk(invk(1,i),j,olist(l,2),olist(m,2))) !G42(k,-iw)=G^*24(k,iw)
            else if(invk(2,i)==1)then
               !iw
-              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(m,1),olist(l,1)) !G13(-k,iw)=G^31(k,iw)
-              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),j)=Gk(invk(1,i),j,olist(l,2),olist(m,2)) !G42(-k,iw)=G^24(k,iw)
+              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),jp)=Gk(invk(1,i),j,olist(m,1),olist(l,1)) !G13(-k,iw)=G^31(k,iw)
+              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),jp)=Gk(invk(1,i),j,olist(l,2),olist(m,2)) !G42(-k,iw)=G^24(k,iw)
               !-iw
-              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(l,1),olist(m,1))) !G13(-k,-iw)=G^*13(k,iw)
-              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),2*Nw-j+1)=conjg(Gk(invk(1,i),j,olist(m,2),olist(l,2))) !G42(-k,-iw)=G^*42(k,iw)
+              tmpgk13(kmap(1,i),kmap(2,i),kmap(3,i),jm)=conjg(Gk(invk(1,i),j,olist(l,1),olist(m,1))) !G13(-k,-iw)=G^*13(k,iw)
+              tmpgk42(kmap(1,i),kmap(2,i),kmap(3,i),jm)=conjg(Gk(invk(1,i),j,olist(m,2),olist(l,2))) !G42(-k,-iw)=G^*42(k,iw)
            end if
         end do k_loop_Gk_to_tmp
      end do w_loop_Gk_to_tmp
      !$omp end parallel do
-     call FFT(tmpgk13,tmp,Nx,Ny,Nz,2*Nw,.true.)
-     call FFT(tmpgk42,tmp,Nx,Ny,Nz,2*Nw,.true.)
+     call fg_forward(tmpgk13,tmp,Nx,Ny,Nz,Nw)
+     call fg_forward(tmpgk42,tmp,Nx,Ny,Nz,Nw)
      !calculate G(r)G(-r)
      !$omp parallel do private(i,j,k)
-     w_loop_conv:do n=1,2*Nw
+     w_loop_conv:do n=1,int(fg_nt(Nw),c_int32_t)
         z_loop:do k=0,Nz-1
            y_loop:do j=0,Ny-1
               !$omp simd
@@ -601,19 +605,20 @@ subroutine chi0_conv_acc(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,coef,&
         end do z_loop
      end do w_loop_conv
      !$omp end parallel do
-     call FFT(tmp,tmpgk13,Nx,Ny,Nz,2*Nw,.false.)
-     !$omp parallel do private(i,j)
+     call fg_backward(tmp,tmpgk13,Nx,Ny,Nz,Nw)
+     !$omp parallel do private(i,j,jp)
      w_loop_tmp_to_chi:do j=1,Nw
+        jp=fg_pos(FG_BOSON,j)
         k_loop_tmp_to_chi:do i=1,Nkall
            if(invk(2,i)==0)then
-              chi(invk(1,i),j,m,l)=chi(invk(1,i),j,m,l)+tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight
+              chi(invk(1,i),j,m,l)=chi(invk(1,i),j,m,l)+tmp(kmap(1,i),kmap(2,i),kmap(3,i),jp)*weight
            end if
         end do k_loop_tmp_to_chi
      end do w_loop_tmp_to_chi
      !$omp end parallel do
      chi(:,:,chi_map(m,l,1),chi_map(m,l,2))=conjg(chi(:,:,m,l))
   end do orb_loop
-  call destroy_fft_plans()
+  call fg_plans_free()
 end subroutine chi0_conv_acc
 
 subroutine get_chi0_conv(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,&
