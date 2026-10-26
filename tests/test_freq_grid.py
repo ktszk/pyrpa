@@ -28,7 +28,7 @@ except ImportError:
 
 def test_ir_grid_reproduces_a_fermionic_function_and_reflects_tau():
     if not HAVE_IR:
-        return
+        T.skip('sparse-ir not installed')
     temp = 0.05
     g = P.ir_grid(temp, 10.0, eps=1e-8)
     beta = 1.0/temp
@@ -46,7 +46,7 @@ def test_ir_grid_reproduces_a_fermionic_function_and_reflects_tau():
 
 def test_ir_chi0_is_the_exact_bubble_at_the_sampled_frequencies():
     if not HAVE_IR:
-        return
+        T.skip('sparse-ir not installed')
     temp, N = 0.05, 8
     st = T.one_orbital_square(Nx=N, Ny=N, Nw=16, temp=temp, mu=-0.4)
     g = P.ir_grid(temp, 10.0, eps=1e-8)
@@ -69,7 +69,7 @@ def test_ir_chi0_is_the_exact_bubble_at_the_sampled_frequencies():
 
 def test_ir_flex_is_the_large_nw_limit_of_the_uniform_grid():
     if not HAVE_IR:
-        return
+        T.skip('sparse-ir not installed')
     temp, N = 0.05, 8
     st = T.two_orbital_square(Nx=N, Ny=N, Nw=16, temp=temp, mu=-0.5, U=1.2, J=0.15)
     g = P.ir_grid(temp, 10.0, eps=1e-8)
@@ -96,7 +96,7 @@ def test_ir_flex_is_the_large_nw_limit_of_the_uniform_grid():
 
 def test_ir_linearized_eliashberg_eigenvalue_is_the_large_nw_limit():
     if not HAVE_IR:
-        return
+        T.skip('sparse-ir not installed')
     temp, N = 0.05, 8
     st = T.two_orbital_square(Nx=N, Ny=N, Nw=16, temp=temp, mu=-0.5, U=1.2, J=0.15)
     g = P.ir_grid(temp, 10.0, eps=1e-8)
@@ -122,7 +122,7 @@ def test_ir_linearized_eliashberg_eigenvalue_is_the_large_nw_limit():
 
 def test_ir_soc_kernels_reproduce_the_no_soc_ones_on_a_spin_doubled_model():
     if not HAVE_IR:
-        return
+        T.skip('sparse-ir not installed')
     temp, N, No = 0.05, 8, 2
     st = T.two_orbital_square(Nx=N, Ny=N, Nw=16, temp=temp, mu=-0.5, U=1.2, J=0.15)
     ham2 = np.zeros((len(st['rvec']), 2*No, 2*No), dtype=complex)
@@ -164,7 +164,7 @@ def test_ir_phonon_vertex_gives_the_isotropic_gap_equation_eigenvalue():
     """vph built on boson_frequencies of the IR grid: for one band at U = 0 the eigenvalue is that of
     lambda Delta_n = -T sum_m W(w_n - w_m) <1/(w_m^2 + xi^2)>_k Delta_m, here solved on a wide window."""
     if not HAVE_IR:
-        return
+        T.skip('sparse-ir not installed')
     Nx = Ny = 16
     temp, mu, w0, g2 = 0.02, -0.1, 0.03, 0.004
     rvec = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]], dtype=np.float64)
@@ -202,7 +202,7 @@ def test_ir_nosym_eliashberg_matches_the_symmetric_solver_and_the_large_nw_limit
     """nosym kernels on IR: (a) a spin-doubled no-SOC model gives the no-SOC leading eigenvalue (singlet here);
     (b) Rashba + Zeeman with a finite pair momentum Q gives the large-Nw limit of the uniform grid."""
     if not HAVE_IR:
-        return
+        T.skip('sparse-ir not installed')
     from test_eliash_nosym import _rashba_zeeman_hk, _spin_half, _nosym_lambda
     temp, N, No = 0.05, 8, 2
     st = T.two_orbital_square(Nx=N, Ny=N, Nw=16, temp=temp, mu=-0.5, U=1.2, J=0.15)
@@ -250,7 +250,7 @@ def test_to_uniform_fermion_evaluates_a_self_energy_with_a_constant_part():
     """Sigma(iw) = S0 + sum_p A_p/(iw - e_p) (Hermitian S0, A_p): the constant S0 is not representable by the basis,
     to_uniform_fermion takes it off and the rest goes through the IR basis to the uniform w_n."""
     if not HAVE_IR:
-        return
+        T.skip('sparse-ir not installed')
     temp, No = 0.05, 2
     rng = np.random.default_rng(1)
     S0 = rng.standard_normal((No, No))+1j*rng.standard_normal((No, No))

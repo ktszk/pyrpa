@@ -34,6 +34,7 @@ import sys
 import tempfile
 import time
 import pathlib
+import unittest
 
 import numpy as np
 
@@ -410,13 +411,20 @@ def slow(fn):
     return pytest.mark.slow(fn)
 
 
+def skip(reason):
+    """Skip the running test (e.g. an optional package is missing): raises unittest.SkipTest,
+    which run_standalone reports as SKIP and pytest as skipped."""
+    raise unittest.SkipTest(reason)
+
+
 def run_standalone(namespace, argv=None):
     """Shared 'no pytest required' driver: run every test_* callable in
     namespace (a module's globals()), report PASS/FAIL with timings and
     return a shell exit code.  Supplies a temporary directory to tests with
     a tmp_path parameter.  Optional argv (default sys.argv[1:]): substring
     filters, only tests whose name contains one of them are run; the flag
-    --runslow also runs the tests marked with slow (skipped otherwise).
+    --runslow also runs the tests marked with slow (skipped otherwise).  A test that calls
+    skip() is reported as SKIP; skipped tests do not count as failures.
 
     Usage at the end of a test module:
 
@@ -450,9 +458,12 @@ def run_standalone(namespace, argv=None):
             print(f"  PASS  {t.__name__:{width}s} ({time.time()-t0:5.1f}s)",
                   flush=True)
             npass += 1
+        except unittest.SkipTest as e:
+            print(f"  SKIP  {t.__name__:{width}s} ({e})", flush=True)
+            nskip += 1
         except Exception as e:
             print(f"  FAIL  {t.__name__:{width}s} ({time.time()-t0:5.1f}s)"
                   f"  -> {type(e).__name__}: {e}", flush=True)
     nrun = len(tests) - nskip
-    print(f"\n{npass}/{nrun} passed" + (f"  ({nskip} slow skipped)" if nskip else ""))
+    print(f"\n{npass}/{nrun} passed" + (f"  ({nskip} skipped)" if nskip else ""))
     return 0 if npass == nrun else 1

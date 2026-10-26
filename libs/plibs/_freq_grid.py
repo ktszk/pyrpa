@@ -19,13 +19,17 @@ _active = None   # the grid set_freq_grid installed (None: uniform Matsubara)
 
 def _bases(beta: float, wmax: float, eps: float) -> tuple:
     import sparse_ir
-    from sparse_ir import sve, kernel
-    # svd_strat='accurate': the 'fast' interpolative SVD of sparse-ir 1.x calls
-    # scipy.linalg.interpolative.seed, which recent SciPy no longer has
+    from sparse_ir import sve
     import warnings
     with warnings.catch_warnings():   # sparse-ir 1.x: harmless np.divide(where=) warnings with recent numpy
         warnings.simplefilter('ignore', UserWarning)
-        res = sve.compute(kernel.LogisticKernel(beta*wmax), eps=eps, svd_strat='accurate')
+        K = sparse_ir.LogisticKernel(beta*wmax)
+        try:
+            # 1.x: svd_strat='accurate', since its 'fast' interpolative SVD calls
+            # scipy.linalg.interpolative.seed, which recent SciPy no longer has
+            res = sve.compute(K, eps=eps, svd_strat='accurate')
+        except TypeError:   # 2.x (C backend): no svd_strat
+            res = sve.compute(K, eps=eps)
         return (sparse_ir.FiniteTempBasis('F', beta, wmax, eps=eps, sve_result=res),
                 sparse_ir.FiniteTempBasis('B', beta, wmax, eps=eps, sve_result=res))
 
