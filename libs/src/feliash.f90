@@ -318,6 +318,7 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,iprm,olist
   real(c_double) sgn,dprt
   complex(c_double),dimension(Norb,Norb):: dtrim
   logical(1),parameter:: sw_odd_freq=.false.
+  complex(c_double) vinf,st
 
   ! sgn: Pauli, F(-k,-ω) = sgn·F^T(k,ω);  dprt: inversion parity, F(-k,ω) = dprt·P F(k,ω) P
   ! -ω is rebuilt as F(k,-ω) = sgn·dprt·P F^*(k,ω) P, using F^T=F^* (Δ Hermitian: TRS lets the
@@ -389,9 +390,11 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,iprm,olist
            end do
            !$omp end do
            !$omp end parallel
-           call fg_set_static(tmpVdelta,cmplx(0.5d0*(Smat(m,l)+sgn*Cmat(m,l)),0.0d0,kind=c_double),Nx,Ny,Nz,Nw) !bare vertex
-           call fg_forward(tmpVdelta,tmp,Nx,Ny,Nz,Nw)
-           call fg_forward(tmpfk,tmp,Nx,Ny,Nz,Nw)
+           vinf=cmplx(0.5d0*(Smat(m,l)+sgn*Cmat(m,l)),0.0d0,kind=c_double) !bare vertex
+           call fg_set_static(tmpVdelta,vinf,Nx,Ny,Nz,Nw)
+           call fg_forward(FG_BOSON,tmpVdelta,tmp,Nx,Ny,Nz,Nw)
+           st=fg_static_term(tmpfk,Nx,Ny,Nz,Nw)   ! 0 on the uniform grid
+           call fg_forward(FG_FERMION,tmpfk,tmp,Nx,Ny,Nz,Nw)
            !$omp parallel
            !$omp workshare
            tmp(:,:,:,:)=0.0d0
@@ -413,7 +416,7 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,iprm,olist
            tmpfk(:,:,:,:)=0.0d0
            !$omp end workshare
            !$omp end parallel
-           call fg_backward(tmp,tmpfk,Nx,Ny,Nz,Nw)
+           call fg_backward(FG_FERMION,tmp,tmpfk,Nx,Ny,Nz,Nw)
            !$omp parallel do private(i,jp)
            do j=1,Nw
               jp=fg_pos(FG_FERMION,j)
@@ -425,6 +428,9 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,iprm,olist
               end do
            end do
            !$omp end parallel do
+           if(.not.fg_uniform())then   ! IR: the bare vertex was kept out of the transform
+              newdelta(:,:,olist(l,1),olist(m,2))=newdelta(:,:,olist(l,1),olist(m,2))+vinf*st
+           end if
         end if
      end do
   end do

@@ -496,6 +496,7 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,prt,kmap,invk,i
   integer(c_int32_t) i,j,k,n,l,m
   integer(c_int64_t) jp,jm,j0
   real(c_double) pp,sp,sm
+  complex(c_double) vinf,st
   
   call grid_work_get(Nx,Ny,Nz,fg_nt(Nw))
   j0=fg_pos(FG_BOSON,1_c_int64_t)   ! v=0
@@ -554,9 +555,11 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,prt,kmap,invk,i
                  end do
                  !$omp end do
                  !$omp end parallel
-                 call fg_set_static(tmpVdelta,cmplx(-0.5d0*Vmat(m,l),0.0d0,kind=c_double),Nx,Ny,Nz,Nw) !bare -V/2
-                 call fg_forward(tmpVdelta,tmp,Nx,Ny,Nz,Nw)
-                 call fg_forward(tmpfk,tmp,Nx,Ny,Nz,Nw)
+                 vinf=cmplx(-0.5d0*Vmat(m,l),0.0d0,kind=c_double) !bare -V/2
+                 call fg_set_static(tmpVdelta,vinf,Nx,Ny,Nz,Nw)
+                 call fg_forward(FG_BOSON,tmpVdelta,tmp,Nx,Ny,Nz,Nw)
+                 st=fg_static_term(tmpfk,Nx,Ny,Nz,Nw)   ! 0 on the uniform grid
+                 call fg_forward(FG_FERMION,tmpfk,tmp,Nx,Ny,Nz,Nw)
                  !$omp parallel
                  !$omp workshare
                  tmp(:,:,:,:)=0.0d0
@@ -576,7 +579,7 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,prt,kmap,invk,i
                  tmpfk(:,:,:,:)=0.0d0
                  !$omp end workshare
                  !$omp end parallel
-                 call fg_backward(tmp,tmpfk,Nx,Ny,Nz,Nw)
+                 call fg_backward(FG_FERMION,tmp,tmpfk,Nx,Ny,Nz,Nw)
                  !$omp parallel do private(i,jp)
                  do j=1,Nw
                     jp=fg_pos(FG_FERMION,j)
@@ -587,6 +590,9 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,prt,kmap,invk,i
                     end do
                  end do
                  !$omp end parallel do
+                 if(.not.fg_uniform())then   ! IR: the bare vertex was kept out of the transform
+                    newdelta(:,:,olist(l,1),olist(m,2))=newdelta(:,:,olist(l,1),olist(m,2))+vinf*st
+                 end if
               end if
         end if
      end do

@@ -28,6 +28,7 @@ subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb)
   !!@param   Nk,in: The number of k-points
   !!@param   Nw,in: The number of energies mesh
   !!@param Norb,in: The number of orbitals
+  use freq_grid, only:fg_omega,FG_FERMION
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   use constant
   implicit none
@@ -47,7 +48,7 @@ subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb)
      do m=1,Norb
         !$omp do private(iw,i,j,n)
         wloop: do j=1,Nw !ien=pi(2l+1)/beta l=0,1,... beta=(kBT)^-1
-           iw=cmplx(mu,dble(2*j-1)*pi*temp,kind=c_double) !iω_j = μ + i(2j-1)πT (j=1: ω_0=πT)
+           iw=cmplx(mu,fg_omega(FG_FERMION,j,temp),kind=c_double) !iω_j = μ + i(2j-1)πT (j=1: ω_0=πT)
            band_loop: do n=1,Norb
               kloop: do i=1,Nk
                  Gk(i,j,m,l)=Gk(i,j,m,l)+uni(m,n,i)*conjg(uni(l,n,i))/(iw-eig(n,i))
@@ -70,6 +71,7 @@ subroutine gen_green_inv(Gk,self,hamk,mu,temp,Nk,Nw,Norb)
   !!@param   Nk,in: The number of k-points
   !!@param   Nw,in: The number of energies mesh
   !!@param Norb,in: The number of orbitals
+  use freq_grid, only:fg_omega,FG_FERMION
   use,intrinsic:: iso_c_binding, only: c_int64_t,c_double,c_int32_t
   use constant
   implicit none
@@ -88,7 +90,7 @@ subroutine gen_green_inv(Gk,self,hamk,mu,temp,Nk,Nw,Norb)
      do m=1,Norb
         !$omp do private(iw,i)
         do j=1,Nw
-           iw=cmplx(mu,dble(2*j-1)*pi*temp,kind=c_double)
+           iw=cmplx(mu,fg_omega(FG_FERMION,j,temp),kind=c_double)
            do i=1,Nk
               Gk(i,j,m,l)=-(hamk(m,l,i)+self(i,j,m,l))
               if(l==m)then
@@ -113,6 +115,7 @@ subroutine gen_green_inv_from_eig(Gk,self,uni,eig,mu,temp,Nk,Nw,Norb) bind(C)
   !!@param   Nk,in: The number of k-points
   !!@param   Nw,in: The number of energies mesh
   !!@param Norb,in: The number of orbitals
+  use freq_grid, only:fg_omega,FG_FERMION
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   use constant
   implicit none
@@ -134,7 +137,7 @@ subroutine gen_green_inv_from_eig(Gk,self,uni,eig,mu,temp,Nk,Nw,Norb) bind(C)
      do m=1,norb
         !$omp do private(iw,i,n)
         wloop: do j=1,Nw
-           iw=cmplx(mu,dble(2*j-1)*pi*temp,kind=c_double) !(2(j-1)+1)pi/beta
+           iw=cmplx(mu,fg_omega(FG_FERMION,j,temp),kind=c_double) !(2(j-1)+1)pi/beta
            kloop: do i=1,Nk
               band_loop: do n=1,norb
                  Gk(i,j,m,l)=Gk(i,j,m,l)+uni(m,n,i)*conjg(uni(l,n,i))*(iw-eig(n,i))
@@ -210,6 +213,7 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
 
   integer(c_int32_t) i,j,k,n,l,m
   integer(c_int64_t) jp,jm,j0
+  complex(c_double) vinf,st
   real(c_double) weight
   complex(c_double),allocatable,dimension(:,:,:,:):: tmpVsigma,tmp,tmpgk
 
@@ -264,9 +268,11 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
         end do
         !$omp end do
         !$omp end parallel
-        call fg_set_static(tmpVsigma,cmplx(1.5d0*Smat(m,l)-0.5d0*Cmat(m,l),0.0d0,kind=c_double),Nx,Ny,Nz,Nw)
-        call fg_forward(tmpVsigma,tmp,Nx,Ny,Nz,Nw)
-        call fg_forward(tmpgk,tmp,Nx,Ny,Nz,Nw)
+        vinf=cmplx(1.5d0*Smat(m,l)-0.5d0*Cmat(m,l),0.0d0,kind=c_double)   ! bare vertex (v -> infinity)
+        call fg_set_static(tmpVsigma,vinf,Nx,Ny,Nz,Nw)
+        call fg_forward(FG_BOSON,tmpVsigma,tmp,Nx,Ny,Nz,Nw)
+        st=fg_static_term(tmpgk,Nx,Ny,Nz,Nw)   ! 0 on the uniform grid
+        call fg_forward(FG_FERMION,tmpgk,tmp,Nx,Ny,Nz,Nw)
         !$omp parallel
         !$omp do private(i,j,k,n)
         do n=1,int(fg_nt(Nw),c_int32_t)
@@ -283,7 +289,7 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
       tmpgk=cmplx(0.0d0,0.0d0,kind=c_double)
         !$omp end workshare
         !$omp end parallel
-        call fg_backward(tmp,tmpgk,Nx,Ny,Nz,Nw)
+        call fg_backward(FG_FERMION,tmp,tmpgk,Nx,Ny,Nz,Nw)
         !$omp parallel do private(i,j,jp)
         do j=1,Nw
            jp=fg_pos(FG_FERMION,j)
@@ -295,6 +301,9 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
            end do
         end do
         !$omp end parallel do
+        if(.not.fg_uniform())then   ! IR: the bare vertex was kept out of the transform
+           sigmak(:,:,olist(m,1),olist(l,1))=sigmak(:,:,olist(m,1),olist(l,1))+vinf*st
+        end if
      end do
   end do
 
@@ -311,6 +320,7 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   use flex_scf, only:solve_mu,diis_state,diis_init,diis_free,mix_sigma
   use mkself_rn
+  use freq_grid, only:fg_uniform
   implicit none
   integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz,scf_loop,m_diis
   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
@@ -347,6 +357,13 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   real(c_double),allocatable,target,dimension(:):: kmult
   integer(c_int32_t) ik_mult
 
+  if(.not.fg_uniform())then
+     ! sub_sigma=2 averages over a uniform grid, and sigma.bin is read back as one (plibs.regrid_sigma_bin)
+     if(sub_sigma==2 .or. sw_in .or. sw_out)then
+        print'(A)','ERROR(mkself): sub_sigma=2 and sw_in/sw_out are for the uniform Matsubara grid only'
+        stop
+     end if
+  end if
   allocate(Gk(Nk,Nw,Norb,Norb),sigmak0(Nk,Nw,Norb,Norb),chi(Nk,Nw,Nchi,Nchi),kmult(Nk))
   kmult(:)=0.0d0
   do ik_mult=1,int(Nkall,c_int32_t)
@@ -572,6 +589,7 @@ end subroutine mkself
 subroutine get_rn_mkself(rn,rmu,eig,kmult,eig_gkinv,temp,Nk,Nw,Norb,Nkall)
   !> n(mu) of mkself; called through get_rn (module mkself_rn), which supplies mkself's state
   use constant
+  use freq_grid, only:fg_uniform,fg_dens_coef,fg_omega,FG_FERMION
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nk,Nw,Norb,Nkall
@@ -583,7 +601,8 @@ subroutine get_rn_mkself(rn,rmu,eig,kmult,eig_gkinv,temp,Nk,Nw,Norb,Nkall)
 
   integer(c_int32_t) i,j,n
   real(c_double) tmp,deltagk
-  complex(c_double) iw_im
+  complex(c_double) iw_im,cp,cm,x
+  integer(c_int64_t) j64
 
   ! n(μ) = (1/Nkall){Σ_{k,n} w_k f(ε_{kn}) + 2T·Σ_{k,j} w_k [G(k,iω_j) - G_0(k,iω_j)]}
   ! w_k = kmult(k) is the multiplicity of the irreducible k in the full BZ (1 on the TRIMs,
@@ -595,6 +614,25 @@ subroutine get_rn_mkself(rn,rmu,eig,kmult,eig_gkinv,temp,Nk,Nw,Norb,Nkall)
   end do
   ! correction from self-energy: use precomputed eigenvalues of H(k)+Sigma(k,iw): no getinv needed
   deltagk=0.0d0
+  if(.not.fg_uniform())then
+     ! IR: T sum_n [G - G_0](i w_n) is [G - G_0](tau = 0), continuous there (no 1/iw tail), read off
+     ! the sampled values by the basis (fg_dens_coef); G - G_0 at -i w is the conjugate
+     !$omp parallel do reduction(+:deltagk) private(n,i,iw_im,cp,cm,x,j64)
+     do j=1,int(Nw,c_int32_t)
+        j64=j
+        iw_im=cmplx(0.0d0,fg_omega(FG_FERMION,j64,temp),kind=c_double)
+        call fg_dens_coef(j64,cp,cm)
+        do i=1,Nk
+           do n=1,Norb
+              x=1.0d0/(rmu+iw_im-eig_gkinv(n,i,j))-1.0d0/(rmu+iw_im-eig(n,i))
+              deltagk=deltagk+kmult(i)*dble(cp*x+cm*conjg(x))
+           end do
+        end do
+     end do
+     !$omp end parallel do
+     rn=(tmp+deltagk)/Nkall
+     return
+  end if
   !$omp parallel do reduction(+:deltagk) private(n,i,iw_im)
   do j=1,Nw
      iw_im=cmplx(0.0d0,dble(2*j-1)*pi*temp,kind=c_double)

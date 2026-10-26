@@ -12,6 +12,7 @@ Functions are organized in submodules by physical topic:
   _impurity     : Impurity Hamiltonian, CPA
   _eilenberger  : Quasiclassical Eilenberger / Riccati trajectory hot loops
   _grid         : Bilinear grid sampling and the Abrikosov LLL order parameter (vortex lattice)
+  _freq         : Frequency grid of the convolution kernels (uniform Matsubara / IR basis)
 """
 from ._hamiltonian import *
 from ._green import *
@@ -23,3 +24,4 @@ from ._transport import *
 from ._impurity import *
 from ._eilenberger import *
 from ._grid import *
+from ._freq import *

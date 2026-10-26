@@ -5,6 +5,7 @@ EPA output reading, orbital-dependent U/J parameter sets, and Wannier-R space fi
 for self-energy and gap functions.
 """
 import numpy as np
+import libs.plibs._freq_grid as _freq_grid
 
 # Public API of this submodule; keeps `from ._x import *` in __init__.py from
 # re-exporting numpy, scipy, ctypes and the sibling packages imported above.
@@ -209,12 +210,18 @@ def output_self_wannier(sigmak: np.ndarray, mu_self: float, kmap: np.ndarray, in
     @param       Nz: k-mesh size along z
     @param       Nw: number of positive Matsubara frequencies
     @param     temp: temperature k_B*T [eV]
-    @param    N_cut: number of leading Matsubara frequencies to keep (default 64)
+    @param    N_cut: number of leading Matsubara frequencies to keep (default 64); on the IR grid Sigma
+                   is first evaluated at the N_cut lowest uniform w_n (plibs.to_uniform_fermion)
     @param zero_tol: Re/Im components below zero_tol * max|Sigma| are set to 0 (default 1e-5)
     @param    fname: output file base name
     @param     invs: spin-flip partner of each orbital, Fortran 1-based (SOC runs; None without SOC)
     @param    slist: spin sign +-1 of each orbital (SOC runs)
     """
+    if _freq_grid.active_freq_grid() is not None:
+        # IR: the file keeps its uniform-Matsubara format (Pade/MaxEnt consumers), so the
+        # sampled Sigma is evaluated at the N_cut lowest w_n = (2n+1) pi T through the basis
+        sigmak = _freq_grid.to_uniform_fermion(sigmak, temp, N_cut)
+        Nw = N_cut
     sigma_full = _irr_to_full_kgrid_normal(sigmak, invk, kmap, Nx, Ny, Nz, invs, slist)
     s11_iw0 = sigma_full[0, 0, 0]
     print(f'[Pre-FFT] Sigma_11(iw_0): Gamma={sigma_full[0, 0, 0, 0, 0, 0]:.6e}, '
@@ -301,7 +308,8 @@ def output_gap_wannier(gap: np.ndarray, kmap: np.ndarray, invk: np.ndarray, Nx: 
         print('output_gap_wannier: no non-zero R-vectors found', flush=True)
         return
     N_cut_used = data_out.shape[2]
-    iw_grid    = (2 * np.arange(N_cut_used) + 1) * np.pi * temp
+    # the stored frequencies: (2n+1) pi T, or the IR sampling ones (the gap is kept on them)
+    iw_grid    = _freq_grid.fermion_frequencies(temp, Nw)[:N_cut_used]
     try:
         np.savez(fname, gap=data_out, rvec=rvec_kept, iw=iw_grid, temp=temp,
                  orb_conv=np.array(GAP_ORB_CONV))

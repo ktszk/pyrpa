@@ -17,6 +17,7 @@ Functions are organized in submodules by physical topic:
   _fermiology : Cyclotron mass, dHvA frequencies of extremal orbits, band masses on a path
   _impurity   : Impurity supercell, exact diagonalization and the unfolded spectrum
   _phonon_pairing: Phonon-mediated pairing interaction from EPA data for the Eliashberg equation
+  _freq_grid  : IR basis frequency grid for the convolution kernels (uniform Matsubara is the default)
 """
 from ._symmetry import *
 from ._lattice import *
@@ -38,3 +39,4 @@ from ._conductivity import *
 from ._fermiology import *
 from ._impurity import *
 from ._phonon_pairing import *
+from ._freq_grid import *

@@ -553,6 +553,7 @@ subroutine chi0_conv_acc(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,coef,&
 
   integer(c_int32_t) i,j,k,l,m,n,iorb
   integer(c_int32_t) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(fg_nt(Nw))
+  real(c_double) sg(fg_nt(Nw))   ! reflection sign of a fermionic factor
   integer(c_int64_t) jp,jm
   real(c_double) weight
   complex(c_double),allocatable,dimension(:,:,:,:):: tmp,tmpgk13,tmpgk42
@@ -560,7 +561,7 @@ subroutine chi0_conv_acc(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,coef,&
   allocate(tmp(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)),tmpgk13(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)),&
        tmpgk42(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)))
   weight=coef*temp/dble(Nkall)
-  call fg_reverse(ii,ij,ik,iw,Nx,Ny,Nz,Nw)
+  call fg_reverse(ii,ij,ik,iw,Nx,Ny,Nz,Nw,sg)
   call fg_plans_init(tmpgk13,tmp,Nx,Ny,Nz,Nw)
   orb_loop:do iorb=1,Nchi*(Nchi+1)/2
      l=irr_chi(iorb,1)
@@ -589,8 +590,8 @@ subroutine chi0_conv_acc(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,coef,&
         end do k_loop_Gk_to_tmp
      end do w_loop_Gk_to_tmp
      !$omp end parallel do
-     call fg_forward(tmpgk13,tmp,Nx,Ny,Nz,Nw)
-     call fg_forward(tmpgk42,tmp,Nx,Ny,Nz,Nw)
+     call fg_forward(FG_FERMION,tmpgk13,tmp,Nx,Ny,Nz,Nw)
+     call fg_forward(FG_FERMION,tmpgk42,tmp,Nx,Ny,Nz,Nw)
      !calculate G(r)G(-r)
      !$omp parallel do private(i,j,k)
      w_loop_conv:do n=1,int(fg_nt(Nw),c_int32_t)
@@ -598,14 +599,14 @@ subroutine chi0_conv_acc(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,coef,&
            y_loop:do j=0,Ny-1
               !$omp simd
               x_loop:do i=0,Nx-1
-                 tmp(i,j,k,n)=-tmpgk13(i,j,k,n)*tmpgk42(ii(i),ij(j),ik(k),iw(n))
+                 tmp(i,j,k,n)=-sg(n)*tmpgk13(i,j,k,n)*tmpgk42(ii(i),ij(j),ik(k),iw(n))
               end do x_loop
               !$omp end simd
            end do y_loop
         end do z_loop
      end do w_loop_conv
      !$omp end parallel do
-     call fg_backward(tmp,tmpgk13,Nx,Ny,Nz,Nw)
+     call fg_backward(FG_BOSON,tmp,tmpgk13,Nx,Ny,Nz,Nw)
      !$omp parallel do private(i,j,jp)
      w_loop_tmp_to_chi:do j=1,Nw
         jp=fg_pos(FG_BOSON,j)
@@ -670,6 +671,7 @@ subroutine chi0_ref_tau(chi,eig,uni,mu,kmap,invk,irr_chi,chi_map,olist,temp,&
   !> get_chi0_conv / gen_irr_k_TRS.
   use constant
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  use freq_grid, only:fg_uniform
   implicit none
   integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
@@ -691,6 +693,10 @@ subroutine chi0_ref_tau(chi,eig,uni,mu,kmap,invk,irr_chi,chi_map,olist,temp,&
   complex(c_double),dimension(Nw):: sawc
   complex(c_double),allocatable,dimension(:,:,:,:):: tmpA,tmpB,tmp
 
+  if(.not.fg_uniform())then
+     print'(A)','ERROR(chi0_ref_tau): the chi0 tail correction is for the uniform Matsubara grid only (sw_tail)'
+     stop
+  end if
   allocate(tmpA(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmpB(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw),tmp(0:Nx-1,0:Ny-1,0:Nz-1,2*Nw))
   M32=int(2*Nw,c_int32_t)
   beta=1.0d0/temp
@@ -930,6 +936,7 @@ end subroutine get_chi0_tail
 subroutine get_chi0_sum(chi,Gk,klist,invk,irr_chi,chi_map,olist,temp,Nw,Nk,Nkall,Norb,Nchi) bind(C)
   !> It obtains chi_0 using summation. Its cost is O(Nk^2), so it is heavy. You should use get_chi0_conv.
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  use freq_grid, only:fg_uniform
   implicit none
   integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nk,Nkall
   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
@@ -947,6 +954,10 @@ subroutine get_chi0_sum(chi,Gk,klist,invk,irr_chi,chi_map,olist,temp,Nw,Nk,Nkall
   real(c_double) weight
   complex(c_double),allocatable,dimension(:,:):: tmpgk13,tmpgk42
 
+  if(.not.fg_uniform())then
+     print'(A)','ERROR(get_chi0_sum): the direct-sum reference chi0 is for the uniform Matsubara grid only'
+     stop
+  end if
   allocate(qshift(Nkall),tmpgk13(Nkall,2*Nw),tmpgk42(Nkall,2*Nw))
   !$omp parallel workshare
   chi(:,:,:,:)=0.0d0

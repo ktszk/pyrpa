@@ -204,3 +204,6 @@ Doc/api/
 
 # calculation results per material
 results/
+
+# local design notes (not part of the repository)
+Doc/design_freq_grid.md

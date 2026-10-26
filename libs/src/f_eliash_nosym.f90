@@ -95,6 +95,7 @@ subroutine get_chi0_nosym(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nkall,Norb,Nchi) bi
 
   integer(c_int32_t) i,j,k,l,m,n
   integer(c_int32_t) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(fg_nt(Nw))
+  real(c_double) sg(fg_nt(Nw))   ! reflection sign of a fermionic factor
   integer(c_int64_t) jp,jm
   real(c_double) weight
   complex(c_double),allocatable,dimension(:,:,:,:):: tmp,tmpgk13,tmpgk42
@@ -102,8 +103,8 @@ subroutine get_chi0_nosym(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nkall,Norb,Nchi) bi
   weight=temp/dble(Nkall)
   allocate(tmp(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)),tmpgk13(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)),&
        tmpgk42(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)))
-  ! ii,ij,ik,iw: index of -r and -tau (iw also maps v_n -> -v_n on the bosonic grid)
-  call fg_reverse(ii,ij,ik,iw,Nx,Ny,Nz,Nw)
+  ! ii,ij,ik,iw: index of -r and -tau
+  call fg_reverse(ii,ij,ik,iw,Nx,Ny,Nz,Nw,sg)
   call fg_plans_init(tmpgk13,tmp,Nx,Ny,Nz,Nw)
   l_loop:do l=1,Nchi
      m_loop:do m=1,l
@@ -119,8 +120,8 @@ subroutine get_chi0_nosym(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nkall,Norb,Nchi) bi
            end do
         end do
         !$omp end parallel do
-        call fg_forward(tmpgk13,tmp,Nx,Ny,Nz,Nw)
-        call fg_forward(tmpgk42,tmp,Nx,Ny,Nz,Nw)
+        call fg_forward(FG_FERMION,tmpgk13,tmp,Nx,Ny,Nz,Nw)
+        call fg_forward(FG_FERMION,tmpgk42,tmp,Nx,Ny,Nz,Nw)
         !calculate G(r)G(-r)
         !$omp parallel do private(i,j,k)
         do n=1,int(fg_nt(Nw),c_int32_t)
@@ -128,20 +129,21 @@ subroutine get_chi0_nosym(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nkall,Norb,Nchi) bi
               do j=0,Ny-1
                  !$omp simd
                  do i=0,Nx-1
-                    tmp(i,j,k,n)=-tmpgk13(i,j,k,n)*tmpgk42(ii(i),ij(j),ik(k),iw(n))
+                    tmp(i,j,k,n)=-sg(n)*tmpgk13(i,j,k,n)*tmpgk42(ii(i),ij(j),ik(k),iw(n))
                  end do
                  !$omp end simd
               end do
            end do
         end do
         !$omp end parallel do
-        call fg_backward(tmp,tmpgk13,Nx,Ny,Nz,Nw)
-        !$omp parallel do private(i,j,jp)
+        call fg_backward(FG_BOSON,tmp,tmpgk13,Nx,Ny,Nz,Nw)
+        !$omp parallel do private(i,j,jp,jm)
         do j=1,Nw
            jp=fg_pos(FG_BOSON,j)
+           jm=merge(jp,fg_neg(FG_BOSON,j,Nw),j==1)   ! slot of -v_j (v_0 = 0 is its own partner)
            do i=1,Nkall
               chi(i,j,m,l)=tmp(kmap(1,i),kmap(2,i),kmap(3,i),jp)*weight
-              chi(i,j,l,m)=conjg(tmp(kmap(1,i),kmap(2,i),kmap(3,i),iw(j)))*weight !chi^lm(q,iv)=chi^*ml(q,-iv)
+              chi(i,j,l,m)=conjg(tmp(kmap(1,i),kmap(2,i),kmap(3,i),jm))*weight !chi^lm(q,iv)=chi^*ml(q,-iv)
            end do
         end do
         !$omp end parallel do
@@ -226,6 +228,8 @@ subroutine mkdelta_nosym(newdelta,fk,Vdelta,Vmat,kmap,ikmq,olist,Nkall,Nw,Nchi,N
   logical,dimension(Nchi,Nchi):: nzv
   complex(c_double),allocatable,dimension(:,:,:,:):: tmpVdelta,tmpdel,tmp
   complex(c_double),allocatable,dimension(:,:,:,:,:,:):: fr
+  complex(c_double),dimension(Norb,Norb):: fst   ! IR: raw sum of F_ab over (k, w), for the bare vertex
+  complex(c_double) dst
 
   ! ichi(a,b): chi index of orbital pair (a,b), 0 if the pair is not in olist
   ! nzv(m,l): block (m,l) of V_Delta contributes (relative cut far below FFT round-off)
@@ -260,7 +264,8 @@ subroutine mkdelta_nosym(newdelta,fk,Vdelta,Vmat,kmap,ikmq,olist,Nkall,Nw,Nchi,N
            end do
         end do
         !$omp end parallel do
-        call fg_forward(tmpdel,tmp,Nx,Ny,Nz,Nw)
+        fst(a,b)=fg_static_term(tmpdel,Nx,Ny,Nz,Nw)   ! 0 on the uniform grid
+        call fg_forward(FG_FERMION,tmpdel,tmp,Nx,Ny,Nz,Nw)
         !$omp parallel workshare
         fr(:,:,:,:,a,b)=tmpdel(:,:,:,:)
         !$omp end parallel workshare
@@ -273,6 +278,7 @@ subroutine mkdelta_nosym(newdelta,fk,Vdelta,Vmat,kmap,ikmq,olist,Nkall,Nw,Nchi,N
         !$omp parallel workshare
         tmpdel(:,:,:,:)=0.0d0
         !$omp end parallel workshare
+        dst=0.0d0
         do b=1,Norb
            l=ichi(a,b)
            if(l==0)cycle
@@ -299,7 +305,8 @@ subroutine mkdelta_nosym(newdelta,fk,Vdelta,Vmat,kmap,ikmq,olist,Nkall,Nw,Nchi,N
               !$omp end do
               !$omp end parallel
               call fg_set_static(tmpVdelta,cmplx(-0.5d0*Vmat(m,l),0.0d0,kind=c_double),Nx,Ny,Nz,Nw) !bare -V/2
-              call fg_forward(tmpVdelta,tmp,Nx,Ny,Nz,Nw)
+              dst=dst-0.5d0*Vmat(m,l)*fst(b,c)
+              call fg_forward(FG_BOSON,tmpVdelta,tmp,Nx,Ny,Nz,Nw)
               !$omp parallel do private(i,j,k)
               do n=1,int(fg_nt(Nw),c_int32_t)
                  do k=0,Nz-1
@@ -315,7 +322,7 @@ subroutine mkdelta_nosym(newdelta,fk,Vdelta,Vmat,kmap,ikmq,olist,Nkall,Nw,Nchi,N
               !$omp end parallel do
            end do
         end do
-        call fg_backward(tmpdel,tmp,Nx,Ny,Nz,Nw)
+        call fg_backward(FG_FERMION,tmpdel,tmp,Nx,Ny,Nz,Nw)
         !$omp parallel do private(i,j,jp)
         do j=1,Nw
            jp=fg_pos(FG_FERMION,j)
@@ -324,6 +331,7 @@ subroutine mkdelta_nosym(newdelta,fk,Vdelta,Vmat,kmap,ikmq,olist,Nkall,Nw,Nchi,N
            end do
         end do
         !$omp end parallel do
+        if(.not.fg_uniform())newdelta(:,:,a,d)=newdelta(:,:,a,d)+dst   ! IR: bare vertex kept out of the transform
      end do a_loop
   end do d_loop
   call fg_plans_free()

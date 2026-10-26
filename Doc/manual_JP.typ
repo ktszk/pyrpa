@@ -334,6 +334,18 @@ FLEX アルゴリズムを自己無撞着に解き, 電子の自己エネルギ�
 - 自己エネルギーからは静的成分が各反復で減算されます（ラッパー引数 `sub_sigma`; `1`: $Sigma(bold(k), i omega_0)$ の Hermite 部分（デフォルト）, `2`: 周波数平均, `0`: 減算なし）。これはバンド分散の静的シフトを化学ポテンシャル調整側に吸収させてフェルミ面を安定させるための処方であり, 厳密な Hartree--Fock 項のみの減算ではありません（$i omega_0$ での値には低エネルギーの動的成分も含まれます）。絶対的なバンドシフトを議論したい場合は `sub_sigma=0` を使用してください。
 - 松原周波数方向の畳み込み（$chi_0$, $Sigma$, Eliashberg カーネル）は長さ $2 N_w$ の FFT による循環畳み込みで, 既定では高周波 tail 補正を行いません（$V$ の最遠点のみ bare 頂点で近似）。実効カットオフは $omega_c = (2 N_w - 1) pi T$ と温度に比例して縮むため, $N_w$ 固定の温度走査には $O(1\/N_w)$ の系統誤差が乗ります。最低温度でも $omega_c$ がバンド幅と $U$ を十分上回るように $N_w$ を選んでください。`sw_chi0_tail=True` で $chi_0$ の打ち切り誤差を $O(1\/N_w^2)$ に改善できます。なお $Sigma$ 自身の畳み込みの tail 誤差は $omega$ に依らない定数（HF 的静的シフト）が主で `sub_sigma`/化学ポテンシャル調整に吸収され, Eliashberg カーネルの tail 誤差はギャップの一様（$s$ 波）成分にのみ入り符号反転ギャップでは対称性で消えるため, これらには個別の補正を実装していません（$V_Delta$, $V_sigma$ は補正済み $chi_0$ を通じて改善されます）。
 
+=== 周波数格子: 一様な松原周波数と IR 基底（`freq_grid`）
+
+`freq_grid='ir'` にすると, option=14, 15, 16 の周波数方向（$chi_0$, $Sigma$, 化学ポテンシャルの探索, 線形 Eliashberg のカーネル; SOC あり・なし, `sw_nosym` のいずれも）を, 一様な $N_w$ 点の松原周波数ではなく IR（intermediate representation）基底のスパースサンプリングで扱います。sparse-ir（1.x）が必要です。
+
+- 周波数の点数は基底が決め（$Lambda = omega_"max"\/T$ と精度 `ir_eps` に依存し, 典型的に 15〜30 点）, `Nw` は使われません。一様格子のような打ち切り誤差がないので `sw_chi0_tail` は不要で, 自動的に off になります。
+- `ir_wmax`（既定 None）: スペクトルのカットオフ $omega_"max"$ [eV]。None のときは $2 max_bold(k) |epsilon_bold(k) - mu|$ を使います。RPA の $chi_0$ はバンド幅程度で足りますが, FLEX では $Sigma$ がスペクトルの重みをバンドの外へ広げるため 2 倍程度が必要です（000AsP, $T = 0.02$ eV: $omega_"max" = 2.88$ eV では $mu$ が 0.27 meV ずれ, 6.0 eV で一様格子の $N_w -> infinity$ 外挿と $6 times 10^(-6)$ eV で一致）。
+- `ir_eps`（既定 $10^(-8)$）: 基底の精度。
+- 精度の目安（検証済み）: $chi_0$ は厳密な Lindhard 和と $10^(-8)$, FLEX の $mu$ と Stoner 因子は一様格子の外挿値と $10^(-5)$ 以下, 線形 Eliashberg の $lambda$ は $10^(-7)$〜$10^(-8)$ で一致します。一様格子は FLEX では $chi_0$ の tail 補正を入れても $Sigma$ の打ち切りで $O(1\/N_w)$ の誤差が残り, $N_w = 1024$ でも $mu$ が 1 meV 程度ずれることがあります。計算時間は数十分の 1 程度になります。
+- 制限: option=23（非線形 Eliashberg）は未対応でエラー停止します。`sigma.bin`（`sw_in_self`, `sw_out_self` のうち `sigma.bin` の部分）と `sub_sigma=2` は一様格子専用です。
+- ファイル: `self_en.npz` にはサンプリング点上の $Sigma$ と周波数（`iw`）を保存し, 格子が異なる場合は読み込みを拒否します（`sw_from_file`, option=16）。`self_en_wannier.npz` は従来通り一様な $omega_n = (2n+1) pi T$ の先頭 64 点の形式で, IR 基底から評価して書き出します（基底で表せない定数 $Sigma(i omega -> infinity)$ は最も高い 3 つのサンプリング点の Hermite 部分から $1\/omega^2$, $1\/omega^4$ 項とともに推定して除いてから展開します）。ギャップ（`gap.npy`, `gap_wannier.npz`）はサンプリング点のまま保存し, 周波数を `gap_iw.npy` と `gap_wannier.npz` の `iw` に記録します。$omega_n -> 0$ への外挿は記録された周波数で行います。
+- *Padé 接続の不安定性*: IR の値を一様な $omega_n$ で評価し直した $G$, $Sigma$ は, 松原軸の上では一様格子より正確です（hop2 模型, $16 times 16$, $T = 0.05$ eV: $N_w -> infinity$ 外挿との差は $G$ で $9 times 10^(-6)$, 一様格子 $N_w = 4096$ では $2 times 10^(-4)$）。ところが, それを Padé で実軸へ接続したスペクトルは一様格子のものから大きく外れることがあります（同じ例で $A(bold(k), omega)$ の差の中央値は $7 times 10^(-4)$ ですが, 局所的にピーク値の 20〜60% のスパイクが出ます）。Padé は入力に相対 $10^(-10)$ の乱雑な誤差を加えただけでスペクトルが数十 % 変わるほど悪条件です。一様格子どうし（$N_w$ の違い）の差は $omega_n$ について滑らかな系統的な差なので目立ちませんが, 基底を通した評価に残る $10^(-6)$ 程度の誤差は解析関数として整合しない雑音として増幅されます。`ir_wmax` や `ir_eps` を変えても, サンプリング点で直接 Padé をとっても改善しません。IR で解いた $Sigma$ から実軸のスペクトル（option=4 の `sw_self`, option=16 の `Gpade.dat`）や `tau_mode='flex'` の輸送係数を求めるときは, MaxEnt（`plibs.spectrum_on_path`, `plibs.output_Fk` の `sw_maxent=True`; IR と一様格子で差は同程度）を使うか, 一様格子で解いた $Sigma$ と見比べて確認してください。松原軸の上の量（$mu$, $lambda$, ギャップ, $chi$）にはこの問題はありません。
+
 == option=15: 線形 Eliashberg 方程式 (`LIN_ELIASHBERG`)
 
 RPA または FLEX で求めた有効ペアリング相互作用を使い, 線形化された Eliashberg 方程式を固有値問題として解きます。最大固有値 $lambda$ と対応するギャップ関数 $Delta(bold(k), i omega_n)$ が得られます。$lambda = 1$ で超伝導転移温度 $T_c$ となります。デフォルトは shift + deflation 付き power method, `arnoldi_m > 0` で Arnoldi 法も選択可能です。
@@ -350,7 +362,7 @@ RPA または FLEX で求めた有効ペアリング相互作用を使い, 線�
 option=15 で計算したギャップ関数 (`gap.npy`) を読み込み, 以下の量を計算・出力します。
 
 - ギャップ関数の異常グリーン関数 $F(bold(k), i omega_n)$
-- Padé 近似による実周波数への解析接続スペクトル
+- Padé 近似による実周波数への解析接続スペクトル（`freq_grid='ir'` では不安定になることがあります。option=14 の「周波数格子」の節を参照）
 
 == option=17: バンドフィリング (`BAND_FILLING`)
 
@@ -546,7 +558,7 @@ olist = [[0, 3], [1, 4], [2, 5]]
 
 - `flex_gamma_imp` （実数, 単位: eV, 既定 0）: `tau_mode='flex'` で $-"Im" Sigma^R$ に加える不純物減衰 $Gamma_"imp"$（マティーセン則）。低温で FLEX の $Gamma prop T^2$ が小さくなりすぎるときの残留抵抗に相当します。
 
-- `flex_npade` （整数, 既定 40）: `tau_mode='flex'` の Padé 接続に使う松原点の最大数（次数 `flex_npade/2`〜`flex_npade` の因果的な結果の中央値を使います）。どの次数も因果的にならない k 点は, 非因果なエネルギー区間を両端から補間して修復し, その数を警告として表示します。FLEX の k メッシュは `self_en_wannier.npz` に記録されます。記録のない古いファイルでは R の範囲から推定するので, FLEX を `sw_out_self=True` で解き直してください。
+- `flex_npade` （整数, 既定 40）: `tau_mode='flex'` の Padé 接続に使う松原点の最大数（次数 `flex_npade/2`〜`flex_npade` の因果的な結果の中央値を使います）。どの次数も因果的にならない k 点は, 非因果なエネルギー区間を両端から補間して修復し, その数を警告として表示します。FLEX の k メッシュは `self_en_wannier.npz` に記録されます。記録のない古いファイルでは R の範囲から推定するので, FLEX を `sw_out_self=True` で解き直してください。`freq_grid='ir'` で解いた FLEX の $Sigma$ では Padé 接続が不安定になることがあります（option=14 の「周波数格子」の節を参照）。
 
 - `hall_mesh_list` （リスト または `None`, 既定 `None`）: option=5 のホール係数に対する $bold(k)$ メッシュ収束スイープ。例: `[20,30,40]` や `[(20,20,10),(30,30,15)]`。各要素は整数（立方メッシュ）か `(Nx,Ny,Nz)` タプルです。`None` の場合は `(Nx,Ny,Nz)` 単一メッシュのみで, 収束情報は得られません。粗いメッシュでは $sigma^((1))$ が符号ごと誤り得るため, 新しい物質では最低一度はスイープすることを強く推奨します。
 
@@ -634,6 +646,8 @@ $s^plus.minus$（`gap_sym=2`）だけは例外で, シェルを対称性から�
 - `sw_check_only` （bool）: option=23（非線形 Eliashberg）専用。`True` にすると内部の線形化 Eliashberg 解（Stoner 因子 $S$ と固有値 $lambda_"eliash"$）を計算した時点で停止し, 非線形ループを実行しません。温度走査で $T_c$（$lambda_"eliash"=1$ となる温度）の見積もりだけを高速に行いたい場合に使用します。$S >= 1$ または $lambda_"eliash" < 1$ の場合は, このフラグの値に関わらず非線形ループ手前で自動的に停止します。
 
 - `sw_rescale_flex` （bool）: option=14 の FLEX 計算で, 反復中に Stoner 因子が 1 に達した場合に $chi_0$ 全体を一律に $(1-10^(-4))\/S$ 倍して発散を防ぎます。反復の序盤を安定化するための処置で, 通常は $Sigma$ のフィードバックにより収束時にはリスケールが非アクティブになり, 収束解にバイアスは残りません。最終反復でもリスケールが作動していた場合は正常状態が磁気不安定である旨の警告（`[FLEX] WARNING`）が表示されます（option=14 の注意書き参照）。
+
+- `freq_grid` （`'matsubara'` / `'ir'`, 既定 `'matsubara'`）, `ir_wmax` （float または None）, `ir_eps` （float, 既定 $10^(-8)$）: option=14, 15, 16 の周波数格子。`'ir'` で IR 基底のスパースサンプリングを使います（option=14 の「周波数格子」の節を参照。Padé 接続の不安定性に注意）。
 
 - `sw_chi0_tail` （bool）: option=14,15,23（SOC なし経路）で $chi_0$ を tail 補正付きで評価します（既定 False）。松原打ち切り誤差が $O(1\/N_w)$ から $O(1\/N_w^2)$ に改善し, 同じ精度なら小さい `Nw` で済みます（$chi_0$ 段のコスト約 3 倍, $N_w gt.eq 64$ 目安）。詳細は option=14 の注意書きを参照。
 

@@ -1280,22 +1280,32 @@ end subroutine fft3d_batch
 
 module freq_grid
   !> The frequency grid of the FFT-convolution kernels (chi0, Sigma, gap equation): where a stored
-  !> Matsubara frequency sits in the (k-mesh x frequency) work array, and the transform of that
-  !> array between (k, i w) and (R, tau).  The kernels only call these, so the grid can be switched
-  !> (uniform Matsubara now, the IR basis next) without touching them -- see Doc/design_freq_grid.md.
+  !> Matsubara frequency sits in the (k-mesh x frequency) work array, its value, and the transform
+  !> of that array between (k, i w) and (R, tau).  The kernels only call these, so the grid can be
+  !> switched without touching them -- see Doc/design_freq_grid.md.
   !>
-  !> Uniform Matsubara grid (the only one so far).  The work array holds 2*Nw frequencies on a
-  !> circular index: fermionic w_n (n = 0..Nw-1) at n+1 and -w_n at 2*Nw-n; bosonic v_m
-  !> (m = 0..Nw-1) at m+1 and -v_m at 2*Nw-m+1 (m >= 1); index Nw+1 is the w -> infinity slot
-  !> that the kernels fill with the bare (instantaneous) vertex.  The (k, w) <-> (R, tau)
-  !> transform is one 4D FFT: splitting it into a k-FFT and a frequency FFT is as fast with MKL
-  !> and pocketfft but twice as slow with AOCL-FFTZ (strided 1D transforms), so the boundary is
-  !> the whole (k, w) transform, not the frequency axis alone.
+  !> Uniform Matsubara grid (default).  The work array holds 2*Nw frequencies on a circular index:
+  !> fermionic w_n (n = 0..Nw-1) at n+1 and -w_n at 2*Nw-n; bosonic v_m (m = 0..Nw-1) at m+1 and -v_m
+  !> at 2*Nw-m+1 (m >= 1); index Nw+1 is the v -> infinity slot holding the bare (instantaneous)
+  !> vertex.  The (k, w) <-> (R, tau) transform is one 4D FFT: splitting it into a k-FFT and a
+  !> frequency FFT is as fast with MKL and pocketfft but twice as slow with AOCL-FFTZ, so the
+  !> boundary is the whole (k, w) transform, not the frequency axis alone.
+  !>
+  !> IR basis (fg_set_ir, from python: plibs.ir_grid).  The Nw stored frequencies are sparse-ir
+  !> sampling points (positive fermionic ones; v=0 and positive bosonic ones), their negatives sit at
+  !> Nw+j (fermion) / Nw+j-1 (boson); the transform is a batched 3D k-FFT plus dense matrices from the
+  !> 2*Nw frequency slots to Ntau tau sampling points (symmetric about beta/2) and back.  The
+  !> matrices are scaled so that forward -> product -> backward is the RAW sum sum_q sum_m a b of the
+  !> uniform grid (forward = U(tau) fit / T, backward = T Uhat fit_tau), i.e. the kernels' weights
+  !> T/Nk stay valid.  The instantaneous part of a bosonic vertex does not decay and is kept out of
+  !> the transform (fg_set_static subtracts it); fg_static_term then gives the raw sum of the other
+  !> factor, sum_k sum_n X(k, i w_n) = (Nk/T) X_loc(tau=0, midpoint), to add V(inf) times it.
   use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
   implicit none
   private
   integer(c_int32_t),parameter,public:: FG_FERMION=1, FG_BOSON=2
-  public:: fg_nt,fg_pos,fg_neg,fg_set_static,fg_forward,fg_backward,fg_reverse,fg_plans_init,fg_plans_free
+  public:: fg_nt,fg_pos,fg_neg,fg_omega,fg_uniform,fg_set_static,fg_static_term,fg_dens_coef,&
+       fg_forward,fg_backward,fg_reverse,fg_plans_init,fg_plans_free,fg_set_ir,fg_set_matsubara
   !> stored frequency j (1-based: j=1 is w_0 / v_0) -> work-array index of +w_j / -w_j
   interface fg_pos
      module procedure fg_pos_i32,fg_pos_i64
@@ -1303,12 +1313,32 @@ module freq_grid
   interface fg_neg
      module procedure fg_neg_i32,fg_neg_i64
   end interface fg_neg
+  interface fg_omega
+     module procedure fg_omega_i32,fg_omega_i64
+  end interface fg_omega
+  ! --- IR state (allocated by fg_set_ir) ---------------------------------------------------
+  logical,save:: ir_on=.false.
+  integer(c_int64_t),save:: ir_Nw=0,ir_Ntau=0
+  real(c_double),allocatable,save:: ir_wF(:),ir_wB(:)               ! stored frequency values [Nw]
+  complex(c_double),allocatable,save:: ir_fwdF(:,:),ir_bwdF(:,:)    ! (Ntau,2Nw) / (2Nw,Ntau)
+  complex(c_double),allocatable,save:: ir_fwdB(:,:),ir_bwdB(:,:)
+  complex(c_double),allocatable,save:: ir_stat(:),ir_dens(:)        ! fermionic weights [2Nw]
+  integer(c_int32_t),allocatable,save:: ir_rev(:)                   ! tau_i -> beta - tau_i [Ntau]
 contains
+  logical function fg_uniform()
+    !> .true. on the uniform Matsubara grid (kernels with a uniform-only formula branch on it)
+    fg_uniform=.not.ir_on
+  end function fg_uniform
+
   pure function fg_nt(Nw) result(nt)
     !> length of the frequency axis of the work array
     integer(c_int64_t),intent(in):: Nw
     integer(c_int64_t) nt
-    nt=2*Nw
+    if(ir_on)then
+       nt=max(2*Nw,ir_Ntau)
+    else
+       nt=2*Nw
+    end if
   end function fg_nt
 
   pure function fg_pos_i64(stat,j) result(p)
@@ -1329,10 +1359,16 @@ contains
     integer(c_int32_t),intent(in):: stat
     integer(c_int64_t),intent(in):: j,Nw
     integer(c_int64_t) p
-    if(stat==FG_FERMION)then
-       p=2*Nw-j+1                   ! -w_{j-1} = w_{-j}
-    else if(j==1)then
+    if(stat==FG_BOSON .and. j==1)then
        p=1                          ! v_0 is its own partner
+    else if(ir_on)then
+       if(stat==FG_FERMION)then
+          p=Nw+j
+       else
+          p=Nw+j-1
+       end if
+    else if(stat==FG_FERMION)then
+       p=2*Nw-j+1                   ! -w_{j-1} = w_{-j}
     else
        p=2*Nw-j+2                   ! -v_{j-1}
     end if
@@ -1345,6 +1381,33 @@ contains
     p=fg_neg_i64(stat,int(j,c_int64_t),Nw)
   end function fg_neg_i32
 
+  pure function fg_omega_i64(stat,j,temp) result(w)
+    !> value of the stored frequency j: w_{j-1} = (2j-1) pi T, v_{j-1} = 2(j-1) pi T (uniform)
+    use constant, only:pi
+    integer(c_int32_t),intent(in):: stat
+    integer(c_int64_t),intent(in):: j
+    real(c_double),intent(in):: temp
+    real(c_double) w
+    if(ir_on)then
+       if(stat==FG_FERMION)then
+          w=ir_wF(j)
+       else
+          w=ir_wB(j)
+       end if
+    else if(stat==FG_FERMION)then
+       w=dble(2*j-1)*pi*temp
+    else
+       w=dble(2*(j-1))*pi*temp
+    end if
+  end function fg_omega_i64
+
+  pure function fg_omega_i32(stat,j,temp) result(w)
+    integer(c_int32_t),intent(in):: stat,j
+    real(c_double),intent(in):: temp
+    real(c_double) w
+    w=fg_omega_i64(stat,int(j,c_int64_t),temp)
+  end function fg_omega_i32
+
   pure function fg_inf(Nw) result(p)
     !> index of the w -> infinity slot (uniform Matsubara grid only; the kernels go through fg_set_static)
     integer(c_int64_t),intent(in):: Nw
@@ -1355,15 +1418,25 @@ contains
   subroutine fg_set_static(work,val,Nx,Ny,Nz,Nw)
     !> Put the instantaneous (frequency independent, k independent) part val of a bosonic vertex
     !> into its bosonic work array, i.e. the bare U, J combination the dressed vertex tends to as
-    !> v -> infinity.  Uniform Matsubara grid: it fills the v -> infinity slot (index Nw+1) at every
-    !> mesh point, so the circular convolution carries it along with the dynamic part.  A grid that
-    !> transforms only the dynamic part (IR) keeps it apart instead: the kernel then adds its Fock-
-    !> like contribution, V(inf) times the other factor at R = 0, tau = 0^-, separately.
-    !> Call outside an OpenMP parallel region, after the dynamic part has been scattered.
+    !> v -> infinity.  Uniform grid: it fills the v -> infinity slot (index Nw+1) at every mesh
+    !> point, so the circular convolution carries it along with the dynamic part.  IR: the vertex
+    !> was scattered in full, so val is subtracted from every bosonic slot (the dynamic part is what
+    !> the basis can hold); the kernel adds val * fg_static_term(other factor) itself.
+    !> Call outside an OpenMP parallel region, after the vertex has been scattered.
     integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nw
     complex(c_double),intent(in):: val
     complex(c_double),intent(inout):: work(Nx*Ny*Nz,fg_nt(Nw))
     integer(c_int64_t) i,p
+    if(ir_on)then
+       !$omp parallel do private(i)
+       do p=1,2*Nw-1
+          do i=1,Nx*Ny*Nz
+             work(i,p)=work(i,p)-val
+          end do
+       end do
+       !$omp end parallel do
+       return
+    end if
     p=fg_inf(Nw)
     !$omp parallel do
     do i=1,Nx*Ny*Nz
@@ -1372,38 +1445,156 @@ contains
     !$omp end parallel do
   end subroutine fg_set_static
 
-  subroutine fg_forward(work,tmp,Nx,Ny,Nz,Nw)
-    !> (k, i w) -> (R, tau), in place in work (tmp is scratch); unnormalized
+  function fg_static_term(work,Nx,Ny,Nz,Nw) result(st)
+    !> Raw sum sum_k sum_n X(k, i w_n) of a FERMIONIC work array still in (k, i w), the factor the
+    !> instantaneous vertex multiplies (taken at tau = 0 as the midpoint of 0+ and 0-, which is what
+    !> the symmetric truncated sum of the uniform grid converges to).  Zero on the uniform grid,
+    !> where the convolution already carries the bare vertex (fg_set_static).
     integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nw
-    complex(c_double),intent(inout):: work(*),tmp(*)
-    call FFT(work,tmp,Nx,Ny,Nz,fg_nt(Nw),.true.)
+    complex(c_double),intent(in):: work(Nx*Ny*Nz,fg_nt(Nw))
+    complex(c_double) st
+    integer(c_int64_t) p
+    st=(0.0d0,0.0d0)
+    if(.not.ir_on)return
+    do p=1,2*Nw
+       st=st+ir_stat(p)*sum(work(:,p))
+    end do
+  end function fg_static_term
+
+  subroutine fg_dens_coef(j,cp,cm)
+    !> IR only: X(tau=0) = sum_j [cp_j X(i w_j) + cm_j X(i w_j)^*] for a function with
+    !> X(-i w) = X(i w)^* (the uniform-grid counterpart is cp = cm = T)
+    integer(c_int64_t),intent(in):: j
+    complex(c_double),intent(out):: cp,cm
+    cp=ir_dens(fg_pos(FG_FERMION,j))
+    cm=ir_dens(fg_neg(FG_FERMION,j,ir_Nw))
+  end subroutine fg_dens_coef
+
+  subroutine fg_forward(stat,work,tmp,Nx,Ny,Nz,Nw)
+    !> (k, i w) -> (R, tau), in place in work (tmp is scratch); unnormalized (see the module header)
+    integer(c_int32_t),intent(in):: stat
+    integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nw
+    complex(c_double),intent(inout):: work(Nx*Ny*Nz,fg_nt(Nw)),tmp(Nx*Ny*Nz,fg_nt(Nw))
+    if(ir_on)then
+       call ir_transform(stat,.true.,work,tmp,Nx,Ny,Nz,Nw)
+    else
+       call FFT(work,tmp,Nx,Ny,Nz,fg_nt(Nw),.true.)
+    end if
   end subroutine fg_forward
 
-  subroutine fg_backward(work,tmp,Nx,Ny,Nz,Nw)
-    !> (R, tau) -> (k, i w), in place in work (tmp is scratch); normalized by 1/(Nk*2Nw)
+  subroutine fg_backward(stat,work,tmp,Nx,Ny,Nz,Nw)
+    !> (R, tau) -> (k, i w), in place in work (tmp is scratch); stat is the statistics of the RESULT
+    integer(c_int32_t),intent(in):: stat
     integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nw
-    complex(c_double),intent(inout):: work(*),tmp(*)
-    call FFT(work,tmp,Nx,Ny,Nz,fg_nt(Nw),.false.)
+    complex(c_double),intent(inout):: work(Nx*Ny*Nz,fg_nt(Nw)),tmp(Nx*Ny*Nz,fg_nt(Nw))
+    if(ir_on)then
+       call ir_transform(stat,.false.,work,tmp,Nx,Ny,Nz,Nw)
+    else
+       call FFT(work,tmp,Nx,Ny,Nz,fg_nt(Nw),.false.)
+    end if
   end subroutine fg_backward
 
-  subroutine fg_reverse(ii,ij,ik,iw,Nx,Ny,Nz,Nw)
-    !> index tables of (-R, -tau): ii/ij/ik on the mesh, iw on the frequency axis (fg_nt(Nw) long)
+  subroutine ir_transform(stat,fwd,work,tmp,Nx,Ny,Nz,Nw)
+    !> batched 3D k-FFT + dense frequency <-> tau matrices (zgemm along the slow frequency axis,
+    !> contiguous in k); unused slots are zeroed so stale data never enters a transform
+    integer(c_int32_t),intent(in):: stat
+    logical,intent(in):: fwd
+    integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nw
+    complex(c_double),intent(inout):: work(Nx*Ny*Nz,fg_nt(Nw)),tmp(Nx*Ny*Nz,fg_nt(Nw))
+    integer(c_int64_t) nk,n2,nt,nf
+    integer(c_int32_t) i32nk,i32n2,i32tau
+    nk=Nx*Ny*Nz; n2=2*Nw; nt=fg_nt(Nw)
+    if(Nw/=ir_Nw)then
+       print'(A,2I8)','ERROR(freq_grid): Nw of the call and of the IR grid differ:',Nw,ir_Nw
+       stop
+    end if
+    nf=merge(n2,n2-1,stat==FG_FERMION)            ! used frequency slots
+    i32nk=int(nk,c_int32_t); i32n2=int(n2,c_int32_t); i32tau=int(ir_Ntau,c_int32_t)
+    if(fwd)then
+       work(:,nf+1:nt)=(0.0d0,0.0d0)
+       call fft3d_batch(work,tmp,Nx,Ny,Nz,n2,.true.)
+       if(stat==FG_FERMION)then
+          call zgemm('N','T',i32nk,i32tau,i32n2,(1.0d0,0.0d0),work,i32nk,ir_fwdF,i32tau,(0.0d0,0.0d0),tmp,i32nk)
+       else
+          call zgemm('N','T',i32nk,i32tau,i32n2,(1.0d0,0.0d0),work,i32nk,ir_fwdB,i32tau,(0.0d0,0.0d0),tmp,i32nk)
+       end if
+       work(:,1:ir_Ntau)=tmp(:,1:ir_Ntau)
+       if(nt>ir_Ntau)work(:,ir_Ntau+1:nt)=(0.0d0,0.0d0)
+    else
+       if(stat==FG_FERMION)then
+          call zgemm('N','T',i32nk,i32n2,i32tau,(1.0d0,0.0d0),work,i32nk,ir_bwdF,i32n2,(0.0d0,0.0d0),tmp,i32nk)
+       else
+          call zgemm('N','T',i32nk,i32n2,i32tau,(1.0d0,0.0d0),work,i32nk,ir_bwdB,i32n2,(0.0d0,0.0d0),tmp,i32nk)
+       end if
+       work(:,1:n2)=tmp(:,1:n2)
+       if(nt>n2)work(:,n2+1:nt)=(0.0d0,0.0d0)
+       call fft3d_batch(work,tmp,Nx,Ny,Nz,n2,.false.)
+    end if
+  end subroutine ir_transform
+
+  subroutine fg_reverse(ii,ij,ik,iw,Nx,Ny,Nz,Nw,sg)
+    !> index tables of (-R, -tau): ii/ij/ik on the mesh, iw on the frequency axis (fg_nt(Nw) long),
+    !> and sg the sign a FERMIONIC function picks up there (-1 on the IR tau points: G(-tau) =
+    !> -G(beta-tau); +1 on the uniform grid, whose circular index needs none)
     use numerics, only:reverse_index
     integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nw
     integer(c_int32_t),intent(out):: ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(fg_nt(Nw))
-    call reverse_index(ii,ij,ik,iw,Nx,Ny,Nz,Nw)
+    real(c_double),intent(out),optional:: sg(fg_nt(Nw))
+    integer(c_int64_t) n
+    if(.not.ir_on)then
+       call reverse_index(ii,ij,ik,iw,Nx,Ny,Nz,Nw)
+       if(present(sg))sg(:)=1.0d0
+       return
+    end if
+    block
+      integer(c_int32_t) jw(2*Nw)
+      call reverse_index(ii,ij,ik,jw,Nx,Ny,Nz,Nw)    ! the mesh part only
+    end block
+    do n=1,fg_nt(Nw)
+       if(n<=ir_Ntau)then
+          iw(n)=ir_rev(n)
+       else
+          iw(n)=int(n,c_int32_t)
+       end if
+    end do
+    if(present(sg))then
+       sg(:)=1.0d0
+       sg(1:ir_Ntau)=-1.0d0
+    end if
   end subroutine fg_reverse
 
   subroutine fg_plans_init(work,tmp,Nx,Ny,Nz,Nw)
-    !> prepare the transforms for work arrays of this shape (cached FFT plans)
+    !> prepare the transforms for work arrays of this shape (cached 4D FFT plans; IR: nothing)
     integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nw
     complex(c_double),intent(inout):: work(*),tmp(*)
+    if(ir_on)return
     call init_fft_plans(work,tmp,Nx,Ny,Nz,fg_nt(Nw))
   end subroutine fg_plans_init
 
   subroutine fg_plans_free()
+    if(ir_on)return
     call destroy_fft_plans()
   end subroutine fg_plans_free
+
+  subroutine fg_set_matsubara() bind(C)
+    !> back to the uniform Matsubara grid (the default)
+    ir_on=.false.
+  end subroutine fg_set_matsubara
+
+  subroutine fg_set_ir(Nw,Ntau,wF,wB,fwdF,bwdF,fwdB,bwdB,rev,stat,dens) bind(C)
+    !> switch to the IR grid; the arrays are built by plibs.ir_grid (Fortran index order)
+    integer(c_int64_t),intent(in):: Nw,Ntau
+    real(c_double),intent(in):: wF(Nw),wB(Nw)
+    complex(c_double),intent(in):: fwdF(Ntau,2*Nw),bwdF(2*Nw,Ntau),fwdB(Ntau,2*Nw),bwdB(2*Nw,Ntau)
+    integer(c_int64_t),intent(in):: rev(Ntau)
+    complex(c_double),intent(in):: stat(2*Nw),dens(2*Nw)
+    if(allocated(ir_wF))deallocate(ir_wF,ir_wB,ir_fwdF,ir_bwdF,ir_fwdB,ir_bwdB,ir_stat,ir_dens,ir_rev)
+    allocate(ir_wF(Nw),ir_wB(Nw),ir_fwdF(Ntau,2*Nw),ir_bwdF(2*Nw,Ntau),ir_fwdB(Ntau,2*Nw),ir_bwdB(2*Nw,Ntau),&
+         ir_stat(2*Nw),ir_dens(2*Nw),ir_rev(Ntau))
+    ir_wF=wF; ir_wB=wB; ir_fwdF=fwdF; ir_bwdF=bwdF; ir_fwdB=fwdB; ir_bwdB=bwdB
+    ir_stat=stat; ir_dens=dens; ir_rev=int(rev,c_int32_t)
+    ir_Nw=Nw; ir_Ntau=Ntau; ir_on=.true.
+  end subroutine fg_set_ir
 end module freq_grid
 
 subroutine gen_ham(ham_k,klist,ham_r,rvec,Nk,Nr,Norb) bind(C)

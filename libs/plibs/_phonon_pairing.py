@@ -5,6 +5,7 @@ to be added to the spin/charge-fluctuation pairing of the linearized Eliashberg 
 import numpy as np
 import libs.flibs as flibs
 import libs.plibs._bands as _bands
+import libs.plibs._freq_grid as _freq_grid
 import libs.plibs._wannier_io as _wannier_io
 
 # Public API of this submodule; keeps `from ._x import *` in __init__.py from
@@ -50,7 +51,8 @@ def epa_pairing_vertex(epa_file: str, ham_r: np.ndarray, S_r: np.ndarray, rvec: 
     @param  chiolist: orbital-pair basis of chi [Nchi, 2] (1-based), site: its site labels [Nchi]
     @param        mu: chemical potential [eV], on the same absolute scale as the EPA grid edges
     @param      temp: k_B T [eV]
-    @param        Nw: number of bosonic Matsubara frequencies v_j = 2 pi j T, j = 0..Nw-1
+    @param        Nw: number of stored bosonic frequencies: v_j = 2 pi j T, j = 0..Nw-1, on the uniform grid,
+                      the sampling frequencies on the IR grid (plibs.set_freq_grid; set it before this call)
     @param   gap_sym: >= 0 singlet, < 0 triplet (the channel lin_eliash solves)
     @param     scale: factor on the phonon coupling (1 = EPA as is)
     @return vph [Nchi, Nchi, Nw] float64 and a dict (lambda_nu, lambda, omega_log, N_F, g2_FS, eta, W0)
@@ -80,7 +82,7 @@ def epa_pairing_vertex(epa_file: str, ham_r: np.ndarray, S_r: np.ndarray, rvec: 
     eta /= wsum**2
     # --- W(iv_j) and the vertex in the channel gap_sym selects
     ok = wavg > 1.0e-8
-    vj = 2.0*np.pi*temp*np.arange(Nw)
+    vj = _freq_grid.boson_frequencies(temp, Nw)
     VFS = -scale*(g2[ok, None]*2.0*wavg[ok, None]/(vj[None, :]**2+wavg[ok, None]**2)).sum(axis=0)
     W = VFS/eta
     Norb = ham_r.shape[1]

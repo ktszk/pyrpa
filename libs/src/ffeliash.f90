@@ -524,6 +524,7 @@ subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,prt,iprm,temp
 
   integer(c_int32_t) i,j,k,l,m,n,iorb
   integer(c_int32_t) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1),iw(fg_nt(Nw))
+  real(c_double) sg(fg_nt(Nw))   ! reflection sign of a fermionic factor
   integer(c_int64_t) jp,jm
   real(c_double) weight,sgn,dprt
   complex(c_double),allocatable,dimension(:,:,:,:):: tmp,tmpfk14,tmpfk23
@@ -540,7 +541,7 @@ subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,prt,iprm,temp
      dprt=-1.0d0 !gap parity even freq triplet is odd
   end if
   weight=temp/dble(Nkall)
-  call fg_reverse(ii,ij,ik,iw,Nx,Ny,Nz,Nw)
+  call fg_reverse(ii,ij,ik,iw,Nx,Ny,Nz,Nw,sg)
   call fg_plans_init(tmpfk14,tmp,Nx,Ny,Nz,Nw)
   orb_loop:do iorb=1,Nchi*(Nchi+1)/2
      l=irr_chi(iorb,1)
@@ -569,8 +570,8 @@ subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,prt,iprm,temp
         end do k_loop_Gk_to_tmp
      end do w_loop_Gk_to_tmp
      !$omp end parallel do
-     call fg_forward(tmpfk14,tmp,Nx,Ny,Nz,Nw)
-     call fg_forward(tmpfk23,tmp,Nx,Ny,Nz,Nw)
+     call fg_forward(FG_FERMION,tmpfk14,tmp,Nx,Ny,Nz,Nw)
+     call fg_forward(FG_FERMION,tmpfk23,tmp,Nx,Ny,Nz,Nw)
      !calculate G(r)G(-r)
      !$omp parallel do private(i,j,k)
      w_loop_conv:do n=1,int(fg_nt(Nw),c_int32_t)
@@ -578,14 +579,14 @@ subroutine get_chi0_conv_ff(chi,Fk,kmap,invk,irr_chi,chi_map,olist,prt,iprm,temp
            y_loop:do j=0,Ny-1
               !$omp simd
               x_loop:do i=0,Nx-1
-                 tmp(i,j,k,n)=-tmpfk14(i,j,k,n)*tmpfk23(ii(i),ij(j),ik(k),iw(n))
+                 tmp(i,j,k,n)=-sg(n)*tmpfk14(i,j,k,n)*tmpfk23(ii(i),ij(j),ik(k),iw(n))
               end do x_loop
               !$omp end simd
            end do y_loop
         end do z_loop
      end do w_loop_conv
      !$omp end parallel do
-     call fg_backward(tmp,tmpfk14,Nx,Ny,Nz,Nw)
+     call fg_backward(FG_BOSON,tmp,tmpfk14,Nx,Ny,Nz,Nw)
      !$omp parallel do private(i,j,jp)
      w_loop_tmp_to_chi:do j=1,Nw
         jp=fg_pos(FG_BOSON,j)

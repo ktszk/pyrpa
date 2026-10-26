@@ -7,6 +7,7 @@ import numpy as np
 import scipy.linalg as sclin
 import libs.flibs as flibs
 import libs.plibs._bands as _bands
+import libs.plibs._freq_grid as _freq_grid
 import libs.plibs._eilenberger as _eilenberger
 import libs.plibs._lattice as _lattice
 import libs.plibs._maxent as _maxent
@@ -55,15 +56,48 @@ def _prepare_soc_interaction(olist: np.ndarray, slist: np.ndarray, site: np.ndar
     return flibs.gen_Vmatrix(olist, slist, site, invs, U, J)
 
 
-def _load_sigma_from_file() -> tuple | None:
-    """Load (sigmak, mu_self) from self_en.npz, or None if the file is missing."""
+def _load_sigma_from_file(temp: float, Nw: int) -> tuple | None:
+    """Load (sigmak, mu_self) from self_en.npz, or None if the file is missing or was written on another
+    frequency grid (the stored frequencies 'iw' are compared with the active grid's; files without them
+    predate the IR grid and are uniform Matsubara ones)."""
     try:
         npz = np.load('self_en.npz')
-        print("Import sigma from self_en.npz", flush=True)
-        return npz['arr_0'], npz['arr_1']
     except FileNotFoundError:
         print("Error: 'self_en.npz' not found", flush=True)
         return None
+    sigmak = npz['arr_0']
+    iw = npz['iw'] if 'iw' in npz.files else (2*np.arange(sigmak.shape[2])+1)*np.pi*float(npz['temp'] if 'temp' in
+                                                                                        npz.files else temp)
+    if sigmak.shape[2] != Nw or not np.allclose(iw, _freq_grid.fermion_frequencies(temp, Nw), rtol=1e-10):
+        print(f"Error: 'self_en.npz' holds Sigma on another frequency grid ({sigmak.shape[2]} points, "
+              f"w_0..w_last = {iw[0]:.4e}..{iw[-1]:.4e} eV) than this run (Nw = {Nw}, freq_grid / temp)", flush=True)
+        return None
+    print("Import sigma from self_en.npz", flush=True)
+    return sigmak, npz['arr_1']
+
+
+def _save_sigma(sigmak: np.ndarray, mu_self: float, temp: float) -> None:
+    """self_en.npz: Sigma on the stored frequencies of the run, which are recorded with it."""
+    np.savez('self_en', sigmak, mu_self, iw=_freq_grid.fermion_frequencies(temp, sigmak.shape[2]), temp=temp)
+
+
+def _save_gap(gap: np.ndarray, temp: float) -> None:
+    """gap.npy and, beside it, its stored frequencies gap_iw.npy (read back by output_Fk)."""
+    np.save('gap', gap)
+    np.save('gap_iw', _freq_grid.fermion_frequencies(temp, gap.shape[2]))
+
+
+def _sigma_bin_flags(sw_out_self: bool, sw_in_self: bool, temp: float, Nw: int) -> tuple[bool, bool]:
+    """sw_out/sw_in of the Fortran FLEX drivers (sigma.bin), with the seed re-gridded first.  sigma.bin is
+    a uniform-Matsubara file, so on the IR grid neither is used (self_en.npz is still written)."""
+    if _freq_grid.active_freq_grid() is not None:
+        if sw_in_self:
+            print('Note: sw_in_self (sigma.bin seed) is for the uniform Matsubara grid; starting from Sigma = 0',
+                  flush=True)
+        return False, False
+    if sw_in_self:
+        _auto_regrid_sigma_seed(temp, Nw)
+    return sw_out_self, sw_in_self
 
 
 def _read_sigma_bin_meta(path: str = 'sigma.bin') -> tuple | None:
@@ -261,16 +295,15 @@ def _prepare_green_state_normal(state: dict, olist: np.ndarray, interaction: tup
     Smat, Cmat = interaction
     if sw_self:
         if sw_from_file:
-            loaded = _load_sigma_from_file()
+            loaded = _load_sigma_from_file(temp, Nw)
             if loaded is None:
                 return None
             sigmak, mu_self = loaded
         else:
-            if sw_in_self:
-                _auto_regrid_sigma_seed(temp, Nw)
+            sw_out, sw_in = _sigma_bin_flags(sw_out_self, sw_in_self, temp, Nw)
             sigmak, mu_self = flibs.mkself(Smat, Cmat, state['kmap'], state['invk'], olist,
                                            state['ham_k'], state['eig'], state['uni'],
-                                           mu, fill, temp, Nw, Nx, Ny, Nz, sw_out_self, sw_in_self,
+                                           mu, fill, temp, Nw, Nx, Ny, Nz, sw_out, sw_in,
                                            eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale,
                                            sw_tail=sw_tail, sigma_scale=sigma_scale)
         print(f'chem. pot. with self= {mu_self:.4f} eV', flush=True)
@@ -290,16 +323,15 @@ def _prepare_green_state_soc(state: dict, olist: np.ndarray, slist: np.ndarray, 
     Vmat = interaction
     if sw_self:
         if sw_from_file:
-            loaded = _load_sigma_from_file()
+            loaded = _load_sigma_from_file(temp, Nw)
             if loaded is None:
                 return None
             sigmak, mu_self = loaded
         else:
-            if sw_in_self:
-                _auto_regrid_sigma_seed(temp, Nw)
+            sw_out, sw_in = _sigma_bin_flags(sw_out_self, sw_in_self, temp, Nw)
             sigmak, mu_self = flibs.mkself_soc(Vmat, state['kmap'], state['invk'], invs, olist, slist,
                                                state['ham_k'], state['eig'], state['uni'],
-                                               mu, fill, temp, Nw, Nx, Ny, Nz, sw_out_self, sw_in_self,
+                                               mu, fill, temp, Nw, Nx, Ny, Nz, sw_out, sw_in,
                                                eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale,
                                                sigma_scale=sigma_scale)
         print(f'chem. pot. with self= {mu_self:.4f} eV', flush=True)
@@ -690,7 +722,7 @@ def _disperses(ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray, ax: int) ->
 
 
 def gap_extrapolate_w0(gap: np.ndarray, temp: float, n_points: int = 4,
-                       order: int = 1) -> tuple[np.ndarray, np.ndarray]:
+                       order: int = 1, wn: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
     """
     @brief Extrapolate the gap function Delta(k,iw_n) to the w_n->0 limit along the
     imaginary axis, by a low-order polynomial fit in w_n^2 using the n_points lowest
@@ -708,6 +740,8 @@ def gap_extrapolate_w0(gap: np.ndarray, temp: float, n_points: int = 4,
     @param n_points: number of lowest Matsubara points used in the fit (>= order+1)
     @param  order: polynomial order in w_n^2 (1: Delta0 + c*w_n^2, the leading-order
                   correction implied by the even-in-w_n symmetry above)
+    @param     wn: the stored frequencies w_n [eV] of gap's 3rd axis (at least n_points); None =
+                  the uniform (2n+1)*pi*temp.  On the IR grid: plibs.fermion_frequencies
     @return  gap0: extrapolated Delta(k,w_n->0) [Norb, Norb, Nk] complex128
     @return  bias: |gap0 - Delta(iw_0)| / max|gap0|, the O((pi*temp)^2) correction
                   that reading Delta(iw_0) directly misses, per component but
@@ -723,7 +757,8 @@ def gap_extrapolate_w0(gap: np.ndarray, temp: float, n_points: int = 4,
     Norb1, Norb2, Nw, Nk = gap.shape
     if Nw < n_points:
         raise ValueError(f"gap has only {Nw} Matsubara points, need >= {n_points}")
-    wn2 = ((2*np.arange(n_points)+1)*np.pi*temp)**2                    # [n_points]
+    wn = (2*np.arange(n_points)+1)*np.pi*temp if wn is None else np.asarray(wn, dtype=np.float64)
+    wn2 = wn[:n_points]**2                                                # [n_points]
     data = np.transpose(gap[:, :, :n_points, :], (2, 0, 1, 3)).reshape(n_points, -1)  # [n_points, Norb^2*Nk]
     A = np.vander(wn2, order+1, increasing=True)                       # [n_points, order+1]
     coeffs, *_ = np.linalg.lstsq(A, data, rcond=None)                  # [order+1, Norb^2*Nk]
@@ -776,7 +811,8 @@ def output_gap_function(invk: np.ndarray, kmap: np.ndarray, gap: np.ndarray, uni
     @return 0
     """
     if sw_extrapolate:
-        gap0, bias = gap_extrapolate_w0(gap, temp, n_points, order)
+        gap0, bias = gap_extrapolate_w0(gap, temp, n_points, order,
+                                        wn=_freq_grid.fermion_frequencies(temp, gap.shape[2]))
         print(f'gap w_n->0 extrapolation: max relative correction over iw_0 = {bias.max():.4e}', flush=True)
         gap = gap0[:, :, None, :]  # restore a length-1 Matsubara axis; downstream code reads index 0
     if sw_orb:
@@ -849,14 +885,13 @@ def calc_flex(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.nda
     # FLEX uses the irreducible k-mesh Green's function together with the same orbital-pair
     # interaction basis used in the response routines above.
     Smat, Cmat = _prepare_normal_interaction(olist, site, orb_dep, U, J, Umat, Jmat)
-    if sw_in_self:
-        _auto_regrid_sigma_seed(temp, Nw)
+    sw_out, sw_in = _sigma_bin_flags(sw_out_self, sw_in_self, temp, Nw)
     sigmak, mu_self = flibs.mkself(Smat, Cmat, state['kmap'], state['invk'], olist, state['ham_k'], state['eig'],
-                                   state['uni'], mu, fill, temp, Nw, Nx, Ny, Nz, sw_out_self, sw_in_self, eps=eps,
+                                   state['uni'], mu, fill, temp, Nw, Nx, Ny, Nz, sw_out, sw_in, eps=eps,
                                    pp=pp, m_diis=m_diis, sw_rescale=sw_rescale, sw_tail=sw_tail,
                                    sigma_scale=sigma_scale)
     if sw_out_self:
-        np.savez('self_en', sigmak, mu_self)
+        _save_sigma(sigmak, mu_self, temp)
         _wannier_io.output_self_wannier(sigmak, mu_self, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
 
 
@@ -899,14 +934,13 @@ def calc_flex_soc(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np
     """
     state = _prepare_kspace_state(Nx, Ny, Nz, ham_r, S_r, rvec, need_ham=True)
     Vmat = _prepare_soc_interaction(olist, slist, site, invs, orb_dep, U, J, Umat, Jmat)
-    if sw_in_self:
-        _auto_regrid_sigma_seed(temp, Nw)
+    sw_out, sw_in = _sigma_bin_flags(sw_out_self, sw_in_self, temp, Nw)
     sigmak, mu_self = flibs.mkself_soc(Vmat, state['kmap'], state['invk'], invs, olist, slist, state['ham_k'],
-                                       state['eig'], state['uni'], mu, fill, temp, Nw, Nx, Ny, Nz, sw_out_self,
-                                       sw_in_self, eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale,
+                                       state['eig'], state['uni'], mu, fill, temp, Nw, Nx, Ny, Nz, sw_out,
+                                       sw_in, eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale,
                                        sigma_scale=sigma_scale)
     if sw_out_self:
-        np.savez('self_en', sigmak, mu_self)
+        _save_sigma(sigmak, mu_self, temp)
         _wannier_io.output_self_wannier(sigmak, mu_self, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp,
                                         invs=invs, slist=slist)
 
@@ -997,7 +1031,7 @@ def calc_lin_eliashberg_eq(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray
                                                      iperm=iperm, vph=vph)
     print(f'Stoner factor = {stoner:.6f}, lambda_eliash = {lambda_eliash:.6f}', flush=True)
     if sw_out_self:
-        np.save('gap', gap)
+        _save_gap(gap, temp)
         _wannier_io.output_gap_wannier(gap, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
     output_gap_function(state['invk'], state['kmap'], gap, state['uni'], plist, gap_sym, Nx, iperm=iperm,
                         sw_extrapolate=sw_gap_extrapolate, temp=temp,
@@ -1091,7 +1125,7 @@ def calc_lin_eliash_soc(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S
                                                          invs, invschi, Nx, Ny, Nz, temp, gap_sym)
     print(f'lambda_eliash = {lambda_eliash:.6f}', flush=True)
     if sw_out_self:
-        np.save('gap', gap)
+        _save_gap(gap, temp)
         _wannier_io.output_gap_wannier(gap, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
     output_gap_function(state['invk'], state['kmap'], gap, state['uni'], plist, gap_sym, Nx, True, invs, slist,
                         sw_extrapolate=sw_gap_extrapolate, temp=temp,
@@ -1297,8 +1331,10 @@ def output_Fk(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.nda
     eig, uni = _bands.get_eigs(klist, ham_r, S_r, rvec)
     if sw_self:
         ham_k = flibs.gen_ham(klist, ham_r, rvec)
-        npz = np.load('self_en.npz')
-        sigmak, mu_self = npz['arr_0'], npz['arr_1']
+        loaded = _load_sigma_from_file(temp, Nw)
+        if loaded is None:
+            return
+        sigmak, mu_self = loaded
         print(f'chem. pot. with self= {mu_self:.4f} eV', flush=True)
         Gk = flibs.gen_green(sigmak, ham_k, mu_self, temp)
     else:
@@ -1307,6 +1343,15 @@ def output_Fk(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.nda
         gap = np.load('gap.npy')
     except FileNotFoundError:
         print("Error: 'gap.npy' not found", flush=True)
+        return
+    iwlist = _freq_grid.fermion_frequencies(temp, Nw)
+    try:
+        gap_iw = np.load('gap_iw.npy')
+    except FileNotFoundError:   # older runs: uniform Matsubara
+        gap_iw = (2*np.arange(gap.shape[2])+1)*np.pi*temp
+    if gap.shape[2] != Nw or not np.allclose(gap_iw, iwlist, rtol=1e-10):
+        print(f"Error: 'gap.npy' was solved on another frequency grid ({gap.shape[2]} points) than this run "
+              f"(Nw = {Nw}, freq_grid / temp)", flush=True)
         return
     if sw_soc:
         Fk = flibs.gen_Fk_soc(Gk, gap, invk, invs, slist, gap_sym)
@@ -1325,7 +1370,6 @@ def output_Fk(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.nda
     print('output anomalous green function')
     try:
         with open(f'Fk_tr.dat', 'w') as f:
-            iwlist = (2*np.arange(Nw)+1)*np.pi*temp
             for i, km in enumerate(kmap):
                 if km[2] == 0:
                     f.write(f'{km[0]:3} {km[1]:3} {Fktr[i].real:12.8f} {Fktr[i].imag:12.8f}\n')
@@ -1339,6 +1383,12 @@ def output_Fk(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.nda
     # only the kx-axis line (ky=kz=0) is written, so continue just those k-points:
     # MaxEnt costs ~0.1-0.5 s/k-point and would otherwise be wasted on the rest.
     sel = [i for i, km in enumerate(klist) if km[1] == 0.0 and km[2] == 0.0]
+    if _freq_grid.active_freq_grid() is not None:
+        # IR: the continuation takes G on the lowest uniform w_n, evaluated through the basis
+        Nu = 64
+        Gc, iwc = _freq_grid.to_uniform_fermion(Gk, temp, Nu), (2*np.arange(Nu)+1)*np.pi*temp
+    else:
+        Gc, iwc = Gk, iwlist
     try:
         with open(f'Gpade.dat', 'w') as fp:
             if sw_maxent:
@@ -1346,11 +1396,11 @@ def output_Fk(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.nda
                 # noise into spurious real-axis structure over this wide 500-point
                 # window the way the 40-point Pade continued fraction below does;
                 # uses the full stored Matsubara mesh instead of truncating to 40.
-                Akw = _maxent.maxent_trace_spectrum(Gk[:, :, :, sel], iwlist, wlist, temp,
+                Akw = _maxent.maxent_trace_spectrum(Gc[:, :, :, sel], iwc, wlist, temp,
                                                     noise_level=maxent_noise)
             else:
                 idelta = 1e-2
-                Gkw = flibs.pade_with_trace(Gk[:, :, :40, :], iwlist[:40]*1j, wlist+idelta*1j)
+                Gkw = flibs.pade_with_trace(Gc[:, :, :40, :], iwc[:40]*1j, wlist+idelta*1j)
                 Akw = -Gkw[sel].imag
             for row, i in enumerate(sel):
                 km = klist[i]

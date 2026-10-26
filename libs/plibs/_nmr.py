@@ -204,7 +204,9 @@ def gap_from_eliashberg(klist: np.ndarray, fname: str = 'gap_wannier',
         if N_iw < n_points:
             raise ValueError(f"{fname}.npz holds only {N_iw} Matsubara slices, "
                              f"need >= n_points={n_points} for the w_n->0 fit")
-        gR0, bias = _calc.gap_extrapolate_w0(gap_R, temp_gap, n_points, order)
+        # the stored frequencies ('iw': uniform (2n+1) pi T, or the IR sampling ones)
+        gR0, bias = _calc.gap_extrapolate_w0(gap_R, temp_gap, n_points, order,
+                                             wn=d['iw'] if 'iw' in d.files else None)
         if verbose:
             print(f'  gap w_n->0 extrapolation: max correction over iw_0 ='
                   f' {bias.max():.3e} of the peak gap', flush=True)

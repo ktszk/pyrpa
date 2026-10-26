@@ -112,6 +112,7 @@ MODES_KMESH_SINGLE  = frozenset({M.FERMI_2D, M.FERMI_3D, M.CHIS_QMAP, M.PHI_QMAP
 # path, with no BZ sum (the DOS, option=1, IS a BZ sum and stays out).
 MODES_DEC_AXIS      = frozenset({M.BAND, M.FERMI_2D, M.FERMI_3D})
 MODES_MATSUBARA     = frozenset({M.FLEX, M.LIN_ELIASHBERG})
+MODES_IR            = frozenset({M.FLEX, M.LIN_ELIASHBERG, M.GAP_FUNCTION})  # may run on freq_grid='ir'
 # dispatch groups
 MODES_CHI_NORMAL    = frozenset({M.CHIS_SPECTRUM, M.CHIS_QPOINT, M.CHIS_QMAP, M.PHI_SPECTRUM, M.PHI_QMAP})
 # SC-state chi family: all share the BdG gap/hamk construction block
@@ -263,6 +264,12 @@ hall_mesh_list = None  # k-mesh convergence sweep for the Hall coefficient (opti
 # None: single mesh (Nx,Ny,Nz), no convergence information.
 sw_omega = False  # True: real freq, False: Matsubara freq.
 sw_rescale_flex = True  # True: rescale self energy to make max|Sigma|~U, False: no rescaling
+freq_grid = 'matsubara'  # Matsubara-axis grid of FLEX/Eliashberg (option 14,15,16): 'matsubara' = Nw uniform points,
+# 'ir' = sparse sampling of the IR basis (needs sparse-ir; Nw is then fixed by the basis, ~15-30 points, and the
+# truncation error of the uniform grid is gone). Not for option 23 yet. self_en_wannier.npz stays uniform-Matsubara
+ir_wmax = None  # freq_grid='ir': spectral cutoff [eV]; None = 2 x the largest |e_k - mu| (FLEX spreads spectral weight
+# beyond the bare band, so the band width alone is too small for FLEX)
+ir_eps = 1.0e-8  # freq_grid='ir': accuracy of the IR basis
 sw_chi0_tail = True  # True: tail-corrected chi0 in FLEX/Eliashberg (conv[G]-conv[G0]+analytic reference; O(1/Nw^2) Matsubara truncation error). no-SOC path only
 sw_self = False  # True: use calculated self energy for spectrum band plot
 sw_out_self = False  # True: write the FLEX self-energy to sigma.bin/self_en.npz (also triggers gap output in option 15,23; option 23 with sw_self also writes the SC-state self-energy to self_en_sc.npz)
@@ -659,6 +666,13 @@ def main() -> None:
     if option in MODES_FLEX_ELIASH:  # eliashberg/flex calculations
         if gap_sym not in {-1, 0, 1, 2, 3}:
             print(f"Warning: gap_sym={gap_sym} is non-standard. Common values: -1,0,1,2,3", flush=True)
+    if freq_grid not in ('matsubara', 'ir'):
+        print(f"Error: freq_grid={freq_grid!r} must be 'matsubara' or 'ir'", flush=True)
+        return
+    if freq_grid == 'ir' and option == CalcMode.NONLIN_ELIASHBERG:
+        print("Error: the nonlinear Eliashberg solver runs on the uniform Matsubara grid only; set "
+              "freq_grid='matsubara'", flush=True)
+        return
     if option == CalcMode.NONLIN_ELIASHBERG and sw_soc:
         print("Error: the nonlinear Eliashberg solver has no SOC version; set sw_soc=False", flush=True)
         return
@@ -729,7 +743,7 @@ def main() -> None:
         print(f'Number of k-mesh = {Nx}', flush=True)
     else:
         print(f'k-mesh is {Nx} {Ny} {Nz}', flush=True)
-    if option in MODES_MATSUBARA:
+    if option in MODES_MATSUBARA and freq_grid == 'matsubara':
         print(f'Number of Matsubara freq. = {Nw}', flush=True)
     print("Lattice Vector (Angstrom)", flush=True)
     for i, a in enumerate(avec):
@@ -747,6 +761,30 @@ def main() -> None:
             print('use fixed mu')
         print(f'Temperature = {temp:10.3e} eV ({temp/kb:.2f} K)', flush=True)
         print(f'chem. pot. = {mu:.4f} eV', flush=True)
+    # Matsubara grid of the FLEX/Eliashberg kernels (Nw_mats, sw_tail_run: Nw and sw_chi0_tail as this run uses
+    # them -- the globals themselves are not reassigned inside main)
+    Nw_mats, sw_tail_run = Nw, sw_chi0_tail
+    if freq_grid == 'ir' and option in MODES_IR:
+        try:
+            import sparse_ir  # noqa: F401
+        except ImportError:
+            print("Error: freq_grid='ir' needs the sparse-ir package (pip install sparse-ir)", flush=True)
+            return
+        wmax = ir_wmax
+        if wmax is None:
+            _, kl = plibs.gen_klist(min(Nx, 16), min(Ny, 16), min(Nz, 16), sw_pp=False)
+            wmax = 2.0*np.abs(plibs.get_eigs(kl, ham_r, S_r, rvec)[0]-mu).max()
+        grid = plibs.ir_grid(temp, wmax, eps=ir_eps)
+        plibs.set_freq_grid(grid)
+        Nw_mats = grid['Nw']
+        print(f"frequency grid: IR basis, wmax = {wmax:.3f} eV (Lambda = {wmax/temp:.1f}), eps = {ir_eps:.1e}: "
+              f"{Nw_mats} fermionic/bosonic points, {grid['Ntau']} tau points", flush=True)
+        if sw_chi0_tail:
+            print("  sw_chi0_tail is for the uniform grid (no truncation error on the IR grid): off", flush=True)
+            sw_tail_run = False
+        if sw_in_self or sw_out_self:
+            print("  sigma.bin (sw_in_self / the sigma.bin part of sw_out_self) is uniform-grid only; "
+                  "self_en.npz / self_en_wannier.npz are written as usual", flush=True)
     if option == CalcMode.BAND:  # plot band
         klist, spa_length, xticks = plibs.mk_klist(k_sets, kmesh, bvec)
         eig, uni = plibs.get_eigs(klist, ham_r, S_r, rvec)
@@ -940,7 +978,7 @@ def main() -> None:
         if sw_self or sw_from_file:
             print('Warning: sw_nosym has no FLEX self-energy (TRS-free FLEX not implemented); using bare G', flush=True)
         slist, invs = get_spin_lists(Norb) if sw_soc else (None, None)
-        plibs.calc_lin_eliash_nosym(Nx, Ny, Nz, Nw, ham_r, S_r, rvec, mu, temp, chiolist, site, orb_dep, U, J,
+        plibs.calc_lin_eliash_nosym(Nx, Ny, Nz, Nw_mats, ham_r, S_r, rvec, mu, temp, chiolist, site, orb_dep, U, J,
                                     gap_sym, sw_soc, slist, invs,
                                     Umat if orb_dep else None, Jmat if orb_dep else None,
                                     hvec=zeeman_h, qlist=fflo_q, arnoldi_m=nosym_arnoldi_m, fill=fill)
@@ -948,7 +986,7 @@ def main() -> None:
         if sw_soc:  # with soc
             slist, invs = get_spin_lists(Norb)
             if option == CalcMode.FLEX:  # calc self-energy using flex
-                plibs.calc_flex_soc(Nx, Ny, Nz, Nw, ham_r, S_r, rvec, mu, temp, chiolist, slist, invs, site,
+                plibs.calc_flex_soc(Nx, Ny, Nz, Nw_mats, ham_r, S_r, rvec, mu, temp, chiolist, slist, invs, site,
                                     orb_dep, U, J, fill, sw_out_self, sw_in_self,
                                     Umat if orb_dep else None, Jmat if orb_dep else None,
                                     m_diis=m_diis_num, sw_rescale=sw_rescale_flex,
@@ -957,30 +995,30 @@ def main() -> None:
                 if epa_pair_file:
                     print('Warning: epa_pair_file (phonon pairing) is implemented without SOC only; ignored here',
                           flush=True)
-                plibs.calc_lin_eliash_soc(Nx, Ny, Nz, Nw, ham_r, S_r, rvec, mu, temp, chiolist, slist, plist, invs, site,
+                plibs.calc_lin_eliash_soc(Nx, Ny, Nz, Nw_mats, ham_r, S_r, rvec, mu, temp, chiolist, slist, plist, invs, site,
                                           orb_dep, U, J, fill, gap_sym, sw_self, sw_from_file, sw_out_self, sw_in_self,
                                           Umat if orb_dep else None, Jmat if orb_dep else None,
                                           sigma_scale=sigma_in_scale)
             elif option == CalcMode.GAP_FUNCTION:  # post gap calculation, output gap function/anomalous green's function
-                sig = plibs.output_Fk(Nx, Ny, Nz, Nw, ham_r, S_r, rvec, plist, mu, temp, sw_self, sw_soc, invs, slist,
+                sig = plibs.output_Fk(Nx, Ny, Nz, Nw_mats, ham_r, S_r, rvec, plist, mu, temp, sw_self, sw_soc, invs, slist,
                                       gap_sym)
                 if sig is not None:
                     plots.plot_sigma_iw(*sig)
         else:  # without soc
             if option == CalcMode.FLEX:  # calc self-energy using flex
-                plibs.calc_flex(Nx, Ny, Nz, Nw, ham_r, S_r, rvec, mu, temp, chiolist, site,
+                plibs.calc_flex(Nx, Ny, Nz, Nw_mats, ham_r, S_r, rvec, mu, temp, chiolist, site,
                                 orb_dep, U, J, fill, sw_out_self, sw_in_self,
                                 Umat if orb_dep else None, Jmat if orb_dep else None,
-                                m_diis=m_diis_num, sw_rescale=sw_rescale_flex, sw_tail=sw_chi0_tail,
+                                m_diis=m_diis_num, sw_rescale=sw_rescale_flex, sw_tail=sw_tail_run,
                                 sigma_scale=sigma_in_scale)
             elif option == CalcMode.LIN_ELIASHBERG:  # calc gap function
-                plibs.calc_lin_eliashberg_eq(Nx, Ny, Nz, Nw, ham_r, S_r, rvec, chiolist, site, plist, mu, temp, gap_sym, sw_self,
+                plibs.calc_lin_eliashberg_eq(Nx, Ny, Nz, Nw_mats, ham_r, S_r, rvec, chiolist, site, plist, mu, temp, gap_sym, sw_self,
                                              orb_dep, U, J, fill, sw_from_file, sw_out_self, sw_in_self,
                                              Umat if orb_dep else None, Jmat if orb_dep else None,
-                                             sw_tail=sw_chi0_tail, sigma_scale=sigma_in_scale, iperm=iperm,
+                                             sw_tail=sw_tail_run, sigma_scale=sigma_in_scale, iperm=iperm,
                                              epa_pair_file=epa_pair_file, epa_pair_scale=epa_pair_scale)
             elif option == CalcMode.GAP_FUNCTION:  # post gap calculation, output gap function/anomalous green's function
-                sig = plibs.output_Fk(Nx, Ny, Nz, Nw, ham_r, S_r, rvec, plist, mu, temp, sw_self, iperm=iperm)
+                sig = plibs.output_Fk(Nx, Ny, Nz, Nw_mats, ham_r, S_r, rvec, plist, mu, temp, sw_self, iperm=iperm)
                 if sig is not None:
                     plots.plot_sigma_iw(*sig)
     elif option == CalcMode.EILENBERGER:  # solve homogeneous quasiclassical Eilenberger equation
