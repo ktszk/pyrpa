@@ -1237,15 +1237,24 @@ def calc_eliashberg_eq(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_
                                                state['kmap'], state['invk'], mu_self, temp, gap_sym, Nx, Ny, Nz,
                                                sw_sigma=sw_self, sw_Vconst=True, eps=eps, m_diis=m_diis, iperm=iperm)
     if sw_out_self:
-        np.save('gap', delta)
+        _save_gap(delta, temp)
         _wannier_io.output_gap_wannier(delta, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
         if sw_self:   # without sw_self the loop keeps Sigma = 0 and there is nothing to save
-            np.savez('self_en_sc', sigmak, mu_self)
+            np.savez('self_en_sc', sigmak, mu_self, iw=_freq_grid.fermion_frequencies(temp, Nw), temp=temp)
             _wannier_io.output_self_wannier(sigmak, mu_self, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp,
                                             fname='self_en_sc_wannier')
     output_gap_function(state['invk'], state['kmap'], delta, state['uni'], plist, gap_sym, Nx, iperm=iperm,
                         sw_extrapolate=sw_gap_extrapolate, temp=temp,
                         n_points=gap_extrap_points, order=gap_extrap_order)
+
+
+def _green_at(selfen: np.ndarray, hamk: np.ndarray, mu: float, wn: np.ndarray) -> np.ndarray:
+    """G(k, i w) = [i w + mu - H(k) - Sigma(k, i w)]^-1 at the given frequencies wn [Niw] (any set, e.g. the IR
+    sampling points), in the layout of flibs.gen_green: selfen [Norb, Norb, Niw, Nk], hamk [Nk, Norb, Norb]."""
+    Norb = hamk.shape[1]
+    z = (1j*np.asarray(wn)+mu)[:, None, None, None]*np.eye(Norb)                       # [Niw, 1, Norb, Norb]
+    G = np.linalg.inv(z-hamk[None]-np.transpose(selfen, (2, 3, 0, 1)))                  # [Niw, Nk, Norb, Norb]
+    return np.ascontiguousarray(np.transpose(G, (2, 3, 0, 1)))
 
 
 def spectrum_on_path(k_sets: list, kmesh: int, bvec: np.ndarray, mu: float, ham_r: np.ndarray,
@@ -1299,6 +1308,12 @@ def spectrum_on_path(k_sets: list, kmesh: int, bvec: np.ndarray, mu: float, ham_
             # Emin..Emax / k windows the way the Pade continued fraction below does.
             # Slower (~0.1-0.5s per k-point) but every point uses all available iw_grid.
             Gk = _maxent.maxent_trace_spectrum(Gk_mats, iw_grid, wlist, temp_self, noise_level=maxent_noise)
+        elif 'sigma_ir' in npz.files:
+            # IR run: Pade on the sampled Sigma itself, not on its uniform-grid evaluation (see
+            # output_self_wannier); all sampling points (typically 15-30)
+            iw_ir = npz['iw_ir']
+            sel_ir = np.einsum('mnwr,kr->mnwk', npz['sigma_ir'], phase)
+            Gk = -flibs.pade_with_trace(_green_at(sel_ir, ham_k, mu_self, iw_ir), 1j*iw_ir, wlist+1j*delta).imag
         else:
             Niw = min(40, len(iw_grid))  # Pade becomes unstable with too many Matsubara points
             # A(k,w) = -Im Tr G(k,w+i*delta)
@@ -1383,12 +1398,16 @@ def output_Fk(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.nda
     # only the kx-axis line (ky=kz=0) is written, so continue just those k-points:
     # MaxEnt costs ~0.1-0.5 s/k-point and would otherwise be wasted on the rest.
     sel = [i for i, km in enumerate(klist) if km[1] == 0.0 and km[2] == 0.0]
-    if _freq_grid.active_freq_grid() is not None:
-        # IR: the continuation takes G on the lowest uniform w_n, evaluated through the basis
+    ir = _freq_grid.active_freq_grid() is not None
+    if ir and sw_maxent:
+        # IR, MaxEnt: G on the lowest uniform w_n, evaluated through the basis
         Nu = 64
         Gc, iwc = _freq_grid.to_uniform_fermion(Gk, temp, Nu), (2*np.arange(Nu)+1)*np.pi*temp
     else:
+        # Pade on IR takes the sampled G itself (all Nw points): the basis truncation in a uniform-grid
+        # evaluation is smooth, and Pade continues it into spurious real-axis structure
         Gc, iwc = Gk, iwlist
+    Npade = len(iwc) if ir else 40
     try:
         with open(f'Gpade.dat', 'w') as fp:
             if sw_maxent:
@@ -1400,7 +1419,7 @@ def output_Fk(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.nda
                                                     noise_level=maxent_noise)
             else:
                 idelta = 1e-2
-                Gkw = flibs.pade_with_trace(Gc[:, :, :40, :], iwc[:40]*1j, wlist+idelta*1j)
+                Gkw = flibs.pade_with_trace(Gc[:, :, :Npade, :], iwc[:Npade]*1j, wlist+idelta*1j)
                 Akw = -Gkw[sel].imag
             for row, i in enumerate(sel):
                 km = klist[i]

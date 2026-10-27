@@ -344,14 +344,14 @@ def test_flex_vertex_zero_interaction_returns_zero():
 def _soc_model(Nx=8, Ny=8, Nz=1, Nw=8, temp=0.05, U=0.8, J=0.1):
     """Spin-resolved model for the SOC RPA/FLEX/Eliashberg smoke tests.
 
-    Built from inputs/hop2_soc.input rather than a hand-written Hamiltonian: the
+    Built from inputs/square_2orb_soc.hop rather than a hand-written Hamiltonian: the
     SOC entry points index slist/invs on the FORTRAN side (1-based, spin labelled
     +1/-1) and take the parity list from get_plist, so a hand-rolled model that
     gets any of those conventions wrong segfaults or silently returns NaN instead
     of exercising the code.  The conventions below mirror main.py exactly.
     """
     root = pathlib.Path(__file__).resolve().parent.parent
-    rvec, ham_r, Norb, _ = P.import_hoppings(str(root / 'inputs' / 'hop2_soc.input'), 1)
+    rvec, ham_r, Norb, _ = P.import_hoppings(str(root / 'inputs' / 'square_2orb_soc.hop'), 1)
     klist, kmap, invk = F.gen_irr_k_TRS(Nx, Ny, Nz)
     eig, uni = F.get_eig(F.gen_ham(klist, ham_r, rvec))
     mu = P.calc_mu(eig, len(klist), fill=Norb/2.0, temp=temp)
@@ -429,6 +429,27 @@ def test_nonlinear_eliashberg_zero_seed_and_zero_interaction_stays_zero():
     assert sigmak.shape == delta0.shape
     assert np.allclose(delta, 0.0)
     assert np.allclose(sigmak, 0.0)
+
+
+def test_nonlinear_eliashberg_sc_green_function_is_the_nambu_solution():
+    """At U = 0 one iteration leaves Delta = 0.7 Delta_seed (linear mixing pp=0.3 of Delta_new = 0) and rebuilds G from
+    it: the SC normal Green's function must be the Nambu one, G = -(iw + xi)/(w^2 + xi^2 + |Delta|^2), also for
+    |Delta| >> pi T (where the former G = G0(1 + Delta F^+) sub-iteration with the previous F was off)."""
+    import _tools as T
+    st = T.one_orbital_square(Nx=8, Ny=8, Nw=16, temp=0.01, mu=-0.3)
+    d0 = 0.2
+    Gk = np.ascontiguousarray(st['Gk'].copy())
+    delta0 = np.full((1, 1, st['Nw'], len(st['klist'])), d0, dtype=np.complex128)
+    with _silence_stdout():
+        F.nonlinear_eliashberg(delta0, Gk, st['hamk'], st['Smat'], st['Cmat'], st['olist'], st['plist'],
+                               st['kmap'], st['invk'], mu=st['mu'], temp=st['temp'], gap_sym=0,
+                               Nx=8, Ny=8, Nz=1, sw_sigma=False, sw_Vconst=True, eps=1e-14, itemax=1,
+                               m_diis=1, gap_min=0.0, sw_amp_newton=False)
+    w = (2*np.arange(st['Nw'])+1)*np.pi*st['temp']
+    xi = st['eig'][:, 0]-st['mu']
+    d = 0.7*d0
+    ref = -(1j*w[:, None]+xi[None, :])/(w[:, None]**2+xi[None, :]**2+d**2)
+    assert np.abs(Gk[0, 0]-ref).max() < 1e-12*np.abs(ref).max()
 
 
 # --------------------------------------------------------------------------- #
@@ -1436,7 +1457,7 @@ def test_soc_chis_xx_yy_follow_zz_under_spin_rotations():
     channels coincide and chispm = <S^-S^+> = 2 chiszz."""
     import _tools as T
     root = pathlib.Path(__file__).resolve().parent.parent
-    rvec, ham_r, Norb, _ = P.import_hoppings(str(root / 'inputs' / 'hop2_soc.input'), 1)
+    rvec, ham_r, Norb, _ = P.import_hoppings(str(root / 'inputs' / 'square_2orb_soc.hop'), 1)
     rvec = np.vstack([rvec, [[0.0, 0.0, 0.0]]])
     hs = np.concatenate([ham_r, np.zeros((1, Norb, Norb), dtype=np.complex128)])
     hs[-1] += np.kron(0.6*np.diag([1, -1]) + 0.8*np.array([[0, 1], [1, 0]]), 0.3*np.array([[0, -1j], [1j, 0]]))

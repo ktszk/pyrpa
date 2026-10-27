@@ -122,6 +122,8 @@ _loader._lib.eliashberg.argtypes = [
     ctypes.POINTER(ctypes.c_int64),                                         # m_diis
     ctypes.POINTER(ctypes.c_double),                                        # gap_min
     ctypes.POINTER(ctypes.c_bool),                                          # sw_amp_newton
+    ctypes.POINTER(ctypes.c_int64),                                         # sub_sigma
+    ctypes.POINTER(ctypes.c_double),                                        # pp (linear mixing rate)
 ]
 _loader._lib.eliashberg.restype = None
 _loader._lib.conv_delta_orb_to_band.argtypes = [
@@ -384,7 +386,8 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
                          sw_sigma: bool = False, sw_Vconst: bool = False, eps: float = 1.0e-4,
                          itemax: int = 100, m_diis: int = 5,
                          gap_min: float = 1.0e-2,
-                         sw_amp_newton: bool = True, iperm: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+                         sw_amp_newton: bool = True, iperm: np.ndarray | None = None,
+                         sub_sigma: int = 1, pp: float = 0.3) -> tuple[np.ndarray, np.ndarray]:
     """
     @brief Solve the non-linear FLEX-Eliashberg self-consistency loop (no SOC).
     Iteratively updates the gap Δ, normal/anomalous Green's functions G/F,
@@ -434,6 +437,15 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
                         (adaptive anchoring), alternating until converged. Set False to use plain
                         DIIS/linear mixing throughout (uses m_diis).
     @param         iperm: orbital permutation of the inversion operator (None = identity)
+    @param     sub_sigma: static part taken off Sigma after each update (sw_sigma), as in mkself: 0 none,
+                          1 the Hermitian part of Sigma(k, iw_0) (default).  mu is fixed in this loop, so
+                          without it the Hartree-Fock-like shift of Sigma moves the bands against mu and
+                          changes the filling (the gap can then vanish for that reason alone).
+    @param            pp: linear mixing rate of Delta (also the DIIS fallback) and of Sigma (sw_sigma); default
+                          0.3.  Near a strongly coupled
+                          solution the map has a large negative eigenvalue mu along the gap amplitude and
+                          linear mixing converges only for pp < 2/(1-mu); if the residual decreases and then
+                          grows again with an oscillating gap amplitude, lower pp (0.1-0.2).
     @return      delta: Converged gap function [Norb, Norb, Nw, Nk] complex128
                         (same array as delta_init when contiguous; otherwise a new copy)
     @return     sigmak: FLEX self-energy [Norb, Norb, Nw, Nk] complex128
@@ -453,7 +465,7 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
                             _loader.i64(Nchi), _loader.i64(Norb), _loader.i64(Nx), _loader.i64(Ny), _loader.i64(Nz),
                             _loader.i64(itemax), _loader.i64(gap_sym), ctypes.byref(ctypes.c_bool(sw_sigma)),
                             ctypes.byref(ctypes.c_bool(sw_Vconst)), _loader.i64(m_diis), _loader.dbl(gap_min),
-                            ctypes.byref(ctypes.c_bool(sw_amp_newton)))
+                            ctypes.byref(ctypes.c_bool(sw_amp_newton)), _loader.i64(sub_sigma), _loader.dbl(pp))
     return delta, sigmak
 
 

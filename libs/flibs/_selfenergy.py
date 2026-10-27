@@ -1,6 +1,7 @@
 import ctypes
 import numpy as np
 import libs.flibs._loader as _loader
+import libs.flibs._freq as _freq
 
 # Public API of this submodule; keeps `from ._x import *` in __init__.py from
 # re-exporting numpy, scipy, ctypes and the sibling packages imported above.
@@ -112,7 +113,8 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
     @param       m_diis: DIIS history length (m_diis=1: equivalent to linear mixing)
     @param   sw_rescale: If True, rescale chi0 when Stoner factor >= 1
     @param      sw_tail: If True, use the tail-corrected chi0 (conv[G]-conv[G0]+analytic
-                         reference; O(1/Nw^2) Matsubara truncation error instead of O(1/Nw))
+                         reference; O(1/Nw^2) Matsubara truncation error instead of O(1/Nw)).
+                         Ignored on the IR grid, which has no truncation error to correct.
     @param  sigma_scale: Factor multiplying the sigma seed loaded via sw_in (only used when
                          sw_in=True). For U-annealing set ~(U_new/U_old)^2 since Sigma ~ U^2.
     @return      sigmak: Converged self-energy [Norb, Norb, Nw, Nk] complex128
@@ -120,7 +122,10 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
     """
     print("mixing rate: pp = %3.1f, DIIS m = %d" % (pp, m_diis), flush=True)
     if sw_tail:
-        print("chi0: tail-corrected convolution (analytic G0 reference)", flush=True)
+        if _freq.fg_is_uniform():
+            print("chi0: tail-corrected convolution (analytic G0 reference)", flush=True)
+        else:
+            print("chi0: sw_tail ignored on the IR grid (no Matsubara truncation to correct)", flush=True)
     Nkall, Nk, Nchi = len(kmap), len(hamk), len(Smat)
     Norb = hamk.shape[1]
     mu_self = ctypes.c_double()

@@ -874,7 +874,10 @@ subroutine chi0_tail_impl(chi,Gk,eig,uni,mu,kmap,invk,irr_chi,chi_map,olist,temp
   !> (chi0_ref_tau).  Sharp-cutoff error: O(1/Nw) -> O(1/Nw^2).
   !> G0 is built from (eig, uni) at the SAME chemical potential mu as Gk so the
   !> 1/(iw) coefficients cancel exactly.
+  !> On the IR grid there is no frequency cutoff to correct (the basis holds the
+  !> 1/(iw) tail as the tau=0 jump), so this is the plain convolution there.
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  use freq_grid, only:fg_uniform
   implicit none
   integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz
   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
@@ -894,6 +897,10 @@ subroutine chi0_tail_impl(chi,Gk,eig,uni,mu,kmap,invk,irr_chi,chi_map,olist,temp
   !$omp end parallel workshare
   call chi0_conv_acc(chi,Gk,kmap,invk,irr_chi,chi_map,olist,temp,1.0d0,&
        Nx,Ny,Nz,Nw,Nk,Nkall,Norb,Nchi)
+  if(.not.fg_uniform())then
+     call chi0_threshold(chi,Nk,Nw,Nchi)
+     return
+  end if
   allocate(G0(Nk,Nw,Norb,Norb))
   !$omp parallel workshare
   G0(:,:,:,:)=(0.0d0,0.0d0)

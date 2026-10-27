@@ -112,7 +112,7 @@ MODES_KMESH_SINGLE  = frozenset({M.FERMI_2D, M.FERMI_3D, M.CHIS_QMAP, M.PHI_QMAP
 # path, with no BZ sum (the DOS, option=1, IS a BZ sum and stays out).
 MODES_DEC_AXIS      = frozenset({M.BAND, M.FERMI_2D, M.FERMI_3D})
 MODES_MATSUBARA     = frozenset({M.FLEX, M.LIN_ELIASHBERG})
-MODES_IR            = frozenset({M.FLEX, M.LIN_ELIASHBERG, M.GAP_FUNCTION})  # may run on freq_grid='ir'
+MODES_IR            = frozenset({M.FLEX, M.LIN_ELIASHBERG, M.GAP_FUNCTION, M.NONLIN_ELIASHBERG})  # may run on freq_grid='ir'
 # dispatch groups
 MODES_CHI_NORMAL    = frozenset({M.CHIS_SPECTRUM, M.CHIS_QPOINT, M.CHIS_QMAP, M.PHI_SPECTRUM, M.PHI_QMAP})
 # SC-state chi family: all share the BdG gap/hamk construction block
@@ -264,9 +264,9 @@ hall_mesh_list = None  # k-mesh convergence sweep for the Hall coefficient (opti
 # None: single mesh (Nx,Ny,Nz), no convergence information.
 sw_omega = False  # True: real freq, False: Matsubara freq.
 sw_rescale_flex = True  # True: rescale self energy to make max|Sigma|~U, False: no rescaling
-freq_grid = 'matsubara'  # Matsubara-axis grid of FLEX/Eliashberg (option 14,15,16): 'matsubara' = Nw uniform points,
+freq_grid = 'matsubara'  # Matsubara-axis grid of FLEX/Eliashberg (option 14,15,16,23): 'matsubara' = Nw uniform points,
 # 'ir' = sparse sampling of the IR basis (needs sparse-ir; Nw is then fixed by the basis, ~15-30 points, and the
-# truncation error of the uniform grid is gone). Not for option 23 yet. self_en_wannier.npz stays uniform-Matsubara
+# truncation error of the uniform grid is gone). self_en_wannier.npz stays uniform-Matsubara
 ir_wmax = None  # freq_grid='ir': spectral cutoff [eV]; None = 2 x the largest |e_k - mu| (FLEX spreads spectral weight
 # beyond the bare band, so the band width alone is too small for FLEX)
 ir_eps = 1.0e-8  # freq_grid='ir': accuracy of the IR basis
@@ -668,10 +668,6 @@ def main() -> None:
             print(f"Warning: gap_sym={gap_sym} is non-standard. Common values: -1,0,1,2,3", flush=True)
     if freq_grid not in ('matsubara', 'ir'):
         print(f"Error: freq_grid={freq_grid!r} must be 'matsubara' or 'ir'", flush=True)
-        return
-    if freq_grid == 'ir' and option == CalcMode.NONLIN_ELIASHBERG:
-        print("Error: the nonlinear Eliashberg solver runs on the uniform Matsubara grid only; set "
-              "freq_grid='matsubara'", flush=True)
         return
     if option == CalcMode.NONLIN_ELIASHBERG and sw_soc:
         print("Error: the nonlinear Eliashberg solver has no SOC version; set sw_soc=False", flush=True)
@@ -1137,12 +1133,12 @@ def main() -> None:
                                                         k_sets, kmesh, bvec, x_cpa=0.5, VB_shift=1.0)
         plots.plot_cpa_spectrum(spa_length, xticks, xlabel, wlist, Akw)
     elif option == CalcMode.NONLIN_ELIASHBERG:
-        plibs.calc_eliashberg_eq(Nx, Ny, Nz, Nw, ham_r, S_r, rvec, chiolist, site, plist,
+        plibs.calc_eliashberg_eq(Nx, Ny, Nz, Nw_mats, ham_r, S_r, rvec, chiolist, site, plist,
                                  mu, temp, gap_sym, sw_self,
                                  orb_dep, U, J, fill, sw_from_file, sw_out_self, sw_in_self,
                                  Umat if orb_dep else None, Jmat if orb_dep else None,
                                  m_diis=m_diis_num, sw_rescale=sw_rescale_flex,
-                                 sw_check_only=sw_check_only, sw_tail=sw_chi0_tail,
+                                 sw_check_only=sw_check_only, sw_tail=sw_tail_run,
                                  sigma_scale=sigma_in_scale, iperm=iperm)
 
 

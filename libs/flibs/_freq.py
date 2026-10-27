@@ -4,7 +4,9 @@ import libs.flibs._loader as _loader
 
 # Public API of this submodule; keeps `from ._x import *` in __init__.py from
 # re-exporting numpy, ctypes and the sibling packages imported above.
-__all__ = ['fg_set_ir', 'fg_set_matsubara']
+__all__ = ['fg_set_ir', 'fg_set_matsubara', 'fg_is_uniform']
+
+_ir_on = False   # mirrors freq_grid's state for the Python-side messages
 
 _loader._lib.fg_set_ir.argtypes = [
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64),   # Nw, Ntau
@@ -26,13 +28,22 @@ def fg_set_ir(g: dict) -> None:
     frequencies; Green's functions are built at those frequencies.
     @param g: the dict of plibs.ir_grid
     """
+    global _ir_on
     _loader._lib.fg_set_ir(_loader.i64(g['Nw']), _loader.i64(g['Ntau']),
                            np.ascontiguousarray(g['wF']), np.ascontiguousarray(g['wB']),
                            g['fwdF'], g['bwdF'], g['fwdB'], g['bwdB'],
                            np.ascontiguousarray(g['rev'], dtype=np.int64),
                            np.ascontiguousarray(g['stat']), np.ascontiguousarray(g['dens']))
+    _ir_on = True
 
 
 def fg_set_matsubara() -> None:
     """@brief Back to the uniform Matsubara grid (the default)."""
+    global _ir_on
     _loader._lib.fg_set_matsubara()
+    _ir_on = False
+
+
+def fg_is_uniform() -> bool:
+    """@brief True on the uniform Matsubara grid, False while the IR grid is installed."""
+    return not _ir_on

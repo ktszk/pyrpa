@@ -613,7 +613,7 @@ def test_multiband_gap_projection():
     The projected gap then feeds the quasiclassical solvers (bulk_gap_fs)."""
     import libs.plibs as p
     hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                       'inputs', 'hop2.input')
+                       'inputs', 'square_2orb.hop')
     if not os.path.exists(hop):
         return
     rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
@@ -1067,7 +1067,7 @@ def test_pair_gauge_real_model_agrees_with_legacy():
     of default cannot move any published real-hopping number."""
     import libs.plibs as p
     hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                       'inputs', 'hop2.input')
+                       'inputs', 'square_2orb.hop')
     if not os.path.exists(hop):
         return
     rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)

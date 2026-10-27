@@ -67,6 +67,65 @@ def test_ir_chi0_is_the_exact_bubble_at_the_sampled_frequencies():
     assert T.rel_err(chiu[0, 0, :1].T, ex[:, :1]) > 1e-3
 
 
+def test_ir_ignores_the_chi0_tail_correction():
+    if not HAVE_IR:
+        T.skip('sparse-ir not installed')
+    temp, N = 0.05, 8
+    st = T.two_orbital_square(Nx=N, Ny=N, Nw=16, temp=temp, mu=-0.5, U=1.2, J=0.15)
+    g = P.ir_grid(temp, 10.0, eps=1e-8)
+    try:
+        P.set_freq_grid(g)
+        Gk = F.gen_Green0(st['eig'], st['uni'], st['mu'], temp, g['Nw'])
+        with T.silence():
+            chi, _ = F.get_chi0(st['Smat'], st['Cmat'], Gk, st['olist'], st['kmap'], st['invk'], temp, N, N, 1)
+            chit, _ = F.get_chi0_tail(st['Smat'], st['Cmat'], Gk, st['eig'], st['uni'], st['olist'], st['kmap'],
+                                      st['invk'], st['mu'], temp, N, N, 1)
+            s = [F.mkself(st['Smat'], st['Cmat'], st['kmap'], st['invk'], st['olist'], st['hamk'], st['eig'],
+                          st['uni'], st['mu'], 1.0, temp, g['Nw'], N, N, 1, False, False, sub_sigma=0, eps=1e-9,
+                          scf_loop=200, sw_tail=tail) for tail in (False, True)]
+    finally:
+        P.set_freq_grid(None)
+    assert np.array_equal(chit, chi)
+    assert np.array_equal(s[1][0], s[0][0]) and s[1][1] == s[0][1]
+
+
+def test_ir_spectrum_is_continued_from_the_sampled_self_energy(tmp_path, monkeypatch):
+    if not HAVE_IR:
+        T.skip('sparse-ir not installed')
+    temp, N, mu, delta = 0.05, 8, -0.5, 0.02
+    st = T.two_orbital_square(Nx=N, Ny=N, Nw=16, temp=temp, mu=mu)
+    Norb = st['hamk'].shape[1]
+    # local Sigma with two poles: the exact real-axis spectrum is known
+    sig = lambda z: (0.15/(z-0.8)+0.15/(z+0.8))[..., None, None]*np.eye(Norb)
+    g = P.ir_grid(temp, 10.0, eps=1e-8)
+    sigmak = np.ascontiguousarray(np.broadcast_to(np.moveaxis(sig(1j*g['wF']), 0, 2)[..., None],
+                                                  (Norb, Norb, g['Nw'], len(st['hamk']))))
+    monkeypatch.chdir(tmp_path)
+    try:
+        P.set_freq_grid(g)
+        with T.silence():
+            P.output_self_wannier(sigmak, mu, st['kmap'], st['invk'], N, N, 1, g['Nw'], temp)
+    finally:
+        P.set_freq_grid(None)
+    d = np.load('self_en_wannier.npz')
+    assert np.allclose(d['iw_ir'], g['wF'])
+    # the uniform-grid part keeps its format: Sigma at (2n+1) pi T, R = 0
+    r0 = np.flatnonzero((d['rvec'] == 0).all(1))[0]
+    assert T.rel_err(np.moveaxis(d['sigma'][:, :, :, r0], 2, 0), sig(1j*d['iw'])) < 1e-8
+    with T.silence():
+        sp, _, wl, A = P.spectrum_on_path([[0, 0, 0], [0.5, 0, 0]], 8, np.eye(3), mu, st['ham_r'], [], st['rvec'],
+                                          -1.5, 1.5, delta, 301, temp)
+    kl = np.linspace(0, 0.5, 9)[:, None]*[1, 0, 0]
+    hk = F.gen_ham(kl, st['ham_r'], st['rvec'])
+    z = wl+1j*delta
+    Aex = -np.trace(np.linalg.inv((z+mu)[None, :, None, None]*np.eye(Norb)-hk[:, None]-sig(z)[None]),
+                    axis1=2, axis2=3).imag
+    # Pade on the sampled Sigma (a two-pole one is rational: exact); on its uniform-grid evaluation the
+    # basis truncation would be continued into ~50 % spurious structure
+    assert A.shape == Aex.shape
+    assert np.abs(A-Aex).max() < 1e-4*Aex.max()
+
+
 def test_ir_flex_is_the_large_nw_limit_of_the_uniform_grid():
     if not HAVE_IR:
         T.skip('sparse-ir not installed')
@@ -275,6 +334,106 @@ def test_to_uniform_fermion_evaluates_a_self_energy_with_a_constant_part():
     ref = sigma((2*np.arange(64)+1)*np.pi*temp)
     assert T.rel_err(u, ref) < 1e-7
     assert np.array_equal(P.to_uniform_fermion(ref[..., None], temp, 8)[..., 0], ref[:, :, :8])   # uniform: a slice
+
+
+def test_ir_nonlinear_eliashberg_gap_is_the_large_nw_limit():
+    """Converged nonlinear gap (one orbital, lambda_lin = 1.34, fixed RPA vertex) on IR = the uniform grid's
+    large-Nw limit, which the uniform grid approaches slowly (3% too small at Nw = 4096)."""
+    if not HAVE_IR:
+        return
+    N, temp, U, mu = 16, 0.02, 2.5, -0.6
+
+    def solve(Nw):
+        st = T.one_orbital_square(Nx=N, Ny=N, Nw=Nw, temp=temp, mu=mu, tx=1.0, ty=1.0, U=U)
+        with T.silence():
+            chi, _ = F.get_chi0(st['Smat'], st['Cmat'], st['Gk'], st['olist'], st['kmap'], st['invk'], temp, N, N, 1)
+            d0, _ = F.linearized_eliashberg(chi, st['Gk'], st['uni'], P.get_initial_gap(st['klist'], 1, 1),
+                                            st['Smat'], st['Cmat'], st['olist'], st['plist'], st['kmap'], st['invk'],
+                                            N, N, 1, temp, 1, eps=1e-8)
+            d0 *= 1.764*temp/np.abs(d0).max()
+            d, _ = F.nonlinear_eliashberg(np.ascontiguousarray(d0), st['Gk'], st['hamk'], st['Smat'], st['Cmat'],
+                                          st['olist'], st['plist'], st['kmap'], st['invk'], mu, temp, 1, N, N, 1,
+                                          sw_Vconst=True, eps=1e-9, itemax=400)
+        return d[0, 0]
+    g = P.ir_grid(temp, 12.0, eps=1e-8)
+    try:
+        P.set_freq_grid(g)
+        dI = solve(g['Nw'])
+    finally:
+        P.set_freq_grid(None)
+    n = np.rint((g['wF']/(np.pi*temp)-1)/2).astype(int)
+    keep = n < 1024
+    u = {Nw: solve(Nw)[n[keep]] for Nw in (1024, 2048, 4096)}
+    ext = (8*u[4096]-6*u[2048]+u[1024])/3
+    assert T.rel_err(dI[keep], ext) < 5e-4
+    assert T.rel_err(dI[keep], ext) < 0.05*T.rel_err(u[4096], ext)
+
+
+def test_ir_nonlinear_map_with_the_vertex_rebuilt_from_the_sc_state():
+    """One step of the nonlinear map with sw_Vconst=False (vertex from the SC-state chi0 = GG +- FF bubbles) for the
+    same analytic seed Delta(k, iw) = D0 (cos kx - cos ky) w0^2/(w^2 + w0^2): IR = the uniform grid's large-Nw limit.
+    With m_diis=1 and no amplitude Newton the first update is Delta = 0.3 M[seed] + 0.7 seed."""
+    if not HAVE_IR:
+        return
+    N, temp, U, mu, D0, w0 = 16, 0.02, 2.5, -0.6, 0.01, 0.3
+
+    def M(wn, Nw, vconst):
+        st = T.one_orbital_square(Nx=N, Ny=N, Nw=Nw, temp=temp, mu=mu, tx=1.0, ty=1.0, U=U)
+        kx, ky = 2*np.pi*st['klist'][:, 0], 2*np.pi*st['klist'][:, 1]
+        seed = (D0*(np.cos(kx)-np.cos(ky))[None, :]*(w0**2/(wn**2+w0**2))[:, None]).astype(complex)[None, None]
+        with T.silence():
+            d, _ = F.nonlinear_eliashberg(np.ascontiguousarray(seed.copy()), st['Gk'], st['hamk'], st['Smat'],
+                                          st['Cmat'], st['olist'], st['plist'], st['kmap'], st['invk'], mu, temp, 1,
+                                          N, N, 1, sw_Vconst=vconst, eps=1e-14, itemax=1, m_diis=1, gap_min=0.0,
+                                          sw_amp_newton=False)
+        return ((d-0.7*seed)/0.3)[0, 0]
+    g = P.ir_grid(temp, 12.0, eps=1e-8)
+    try:
+        P.set_freq_grid(g)
+        mI, mIc = M(g['wF'], g['Nw'], False), M(g['wF'], g['Nw'], True)
+    finally:
+        P.set_freq_grid(None)
+    n = np.rint((g['wF']/(np.pi*temp)-1)/2).astype(int)
+    keep = n < 1024
+    u = {Nw: M((2*np.arange(Nw)+1)*np.pi*temp, Nw, False)[n[keep]] for Nw in (1024, 2048, 4096)}
+    ext = (8*u[4096]-6*u[2048]+u[1024])/3
+    assert T.rel_err(mI[keep], ext) < 2e-4
+    assert T.rel_err(mI, mIc) > 0.05                     # the FF bubble does enter (not a trivial check)
+
+
+def test_ir_nonlinear_eliashberg_with_sigma_and_vertex_update_converges():
+    """Strongly coupled one-band case (FLEX lambda = 1.23, Stoner 0.965, Delta ~ 8 pi T) with Sigma and the vertex
+    rebuilt from the SC state: converges from a small seed, to the same gap for two mixing rates.  Needs the exact
+    Nambu G (the former G = G0(1 + Delta F^+) sub-iteration diverged for Delta >> pi T), the static-Sigma
+    subtraction (sub_sigma=1; mu is fixed in the loop) and the mixing of Sigma."""
+    if not HAVE_IR:
+        return
+    N, temp, U, fill = 16, 0.01, 3.5, 0.41
+    g = P.ir_grid(temp, 12.0, eps=1e-8)
+    try:
+        P.set_freq_grid(g)
+        st = T.one_orbital_square(Nx=N, Ny=N, Nw=g['Nw'], temp=temp, mu=0.0, tx=1.0, ty=1.0, U=U)
+        with T.silence():
+            s, mu = F.mkself(st['Smat'], st['Cmat'], st['kmap'], st['invk'], st['olist'], st['hamk'], st['eig'],
+                             st['uni'], -0.5, fill, temp, g['Nw'], N, N, 1, False, False, eps=1e-10, scf_loop=500)
+            G = F.gen_green(s, st['hamk'], mu, temp)
+            chi, _ = F.get_chi0(st['Smat'], st['Cmat'], G, st['olist'], st['kmap'], st['invk'], temp, N, N, 1)
+            dl, lam = F.linearized_eliashberg(chi, G, st['uni'], P.get_initial_gap(st['klist'], 1, 1), st['Smat'],
+                                              st['Cmat'], st['olist'], st['plist'], st['kmap'], st['invk'], N, N, 1,
+                                              temp, 1, eps=1e-10)
+            gaps = []
+            for pp in (0.3, 0.15):
+                d, _ = F.nonlinear_eliashberg(np.ascontiguousarray(dl*1e-4/np.abs(dl).max()), G.copy(),
+                                              st['hamk'], st['Smat'], st['Cmat'], st['olist'], st['plist'],
+                                              st['kmap'], st['invk'], mu, temp, 1, N, N, 1, sw_sigma=True,
+                                              sw_Vconst=False, eps=1e-10, itemax=3000, gap_min=0.0,
+                                              sw_amp_newton=False, m_diis=1, pp=pp)
+                gaps.append(d[0, 0])
+    finally:
+        P.set_freq_grid(None)
+    assert lam > 1.0
+    assert np.all(np.isfinite(gaps[0])) and np.abs(gaps[0][0]).max() > 5*np.pi*temp
+    assert T.rel_err(gaps[1], gaps[0]) < 1e-7
 
 
 if __name__ == '__main__':

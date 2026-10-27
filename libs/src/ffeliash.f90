@@ -1,15 +1,15 @@
 !non-linear FLEX-Eliashberg equations solver (without SOC)
 subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,iprm,kmap,invk,mu,temp,eps,&
      Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,sw_sigma,sw_Vconst,m_diis,gap_min,&
-     sw_amp_newton) bind(C)
+     sw_amp_newton,sub_sigma,pp) bind(C)
   !> Non-linear self-consistent FLEX-Eliashberg loop (no SOC).
   !>
   !> One iteration:
   !>   1. Δ_new = (T/Nkall) · K[F]                          (gap equation, mkdelta_nsoc)
   !>   2. Δ ← Pulay/DIIS extrapolation of past (Δ_in, Δ_out) pairs    (or linear mixing fallback)
-  !>   3. (sw_sigma=true) Σ ← FLEX self-energy from V_σ·G    (calc_sigma)
+  !>   3. (sw_sigma=true) Σ ← FLEX self-energy from V_σ·G    (calc_sigma; static part off, mixed with rate pp)
   !>      G_0_dressed = (G_0^-1 - Σ)^-1                       (gen_green_inv + getinv)
-  !>   4. G = G_0_dressed (I + Δ·F†)                          (mkgreliah_trs_nsoc, Dyson)
+  !>   4. G = [G_0_dressed^-1 + Δ·G_0_dressed†·Δ†]^-1        (mkgreliah_trs_nsoc, Nambu Dyson)
   !>      F = -G_0_dressed · Δ · G^†                          (mkfkeliash_trs_nsoc)
   !>   5. χ_0_S = χ^GG + χ^FF†,  χ_0_C = χ^GG - χ^FF†         (get_chi0sc)
   !>   6. V_σ, V_Δ ← FLEX vertex from χ_0_S, χ_0_C            (mkV_flex_nosoc)
@@ -50,10 +50,18 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,iprm,kmap,invk,mu
   !!                      amplitude a; the shape is relaxed by plain fixed-point
   !!                      (u=M[Δ]/‖M[Δ]‖) while a is driven by a secant root-find on the
   !!                      Rayleigh gain g(a)=<Δ,M[Δ]>/<Δ,Δ>=1. Bypasses DIIS when true.
+  !!@param  sub_sigma,in: static part taken off Σ after each calc_sigma, as mkself does (μ stays fixed
+  !!                      here, so an unsubtracted Hartree-Fock-like shift of Σ would move the bands
+  !!                      against μ and change the filling): 0 none, 1 the Hermitian part of Σ(k,iω_0)
+  !!@param         pp,in: linear mixing rate Δ ← pp·Δ_new + (1-pp)·Δ (also the DIIS fallback; Σ is mixed
+  !!                      with the same rate when sw_sigma).  The map has
+  !!                      a large negative eigenvalue μ along the gap amplitude (μ ~ -6 in a strongly coupled
+  !!                      one-band case), and linear mixing is stable only for pp < 2/(1-μ): use pp ~ 0.1-0.2
+  !!                      when the iteration oscillates with growing amplitude near the solution
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t,c_bool
   use grid_work, only:grid_work_free
   implicit none
-  integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,m_diis
+  integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,m_diis,sub_sigma
   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
   integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
   logical(c_bool),intent(in):: sw_sigma,sw_Vconst,sw_amp_newton
@@ -76,7 +84,8 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,iprm,kmap,invk,mu
   real(c_double) a_cur,a_nxt,g_cur,a1,a2,g1,g2,proj,cfit,lam0
   real(c_double),parameter:: amp_tol=2.0d-2   ! |g-1| below which the amplitude is "solved"
   integer(c_int32_t),parameter:: n_polish_max=10   ! DIIS shape-polish steps between re-anchors
-  real(c_double),parameter:: pp=0.3d0,eps_reg=1.0d-12   ! linear mixing rate / DIIS regularization
+  real(c_double),intent(in):: pp   ! linear mixing rate
+  real(c_double),parameter:: eps_reg=1.0d-12   ! DIIS regularization
   ! DIIS state
   integer(c_int32_t) m_diis_eff,n_hist,i_hist,n_cur,ih,jh,idx_i,idx_j,info_diis
   complex(c_double),allocatable,dimension(:,:,:,:,:):: xout_hist,res_hist
@@ -85,10 +94,15 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,iprm,kmap,invk,mu
   integer(c_int32_t),allocatable,dimension(:):: ipiv_diis
   complex(c_double),allocatable,dimension(:,:,:,:):: newdelta,fk,Gk0,v0
   complex(c_double),allocatable,dimension(:,:,:,:):: Vdelta,Vsigma
+  complex(c_double),allocatable,dimension(:,:,:,:):: sigma_old
 
+  if(sw_sigma .and. sub_sigma/=0 .and. sub_sigma/=1)then
+     print'(A,I0,A)','ERROR(eliashberg): sub_sigma=',sub_sigma,' (0: none, 1: Hermitian part of Sigma(iw_0))'
+     stop
+  end if
   ! All FLEX vertex / chi0 routines expect (Nk,Nw,Nchi,Nchi) ordering.
   allocate(newdelta(Nk,Nw,Norb,Norb),fk(Nk,Nw,Norb,Norb),Gk0(Nk,Nw,Norb,Norb),v0(Nk,Nw,Norb,Norb))
-  allocate(Vdelta(Nk,Nw,Nchi,Nchi),Vsigma(Nk,Nw,Nchi,Nchi))
+  allocate(Vdelta(Nk,Nw,Nchi,Nchi),Vsigma(Nk,Nw,Nchi,Nchi),sigma_old(Nk,Nw,Norb,Norb))
   ! DIIS: history length is at least 1 (slot for current iterate, used for linear-mixing fallback).
   m_diis_eff=max(int(m_diis,c_int32_t),1)
   allocate(xout_hist(Nk,Nw,Norb,Norb,m_diis_eff))
@@ -164,6 +178,10 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,iprm,kmap,invk,mu
      new_max=maxval(abs(newdelta))
      print'(A,E12.4,A,E12.4,A,E12.4)','  |Δ_new-Δ|max=',delta_diff,'  rel=',delta_diff/delta_norm,&
           '  |Δ_new|max=',new_max
+     if(.not.(abs(delta_diff)<huge(delta_diff)))then   ! NaN/Inf: compares false, so it would pass as "converged"
+        print'(A,I5,A)','diverged at iter=',i_iter,' (non-finite Δ); returning the last finite Δ, NOT a solution'
+        exit iter_loop
+     end if
      if(delta_diff/delta_norm<eps)then
         !$omp parallel workshare
         delta(:,:,:,:)=newdelta(:,:,:,:)
@@ -295,12 +313,17 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,iprm,kmap,invk,mu
 100  continue   ! resume point for amplitude-Newton path (skips DIIS block)
      ! 4. update Σ and dressed G_0 (FLEX self-energy)
      if(sw_sigma)then
+        sigma_old(:,:,:,:)=sigmak(:,:,:,:)
         call calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,&
              Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
+        if(sub_sigma==1)call sub_static_sigma()
+        ! mix Σ like Δ: near a magnetic instability V_σ ~ (1-Sχ)^-1 makes the new Σ overreact to the change
+        ! of G, and replacing Σ outright lets the (Δ, Σ) iteration wander instead of converging
+        if(i_iter>1)sigmak(:,:,:,:)=pp*sigmak(:,:,:,:)+(1.0d0-pp)*sigma_old(:,:,:,:)
         call gen_green_inv(Gk0,sigmak,hamk,mu,temp,Nk,Nw,Norb)             ! Gk0 := G_0^-1 - Σ
         call getinv(Gk0,Nk,Nw,Norb)                                        ! invert in place
      end if
-     ! 5. SC Dyson: G = Gk0(I+Δ·F†), F = -Gk0·Δ·G^†
+     ! 5. SC Dyson: G = [Gk0^-1 + Δ·Gk0†·Δ†]^-1, F = -Gk0·Δ·G^†
      call mkgreliah_trs_nsoc(Gk,Gk0,fk,delta,Nk,Nw,Norb)
      call mkfkeliash_trs_nsoc(fk,Gk0,Gk,delta,Nk,Nw,Norb)
      if(.not. sw_Vconst)then
@@ -316,32 +339,64 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,iprm,kmap,invk,mu
   deallocate(xout_hist,res_hist,B_diis,rhs_diis,ipiv_diis)
   deallocate(Vdelta,Vsigma)
   call grid_work_free()   ! mkdelta_nsoc's work arrays, kept across the iterations
+contains
+  subroutine sub_static_sigma()
+    !> Σ(k,iω) -= [Σ(k,iω_0) + Σ(k,iω_0)^†]/2 for every ω (sub_sigma=1 of mkself)
+    integer(c_int32_t) l,m,j
+    complex(c_double),dimension(Nk,Norb,Norb):: s0
+    do m=1,int(Norb,c_int32_t)
+       do l=1,int(Norb,c_int32_t)
+          s0(:,l,m)=0.5d0*(sigmak(:,1,l,m)+conjg(sigmak(:,1,m,l)))
+       end do
+    end do
+    !$omp parallel do private(j)
+    do j=1,int(Nw,c_int32_t)
+       sigmak(:,j,:,:)=sigmak(:,j,:,:)-s0(:,:,:)
+    end do
+    !$omp end parallel do
+  end subroutine sub_static_sigma
 end subroutine eliashberg
 
 subroutine mkgreliah_trs_nsoc(Gk,Gk0,fk,delta,Nk,Nw,Norb)
-  !> Update normal Green's function in the SC state (TRS, no SOC):
-  !>   G(k,iω) = Gk0(k,iω) · ( I + Δ(k,iω) · F†(k,iω) )
-  !> derived from the Nambu Dyson equation closed under TRS.
-  !> Gk0 is the (possibly Σ-dressed) normal Green's function.
+  !> Normal Green's function in the SC state (TRS, no SOC), solved from the Nambu Dyson equation at each (k,iω):
+  !>   G = G0 + G0·Δ·F†,  F† = G̃0·Δ†·G,  G̃0(k,iω) = -G0^T(-k,-iω) = -G0†(k,iω)  (TRS)
+  !>   =>  G(k,iω) = [ Gk0^-1 + Δ·Gk0†·Δ† ]^-1
+  !> Gk0 is the (possibly Σ-dressed) normal Green's function.  One band: G = -(iω+ξ)/(ω²+ξ²+|Δ|²).
+  !> (G used to be iterated as Gk0·(I+Δ·F†) with the previous F; that sub-iteration diverges once
+  !> |Δ| exceeds the lowest |iω-ξ| on the Fermi surface, i.e. for gaps larger than ~πT.)
+  !> fk is not used any more and kept for the call signature.
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nk,Nw,Norb
   complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk0,fk,delta
   complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: Gk
 
-  integer(c_int32_t) i,j,l,m
-  complex(c_double),dimension(Norb,Norb):: cmat1
+  integer(c_int32_t) i,j,l,info
+  integer(c_int32_t),dimension(Norb):: ipiv
+  complex(c_double),dimension(Norb,Norb):: g0,cmat1,amat,gmat
 
-  !$omp parallel do collapse(2) private(i,j,l,m,cmat1)
+  !$omp parallel do collapse(2) private(i,j,l,info,ipiv,g0,cmat1,amat,gmat)
   do j=1,Nw
      do i=1,Nk
-        ! cmat1 = Δ(k,iω) · F†(k,iω)   (zgemm 'N','C' applies Hermitian conjugate to fk)
-        call zgemm('N','C',Norb,Norb,Norb,(1.0d0,0.0d0),delta(i,j,:,:),Norb,fk(i,j,:,:),Norb,(0.0d0,0.0d0),cmat1,Norb)
-        do l=1,Norb
-           cmat1(l,l)=cmat1(l,l)+1.0d0   ! cmat1 := I + Δ·F†
+        ! amat = Gk0^-1
+        g0(:,:)=Gk0(i,j,:,:)
+        amat(:,:)=(0.0d0,0.0d0)
+        do l=1,int(Norb,c_int32_t)
+           amat(l,l)=(1.0d0,0.0d0)
         end do
-        ! G = Gk0 · (I + Δ·F†)
-        call zgemm('N','N',Norb,Norb,Norb,(1.0d0,0.0d0),Gk0(i,j,:,:),Norb,cmat1,Norb,(0.0d0,0.0d0),Gk(i,j,:,:),Norb)
+        call zgesv(int(Norb,c_int32_t),int(Norb,c_int32_t),g0,int(Norb,c_int32_t),ipiv,amat,int(Norb,c_int32_t),info)
+        if(info/=0)then; print*,'zgesv failed in mkgreliah_trs_nsoc: info=',info; stop; end if
+        ! amat += Δ·Gk0†·Δ†
+        call zgemm('N','C',Norb,Norb,Norb,(1.0d0,0.0d0),delta(i,j,:,:),Norb,Gk0(i,j,:,:),Norb,(0.0d0,0.0d0),cmat1,Norb)
+        call zgemm('N','C',Norb,Norb,Norb,(1.0d0,0.0d0),cmat1,Norb,delta(i,j,:,:),Norb,(1.0d0,0.0d0),amat,Norb)
+        ! G = amat^-1
+        gmat(:,:)=(0.0d0,0.0d0)
+        do l=1,int(Norb,c_int32_t)
+           gmat(l,l)=(1.0d0,0.0d0)
+        end do
+        call zgesv(int(Norb,c_int32_t),int(Norb,c_int32_t),amat,int(Norb,c_int32_t),ipiv,gmat,int(Norb,c_int32_t),info)
+        if(info/=0)then; print*,'zgesv failed in mkgreliah_trs_nsoc: info=',info; stop; end if
+        Gk(i,j,:,:)=gmat(:,:)
      end do
   end do
   !$omp end parallel do

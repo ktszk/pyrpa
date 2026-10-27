@@ -344,7 +344,8 @@ def flex_quasiparticles(eig: np.ndarray, Nx: int, Ny: int, Nz: int, ham_r: np.nd
     eig: band energies of the caller's mesh [Nk, Norb] (checked against this mesh's own,
     so the returned arrays line up with the caller's velocities).
     gamma_imp: extra k-independent damping [eV] (impurity scattering, Matthiessen's rule);
-    n_pade: highest Pade order (Matsubara points); orders n_pade/2 .. n_pade are combined.
+    n_pade: highest Pade order (Matsubara points); orders n_pade/2 .. n_pade are combined.  An IR
+    run's file is continued from its sampling points (all of them when fewer than n_pade).
     ewin, de: the real-energy grid is -ewin*T .. ewin*T in steps of de*T; e* is clipped to it
     (states farther out carry no -df/de weight) and Gamma(e*) is interpolated linearly on it.
     Returns a dict: eig (= mu + e*), Z, gamma, tau [tau_unit] (all [Nk, Norb]), mu (= the
@@ -357,6 +358,10 @@ def flex_quasiparticles(eig: np.ndarray, Nx: int, Ny: int, Nz: int, ham_r: np.nd
     except FileNotFoundError:
         raise FileNotFoundError(f"tau_mode='flex' needs '{fname}' (run FLEX with sw_out_self=True)") from None
     sig_r, rvec_s, iw = npz['sigma'], np.asarray(npz['rvec'], dtype=np.int64), npz['iw']
+    if 'sigma_ir' in npz.files:
+        # IR run: Pade on the sampled Sigma itself, not on its uniform-grid evaluation (see
+        # plibs.output_self_wannier)
+        sig_r, iw = npz['sigma_ir'], npz['iw_ir']
     mu_self, temp_self = float(npz['mu']), float(npz['temp'])
     # Sigma lives on the Matsubara mesh of ITS temperature; transport at another T would
     # silently mix two temperatures (the Fermi window here, the scattering there)

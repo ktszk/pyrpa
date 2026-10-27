@@ -489,7 +489,8 @@ def get_chi0_tail(Smat: np.ndarray, Cmat: np.ndarray, Gk: np.ndarray, eig: np.nd
     the fast-decaying residual G-G0 (~1/w^2), while the slowly decaying 1/(iw)
     reference part is evaluated exactly in imaginary time, reducing the Matsubara
     truncation error from O(1/Nw) to O(1/Nw^2).  G0 is built internally from
-    (eig, uni) at the SAME chemical potential mu as Gk.
+    (eig, uni) at the SAME chemical potential mu as Gk.  On the IR grid (no truncation error)
+    this is the plain get_chi0.
     @param   Smat: Spin interaction matrix [Nchi, Nchi] float64
     @param   Cmat: Charge interaction matrix [Nchi, Nchi] float64
     @param     Gk: Green's function on the irreducible k-grid [Norb, Norb, Nw, Nk] complex128

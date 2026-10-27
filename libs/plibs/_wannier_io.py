@@ -211,30 +211,40 @@ def output_self_wannier(sigmak: np.ndarray, mu_self: float, kmap: np.ndarray, in
     @param       Nw: number of positive Matsubara frequencies
     @param     temp: temperature k_B*T [eV]
     @param    N_cut: number of leading Matsubara frequencies to keep (default 64); on the IR grid Sigma
-                   is first evaluated at the N_cut lowest uniform w_n (plibs.to_uniform_fermion)
+                   is first evaluated at the N_cut lowest uniform w_n (plibs.to_uniform_fermion), and the
+                   sampled values are stored as well (sigma_ir at iw_ir, for Pade)
     @param zero_tol: Re/Im components below zero_tol * max|Sigma| are set to 0 (default 1e-5)
     @param    fname: output file base name
     @param     invs: spin-flip partner of each orbital, Fortran 1-based (SOC runs; None without SOC)
     @param    slist: spin sign +-1 of each orbital (SOC runs)
     """
-    if _freq_grid.active_freq_grid() is not None:
-        # IR: the file keeps its uniform-Matsubara format (Pade/MaxEnt consumers), so the
-        # sampled Sigma is evaluated at the N_cut lowest w_n = (2n+1) pi T through the basis
-        sigmak = _freq_grid.to_uniform_fermion(sigmak, temp, N_cut)
+    ir = _freq_grid.active_freq_grid()
+    extra = {}
+    if ir is not None:
+        # IR: the file keeps its uniform-Matsubara format (MaxEnt consumers), so the sampled
+        # Sigma is evaluated at the N_cut lowest w_n = (2n+1) pi T through the basis.  Pade
+        # takes the sampled values themselves (sigma_ir at iw_ir): the basis truncation in the
+        # uniform ones is smooth, and Pade continues it into spurious real-axis structure.
+        N_ir = sigmak.shape[2]
+        sigmak = np.concatenate([_freq_grid.to_uniform_fermion(sigmak, temp, N_cut), sigmak], axis=2)
         Nw = N_cut
     sigma_full = _irr_to_full_kgrid_normal(sigmak, invk, kmap, Nx, Ny, Nz, invs, slist)
     s11_iw0 = sigma_full[0, 0, 0]
     print(f'[Pre-FFT] Sigma_11(iw_0): Gamma={sigma_full[0, 0, 0, 0, 0, 0]:.6e}, '
           f'max|..|={np.abs(s11_iw0).max():.6e}', flush=True)
-    data_out, rvec_kept = _wannier_all_nonzero(sigma_full, Nx, Ny, Nz, N_cut, zero_tol)
+    data_out, rvec_kept = _wannier_all_nonzero(sigma_full, Nx, Ny, Nz, N_cut if ir is None else N_cut+N_ir,
+                                               zero_tol)
     if data_out.size == 0:
         print('output_self_wannier: no non-zero R-vectors found', flush=True)
         return
+    if ir is not None:
+        extra = dict(sigma_ir=data_out[:, :, N_cut:], iw_ir=np.asarray(ir['wF']))
+        data_out = data_out[:, :, :N_cut]
     N_cut_used = data_out.shape[2]
     iw_grid    = (2 * np.arange(N_cut_used) + 1) * np.pi * temp
     try:
         np.savez(fname, sigma=data_out, rvec=rvec_kept, iw=iw_grid, mu=mu_self, temp=temp,
-                 mesh=np.array([Nx, Ny, Nz], dtype=np.int64))
+                 mesh=np.array([Nx, Ny, Nz], dtype=np.int64), **extra)
     except OSError as e:
         print(f'Error: Failed to write {fname}.npz: {e}', flush=True)
     _write_wannier_dat(fname, data_out, rvec_kept, iw_grid, Nw,
