@@ -1,7 +1,7 @@
 !non-linear FLEX-Eliashberg equations solver (without SOC)
 subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,iprm,kmap,invk,mu,temp,eps,&
      Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,sw_sigma,sw_Vconst,m_diis,gap_min,&
-     sw_amp_newton,sub_sigma,pp) bind(C)
+     sw_amp_newton,sub_sigma,pp,status) bind(C)
   !> Non-linear self-consistent FLEX-Eliashberg loop (no SOC).
   !>
   !> One iteration:
@@ -58,10 +58,15 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,iprm,kmap,invk,mu
   !!                      a large negative eigenvalue μ along the gap amplitude (μ ~ -6 in a strongly coupled
   !!                      one-band case), and linear mixing is stable only for pp < 2/(1-μ): use pp ~ 0.1-0.2
   !!                      when the iteration oscillates with growing amplitude near the solution
+  !!@param     status,out: how the loop ended: 0 converged, 1 gap collapsed (gap_min), 2 itemax reached
+  !!                      without convergence, 3 diverged (non-finite Δ; delta is the last finite one and
+  !!                      sigmak may be non-finite, neither is a solution)
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t,c_bool
+  use,intrinsic:: ieee_arithmetic, only:ieee_is_finite
   use grid_work, only:grid_work_free
   implicit none
   integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,m_diis,sub_sigma
+  integer(c_int64_t),intent(out):: status
   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
   integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
   logical(c_bool),intent(in):: sw_sigma,sw_Vconst,sw_amp_newton
@@ -164,6 +169,7 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,iprm,kmap,invk,mu
      !$omp end parallel workshare
   end if
   ! ===== self-consistent loop ============================================
+  status=2   ! itemax reached unless an exit below sets it
   iter_loop: do i_iter=1,itemax
      print'(A5,I5)','iter=',i_iter
      ! 1. Δ_new = K[F] (gap equation)
@@ -178,8 +184,10 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,iprm,kmap,invk,mu
      new_max=maxval(abs(newdelta))
      print'(A,E12.4,A,E12.4,A,E12.4)','  |Δ_new-Δ|max=',delta_diff,'  rel=',delta_diff/delta_norm,&
           '  |Δ_new|max=',new_max
-     if(.not.(abs(delta_diff)<huge(delta_diff)))then   ! NaN/Inf: compares false, so it would pass as "converged"
+     ! NaN/Inf: maxval skips NaN elements (ifx), so delta_diff can look finite; sum propagates them
+     if(.not.ieee_is_finite(sum(abs(newdelta))))then
         print'(A,I5,A)','diverged at iter=',i_iter,' (non-finite Δ); returning the last finite Δ, NOT a solution'
+        status=3
         exit iter_loop
      end if
      if(delta_diff/delta_norm<eps)then
@@ -187,6 +195,7 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,iprm,kmap,invk,mu
         delta(:,:,:,:)=newdelta(:,:,:,:)
         !$omp end parallel workshare
         print'(A,I5)','converged at iter=',i_iter
+        status=0
         exit iter_loop
      end if
      ! 2b. gap-collapse check: Δ decaying toward the trivial solution (T >= Tc)
@@ -196,6 +205,7 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,iprm,kmap,invk,mu
         !$omp end parallel workshare
         print'(A,E12.4,A,E12.4,A)','gap collapsed: |Δ_new|max=',new_max,' < ',gap_min*delta0_max,&
              ' (likely T >= Tc; no SC solution), stopping'
+        status=1
         exit iter_loop
      end if
 
@@ -343,7 +353,8 @@ contains
   subroutine sub_static_sigma()
     !> Σ(k,iω) -= [Σ(k,iω_0) + Σ(k,iω_0)^†]/2 for every ω (sub_sigma=1 of mkself)
     integer(c_int32_t) l,m,j
-    complex(c_double),dimension(Nk,Norb,Norb):: s0
+    complex(c_double),allocatable,dimension(:,:,:):: s0   ! allocatable: Nk*Norb^2 is too large for the stack
+    allocate(s0(Nk,Norb,Norb))
     do m=1,int(Norb,c_int32_t)
        do l=1,int(Norb,c_int32_t)
           s0(:,l,m)=0.5d0*(sigmak(:,1,l,m)+conjg(sigmak(:,1,m,l)))
@@ -354,6 +365,7 @@ contains
        sigmak(:,j,:,:)=sigmak(:,j,:,:)-s0(:,:,:)
     end do
     !$omp end parallel do
+    deallocate(s0)
   end subroutine sub_static_sigma
 end subroutine eliashberg
 

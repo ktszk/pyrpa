@@ -579,7 +579,7 @@ def test_wannier_fs_matches_model_tb():
     hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        'inputs', 'square.hop')
     if not os.path.exists(hop):
-        return                                          # skip if the input is absent
+        _tools.skip(f'{os.path.basename(hop)} not found')
     rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
     avec = np.eye(3)
     mu = -1.0
@@ -615,7 +615,7 @@ def test_multiband_gap_projection():
     hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        'inputs', 'square_2orb.hop')
     if not os.path.exists(hop):
-        return
+        _tools.skip(f'{os.path.basename(hop)} not found')
     rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
     assert Norb == 2
     fw = E.build_wannier_fs(rvec, ham_r, [], np.eye(3), 0.0, mesh=140)
@@ -663,7 +663,7 @@ def test_gap_orbital_from_wannier(tmp_path):
     hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        'inputs', 'square.hop')
     if not os.path.exists(hop):
-        return
+        _tools.skip(f'{os.path.basename(hop)} not found')
     rv, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
     fw = E.build_wannier_fs(rv, ham_r, [], np.eye(3), -1.0, mesh=200, gap_orbital=g0)
     assert abs((fw['nf'] * np.abs(fw['phi']) ** 2).sum() - 1.0) < 1e-9   # normalized
@@ -732,7 +732,7 @@ def test_gap_color_3d():
     hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        'inputs', 'square.hop')
     if not os.path.exists(hop):
-        return
+        _tools.skip(f'{os.path.basename(hop)} not found')
     rv, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
     centers = [np.array([[0.1, 0.2, 0.0], [0.3, -0.1, 0.0], [-0.2, 0.4, 0.0]])]
     blist = [0]
@@ -772,7 +772,7 @@ def test_gap_sym_index_and_delta0():
     hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        'inputs', 'square.hop')
     if not os.path.exists(hop):
-        return
+        _tools.skip(f'{os.path.basename(hop)} not found')
     rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
     avec = np.eye(3)
     mu = -1.0
@@ -805,7 +805,7 @@ def test_wannier_surface_zebs():
     hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        'inputs', 'square.hop')
     if not os.path.exists(hop):
-        return
+        _tools.skip(f'{os.path.basename(hop)} not found')
     rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
     avec = np.eye(3)
     mu = -1.0
@@ -851,7 +851,7 @@ def test_wannier_dvector_vortex():
     hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        'inputs', 'square.hop')
     if not os.path.exists(hop):
-        return
+        _tools.skip(f'{os.path.basename(hop)} not found')
     rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
     fw = E.build_wannier_fs(rvec, ham_r, [], np.eye(3), -1.0, mesh=120)   # FS geometry only
     om = E.matsubara(1.5e-3, 0.2)
@@ -889,7 +889,7 @@ def test_chiral_pip_gap_sym_minus3():
     hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        'inputs', 'square.hop')
     if not os.path.exists(hop):
-        return
+        _tools.skip(f'{os.path.basename(hop)} not found')
     rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
     fw = E.build_wannier_fs(rvec, ham_r, [], np.eye(3), -1.0, mesh=200, gap_sym=-3)
     assert np.iscomplexobj(fw['phi'])
@@ -1069,7 +1069,7 @@ def test_pair_gauge_real_model_agrees_with_legacy():
     hop = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        'inputs', 'square_2orb.hop')
     if not os.path.exists(hop):
-        return
+        _tools.skip(f'{os.path.basename(hop)} not found')
     rvec, ham_r, Norb, Nr = p.import_hoppings(hop, 1)
     fs = E.build_wannier_fs(rvec, ham_r, [], np.eye(3), 0.0, mesh=140)
     assert E.check_trs_gauge(fs['evec'], fs['evec_mk'], warn=False) < 1e-12
@@ -1117,7 +1117,7 @@ def test_wannier_fs_kz_stack():
     base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         'inputs', 'FeS')
     if not os.path.exists(base + '_hr.dat'):
-        return
+        _tools.skip(f'{os.path.basename(base)}_hr.dat not found')
     rvec, ham_r, Norb, Nr = p.import_hoppings(base, 2)
     import libs.plibs._bands as _bands
     _, _, eig, _, _ = _bands.get_emesh(12, 12, 8, ham_r, [], rvec, np.eye(3), sw_uni=True)
@@ -1154,7 +1154,7 @@ def test_build_fs_band_projection_3d():
     base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         'inputs', 'FeS')
     if not os.path.exists(base + '_hr.dat'):
-        return
+        _tools.skip(f'{os.path.basename(base)}_hr.dat not found')
     rvec, ham_r, Norb, Nr = p.import_hoppings(base, 2)
     import libs.plibs._bands as _bands
     _, klist, eig, uni, _ = _bands.get_emesh(16, 16, 8, ham_r, [], rvec, np.eye(3), sw_uni=True)
@@ -1279,7 +1279,7 @@ def test_pauli_and_spin_accept_the_projected_gap():
     base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         'inputs', 'FeS')
     if not os.path.exists(base + '_hr.dat'):
-        return
+        _tools.skip(f'{os.path.basename(base)}_hr.dat not found')
     rvec, ham_r, Norb, Nr = p.import_hoppings(base, 2)
     import libs.plibs._bands as _bands
     _, klist, eig, uni, _ = _bands.get_emesh(12, 12, 8, ham_r, [], rvec, np.eye(3), sw_uni=True)

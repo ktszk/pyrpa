@@ -124,6 +124,7 @@ _loader._lib.eliashberg.argtypes = [
     ctypes.POINTER(ctypes.c_bool),                                          # sw_amp_newton
     ctypes.POINTER(ctypes.c_int64),                                         # sub_sigma
     ctypes.POINTER(ctypes.c_double),                                        # pp (linear mixing rate)
+    ctypes.POINTER(ctypes.c_int64),                                         # status (out)
 ]
 _loader._lib.eliashberg.restype = None
 _loader._lib.conv_delta_orb_to_band.argtypes = [
@@ -446,6 +447,8 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
                           solution the map has a large negative eigenvalue mu along the gap amplitude and
                           linear mixing converges only for pp < 2/(1-mu); if the residual decreases and then
                           grows again with an oscillating gap amplitude, lower pp (0.1-0.2).
+    @raise RuntimeError: the iteration diverged (non-finite Delta); nothing it holds is a solution.
+                         Reaching itemax without convergence only prints a warning.
     @return      delta: Converged gap function [Norb, Norb, Nw, Nk] complex128
                         (same array as delta_init when contiguous; otherwise a new copy)
     @return     sigmak: FLEX self-energy [Norb, Norb, Nw, Nk] complex128
@@ -460,12 +463,18 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
     sigmak = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
     iprm = np.arange(Norb, dtype=np.int64) if iperm is None else np.asarray(iperm, dtype=np.int64)
     iprm = iprm + 1   # Fortran is 1-based
+    status = ctypes.c_int64()
     _loader._lib.eliashberg(delta, sigmak, Gk, hamk, Smat, Cmat, olist, plist, iprm, kmap, invk, _loader.dbl(mu),
                             _loader.dbl(temp), _loader.dbl(eps), _loader.i64(Nkall), _loader.i64(Nk), _loader.i64(Nw),
                             _loader.i64(Nchi), _loader.i64(Norb), _loader.i64(Nx), _loader.i64(Ny), _loader.i64(Nz),
                             _loader.i64(itemax), _loader.i64(gap_sym), ctypes.byref(ctypes.c_bool(sw_sigma)),
                             ctypes.byref(ctypes.c_bool(sw_Vconst)), _loader.i64(m_diis), _loader.dbl(gap_min),
-                            ctypes.byref(ctypes.c_bool(sw_amp_newton)), _loader.i64(sub_sigma), _loader.dbl(pp))
+                            ctypes.byref(ctypes.c_bool(sw_amp_newton)), _loader.i64(sub_sigma), _loader.dbl(pp),
+                            ctypes.byref(status))
+    if status.value == 3:
+        raise RuntimeError('nonlinear_eliashberg diverged (non-finite Delta); try a smaller pp (0.1-0.2)')
+    if status.value == 2:
+        print(f'Warning: nonlinear_eliashberg did not converge in itemax = {itemax} iterations', flush=True)
     return delta, sigmak
 
 

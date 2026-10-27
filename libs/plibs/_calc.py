@@ -1233,9 +1233,14 @@ def calc_eliashberg_eq(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_
         delta_init *= target_gap / delta_max
     else:
         print("Warning: initial gap is zero; skip Tc-based scaling", flush=True)
-    delta, sigmak = flibs.nonlinear_eliashberg(delta_init, Gk, state['ham_k'], Smat, Cmat, chiolist, plist,
-                                               state['kmap'], state['invk'], mu_self, temp, gap_sym, Nx, Ny, Nz,
-                                               sw_sigma=sw_self, sw_Vconst=True, eps=eps, m_diis=m_diis, iperm=iperm)
+    try:
+        delta, sigmak = flibs.nonlinear_eliashberg(delta_init, Gk, state['ham_k'], Smat, Cmat, chiolist, plist,
+                                                   state['kmap'], state['invk'], mu_self, temp, gap_sym, Nx, Ny, Nz,
+                                                   sw_sigma=sw_self, sw_Vconst=True, eps=eps, m_diis=m_diis,
+                                                   iperm=iperm)
+    except RuntimeError as e:   # diverged: no gap / Sigma to write
+        print(f'Error: {e}', flush=True)
+        return
     if sw_out_self:
         _save_gap(delta, temp)
         _wannier_io.output_gap_wannier(delta, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)

@@ -452,6 +452,21 @@ def test_nonlinear_eliashberg_sc_green_function_is_the_nambu_solution():
     assert np.abs(Gk[0, 0]-ref).max() < 1e-12*np.abs(ref).max()
 
 
+def test_nonlinear_eliashberg_raises_on_a_non_finite_gap():
+    """A NaN entering the loop (here one element of G) must stop it as diverged and raise, not run to itemax or pass
+    as converged: maxval skips NaN elements, so the residual alone does not see it."""
+    import _tools as T
+    st = T.one_orbital_square(Nx=8, Ny=8, Nw=16, temp=0.05, mu=-0.3, U=1.0)
+    Gk = np.ascontiguousarray(st['Gk'].copy())
+    Gk[0, 0, 0, 3] = np.nan
+    delta0 = np.full((1, 1, st['Nw'], len(st['klist'])), 0.05, dtype=np.complex128)
+    with _silence_stdout():
+        T.assert_raises(RuntimeError, F.nonlinear_eliashberg, delta0, Gk, st['hamk'], st['Smat'], st['Cmat'],
+                        st['olist'], st['plist'], st['kmap'], st['invk'], mu=st['mu'], temp=st['temp'], gap_sym=0,
+                        Nx=8, Ny=8, Nz=1, sw_sigma=False, sw_Vconst=True, eps=1e-14, itemax=5, m_diis=1,
+                        gap_min=0.0, sw_amp_newton=False)
+
+
 # --------------------------------------------------------------------------- #
 #  high-level calc helpers
 # --------------------------------------------------------------------------- #

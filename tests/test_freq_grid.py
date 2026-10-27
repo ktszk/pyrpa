@@ -89,7 +89,7 @@ def test_ir_ignores_the_chi0_tail_correction():
     assert np.array_equal(s[1][0], s[0][0]) and s[1][1] == s[0][1]
 
 
-def test_ir_spectrum_is_continued_from_the_sampled_self_energy(tmp_path, monkeypatch):
+def test_ir_spectrum_is_continued_from_the_sampled_self_energy(tmp_path):
     if not HAVE_IR:
         T.skip('sparse-ir not installed')
     temp, N, mu, delta = 0.05, 8, -0.5, 0.02
@@ -100,30 +100,34 @@ def test_ir_spectrum_is_continued_from_the_sampled_self_energy(tmp_path, monkeyp
     g = P.ir_grid(temp, 10.0, eps=1e-8)
     sigmak = np.ascontiguousarray(np.broadcast_to(np.moveaxis(sig(1j*g['wF']), 0, 2)[..., None],
                                                   (Norb, Norb, g['Nw'], len(st['hamk']))))
-    monkeypatch.chdir(tmp_path)
+    cwd = os.getcwd()
+    os.chdir(tmp_path)   # the drivers write and read in the working directory
     try:
-        P.set_freq_grid(g)
+        try:
+            P.set_freq_grid(g)
+            with T.silence():
+                P.output_self_wannier(sigmak, mu, st['kmap'], st['invk'], N, N, 1, g['Nw'], temp)
+        finally:
+            P.set_freq_grid(None)
+        d = np.load('self_en_wannier.npz')
+        assert np.allclose(d['iw_ir'], g['wF'])
+        # the uniform-grid part keeps its format: Sigma at (2n+1) pi T, R = 0
+        r0 = np.flatnonzero((d['rvec'] == 0).all(1))[0]
+        assert T.rel_err(np.moveaxis(d['sigma'][:, :, :, r0], 2, 0), sig(1j*d['iw'])) < 1e-8
         with T.silence():
-            P.output_self_wannier(sigmak, mu, st['kmap'], st['invk'], N, N, 1, g['Nw'], temp)
+            sp, _, wl, A = P.spectrum_on_path([[0, 0, 0], [0.5, 0, 0]], 8, np.eye(3), mu, st['ham_r'], [], st['rvec'],
+                                              -1.5, 1.5, delta, 301, temp)
+        kl = np.linspace(0, 0.5, 9)[:, None]*[1, 0, 0]
+        hk = F.gen_ham(kl, st['ham_r'], st['rvec'])
+        z = wl+1j*delta
+        Aex = -np.trace(np.linalg.inv((z+mu)[None, :, None, None]*np.eye(Norb)-hk[:, None]-sig(z)[None]),
+                        axis1=2, axis2=3).imag
+        # Pade on the sampled Sigma (a two-pole one is rational: exact); on its uniform-grid evaluation the
+        # basis truncation would be continued into ~50 % spurious structure
+        assert A.shape == Aex.shape
+        assert np.abs(A-Aex).max() < 1e-4*Aex.max()
     finally:
-        P.set_freq_grid(None)
-    d = np.load('self_en_wannier.npz')
-    assert np.allclose(d['iw_ir'], g['wF'])
-    # the uniform-grid part keeps its format: Sigma at (2n+1) pi T, R = 0
-    r0 = np.flatnonzero((d['rvec'] == 0).all(1))[0]
-    assert T.rel_err(np.moveaxis(d['sigma'][:, :, :, r0], 2, 0), sig(1j*d['iw'])) < 1e-8
-    with T.silence():
-        sp, _, wl, A = P.spectrum_on_path([[0, 0, 0], [0.5, 0, 0]], 8, np.eye(3), mu, st['ham_r'], [], st['rvec'],
-                                          -1.5, 1.5, delta, 301, temp)
-    kl = np.linspace(0, 0.5, 9)[:, None]*[1, 0, 0]
-    hk = F.gen_ham(kl, st['ham_r'], st['rvec'])
-    z = wl+1j*delta
-    Aex = -np.trace(np.linalg.inv((z+mu)[None, :, None, None]*np.eye(Norb)-hk[:, None]-sig(z)[None]),
-                    axis1=2, axis2=3).imag
-    # Pade on the sampled Sigma (a two-pole one is rational: exact); on its uniform-grid evaluation the
-    # basis truncation would be continued into ~50 % spurious structure
-    assert A.shape == Aex.shape
-    assert np.abs(A-Aex).max() < 1e-4*Aex.max()
+        os.chdir(cwd)
 
 
 def test_ir_flex_is_the_large_nw_limit_of_the_uniform_grid():
