@@ -663,9 +663,12 @@ subroutine chi0_ref_tau(chi,eig,uni,mu,kmap,invk,irr_chi,chi_map,olist,temp,&
   !>
   !> tau=0 jump handling: for orbital pairs with a nonzero equal-time
   !> commutator the bubble chi0(tau) has a step at tau=0 (the 1/(i nu)
-  !> high-frequency component of chi0).  The jump J is computed analytically
+  !> high-frequency component of chi0).  The jump J(q) is computed analytically
   !> from the free density matrix and handled by the sawtooth trick: the DFT
   !> of J*(1/2 - tau/beta) is replaced by its exact transform -J/(i nu_m).
+  !> The jump of G0 itself is sum_n u_n u_n^dagger = S(k)^-1, the identity for an
+  !> orthonormal basis but k dependent for a non-orthogonal one (MLO, with
+  !> S-orthonormal u_n), so J(q) is a k-convolution of S^-1 and rho.
   !>
   !> Assumes TRS without SOC (H(-k) = H(k)^*), the same restriction as
   !> get_chi0_conv / gen_irr_k_TRS.
@@ -686,10 +689,11 @@ subroutine chi0_ref_tau(chi,eig,uni,mu,kmap,invk,irr_chi,chi_map,olist,temp,&
   integer(c_int32_t) i,j,k,l,m,n,s,iorb,kk,M32,a13,b13,a42,b42
   integer(c_int32_t) ii(0:Nx-1),ij(0:Ny-1),ik(0:Nz-1)
   real(c_double) beta,dtau,xi,tau,fn,weight,nu
-  complex(c_double) Jlm,zsumA,zsumB,ph
+  complex(c_double) zsumA,zsumB,ph
+  complex(c_double) g0jump13,dens13,g0jump42,dens42   ! G0(0-)-G0(0+) = S^-1 and G0(0-) = rho, elements 13 / 42
   real(c_double),allocatable:: gp(:,:,:),gm(:,:,:),ff(:,:)
-  complex(c_double),allocatable:: U13(:,:),U42(:,:),rho(:,:,:)
-  complex(c_double),dimension(Norb,Norb):: rhobar
+  complex(c_double),allocatable:: U13(:,:),U42(:,:)
+  complex(c_double),allocatable:: chi_jump(:)   ! tau=0 jump chi0(q,0+)-chi0(q,0-) of the pair, on the irreducible q
   complex(c_double),dimension(Nw):: sawc
   complex(c_double),allocatable,dimension(:,:,:,:):: tmpA,tmpB,tmp
 
@@ -744,32 +748,6 @@ subroutine chi0_ref_tau(chi,eig,uni,mu,kmap,invk,irr_chi,chi_map,olist,temp,&
   end do
   !$omp end parallel do
 
-  ! --- BZ-averaged free density matrix (for the tau=0 jump) ----------------
-  allocate(rho(Norb,Norb,Nk))
-  !$omp parallel do private(l,m,n)
-  do i=1,Nk
-     do l=1,Norb
-        do m=1,Norb
-           rho(m,l,i)=(0.0d0,0.0d0)
-           do n=1,Norb
-              rho(m,l,i)=rho(m,l,i)+uni(m,n,i)*conjg(uni(l,n,i))*ff(n,i)
-           end do
-        end do
-     end do
-  end do
-  !$omp end parallel do
-  rhobar(:,:)=(0.0d0,0.0d0)
-  do i=1,Nkall
-     kk=int(invk(1,i),c_int32_t)
-     if(invk(2,i)==0)then
-        rhobar(:,:)=rhobar(:,:)+rho(:,:,kk)
-     else if(invk(2,i)==1)then
-        rhobar(:,:)=rhobar(:,:)+transpose(rho(:,:,kk))
-     end if
-  end do
-  rhobar(:,:)=rhobar(:,:)/dble(Nkall)
-  deallocate(rho)
-
   ! --- sawtooth: exact transform minus its rectangle-rule DFT --------------
   ! saw(tau) = 1/2 - tau/beta carries the unit tau=0 jump; exact coefficients
   ! are -1/(i nu_m) (0 at nu=0).  sawc = exact - numeric replaces the poorly
@@ -787,7 +765,7 @@ subroutine chi0_ref_tau(chi,eig,uni,mu,kmap,invk,irr_chi,chi_map,olist,temp,&
      end do
   end do
 
-  allocate(U13(Norb,Nk),U42(Norb,Nk))
+  allocate(U13(Norb,Nk),U42(Norb,Nk),chi_jump(Nk))
   call init_fft_plans(tmpA,tmp,Nx,Ny,Nz,2*Nw)
   orb_loop:do iorb=1,Nchi*(Nchi+1)/2
      l=irr_chi(iorb,1)
@@ -804,6 +782,41 @@ subroutine chi0_ref_tau(chi,eig,uni,mu,kmap,invk,irr_chi,chi_map,olist,temp,&
         end do
      end do
      !$omp end parallel do
+     ! tau=0 jump of this pair, chi0(q,0+) - chi0(q,0-):
+     !   J(q) = (1/N) sum_k [Sinv_13(k+q) rho_42(k) - rho_13(k+q) Sinv_42(k)]
+     ! with G0(k,0-) - G0(k,0+) = Sinv(k) = sum_n u_n u_n^dagger and G0(k,0-) = rho(k) = sum_n u_n f_n u_n^dagger;
+     ! for an orthonormal basis Sinv = 1 and J = delta_13 rhobar_42 - delta_42 rhobar_13 for every q.
+     ! Slices 1, 2 of tmpA / tmpB hold the k+q / k factors of the two terms.
+     !$omp parallel do private(i,kk,g0jump13,dens13,g0jump42,dens42)
+     do i=1,Nkall
+        kk=int(invk(1,i),c_int32_t)
+        g0jump13=sum(U13(:,kk)); dens13=sum(U13(:,kk)*ff(:,kk))
+        g0jump42=sum(U42(:,kk)); dens42=sum(U42(:,kk)*ff(:,kk))
+        if(invk(2,i)==1)then   ! G0(-k) = G0(k)^T (TRS)
+           g0jump13=conjg(g0jump13); dens13=conjg(dens13); g0jump42=conjg(g0jump42); dens42=conjg(dens42)
+        end if
+        tmpA(kmap(1,i),kmap(2,i),kmap(3,i),1)=g0jump13
+        tmpA(kmap(1,i),kmap(2,i),kmap(3,i),2)=dens13
+        tmpB(kmap(1,i),kmap(2,i),kmap(3,i),1)=dens42
+        tmpB(kmap(1,i),kmap(2,i),kmap(3,i),2)=g0jump42
+     end do
+     !$omp end parallel do
+     call fft3d_batch(tmpA,tmp,Nx,Ny,Nz,2_c_int64_t,.true.)
+     call fft3d_batch(tmpB,tmp,Nx,Ny,Nz,2_c_int64_t,.true.)
+     !$omp parallel do private(i,j)
+     do k=0,Nz-1
+        do j=0,Ny-1
+           do i=0,Nx-1
+              tmp(i,j,k,1)=(tmpA(i,j,k,1)*tmpB(ii(i),ij(j),ik(k),1)&
+                   -tmpA(i,j,k,2)*tmpB(ii(i),ij(j),ik(k),2))/dble(Nkall)
+           end do
+        end do
+     end do
+     !$omp end parallel do
+     call fft3d_batch(tmp,tmpA,Nx,Ny,Nz,1_c_int64_t,.false.)   ! J(q) in tmp(:,:,:,1)
+     do i=1,Nkall
+        if(invk(2,i)==0)chi_jump(invk(1,i))=tmp(kmap(1,i),kmap(2,i),kmap(3,i),1)
+     end do
      ! full-grid tau kernels; G0(-k,tau) = G0(k,tau)^T (TRS) -> conj(U) coefficients
      !$omp parallel do private(i,kk,n,zsumA,zsumB)
      do s=1,M32
@@ -845,16 +858,12 @@ subroutine chi0_ref_tau(chi,eig,uni,mu,kmap,invk,irr_chi,chi_map,olist,temp,&
      end do
      !$omp end parallel do
      call FFT(tmp,tmpB,Nx,Ny,Nz,2*Nw,.false.)
-     ! tau=0 jump of this pair: J = delta_{13} rhobar_{42} - delta_{42} rhobar_{13}
-     Jlm=(0.0d0,0.0d0)
-     if(a13==b13) Jlm=Jlm+rhobar(a42,b42)
-     if(a42==b42) Jlm=Jlm-rhobar(a13,b13)
      !$omp parallel do private(i,j)
      do j=1,Nw
         do i=1,Nkall
            if(invk(2,i)==0)then
               chi(invk(1,i),j,m,l)=chi(invk(1,i),j,m,l)&
-                   +tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight+Jlm*sawc(j)
+                   +tmp(kmap(1,i),kmap(2,i),kmap(3,i),j)*weight+chi_jump(invk(1,i))*sawc(j)
            end if
         end do
      end do
@@ -862,7 +871,7 @@ subroutine chi0_ref_tau(chi,eig,uni,mu,kmap,invk,irr_chi,chi_map,olist,temp,&
      chi(:,:,chi_map(m,l,1),chi_map(m,l,2))=conjg(chi(:,:,m,l))
   end do orb_loop
   call destroy_fft_plans()
-  deallocate(U13,U42,gp,gm,ff)
+  deallocate(U13,U42,chi_jump,gp,gm,ff)
 end subroutine chi0_ref_tau
 
 subroutine chi0_tail_impl(chi,Gk,eig,uni,mu,kmap,invk,irr_chi,chi_map,olist,temp,&

@@ -8,19 +8,20 @@ module mkself_soc_rn
   real(c_double):: rn_temp
   real(c_double),pointer,contiguous:: rn_eig(:,:)=>null(),rn_kmult(:)=>null()
   complex(c_double),pointer,contiguous:: rn_Gk(:,:,:,:)=>null(),rn_sigmak(:,:,:,:)=>null()
-  complex(c_double),pointer,contiguous:: rn_hamk(:,:,:)=>null(),rn_uni(:,:,:)=>null()
+  complex(c_double),pointer,contiguous:: rn_hamk(:,:,:)=>null(),rn_uni(:,:,:)=>null(),rn_ovlk(:,:,:)=>null()
+  logical:: rn_nonorth
 contains
   subroutine get_rn(rn,rmu)
     real(c_double),intent(in):: rmu
     real(c_double),intent(out):: rn
-    call get_rn_mkself_soc(rn,rmu,rn_Gk,rn_sigmak,rn_hamk,rn_uni,rn_eig,rn_kmult,rn_temp,&
+    call get_rn_mkself_soc(rn,rmu,rn_Gk,rn_sigmak,rn_hamk,rn_uni,rn_ovlk,rn_nonorth,rn_eig,rn_kmult,rn_temp,&
          rn_Nk,rn_Nw,rn_Norb,rn_Nkall)
   end subroutine get_rn
 end module mkself_soc_rn
 
 subroutine mkself_soc(sigmak,mu,Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,mu_init,&
      rfill,temp,scf_loop,pp,eps,Nkall,Nk,Nw,Norb,Nchi,Nx,Ny,Nz,sub_sigma,sw_out,&
-     sw_in,m_diis,sw_rescale,sigma_scale) bind(C)
+     sw_in,m_diis,sw_rescale,sigma_scale,ovlk,nonorth) bind(C)
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t,c_bool
   use flex_scf, only:solve_mu,diis_state,diis_init,diis_free,mix_sigma
   use mkself_soc_rn
@@ -31,6 +32,7 @@ subroutine mkself_soc(sigmak,mu,Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,mu_
   integer(c_int64_t),intent(in),dimension(Norb):: slist,invs
   integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
   logical(c_bool),intent(in):: sw_in,sw_out,sw_rescale
+  logical(c_bool),intent(in):: nonorth
   !> The self-energy channel always subtracts the FLEX second-order double counting: the RPA
   !> matrix series reaches that diagram through two spin channels, and keeping both overestimates
   !> Sigma (by 2x for one orbital, 1.5x for two orbitals at J=0, measured against the exact second
@@ -42,7 +44,7 @@ subroutine mkself_soc(sigmak,mu,Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,mu_
   real(c_double),intent(in),target,dimension(Norb,Nk):: eig
   real(c_double),intent(in),dimension(Nchi,Nchi):: Vmat
   real(c_double),intent(out):: mu
-  complex(c_double),intent(in),target,dimension(Norb,Norb,Nk):: uni,hamk
+  complex(c_double),intent(in),target,dimension(Norb,Norb,Nk):: uni,hamk,ovlk
   complex(c_double),intent(out),target,dimension(Nk,Nw,Norb,Norb):: sigmak
 
   integer(c_int32_t) scf_i
@@ -94,7 +96,7 @@ subroutine mkself_soc(sigmak,mu,Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,mu_
      sigmak0(:,:,:,:)=sigmak(:,:,:,:)
      !$omp end workshare
      !$omp end parallel
-     call gen_green_inv(Gk,sigmak,hamk,mu,temp,Nk,Nw,Norb)
+     call make_green_inverse()
      call getinv(Gk,Nk,Nw,Norb)
   else
      mu_old=mu*1.2
@@ -110,7 +112,8 @@ subroutine mkself_soc(sigmak,mu,Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,mu_
   call diis_init(diis,m_diis,Nk,Nw,Norb)
   ! state of get_rn (module mkself_soc_rn)
   rn_Nk=Nk; rn_Nw=Nw; rn_Norb=Norb; rn_Nkall=Nkall; rn_temp=temp
-  rn_Gk=>Gk; rn_sigmak=>sigmak; rn_hamk=>hamk; rn_uni=>uni; rn_eig=>eig; rn_kmult=>kmult
+  rn_Gk=>Gk; rn_sigmak=>sigmak; rn_hamk=>hamk; rn_uni=>uni; rn_ovlk=>ovlk
+  rn_nonorth=nonorth; rn_eig=>eig; rn_kmult=>kmult
   bracket_valid=.false.
   muS_cache=0.0d0
   muL_cache=0.0d0
@@ -168,7 +171,7 @@ subroutine mkself_soc(sigmak,mu,Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,mu_
         exit
      end if
      call renew_mu()
-     call gen_green_inv(Gk,sigmak,hamk,mu,temp,Nk,Nw,Norb)
+     call make_green_inverse()
      call getinv(Gk,Nk,Nw,Norb)
      !$omp parallel
      !$omp workshare
@@ -192,8 +195,16 @@ subroutine mkself_soc(sigmak,mu,Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,mu_
      call io_sigma(.true.)
   end if
   call renew_mu()
-  nullify(rn_Gk,rn_sigmak,rn_hamk,rn_uni,rn_eig,rn_kmult)
+  nullify(rn_Gk,rn_sigmak,rn_hamk,rn_uni,rn_ovlk,rn_eig,rn_kmult)
 contains
+  subroutine make_green_inverse()
+    if(nonorth)then
+       call gen_green_inv_overlap(Gk,sigmak,hamk,ovlk,mu,temp,Nk,Nw,Norb)
+    else
+       call gen_green_inv(Gk,sigmak,hamk,mu,temp,Nk,Nw,Norb)
+    end if
+  end subroutine make_green_inverse
+
   subroutine get_sgnsig()
     integer(c_int32_t) i,j
     do j=1,Norb
@@ -265,7 +276,7 @@ contains
   end subroutine ck_sigma_meta
 end subroutine mkself_soc
 
-subroutine get_rn_mkself_soc(rn,rmu,Gk,sigmak,hamk,uni,eig,kmult,temp,Nk,Nw,Norb,Nkall)
+subroutine get_rn_mkself_soc(rn,rmu,Gk,sigmak,hamk,uni,ovlk,nonorth,eig,kmult,temp,Nk,Nw,Norb,Nkall)
   !> n(mu) of mkself_soc; called through get_rn (module mkself_soc_rn), which supplies the
   !> state.  Gk is mkself_soc's work array and is overwritten.
   use constant
@@ -273,15 +284,16 @@ subroutine get_rn_mkself_soc(rn,rmu,Gk,sigmak,hamk,uni,eig,kmult,temp,Nk,Nw,Norb
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nk,Nw,Norb,Nkall
+  logical,intent(in):: nonorth
   real(c_double),intent(in):: rmu,temp
   real(c_double),intent(in),dimension(Norb,Nk):: eig
   real(c_double),intent(in),dimension(Nk):: kmult
-  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni,hamk
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni,hamk,ovlk
   complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: sigmak
   complex(c_double),intent(inout),dimension(Nk,Nw,Norb,Norb):: Gk
   real(c_double),intent(out):: rn
 
-  integer(c_int32_t) l,i,j,n
+  integer(c_int32_t) l,m,i,j,n
   real(c_double) tmp,deltagk
   complex(c_double):: Gk0,iw,cp,cm,x
   integer(c_int64_t) j64
@@ -291,29 +303,41 @@ subroutine get_rn_mkself_soc(rn,rmu,Gk,sigmak,hamk,uni,eig,kmult,temp,Nk,Nw,Norb
   do i=1,Nk
      tmp=tmp+kmult(i)*sum(0.5d0*(1.0d0-tanh(0.5d0*(eig(:,i)-rmu)/temp)))
   end do
-  call gen_green_inv(Gk,sigmak,hamk,rmu,temp,Nk,Nw,Norb)
+  if(nonorth)then
+     call gen_green_inv_overlap(Gk,sigmak,hamk,ovlk,rmu,temp,Nk,Nw,Norb)
+  else
+     call gen_green_inv(Gk,sigmak,hamk,rmu,temp,Nk,Nw,Norb)
+  end if
   call getinv(Gk,Nk,Nw,Norb)
   deltagk=0.0d0
   ! IR: T sum_n [G - G_0](i w_n) is [G - G_0](tau = 0) from the sampled values (see get_rn_mkself);
   ! uniform: 2T Re sum_n.  G_ll(-i w) = G_ll(i w)^*.
-  !$omp parallel do reduction(+:deltagk) private(l,i,n,iw,Gk0,cp,cm,x,j64)
+  !$omp parallel do reduction(+:deltagk) private(l,m,i,n,iw,Gk0,cp,cm,x,j64)
   do j=1,int(Nw,c_int32_t)
      j64=j
      if(.not.fg_uniform())call fg_dens_coef(j64,cp,cm)
      iw=cmplx(rmu,fg_omega(FG_FERMION,j64,temp),kind=c_double)
-     do l=1,Norb
-        do i=1,Nk
-           Gk0=0.0d0
-           do n=1,Norb
-              Gk0=Gk0+uni(l,n,i)*conjg(uni(l,n,i))/(iw-eig(n,i))
+     do i=1,Nk
+        x=0.0d0
+        do l=1,Norb
+           do m=1,Norb
+              if(.not.nonorth .and. l/=m)cycle
+              Gk0=0.0d0
+              do n=1,Norb
+                 Gk0=Gk0+uni(m,n,i)*conjg(uni(l,n,i))/(iw-eig(n,i))
+              end do
+              if(nonorth)then
+                 x=x+ovlk(l,m,i)*(Gk(i,j,m,l)-Gk0)
+              else
+                 x=x+Gk(i,j,m,l)-Gk0
+              end if
            end do
-           x=Gk(i,j,l,l)-Gk0
+        end do
            if(fg_uniform())then
               deltagk=deltagk+kmult(i)*dble(x)
            else
               deltagk=deltagk+kmult(i)*dble(cp*x+cm*conjg(x))
            end if
-        end do
      end do
   end do
   !$omp end parallel do
@@ -359,7 +383,7 @@ subroutine calc_sigma_soc(sigmak,Gk,Vsigma,Vmat,kmap,invk,invs,olist,slist,sgnsi
   integer(c_int32_t) i,j,k,n,l,m
   integer(c_int64_t) jp,jm,j0
   real(c_double) weight
-  complex(c_double) vinf,st
+  complex(c_double) vinf,static_sum
   complex(c_double),allocatable,dimension(:,:,:,:):: tmpVsigma,tmp,tmpgk
 
   allocate(tmpVsigma(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)),tmp(0:Nx-1,0:Ny-1,0:Nz-1,fg_nt(Nw)),&
@@ -373,7 +397,7 @@ subroutine calc_sigma_soc(sigmak,Gk,Vsigma,Vmat,kmap,invk,invs,olist,slist,sgnsi
      do m=1,Nchi
         !$omp parallel
         !$omp do
-        do i=1,Nkall !j=1>iw=0, j=Nw>iw=inf
+        do i=1,Nkall !v=0 (slot j0); the v->inf limit goes through fg_set_static
            if(invk(2,i)==0)then
               tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),j0)=Vsigma(invk(1,i),1,m,l) !Vsigma(k,iw)
            else if(invk(2,i)==1)then
@@ -415,7 +439,7 @@ subroutine calc_sigma_soc(sigmak,Gk,Vsigma,Vmat,kmap,invk,invs,olist,slist,sgnsi
         vinf=cmplx(-Vmat(m,l),0.0d0,kind=c_double)
         call fg_set_static(tmpVsigma,vinf,Nx,Ny,Nz,Nw)
         call fg_forward(FG_BOSON,tmpVsigma,tmp,Nx,Ny,Nz,Nw)
-        st=fg_static_term(tmpgk,Nx,Ny,Nz,Nw)   ! 0 on the uniform grid
+        static_sum=fg_static_term(tmpgk,Nx,Ny,Nz,Nw)   ! 0 on the uniform grid
         call fg_forward(FG_FERMION,tmpgk,tmp,Nx,Ny,Nz,Nw)
         !$omp parallel
         !$omp do private(i,j,k,n)
@@ -446,7 +470,7 @@ subroutine calc_sigma_soc(sigmak,Gk,Vsigma,Vmat,kmap,invk,invs,olist,slist,sgnsi
         end do
         !$omp end parallel do
         if(.not.fg_uniform())then   ! IR: the bare vertex was kept out of the transform
-           sigmak(:,:,olist(m,1),olist(l,1))=sigmak(:,:,olist(m,1),olist(l,1))+vinf*st
+           sigmak(:,:,olist(m,1),olist(l,1))=sigmak(:,:,olist(m,1),olist(l,1))+vinf*static_sum
         end if
      end do
   end do

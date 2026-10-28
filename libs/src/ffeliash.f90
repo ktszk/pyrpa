@@ -1,7 +1,7 @@
 !non-linear FLEX-Eliashberg equations solver (without SOC)
 subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,iprm,kmap,invk,mu,temp,eps,&
      Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz,itemax,gap_sym,sw_sigma,sw_Vconst,m_diis,gap_min,&
-     sw_amp_newton,sub_sigma,pp,status) bind(C)
+     sw_amp_newton,sub_sigma,pp,status,ovlk,nonorth) bind(C)
   !> Non-linear self-consistent FLEX-Eliashberg loop (no SOC).
   !>
   !> One iteration:
@@ -70,12 +70,14 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,iprm,kmap,invk,mu
   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
   integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
   logical(c_bool),intent(in):: sw_sigma,sw_Vconst,sw_amp_newton
+  logical(c_bool),intent(in):: nonorth
   real(c_double),intent(in):: temp,eps,mu,gap_min
+  real(c_double),intent(in):: pp   ! linear mixing rate
   !! orbital permutation of the inversion operator (identity = old behaviour)
   integer(c_int64_t),intent(in),dimension(Norb):: iprm
   real(c_double),intent(in),dimension(Norb):: prt
   real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
-  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: hamk
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: hamk,ovlk
   complex(c_double),intent(inout),dimension(Nk,Nw,Norb,Norb):: Gk, sigmak, delta
 
   integer(c_int32_t) i_iter
@@ -89,7 +91,6 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,iprm,kmap,invk,mu
   real(c_double) a_cur,a_nxt,g_cur,a1,a2,g1,g2,proj,cfit,lam0
   real(c_double),parameter:: amp_tol=2.0d-2   ! |g-1| below which the amplitude is "solved"
   integer(c_int32_t),parameter:: n_polish_max=10   ! DIIS shape-polish steps between re-anchors
-  real(c_double),intent(in):: pp   ! linear mixing rate
   real(c_double),parameter:: eps_reg=1.0d-12   ! DIIS regularization
   ! DIIS state
   integer(c_int32_t) m_diis_eff,n_hist,i_hist,n_cur,ih,jh,idx_i,idx_j,info_diis
@@ -330,11 +331,15 @@ subroutine eliashberg(delta,sigmak,Gk,hamk,Smat,Cmat,olist,prt,iprm,kmap,invk,mu
         ! mix Σ like Δ: near a magnetic instability V_σ ~ (1-Sχ)^-1 makes the new Σ overreact to the change
         ! of G, and replacing Σ outright lets the (Δ, Σ) iteration wander instead of converging
         if(i_iter>1)sigmak(:,:,:,:)=pp*sigmak(:,:,:,:)+(1.0d0-pp)*sigma_old(:,:,:,:)
-        call gen_green_inv(Gk0,sigmak,hamk,mu,temp,Nk,Nw,Norb)             ! Gk0 := G_0^-1 - Σ
+        if(nonorth)then
+           call gen_green_inv_overlap(Gk0,sigmak,hamk,ovlk,mu,temp,Nk,Nw,Norb)
+        else
+           call gen_green_inv(Gk0,sigmak,hamk,mu,temp,Nk,Nw,Norb)
+        end if
         call getinv(Gk0,Nk,Nw,Norb)                                        ! invert in place
      end if
      ! 5. SC Dyson: G = [Gk0^-1 + Δ·Gk0†·Δ†]^-1, F = -Gk0·Δ·G^†
-     call mkgreliah_trs_nsoc(Gk,Gk0,fk,delta,Nk,Nw,Norb)
+     call mkgreliah_trs_nsoc(Gk,Gk0,delta,Nk,Nw,Norb)
      call mkfkeliash_trs_nsoc(fk,Gk0,Gk,delta,Nk,Nw,Norb)
      if(.not. sw_Vconst)then
         ! 6. χ_0_S, χ_0_C from new G, F
@@ -369,49 +374,53 @@ contains
   end subroutine sub_static_sigma
 end subroutine eliashberg
 
-subroutine mkgreliah_trs_nsoc(Gk,Gk0,fk,delta,Nk,Nw,Norb)
+subroutine mkgreliah_trs_nsoc(Gk,Gk0,delta,Nk,Nw,Norb)
   !> Normal Green's function in the SC state (TRS, no SOC), solved from the Nambu Dyson equation at each (k,iω):
   !>   G = G0 + G0·Δ·F†,  F† = G̃0·Δ†·G,  G̃0(k,iω) = -G0^T(-k,-iω) = -G0†(k,iω)  (TRS)
   !>   =>  G(k,iω) = [ Gk0^-1 + Δ·Gk0†·Δ† ]^-1
   !> Gk0 is the (possibly Σ-dressed) normal Green's function.  One band: G = -(iω+ξ)/(ω²+ξ²+|Δ|²).
   !> (G used to be iterated as Gk0·(I+Δ·F†) with the previous F; that sub-iteration diverges once
   !> |Δ| exceeds the lowest |iω-ξ| on the Fermi surface, i.e. for gaps larger than ~πT.)
-  !> fk is not used any more and kept for the call signature.
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   implicit none
   integer(c_int64_t),intent(in):: Nk,Nw,Norb
-  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk0,fk,delta
+  complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk0,delta
   complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: Gk
 
-  integer(c_int32_t) i,j,l,info
-  integer(c_int32_t),dimension(Norb):: ipiv
-  complex(c_double),dimension(Norb,Norb):: g0,cmat1,amat,gmat
+  integer(c_int32_t) i,j
+  complex(c_double),dimension(Norb,Norb):: cmat1,amat,gmat
 
-  !$omp parallel do collapse(2) private(i,j,l,info,ipiv,g0,cmat1,amat,gmat)
+  !$omp parallel do collapse(2) private(i,j,cmat1,amat,gmat)
   do j=1,Nw
      do i=1,Nk
-        ! amat = Gk0^-1
-        g0(:,:)=Gk0(i,j,:,:)
-        amat(:,:)=(0.0d0,0.0d0)
-        do l=1,int(Norb,c_int32_t)
-           amat(l,l)=(1.0d0,0.0d0)
-        end do
-        call zgesv(int(Norb,c_int32_t),int(Norb,c_int32_t),g0,int(Norb,c_int32_t),ipiv,amat,int(Norb,c_int32_t),info)
-        if(info/=0)then; print*,'zgesv failed in mkgreliah_trs_nsoc: info=',info; stop; end if
+        call invert(Gk0(i,j,:,:),amat)                                     ! amat = Gk0^-1
         ! amat += Δ·Gk0†·Δ†
         call zgemm('N','C',Norb,Norb,Norb,(1.0d0,0.0d0),delta(i,j,:,:),Norb,Gk0(i,j,:,:),Norb,(0.0d0,0.0d0),cmat1,Norb)
         call zgemm('N','C',Norb,Norb,Norb,(1.0d0,0.0d0),cmat1,Norb,delta(i,j,:,:),Norb,(1.0d0,0.0d0),amat,Norb)
-        ! G = amat^-1
-        gmat(:,:)=(0.0d0,0.0d0)
-        do l=1,int(Norb,c_int32_t)
-           gmat(l,l)=(1.0d0,0.0d0)
-        end do
-        call zgesv(int(Norb,c_int32_t),int(Norb,c_int32_t),amat,int(Norb,c_int32_t),ipiv,gmat,int(Norb,c_int32_t),info)
-        if(info/=0)then; print*,'zgesv failed in mkgreliah_trs_nsoc: info=',info; stop; end if
+        call invert(amat,gmat)                                             ! G = amat^-1
         Gk(i,j,:,:)=gmat(:,:)
      end do
   end do
   !$omp end parallel do
+contains
+  subroutine invert(a,ainv)
+    !> ainv = a^-1 (LU solve of a·X = I; a is not modified)
+    complex(c_double),intent(in):: a(Norb,Norb)
+    complex(c_double),intent(out):: ainv(Norb,Norb)
+    complex(c_double) lu(Norb,Norb)
+    integer(c_int64_t) l
+    integer(c_int32_t) info,ipiv(Norb)
+    lu(:,:)=a(:,:)
+    ainv(:,:)=(0.0d0,0.0d0)
+    do l=1,Norb
+       ainv(l,l)=(1.0d0,0.0d0)
+    end do
+    call zgesv(Norb,Norb,lu,Norb,ipiv,ainv,Norb,info)
+    if(info/=0)then
+       print*,'zgesv failed in mkgreliah_trs_nsoc: info=',info
+       stop
+    end if
+  end subroutine invert
 end subroutine mkgreliah_trs_nsoc
 
 subroutine mkfkeliash_trs_nsoc(fk,Gk0,Gk,delta,Nk,Nw,Norb)

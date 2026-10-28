@@ -1,6 +1,6 @@
 """
 IR (intermediate representation) frequency grid of the convolution kernels (plibs.ir_grid,
-plibs.set_freq_grid; Doc/design_freq_grid.md).
+plibs.set_freq_grid).
 
   * the grid matrices: a fermionic function is reproduced from its sampled values, and the tau
     points are symmetric about beta/2 (the reflection of the bubble);
@@ -86,7 +86,8 @@ def test_ir_ignores_the_chi0_tail_correction():
     finally:
         P.set_freq_grid(None)
     assert np.array_equal(chit, chi)
-    assert np.array_equal(s[1][0], s[0][0]) and s[1][1] == s[0][1]
+    # two separate FLEX runs: equal up to the run-to-run roundoff of the threaded sums (gfortran + MKL)
+    assert T.rel_err(s[1][0], s[0][0]) < 1e-10 and abs(s[1][1]-s[0][1]) < 1e-10
 
 
 def test_ir_spectrum_is_continued_from_the_sampled_self_energy(tmp_path):

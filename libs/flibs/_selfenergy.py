@@ -2,6 +2,7 @@ import ctypes
 import numpy as np
 import libs.flibs._loader as _loader
 import libs.flibs._freq as _freq
+from libs.flibs._green import _overlap_arg
 
 # Public API of this submodule; keeps `from ._x import *` in __init__.py from
 # re-exporting numpy, scipy, ctypes and the sibling packages imported above.
@@ -40,7 +41,8 @@ _loader._lib.mkself.argtypes = [
     ctypes.POINTER(ctypes.c_int64),                                        # m_diis
     ctypes.POINTER(ctypes.c_bool),                                         # sw_rescale
     ctypes.POINTER(ctypes.c_bool),                                         # sw_tail
-    ctypes.POINTER(ctypes.c_double)                                        # sigma_scale
+    ctypes.POINTER(ctypes.c_double),                                       # sigma_scale
+    _loader.c_array(np.complex128), ctypes.POINTER(ctypes.c_bool)          # overlap, nonorth
 ]
 _loader._lib.mkself.restype = None
 _loader._lib.mkself_soc.argtypes = [
@@ -64,7 +66,8 @@ _loader._lib.mkself_soc.argtypes = [
     ctypes.POINTER(ctypes.c_int64),                                        # sub_sigma
     ctypes.POINTER(ctypes.c_bool), ctypes.POINTER(ctypes.c_bool),          # sw_out, sw_in
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_bool),                       # m_diis, sw_rescale
-    ctypes.POINTER(ctypes.c_double)                                        # sigma_scale
+    ctypes.POINTER(ctypes.c_double),                                       # sigma_scale
+    _loader.c_array(np.complex128), ctypes.POINTER(ctypes.c_bool)          # overlap, nonorth
 ]
 _loader._lib.mkself_soc.restype = None
 
@@ -88,7 +91,8 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
            fill: float, temp: float, Nw: int, Nx: int, Ny: int, Nz: int, sw_out: bool,
            sw_in: bool, sub_sigma: int = 1, scf_loop: int = 300, eps: float = 1.0e-4,
            pp: float = 0.3, m_diis: int = 5, sw_rescale: bool = False,
-           sw_tail: bool = False, sigma_scale: float = 1.0) -> tuple[np.ndarray, float]:
+           sw_tail: bool = False, sigma_scale: float = 1.0,
+           overlap: np.ndarray | None = None) -> tuple[np.ndarray, float]:
     """
     @brief Iteratively compute the self-energy Sigma(k, iw_n) via FLEX self-consistency loop (without SOC).
     @param         Smat: Spin interaction matrix [Nchi, Nchi] float64
@@ -117,6 +121,7 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
                          Ignored on the IR grid, which has no truncation error to correct.
     @param  sigma_scale: Factor multiplying the sigma seed loaded via sw_in (only used when
                          sw_in=True). For U-annealing set ~(U_new/U_old)^2 since Sigma ~ U^2.
+    @param     overlap: S(k) [Nk, Norb, Norb], or None for an orthogonal basis
     @return      sigmak: Converged self-energy [Norb, Norb, Nw, Nk] complex128
     @return     mu_self: Final chemical potential in eV
     """
@@ -130,13 +135,14 @@ def mkself(Smat: np.ndarray, Cmat: np.ndarray, kmap: np.ndarray, invk: np.ndarra
     Norb = hamk.shape[1]
     mu_self = ctypes.c_double()
     sigmak = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
+    ovlk, nonorth = _overlap_arg(hamk, overlap)
     _loader._lib.mkself(sigmak, ctypes.byref(mu_self), Smat, Cmat, kmap, invk, olist, hamk, eig, uni, _loader.dbl(mu),
                         _loader.dbl(fill), _loader.dbl(temp), _loader.i64(scf_loop), _loader.dbl(pp), _loader.dbl(eps),
                         _loader.i64(Nkall), _loader.i64(Nk), _loader.i64(Nw), _loader.i64(Norb), _loader.i64(Nchi),
                         _loader.i64(Nx), _loader.i64(Ny), _loader.i64(Nz), _loader.i64(sub_sigma),
                         ctypes.byref(ctypes.c_bool(sw_out)), ctypes.byref(ctypes.c_bool(sw_in)), _loader.i64(m_diis),
                         ctypes.byref(ctypes.c_bool(sw_rescale)), ctypes.byref(ctypes.c_bool(sw_tail)),
-                        _loader.dbl(sigma_scale))
+                        _loader.dbl(sigma_scale), ovlk, ctypes.byref(ctypes.c_bool(nonorth)))
     return sigmak, mu_self.value
 
 
@@ -146,7 +152,7 @@ def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.nd
                Nx: int, Ny: int, Nz: int, sw_out: bool, sw_in: bool,
                sub_sigma: int = 1, scf_loop: int = 300, eps: float = 1.0e-4,
                pp: float = 0.3, m_diis: int = 5, sw_rescale: bool = False,
-               sigma_scale: float = 1.0) -> tuple[np.ndarray, float]:
+               sigma_scale: float = 1.0, overlap: np.ndarray | None = None) -> tuple[np.ndarray, float]:
     """
     @brief Iteratively compute the self-energy Sigma(k, iw_n) via FLEX self-consistency loop with SOC.
     @param        Vmat: SOC interaction matrix [Nchi, Nchi] float64
@@ -173,6 +179,7 @@ def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.nd
     @param  sw_rescale: rescale chi0 when the Stoner factor >= 1
     @param sigma_scale: Factor multiplying the sigma seed loaded via sw_in (only used when
                         sw_in=True). For U-annealing set ~(U_new/U_old)^2 since Sigma ~ U^2.
+    @param    overlap: S(k) [Nk, Norb, Norb], or None for an orthogonal basis
     @return      sigmak: Converged self-energy [Norb, Norb, Nw, Nk] complex128
     @return     mu_self: Final chemical potential in eV
     """
@@ -181,11 +188,13 @@ def mkself_soc(Vmat: np.ndarray, kmap: np.ndarray, invk: np.ndarray, invs: np.nd
     Norb = hamk.shape[1]
     mu_self = ctypes.c_double()
     sigmak = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
+    ovlk, nonorth = _overlap_arg(hamk, overlap)
     _loader._lib.mkself_soc(sigmak, ctypes.byref(mu_self), Vmat, kmap, invk, invs, olist, slist, hamk, eig, uni,
                             _loader.dbl(mu), _loader.dbl(fill), _loader.dbl(temp), _loader.i64(scf_loop),
                             _loader.dbl(pp), _loader.dbl(eps), _loader.i64(Nkall), _loader.i64(Nk), _loader.i64(Nw),
                             _loader.i64(Norb), _loader.i64(Nchi), _loader.i64(Nx), _loader.i64(Ny), _loader.i64(Nz),
                             _loader.i64(sub_sigma), ctypes.byref(ctypes.c_bool(sw_out)),
                             ctypes.byref(ctypes.c_bool(sw_in)), _loader.i64(m_diis),
-                            ctypes.byref(ctypes.c_bool(sw_rescale)), _loader.dbl(sigma_scale))
+                            ctypes.byref(ctypes.c_bool(sw_rescale)), _loader.dbl(sigma_scale), ovlk,
+                            ctypes.byref(ctypes.c_bool(nonorth)))
     return sigmak, mu_self.value

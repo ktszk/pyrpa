@@ -27,6 +27,13 @@ _loader._lib.gen_green_inv_.argtypes = [
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nw, Norb
 ]
 _loader._lib.gen_green_inv_.restype = None
+_loader._lib.gen_green_inv_overlap_.argtypes = [
+    _loader.c_array(np.complex128), _loader.c_array(np.complex128),
+    _loader.c_array(np.complex128), _loader.c_array(np.complex128),
+    ctypes.POINTER(ctypes.c_double), ctypes.POINTER(ctypes.c_double),
+    ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)
+]
+_loader._lib.gen_green_inv_overlap_.restype = None
 _loader._lib.getinv_.argtypes = [
     _loader.c_array(np.complex128),          # Gk (inout)
     ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(ctypes.c_int64)  # Nk, Nw, Norb
@@ -113,28 +120,44 @@ def gen_Green0(eig: np.ndarray, uni: np.ndarray,
     return Gk
 
 
+def _overlap_arg(hamk: np.ndarray, overlap: np.ndarray | None) -> tuple[np.ndarray, bool]:
+    if overlap is None:
+        return np.zeros_like(hamk), False
+    overlap = np.ascontiguousarray(overlap, dtype=np.complex128)
+    if overlap.shape != hamk.shape:
+        raise ValueError(f'overlap shape {overlap.shape} differs from Hamiltonian shape {hamk.shape}')
+    return overlap, True
+
+
 def gen_green(selfen: np.ndarray, hamk: np.ndarray,
-              mu: float, temp: float) -> np.ndarray:
+              mu: float, temp: float, overlap: np.ndarray | None = None) -> np.ndarray:
     """
-    @brief Construct the interacting Matsubara Green's function G(k, iω_n) = [iω_n + mu - H(k) - Sigma(k,iω_n)]^-1.
+    @brief Construct G(k, iω_n) = [(iω_n + mu) S(k) - H(k) - Sigma(k,iω_n)]^-1.
     @param  selfen: Self-energy tensor [Norb, Norb, Nw, Nk] complex128
     @param    hamk: k-space Hamiltonian [Nk, Norb, Norb] complex128
     @param      mu: Chemical potential in eV
     @param    temp: Temperature in eV
+    @param  overlap: Overlap matrix S(k) [Nk, Norb, Norb], or None for an orthogonal basis
     @return     Gk: Interacting Green's function [Norb, Norb, Nw, Nk] complex128
     """
     Nk = len(hamk)
     Norb = hamk.shape[1]
     Nw = selfen.shape[2]
     Gk = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
-    _loader._lib.gen_green_inv_(Gk, selfen, hamk, _loader.dbl(mu), _loader.dbl(temp),
-                                _loader.i64(Nk), _loader.i64(Nw), _loader.i64(Norb))
+    if overlap is None:
+        _loader._lib.gen_green_inv_(Gk, selfen, hamk, _loader.dbl(mu), _loader.dbl(temp),
+                                    _loader.i64(Nk), _loader.i64(Nw), _loader.i64(Norb))
+    else:
+        ovlk, _ = _overlap_arg(hamk, overlap)
+        _loader._lib.gen_green_inv_overlap_(Gk, selfen, hamk, ovlk, _loader.dbl(mu), _loader.dbl(temp),
+                                           _loader.i64(Nk), _loader.i64(Nw), _loader.i64(Norb))
     _loader._lib.getinv_(Gk, _loader.i64(Nk), _loader.i64(Nw), _loader.i64(Norb))
     return Gk
 
 
 def gen_green_from_eig(selfen: np.ndarray, eig: np.ndarray,
-                       uni: np.ndarray, mu: float, temp: float) -> np.ndarray:
+                       uni: np.ndarray, mu: float, temp: float,
+                       overlap: np.ndarray | None = None) -> np.ndarray:
     """
     @brief Construct the interacting Green's function using pre-computed eigenvalues and eigenvectors.
     @param  selfen: Self-energy tensor [Norb, Norb, Nw, Nk] complex128
@@ -142,11 +165,17 @@ def gen_green_from_eig(selfen: np.ndarray, eig: np.ndarray,
     @param     uni: Eigenvector matrices [Nk, Norb, Norb] complex128
     @param      mu: Chemical potential in eV
     @param    temp: Temperature in eV
+    @param  overlap: Overlap matrix S(k) [Nk, Norb, Norb], or None for an orthogonal basis
     @return     Gk: Interacting Green's function [Norb, Norb, Nw, Nk] complex128
     """
     Nk = len(eig)
     Norb = eig.shape[1]
     Nw = selfen.shape[2]
+    if overlap is not None:
+        ovlk, _ = _overlap_arg(np.empty((Nk, Norb, Norb), dtype=np.complex128), overlap)
+        su = np.matmul(ovlk, uni.conj().transpose(0, 2, 1))
+        hamk = np.ascontiguousarray((su*eig[:, None, :]) @ su.conj().transpose(0, 2, 1))
+        return gen_green(selfen, hamk, mu, temp, overlap=ovlk)
     Gk = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
     _loader._lib.gen_green_inv_from_eig(Gk, selfen, uni, eig, _loader.dbl(mu), _loader.dbl(temp),
                                         _loader.i64(Nk), _loader.i64(Nw), _loader.i64(Norb))

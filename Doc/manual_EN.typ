@@ -122,7 +122,7 @@ The format of the input Hamiltonian file is specified by the `ftype` variable. A
   [1], [A single `{fname}.input` file (custom format)],
   [2], [`{fname}_hr.dat` file (Wannier90 default hopping file). *This is the standard choice when interfacing with first-principles codes.*],
   [3], [Non-orthogonal basis hopping in MLO (Maximally Localized Orbital) format],
-  [4], [Directory `{fname}/` containing `HamRsMLO` and `HamiltonianPMTInfo` (binary output of ecalj `job_mlo`). Same non-orthogonal MLO basis as ftype=3; the overlap $S(R)$ is read alongside $H(R)$],
+  [4], [Directory `{fname}/` containing `HamRsMLO` and `HamiltonianPMTInfo` (binary output of ecalj `job_mlo`). Same non-orthogonal MLO basis as ftype=3; the overlap $S(R)$ is read alongside $H(R)$. For ftype=3,4 every orbital is scaled to unit norm on reading ($H(R), S(R) -> D^(-1\/2) (dot) D^(-1\/2)$ with $D = "diag" S(R=0)$; the bands are unchanged; ecalj's MLOs are not normalized, e.g. Cu: $S_(a a)(0) = 0.016$ for s, $0.565$ for d)],
   [Other], [`Hopping.dat` file (ecalj hopping file)],
 )
 
@@ -319,6 +319,7 @@ This mode additionally produces:
 
 Solves the FLEX equations self-consistently to obtain the electron self-energy $Sigma(bold(k), i omega_n)$ in Matsubara frequency space. The result is saved to `sigma.bin` and `self_en.npz`.
 
+- For a non-orthogonal MLO basis (`ftype=3,4`), $G^(-1) = (i omega + mu) S - H - Sigma$ and the particle number uses $"tr"(S G)$. `U` and `J` are local interactions in the normalized MLO orbitals ($S_(a a)(R=0) = 1$, set when ftype=3,4 is read), not in an orthogonalized basis. Without the normalization U would act with a strength of about $U \/ S_(a a)(0)^2$ (some 4000 times U for the s orbital of Cu). Linear and nonlinear Eliashberg and self-energy-corrected spectra use the same convention. Self-energy files do not store the overlap, so use the same basis and model when loading them. Transport with `tau_mode='flex'` still requires an orthogonal basis.
 - `sw_out_self=True`: write the self-energy to file
 - `sw_in_self=True`: load the previous self-energy (`sigma.bin`) as the initial guess
 - `sigma_in_scale`: factor multiplying the $Sigma$ seed loaded via `sw_in_self=True` (default 1.0). For $U$-annealing (continuation that raises $U$ stepwise, seeding each step from the `sigma.bin` converged at the smaller $U$) the weak-coupling relation $Sigma prop U^2$ suggests $(U_"new"\/U_"old")^2$. Unlike temperature annealing the Matsubara grid is unchanged, so no seed interpolation is needed (`sigma.bin` has no header — keep `Nw` identical between runs)

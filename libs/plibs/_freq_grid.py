@@ -1,6 +1,6 @@
 """
 Frequency grid of the convolution kernels: the IR (intermediate representation) basis of sparse-ir
-as an alternative to the uniform Matsubara grid.  See Doc/design_freq_grid.md.
+as an alternative to the uniform Matsubara grid.
 
 ir_grid builds what the Fortran module freq_grid needs (fg_set_ir); set_freq_grid switches it.
 The work-array layout of a stored function: positive frequencies j = 1..Nw at slots 1..Nw, their
@@ -12,7 +12,7 @@ import libs.flibs as flibs
 # Public API of this submodule; keeps `from ._x import *` in __init__.py from
 # re-exporting numpy and the sibling packages imported above.
 __all__ = ['ir_grid', 'set_freq_grid', 'active_freq_grid', 'boson_frequencies', 'fermion_frequencies',
-           'to_uniform_fermion', 'ir_fit_fermion', 'ir_eval_fermion']
+           'uniform_fermion_frequencies', 'to_uniform_fermion', 'ir_fit_fermion', 'ir_eval_fermion']
 
 _active = None   # the grid set_freq_grid installed (None: uniform Matsubara)
 
@@ -45,7 +45,7 @@ def ir_grid(temp: float, wmax: float, eps: float = 1.0e-7) -> dict:
     so forward -> product -> backward is the raw sum sum_m a_m b_{n-m} of the uniform grid.
     @param temp: k_B T [eV];  wmax: cutoff of the spectra [eV] (Lambda = wmax/T);  eps: basis accuracy
     @return dict: Nw, Ntau, wF, wB (stored frequency values), fwdF, bwdF, fwdB, bwdB, rev (1-based
-            tau -> beta - tau), stat (raw tau=0 midpoint weights, fermion), dens (physical tau=0
+            tau -> beta - tau), static_wt (raw tau=0 midpoint weights, fermion), dens (physical tau=0
             weights), nF, nB (reduced frequencies of the slots), tau, fitF, and the bases bF, bB
     """
     beta = 1.0/temp
@@ -80,7 +80,7 @@ def ir_grid(temp: float, wmax: float, eps: float = 1.0e-7) -> dict:
     return dict(Nw=Nw, Ntau=Ntau, wF=pF*np.pi*temp, wB=np.concatenate([[0], pB])*np.pi*temp,
                 fwdF=np.asfortranarray(fwdF), bwdF=np.asfortranarray(bwdF),
                 fwdB=np.asfortranarray(fwdB), bwdB=np.asfortranarray(bwdB),
-                rev=(rev+1).astype(np.int64), stat=np.ascontiguousarray(dens/temp), dens=np.ascontiguousarray(dens),
+                rev=(rev+1).astype(np.int64), static_wt=np.ascontiguousarray(dens/temp), dens=np.ascontiguousarray(dens),
                 nF=sF, nB=sB, tau=tau, fitF=fitF, bF=bF, bB=bB, temp=temp)
 
 
@@ -117,11 +117,16 @@ def boson_frequencies(temp: float, Nw: int) -> np.ndarray:
     return 2.0*np.pi*temp*np.arange(Nw) if w is None else w
 
 
+def uniform_fermion_frequencies(temp: float, n: int) -> np.ndarray:
+    """@brief The n lowest uniform fermionic Matsubara frequencies w_n = (2n+1) pi T [eV], whatever grid is active."""
+    return (2*np.arange(n)+1)*np.pi*temp
+
+
 def fermion_frequencies(temp: float, Nw: int) -> np.ndarray:
     """@brief The Nw stored fermionic frequencies w_n > 0 [eV] of the active grid: (2n+1) pi T on the uniform
     Matsubara grid, the sampling frequencies on the IR grid."""
     w = _stored('wF', temp, Nw)
-    return (2*np.arange(Nw)+1)*np.pi*temp if w is None else w
+    return uniform_fermion_frequencies(temp, Nw) if w is None else w
 
 
 def ir_fit_fermion(g: dict, x_pos: np.ndarray, x_neg: np.ndarray | None = None) -> np.ndarray:

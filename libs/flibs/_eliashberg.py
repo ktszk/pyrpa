@@ -1,6 +1,7 @@
 import ctypes
 import numpy as np
 import libs.flibs._loader as _loader
+from libs.flibs._green import _overlap_arg
 
 # Public API of this submodule; keeps `from ._x import *` in __init__.py from
 # re-exporting numpy, scipy, ctypes and the sibling packages imported above.
@@ -125,6 +126,7 @@ _loader._lib.eliashberg.argtypes = [
     ctypes.POINTER(ctypes.c_int64),                                         # sub_sigma
     ctypes.POINTER(ctypes.c_double),                                        # pp (linear mixing rate)
     ctypes.POINTER(ctypes.c_int64),                                         # status (out)
+    _loader.c_array(np.complex128), ctypes.POINTER(ctypes.c_bool)           # overlap, nonorth
 ]
 _loader._lib.eliashberg.restype = None
 _loader._lib.conv_delta_orb_to_band.argtypes = [
@@ -209,7 +211,8 @@ def linearized_eliashberg(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init
                           kmap: np.ndarray, invk: np.ndarray, Nx: int, Ny: int, Nz: int,
                           temp: float, gap_sym: int, eps: float = 1.0e-5, itemax: int = 300,
                           arnoldi_m: int = 10, iperm: np.ndarray | None = None,
-                          vph: np.ndarray | None = None) -> tuple[np.ndarray, float]:
+                          vph: np.ndarray | None = None,
+                          overlap: np.ndarray | None = None) -> tuple[np.ndarray, float]:
     """
     @brief Solve the linearized Eliashberg gap equation (without SOC) to obtain the superconducting gap function.
     @param        chi: Irreducible susceptibility [Nchi, Nchi, Nw, Nk] complex128
@@ -234,6 +237,7 @@ def linearized_eliashberg(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init
     @param        vph: k-independent term added to the pairing interaction V_Delta(q, iv_j)
                        [Nchi, Nchi, Nw] float64 (j = 0: v = 0), in the channel gap_sym selects;
                        None = none.  plibs.epa_pairing_vertex builds the phonon one.
+    @param    overlap: S(k) [Nk, Norb, Norb], or None for an orthogonal basis
     @return    delta: Linearized gap function [Norb, Norb, Nw, Nkall] complex128
     @return   lambda_eliash: Physical (largest) Eliashberg eigenvalue (>1 means T<Tc)
     """
@@ -247,6 +251,9 @@ def linearized_eliashberg(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, init
     vph = np.zeros((Nchi, Nchi, Nw)) if vph is None else np.ascontiguousarray(vph, dtype=np.float64)
     if vph.shape != (Nchi, Nchi, Nw):
         raise ValueError(f'vph has shape {vph.shape}, expected {(Nchi, Nchi, Nw)}')
+    if overlap is not None:
+        ovlk, _ = _overlap_arg(np.empty((Nk, Norb, Norb), dtype=np.complex128), overlap)
+        uni = np.ascontiguousarray(uni @ ovlk)
     _loader._lib.lin_eliash(delta, chi, Gk, uni, init_delta, Smat, Cmat, vph, olist, plist, iprm, kmap, invk,
                             _loader.dbl(temp), _loader.dbl(eps), _loader.i64(Nkall),
                             _loader.i64(Nk), _loader.i64(Nw), _loader.i64(Nchi),
@@ -261,7 +268,8 @@ def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, 
                               slist: np.ndarray, olist: np.ndarray, kmap: np.ndarray, invk: np.ndarray,
                               invs: np.ndarray, invschi: np.ndarray, Nx: int, Ny: int, Nz: int, temp: float,
                               gap_sym: int, eps: float = 1.0e-4, itemax: int = 300,
-                              arnoldi_m: int = 10) -> tuple[np.ndarray, float]:
+                              arnoldi_m: int = 10,
+                              overlap: np.ndarray | None = None) -> tuple[np.ndarray, float]:
     """
     @brief Solve the linearized Eliashberg gap equation with spin-orbit coupling (SOC).
     @param        chi: Irreducible susceptibility [Nchi, Nchi, Nw, Nk] complex128
@@ -284,6 +292,7 @@ def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, 
     @param        eps: Convergence tolerance
     @param     itemax: Maximum number of iterations
     @param  arnoldi_m: Krylov subspace dimension (0 = power method, >0 = Arnoldi)
+    @param    overlap: S(k) [Nk, Norb, Norb], or None for an orthogonal basis
     @return     delta: Linearized gap function [Norb, Norb, Nw, Nkall] complex128
     @return   lambda_eliash: Physical (largest) Eliashberg eigenvalue (>1 means T<Tc)
     """
@@ -291,6 +300,9 @@ def linearized_eliashberg_soc(chi: np.ndarray, Gk: np.ndarray, uni: np.ndarray, 
     Nkall, Nk, Nw = len(kmap), len(Gk[0, 0, 0]), len(Gk[0, 0])
     delta = np.zeros((Norb, Norb, Nw, Nkall), dtype=np.complex128)
     lambda_out = ctypes.c_double(0.0)
+    if overlap is not None:
+        ovlk, _ = _overlap_arg(np.empty((Nk, Norb, Norb), dtype=np.complex128), overlap)
+        uni = np.ascontiguousarray(uni @ ovlk)
     _loader._lib.lin_eliash_soc(delta, chi, Gk, uni, init_delta, Vmat, sgnsig, sgnsig2, plist, olist,
                                 slist, kmap, invk, invs, invschi, _loader.dbl(temp),
                                 _loader.dbl(eps), _loader.i64(Nkall), _loader.i64(Nk),
@@ -388,7 +400,8 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
                          itemax: int = 100, m_diis: int = 5,
                          gap_min: float = 1.0e-2,
                          sw_amp_newton: bool = True, iperm: np.ndarray | None = None,
-                         sub_sigma: int = 1, pp: float = 0.3) -> tuple[np.ndarray, np.ndarray]:
+                         sub_sigma: int = 1, pp: float = 0.3,
+                         overlap: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
     """
     @brief Solve the non-linear FLEX-Eliashberg self-consistency loop (no SOC).
     Iteratively updates the gap Δ, normal/anomalous Green's functions G/F,
@@ -447,6 +460,7 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
                           solution the map has a large negative eigenvalue mu along the gap amplitude and
                           linear mixing converges only for pp < 2/(1-mu); if the residual decreases and then
                           grows again with an oscillating gap amplitude, lower pp (0.1-0.2).
+    @param       overlap: S(k) [Nk, Norb, Norb], or None for an orthogonal basis
     @raise RuntimeError: the iteration diverged (non-finite Delta); nothing it holds is a solution.
                          Reaching itemax without convergence only prints a warning.
     @return      delta: Converged gap function [Norb, Norb, Nw, Nk] complex128
@@ -464,13 +478,14 @@ def nonlinear_eliashberg(delta_init: np.ndarray, Gk: np.ndarray, hamk: np.ndarra
     iprm = np.arange(Norb, dtype=np.int64) if iperm is None else np.asarray(iperm, dtype=np.int64)
     iprm = iprm + 1   # Fortran is 1-based
     status = ctypes.c_int64()
+    ovlk, nonorth = _overlap_arg(hamk, overlap)
     _loader._lib.eliashberg(delta, sigmak, Gk, hamk, Smat, Cmat, olist, plist, iprm, kmap, invk, _loader.dbl(mu),
                             _loader.dbl(temp), _loader.dbl(eps), _loader.i64(Nkall), _loader.i64(Nk), _loader.i64(Nw),
                             _loader.i64(Nchi), _loader.i64(Norb), _loader.i64(Nx), _loader.i64(Ny), _loader.i64(Nz),
                             _loader.i64(itemax), _loader.i64(gap_sym), ctypes.byref(ctypes.c_bool(sw_sigma)),
                             ctypes.byref(ctypes.c_bool(sw_Vconst)), _loader.i64(m_diis), _loader.dbl(gap_min),
                             ctypes.byref(ctypes.c_bool(sw_amp_newton)), _loader.i64(sub_sigma), _loader.dbl(pp),
-                            ctypes.byref(status))
+                            ctypes.byref(status), ovlk, ctypes.byref(ctypes.c_bool(nonorth)))
     if status.value == 3:
         raise RuntimeError('nonlinear_eliashberg diverged (non-finite Delta); try a smaller pp (0.1-0.2)')
     if status.value == 2:

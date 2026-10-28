@@ -14,7 +14,7 @@ _loader._lib.fg_set_ir.argtypes = [
     _loader.f_array(np.complex128), _loader.f_array(np.complex128),   # fwdF (Ntau,2Nw), bwdF (2Nw,Ntau)
     _loader.f_array(np.complex128), _loader.f_array(np.complex128),   # fwdB, bwdB
     _loader.c_array(np.int64),                                        # rev [Ntau] (1-based)
-    _loader.c_array(np.complex128), _loader.c_array(np.complex128),   # stat, dens [2Nw]
+    _loader.c_array(np.complex128), _loader.c_array(np.complex128),   # static_wt, dens [2Nw]
 ]
 _loader._lib.fg_set_ir.restype = None
 _loader._lib.fg_set_matsubara.argtypes = []
@@ -33,7 +33,7 @@ def fg_set_ir(g: dict) -> None:
                            np.ascontiguousarray(g['wF']), np.ascontiguousarray(g['wB']),
                            g['fwdF'], g['bwdF'], g['fwdB'], g['bwdB'],
                            np.ascontiguousarray(g['rev'], dtype=np.int64),
-                           np.ascontiguousarray(g['stat']), np.ascontiguousarray(g['dens']))
+                           np.ascontiguousarray(g['static_wt']), np.ascontiguousarray(g['dens']))
     _ir_on = True
 
 

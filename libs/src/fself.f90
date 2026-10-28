@@ -48,7 +48,7 @@ subroutine gen_green0(Gk,eig,uni,mu,temp,Nk,Nw,Norb)
      do m=1,Norb
         !$omp do private(iw,i,j,n)
         wloop: do j=1,Nw !ien=pi(2l+1)/beta l=0,1,... beta=(kBT)^-1
-           iw=cmplx(mu,fg_omega(FG_FERMION,j,temp),kind=c_double) !iω_j = μ + i(2j-1)πT (j=1: ω_0=πT)
+           iw=cmplx(mu,fg_omega(FG_FERMION,j,temp),kind=c_double) !iω_j = μ + i·(stored frequency j; uniform: (2j-1)πT)
            band_loop: do n=1,Norb
               kloop: do i=1,Nk
                  Gk(i,j,m,l)=Gk(i,j,m,l)+uni(m,n,i)*conjg(uni(l,n,i))/(iw-eig(n,i))
@@ -104,6 +104,31 @@ subroutine gen_green_inv(Gk,self,hamk,mu,temp,Nk,Nw,Norb)
   !$omp end parallel
 end subroutine gen_green_inv
 
+subroutine gen_green_inv_overlap(Gk,self,hamk,ovlk,mu,temp,Nk,Nw,Norb) bind(C,name='gen_green_inv_overlap_')
+  use freq_grid, only:fg_omega,FG_FERMION
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double
+  implicit none
+  integer(c_int64_t),intent(in):: Nk,Nw,Norb
+  real(c_double),intent(in):: mu,temp
+  complex(c_double),intent(in):: hamk(Norb,Norb,Nk),ovlk(Norb,Norb,Nk)
+  complex(c_double),intent(in):: self(Nk,Nw,Norb,Norb)
+  complex(c_double),intent(out):: Gk(Nk,Nw,Norb,Norb)
+  integer(c_int64_t):: i,j,l,m
+  complex(c_double):: z
+  !$omp parallel do private(z,i,l,m)
+  do j=1,Nw
+     z=cmplx(mu,fg_omega(FG_FERMION,j,temp),kind=c_double)
+     do i=1,Nk
+        do l=1,Norb
+           do m=1,Norb
+              Gk(i,j,m,l)=z*ovlk(m,l,i)-hamk(m,l,i)-self(i,j,m,l)
+           end do
+        end do
+     end do
+  end do
+  !$omp end parallel do
+end subroutine gen_green_inv_overlap
+
 subroutine gen_green_inv_from_eig(Gk,self,uni,eig,mu,temp,Nk,Nw,Norb) bind(C)
   !> This function obtains inverse of green function G^-1 form energy and unitary matrix
   !!@param  Gk,out: inverse of green function
@@ -137,7 +162,7 @@ subroutine gen_green_inv_from_eig(Gk,self,uni,eig,mu,temp,Nk,Nw,Norb) bind(C)
      do m=1,norb
         !$omp do private(iw,i,n)
         wloop: do j=1,Nw
-           iw=cmplx(mu,fg_omega(FG_FERMION,j,temp),kind=c_double) !(2(j-1)+1)pi/beta
+           iw=cmplx(mu,fg_omega(FG_FERMION,j,temp),kind=c_double) !stored frequency j (uniform: (2j-1)πT)
            kloop: do i=1,Nk
               band_loop: do n=1,norb
                  Gk(i,j,m,l)=Gk(i,j,m,l)+uni(m,n,i)*conjg(uni(l,n,i))*(iw-eig(n,i))
@@ -213,7 +238,7 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
 
   integer(c_int32_t) i,j,k,n,l,m
   integer(c_int64_t) jp,jm,j0
-  complex(c_double) vinf,st
+  complex(c_double) vinf,static_sum
   real(c_double) weight
   complex(c_double),allocatable,dimension(:,:,:,:):: tmpVsigma,tmp,tmpgk
 
@@ -229,7 +254,7 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
      do m=1,Nchi
         !$omp parallel
         !$omp do
-        do i=1,Nkall !j=1>iw=0, j=Nw>iw=inf
+        do i=1,Nkall !v=0 (slot j0); the v->inf limit goes through fg_set_static
            if(invk(2,i)==0)then
               tmpVsigma(kmap(1,i),kmap(2,i),kmap(3,i),j0)=Vsigma(invk(1,i),1,m,l) !Vsigma(k,iw)
            else if(invk(2,i)==1)then
@@ -271,7 +296,7 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
         vinf=cmplx(1.5d0*Smat(m,l)-0.5d0*Cmat(m,l),0.0d0,kind=c_double)   ! bare vertex (v -> infinity)
         call fg_set_static(tmpVsigma,vinf,Nx,Ny,Nz,Nw)
         call fg_forward(FG_BOSON,tmpVsigma,tmp,Nx,Ny,Nz,Nw)
-        st=fg_static_term(tmpgk,Nx,Ny,Nz,Nw)   ! 0 on the uniform grid
+        static_sum=fg_static_term(tmpgk,Nx,Ny,Nz,Nw)   ! 0 on the uniform grid
         call fg_forward(FG_FERMION,tmpgk,tmp,Nx,Ny,Nz,Nw)
         !$omp parallel
         !$omp do private(i,j,k,n)
@@ -302,7 +327,7 @@ subroutine calc_sigma(sigmak,Gk,Vsigma,Smat,Cmat,kmap,invk,olist,temp,Nkall,Nk,N
         end do
         !$omp end parallel do
         if(.not.fg_uniform())then   ! IR: the bare vertex was kept out of the transform
-           sigmak(:,:,olist(m,1),olist(l,1))=sigmak(:,:,olist(m,1),olist(l,1))+vinf*st
+           sigmak(:,:,olist(m,1),olist(l,1))=sigmak(:,:,olist(m,1),olist(l,1))+vinf*static_sum
         end if
      end do
   end do
@@ -316,7 +341,7 @@ end subroutine calc_sigma
 
 subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill,temp,&
      scf_loop,pp,eps,Nkall,Nk,Nw,Norb,Nchi,Nx,Ny,Nz,sub_sigma,sw_out,sw_in,m_diis,sw_rescale,&
-     sw_tail,sigma_scale) bind(C)
+     sw_tail,sigma_scale,ovlk,nonorth) bind(C)
   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
   use flex_scf, only:solve_mu,diis_state,diis_init,diis_free,mix_sigma
   use mkself_rn
@@ -327,13 +352,14 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
   logical(1),intent(in):: sw_in,sw_out,sw_rescale
   logical(1),intent(in):: sw_tail  !< tail-corrected chi0 (chi0_tail_impl) instead of the sharp-cutoff convolution
+  logical(1),intent(in):: nonorth
   integer(c_int64_t),intent(in):: sub_sigma
   real(c_double),intent(in):: temp,eps,pp,rfill,mu_init
   real(c_double),intent(in):: sigma_scale  !< multiply the sigma seed loaded via sw_in (U-annealing: ~(U_new/U_old)^2)
   real(c_double),intent(in),target,dimension(Norb,Nk):: eig
   real(c_double),intent(in),dimension(Nchi,Nchi):: Smat,Cmat
   real(c_double),intent(out):: mu
-  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni,hamk
+  complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni,hamk,ovlk
   complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: sigmak
 
   integer(c_int32_t) scf_i
@@ -386,7 +412,7 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
      sigmak0(:,:,:,:)=sigmak(:,:,:,:)
      !$omp end workshare
      !$omp end parallel
-     call gen_green_inv(Gk,sigmak,hamk,mu,temp,Nk,Nw,Norb)
+     call make_green_inverse()
      call getinv(Gk,Nk,Nw,Norb)
   else
      mu_old=mu*1.2
@@ -481,7 +507,7 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
         exit
      end if
      call renew_mu()
-     call gen_green_inv(Gk,sigmak,hamk,mu,temp,Nk,Nw,Norb)
+     call make_green_inverse()
      call getinv(Gk,Nk,Nw,Norb)
      !$omp parallel
      !$omp workshare
@@ -508,6 +534,14 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   nullify(rn_eig,rn_kmult,rn_eig_gkinv)
   deallocate(eig_gkinv)
 contains
+  subroutine make_green_inverse()
+    if(nonorth)then
+       call gen_green_inv_overlap(Gk,sigmak,hamk,ovlk,mu,temp,Nk,Nw,Norb)
+    else
+       call gen_green_inv(Gk,sigmak,hamk,mu,temp,Nk,Nw,Norb)
+    end if
+  end subroutine make_green_inverse
+
   subroutine compare_sigma()
     !> DIIS update of sigmak plus the convergence measure esterr (shared, see module flex_scf)
     call mix_sigma(diis,sigmak,sigmak0,esterr,pp,eps_sgm,invk,kmap,Nk,Nkall,Nw,Norb)
@@ -522,17 +556,24 @@ contains
   subroutine precompute_eig_gkinv()
     use constant
     use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
-    integer(c_int32_t) i,j,info_eig
+    integer(c_int32_t) i,j,n,info_eig
     complex(c_double),dimension(Norb,Norb):: A_tmp
     complex(c_double),dimension(Norb):: eig_tmp
     complex(c_double),dimension(Norb,Norb):: vl_dum,vr_dum
     real(c_double),dimension(2*Norb):: rwork_eig
     complex(c_double),dimension(2*Norb):: work_eig
 
-    !$omp parallel do private(A_tmp,eig_tmp,vl_dum,vr_dum,rwork_eig,work_eig,info_eig)
+    !$omp parallel do private(A_tmp,eig_tmp,vl_dum,vr_dum,rwork_eig,work_eig,info_eig,n)
     do j=1,Nw
        do i=1,Nk
-          A_tmp(:,:)=hamk(:,:,i)+sigmak(i,j,:,:)
+          if(nonorth)then
+             A_tmp=matmul(conjg(transpose(uni(:,:,i))),matmul(sigmak(i,j,:,:),uni(:,:,i)))
+             do n=1,Norb
+                A_tmp(n,n)=A_tmp(n,n)+eig(n,i)
+             end do
+          else
+             A_tmp(:,:)=hamk(:,:,i)+sigmak(i,j,:,:)
+          end if
           call zgeev('N','N',Norb,A_tmp,Norb,eig_tmp,vl_dum,Norb,vr_dum,Norb, &
                      work_eig,2*Norb,rwork_eig,info_eig)
           if(info_eig/=0)then

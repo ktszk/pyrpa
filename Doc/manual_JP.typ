@@ -123,7 +123,7 @@ cmake -S libs -B build -DFC_COMPILER=gfortran -DSL=MKL -DARCH_LIST="znver3;znver
   [1], [`{fname}.input` ファイル（独自形式）],
   [2], [`{fname}_hr.dat` ファイル（Wannier90のデフォルトホッピングファイル）。*第一原理計算との連携では通常これを使用*],
   [3], [MLO（最局在ワニエ）基底の非直交基底ホッピング形式],
-  [4], [`{fname}/` ディレクトリ内の `HamRsMLO`, `HamiltonianPMTInfo`（ecalj `job_mlo` のバイナリ出力）。ftype=3 と同じく非直交 MLO 基底で, 重なり積分 $S(R)$ も同時に読み込みます],
+  [4], [`{fname}/` ディレクトリ内の `HamRsMLO`, `HamiltonianPMTInfo`（ecalj `job_mlo` のバイナリ出力）。ftype=3 と同じく非直交 MLO 基底で, 重なり積分 $S(R)$ も同時に読み込みます。ftype=3,4 とも, 読み込み時に各軌道をノルム 1 に規格化します（$D = "diag" S(R=0)$ として $H(R), S(R) -> D^(-1\/2) (dot) D^(-1\/2)$。バンドは不変; ecalj の MLO は規格化されておらず, Cu では $S_(a a)(0)$ が s で 0.016, d で 0.565）],
   [その他], [`Hopping.dat` ファイル（ecaljのホッピングファイル）],
 )
 
@@ -320,6 +320,7 @@ option=12 と同じ SC 状態の枠組みで, `at_point` で指定した $bold(q
 
 FLEX アルゴリズムを自己無撞着に解き, 電子の自己エネルギー $Sigma(bold(k), i omega_n)$ を松原周波数空間で計算します。得られた自己エネルギーは `sigma.bin` および `self_en.npz` に保存されます。
 
+- 非直交 MLO 基底（`ftype=3,4`）では $G^(-1) = (i omega + mu) S - H - Sigma$ を用い, 粒子数は $"tr"(S G)$ で評価します。`U`, `J` は規格化した MLO 軌道（ftype=3,4 の読み込み時に $S_(a a)(R=0) = 1$ とする）上の局所相互作用として扱い, 直交化した軌道上の相互作用とはみなしません。規格化しないと U は実効的に $U \/ S_(a a)(0)^2$ 程度で効きます（Cu の s 軌道で約 4000 倍）。線形・非線形 Eliashberg および自己エネルギー付きスペクトルにも同じ規約を使います。自己エネルギーファイルには重なり行列を保存しないため, 読み込み時には計算時と同じ基底・模型を指定してください。`tau_mode='flex'` の輸送計算は引き続き直交基底専用です。
 - `sw_out_self=True`: 自己エネルギーをファイルへ出力
 - `sw_in_self=True`: 前回の自己エネルギー (`sigma.bin`) を初期値として読み込む
 - `sigma_in_scale`: `sw_in_self=True` で読み込んだ $Sigma$ seed に掛ける係数（既定 1.0）。$U$ アニーリング（小さい $U$ で収束させた `sigma.bin` を seed にして $U$ を段階的に上げる継続法）では, 弱結合の $Sigma prop U^2$ に基づく $(U_"new"\/U_"old")^2$ が目安です。温度アニーリングと異なり松原グリッドが変わらないため, seed の補間が不要という利点があります（`sigma.bin` にはヘッダが無いので `Nw` は前回と同一にしてください）

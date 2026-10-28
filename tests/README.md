@@ -24,6 +24,7 @@ python tests/run_all.py --runslow       # slow マーカー付きも含めて全
 | ファイル | 対象 |
 |---|---|
 | `test_rpa_flex.py` | RPA / FLEX / Eliashberg (χ0, 頂点, tail補正, mkself, mkself_soc と二重計上相殺 `sw_dcsub`) |
+| `test_nonorth_flex.py` | 非直交基底の Green 関数・FLEX・Eliashberg（SOC、IR、自己エネルギー再読み込み） |
 | `test_eliash_nosym.py` | 対称性なし線形化Eliashberg (Zeeman・FFLO), SOC版との整合 (裸の項 -V/2, triplet初期関数・パリティ射影, バンド基底出力), 多軌道tripletの厳密カーネル照合, SOC下のブランチ追跡 |
 | `test_eilenberger.py` | 準古典 Eilenberger (一様系・表面・渦・渦格子) |
 | `test_transport.py` | 輸送係数 (Boltzmann / Kubo, Wiedemann-Franz, k 点重み) |

@@ -10,7 +10,7 @@ import scipy.linalg as sclin
 # Public API of this submodule; keeps `from ._x import *` in __init__.py from
 # re-exporting numpy, scipy, ctypes and the sibling packages imported above.
 __all__ = [
-    'RY_TO_EV', 'import_hoppings', 'import_MLO_hoppings', 'read_HamRsMLO', 'get_bvec', 'gen_rlist',
+    'RY_TO_EV', 'import_hoppings', 'import_MLO_hoppings', 'read_HamRsMLO', 'normalize_mlo_orbitals', 'get_bvec', 'gen_rlist',
     'gen_klist_with_kmap', 'gen_klist', 'mk_klist', 'mk_qlist', 'get_ptv', 'get_symm_line',
     'bz_faces', 'bz_face_planes', 'fold_to_bz'
 ]
@@ -85,10 +85,33 @@ def import_hoppings(fname: str, ftype: int) -> tuple[np.ndarray, np.ndarray, int
     return (rvec, ham_r, no, nr)
 
 
-def import_MLO_hoppings(name: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
+def normalize_mlo_orbitals(rvec: np.ndarray, ham_r: np.ndarray,
+                           S_r: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """
+    @brief Scale every MLO orbital to unit norm: H(R) -> D^-1/2 H(R) D^-1/2, S(R) -> D^-1/2 S(R) D^-1/2 with
+           D = diag S(R=0).  The bands are unchanged (the generalized eigenproblem H u = e S u is invariant
+           under a diagonal rescaling of the basis), but every quantity in the orbital basis -- the local
+           U, J, orbital weights, G, Sigma, the gap -- then refers to normalized orbitals, as for an orthogonal
+           Wannier basis.  ecalj's MLOs are not normalized (e.g. Cu: S_aa(0) = 0.016 for s, 0.565 for d), and a
+           U on the raw orbitals acts with a strength ~ 1/S_aa(0)^2 instead of U.
+    @return ham_r, S_r: the rescaled arrays (new arrays; S_aa(R=0) = 1)
+    """
+    i0 = np.flatnonzero((np.abs(np.asarray(rvec)) < 1.0e-9).all(axis=1))
+    if len(i0) != 1:
+        raise ValueError('normalize_mlo_orbitals: R = 0 not found (once) among the R-vectors')
+    d = S_r[i0[0]].diagonal().real
+    if (d <= 0).any():
+        raise ValueError(f'normalize_mlo_orbitals: non-positive orbital norm S_aa(R=0) = {d.min():.3e}')
+    w = 1.0/np.sqrt(d)
+    scale = w[:, None]*w[None, :]
+    return ham_r*scale, S_r*scale
+
+
+def import_MLO_hoppings(name: str, normalize: bool = True) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
     """
     @brief This function imports MLO hopping parameters from files
     @param name: File name
+    @param normalize: scale the orbitals to unit norm (normalize_mlo_orbitals); False keeps the raw MLOs
     @return  rvec: the array of r-vector, size:(nr,3)
     @return ham_r: the array of hopping integrals, size:(nr,no,no)
     @return   S_r: the array of overlap integrals, size:(nr,no,no)
@@ -104,14 +127,17 @@ def import_MLO_hoppings(name: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, 
     rvec = np.array([tmp1[i][2:5] for i in range(nr)])
     ham_r = tmp.reshape((no*no, nr)).T.reshape((nr, no, no)).round(6).copy()*RY_TO_EV
     S_r = tmpS.reshape((no*no, nr)).T.reshape((nr, no, no)).round(6).copy()
+    if normalize:
+        ham_r, S_r = normalize_mlo_orbitals(rvec, ham_r, S_r)
     return rvec, ham_r, S_r, no, nr
 
 
-def read_HamRsMLO(directory: str = '.') -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
+def read_HamRsMLO(directory: str = '.', normalize: bool = True) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
     """
     @brief Read ecalj job_mlo binary output (HamRsMLO + HamiltonianPMTInfo).
            Returns the same format as import_MLO_hoppings.
     @param directory: path containing HamRsMLO and HamiltonianPMTInfo
+    @param normalize: scale the orbitals to unit norm (normalize_mlo_orbitals); False keeps the raw MLOs
     @return  rvec: R-vectors (nr, 3) float64, in lattice-vector units
     @return ham_r: H(R) (nr, no, no) complex128, eV
     @return   S_r: S(R) (nr, no, no) complex128, dimensionless
@@ -215,6 +241,8 @@ def read_HamRsMLO(directory: str = '.') -> tuple[np.ndarray, np.ndarray, np.ndar
     ham_r *= RY_TO_EV
     # float64 like the other importers: the Fortran kernels declare rvec as double
     rvec = np.array(rvec_list, dtype=np.float64)
+    if normalize:
+        ham_r, S_r = normalize_mlo_orbitals(rvec, ham_r, S_r)
     return rvec, ham_r, S_r, no, nr
 
 

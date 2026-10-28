@@ -241,7 +241,7 @@ def output_self_wannier(sigmak: np.ndarray, mu_self: float, kmap: np.ndarray, in
         extra = dict(sigma_ir=data_out[:, :, N_cut:], iw_ir=np.asarray(ir['wF']))
         data_out = data_out[:, :, :N_cut]
     N_cut_used = data_out.shape[2]
-    iw_grid    = (2 * np.arange(N_cut_used) + 1) * np.pi * temp
+    iw_grid    = _freq_grid.uniform_fermion_frequencies(temp, N_cut_used)
     try:
         np.savez(fname, sigma=data_out, rvec=rvec_kept, iw=iw_grid, mu=mu_self, temp=temp,
                  mesh=np.array([Nx, Ny, Nz], dtype=np.int64), **extra)

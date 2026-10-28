@@ -35,7 +35,12 @@ def _prepare_kspace_state(Nx: int, Ny: int, Nz: int, ham_r: np.ndarray, S_r: np.
         'eig': eig,
         'uni': uni,
     }
-    if need_ham:
+    state['overlap_k'] = None
+    if len(S_r):
+        ham_k, state['overlap_k'] = flibs.gen_ham(klist, ham_r, rvec, Ovl_r=S_r)
+        if need_ham:
+            state['ham_k'] = ham_k
+    elif need_ham:
         state['ham_k'] = flibs.gen_ham(klist, ham_r, rvec)
     return state
 
@@ -66,19 +71,27 @@ def _load_sigma_from_file(temp: float, Nw: int) -> tuple | None:
         print("Error: 'self_en.npz' not found", flush=True)
         return None
     sigmak = npz['arr_0']
-    iw = npz['iw'] if 'iw' in npz.files else (2*np.arange(sigmak.shape[2])+1)*np.pi*float(npz['temp'] if 'temp' in
-                                                                                        npz.files else temp)
-    if sigmak.shape[2] != Nw or not np.allclose(iw, _freq_grid.fermion_frequencies(temp, Nw), rtol=1e-10):
-        print(f"Error: 'self_en.npz' holds Sigma on another frequency grid ({sigmak.shape[2]} points, "
+    if 'iw' in npz.files:
+        iw = npz['iw']
+    else:   # older file: uniform Matsubara at its own temperature (recorded or not)
+        temp_file = float(npz['temp']) if 'temp' in npz.files else temp
+        iw = _freq_grid.uniform_fermion_frequencies(temp_file, sigmak.shape[2])
+    if not _on_active_grid(iw, temp, Nw):
+        print(f"Error: 'self_en.npz' holds Sigma on another frequency grid ({len(iw)} points, "
               f"w_0..w_last = {iw[0]:.4e}..{iw[-1]:.4e} eV) than this run (Nw = {Nw}, freq_grid / temp)", flush=True)
         return None
     print("Import sigma from self_en.npz", flush=True)
     return sigmak, npz['arr_1']
 
 
-def _save_sigma(sigmak: np.ndarray, mu_self: float, temp: float) -> None:
-    """self_en.npz: Sigma on the stored frequencies of the run, which are recorded with it."""
-    np.savez('self_en', sigmak, mu_self, iw=_freq_grid.fermion_frequencies(temp, sigmak.shape[2]), temp=temp)
+def _on_active_grid(iw: np.ndarray, temp: float, Nw: int) -> bool:
+    """True when the stored frequencies iw of a file are those of this run (Nw points of the active grid at temp)."""
+    return len(iw) == Nw and np.allclose(iw, _freq_grid.fermion_frequencies(temp, Nw), rtol=1e-10)
+
+
+def _save_sigma(sigmak: np.ndarray, mu_self: float, temp: float, fname: str = 'self_en') -> None:
+    """fname.npz: Sigma on the stored frequencies of the run, which are recorded with it."""
+    np.savez(fname, sigmak, mu_self, iw=_freq_grid.fermion_frequencies(temp, sigmak.shape[2]), temp=temp)
 
 
 def _save_gap(gap: np.ndarray, temp: float) -> None:
@@ -305,9 +318,9 @@ def _prepare_green_state_normal(state: dict, olist: np.ndarray, interaction: tup
                                            state['ham_k'], state['eig'], state['uni'],
                                            mu, fill, temp, Nw, Nx, Ny, Nz, sw_out, sw_in,
                                            eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale,
-                                           sw_tail=sw_tail, sigma_scale=sigma_scale)
+                                           sw_tail=sw_tail, sigma_scale=sigma_scale, overlap=state['overlap_k'])
         print(f'chem. pot. with self= {mu_self:.4f} eV', flush=True)
-        Gk = flibs.gen_green(sigmak, state['ham_k'], mu_self, temp)
+        Gk = flibs.gen_green(sigmak, state['ham_k'], mu_self, temp, overlap=state['overlap_k'])
     else:
         sigmak = None
         mu_self = mu
@@ -333,9 +346,9 @@ def _prepare_green_state_soc(state: dict, olist: np.ndarray, slist: np.ndarray, 
                                                state['ham_k'], state['eig'], state['uni'],
                                                mu, fill, temp, Nw, Nx, Ny, Nz, sw_out, sw_in,
                                                eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale,
-                                               sigma_scale=sigma_scale)
+                                               sigma_scale=sigma_scale, overlap=state['overlap_k'])
         print(f'chem. pot. with self= {mu_self:.4f} eV', flush=True)
-        Gk = flibs.gen_green(sigmak, state['ham_k'], mu_self, temp)
+        Gk = flibs.gen_green(sigmak, state['ham_k'], mu_self, temp, overlap=state['overlap_k'])
     else:
         sigmak = None
         mu_self = mu
@@ -757,7 +770,7 @@ def gap_extrapolate_w0(gap: np.ndarray, temp: float, n_points: int = 4,
     Norb1, Norb2, Nw, Nk = gap.shape
     if Nw < n_points:
         raise ValueError(f"gap has only {Nw} Matsubara points, need >= {n_points}")
-    wn = (2*np.arange(n_points)+1)*np.pi*temp if wn is None else np.asarray(wn, dtype=np.float64)
+    wn = _freq_grid.uniform_fermion_frequencies(temp, n_points) if wn is None else np.asarray(wn, dtype=np.float64)
     wn2 = wn[:n_points]**2                                                # [n_points]
     data = np.transpose(gap[:, :, :n_points, :], (2, 0, 1, 3)).reshape(n_points, -1)  # [n_points, Norb^2*Nk]
     A = np.vander(wn2, order+1, increasing=True)                       # [n_points, order+1]
@@ -889,7 +902,7 @@ def calc_flex(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.nda
     sigmak, mu_self = flibs.mkself(Smat, Cmat, state['kmap'], state['invk'], olist, state['ham_k'], state['eig'],
                                    state['uni'], mu, fill, temp, Nw, Nx, Ny, Nz, sw_out, sw_in, eps=eps,
                                    pp=pp, m_diis=m_diis, sw_rescale=sw_rescale, sw_tail=sw_tail,
-                                   sigma_scale=sigma_scale)
+                                   sigma_scale=sigma_scale, overlap=state['overlap_k'])
     if sw_out_self:
         _save_sigma(sigmak, mu_self, temp)
         _wannier_io.output_self_wannier(sigmak, mu_self, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
@@ -938,7 +951,7 @@ def calc_flex_soc(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np
     sigmak, mu_self = flibs.mkself_soc(Vmat, state['kmap'], state['invk'], invs, olist, slist, state['ham_k'],
                                        state['eig'], state['uni'], mu, fill, temp, Nw, Nx, Ny, Nz, sw_out,
                                        sw_in, eps=eps, pp=pp, m_diis=m_diis, sw_rescale=sw_rescale,
-                                       sigma_scale=sigma_scale)
+                                       sigma_scale=sigma_scale, overlap=state['overlap_k'])
     if sw_out_self:
         _save_sigma(sigmak, mu_self, temp)
         _wannier_io.output_self_wannier(sigmak, mu_self, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp,
@@ -1028,7 +1041,7 @@ def calc_lin_eliashberg_eq(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray
                                                     green_state['mu_self'], temp, Nw, gap_sym, epa_pair_scale)
     gap, lambda_eliash = flibs.linearized_eliashberg(chi, Gk, state['uni'], init_delta, Smat, Cmat, chiolist, plist,
                                                      state['kmap'], state['invk'], Nx, Ny, Nz, temp, gap_sym,
-                                                     iperm=iperm, vph=vph)
+                                                     iperm=iperm, vph=vph, overlap=state['overlap_k'])
     print(f'Stoner factor = {stoner:.6f}, lambda_eliash = {lambda_eliash:.6f}', flush=True)
     if sw_out_self:
         _save_gap(gap, temp)
@@ -1122,7 +1135,8 @@ def calc_lin_eliash_soc(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S
     init_delta = _response.get_initial_gap(state['klist'], len(slist), gap_sym)
     gap, lambda_eliash = flibs.linearized_eliashberg_soc(chi, Gk, state['uni'], init_delta, Vmat, sgnsig, sgnsig2,
                                                          plist, slist, chiolist, state['kmap'], state['invk'],
-                                                         invs, invschi, Nx, Ny, Nz, temp, gap_sym)
+                                                         invs, invschi, Nx, Ny, Nz, temp, gap_sym,
+                                                         overlap=state['overlap_k'])
     print(f'lambda_eliash = {lambda_eliash:.6f}', flush=True)
     if sw_out_self:
         _save_gap(gap, temp)
@@ -1215,7 +1229,7 @@ def calc_eliashberg_eq(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_
         return
     delta_init, lambda_eliash = flibs.linearized_eliashberg(chi, Gk, state['uni'], delta_init_band, Smat, Cmat,
                                                             chiolist, plist, state['kmap'], state['invk'], Nx, Ny,
-                                                            Nz, temp, gap_sym, iperm=iperm)
+                                                            Nz, temp, gap_sym, iperm=iperm, overlap=state['overlap_k'])
     print(f'Stoner factor = {stoner:.6f}, lambda_eliash = {lambda_eliash:.6f}', flush=True)
     if lambda_eliash < 1.0:
         print(f"lambda_eliash = {lambda_eliash:.6f} < 1: no superconducting instability "
@@ -1237,7 +1251,7 @@ def calc_eliashberg_eq(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_
         delta, sigmak = flibs.nonlinear_eliashberg(delta_init, Gk, state['ham_k'], Smat, Cmat, chiolist, plist,
                                                    state['kmap'], state['invk'], mu_self, temp, gap_sym, Nx, Ny, Nz,
                                                    sw_sigma=sw_self, sw_Vconst=True, eps=eps, m_diis=m_diis,
-                                                   iperm=iperm)
+                                                   iperm=iperm, overlap=state['overlap_k'])
     except RuntimeError as e:   # diverged: no gap / Sigma to write
         print(f'Error: {e}', flush=True)
         return
@@ -1245,7 +1259,7 @@ def calc_eliashberg_eq(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_
         _save_gap(delta, temp)
         _wannier_io.output_gap_wannier(delta, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp)
         if sw_self:   # without sw_self the loop keeps Sigma = 0 and there is nothing to save
-            np.savez('self_en_sc', sigmak, mu_self, iw=_freq_grid.fermion_frequencies(temp, Nw), temp=temp)
+            _save_sigma(sigmak, mu_self, temp, fname='self_en_sc')
             _wannier_io.output_self_wannier(sigmak, mu_self, state['kmap'], state['invk'], Nx, Ny, Nz, Nw, temp,
                                             fname='self_en_sc_wannier')
     output_gap_function(state['invk'], state['kmap'], delta, state['uni'], plist, gap_sym, Nx, iperm=iperm,
@@ -1253,13 +1267,21 @@ def calc_eliashberg_eq(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_
                         n_points=gap_extrap_points, order=gap_extrap_order)
 
 
-def _green_at(selfen: np.ndarray, hamk: np.ndarray, mu: float, wn: np.ndarray) -> np.ndarray:
-    """G(k, i w) = [i w + mu - H(k) - Sigma(k, i w)]^-1 at the given frequencies wn [Niw] (any set, e.g. the IR
+def _green_at(selfen: np.ndarray, hamk: np.ndarray, mu: float, wn: np.ndarray,
+              overlap: np.ndarray | None = None) -> np.ndarray:
+    """G(k, i w) = [(i w + mu) S(k) - H(k) - Sigma(k, i w)]^-1 at frequencies wn [Niw] (e.g. IR
     sampling points), in the layout of flibs.gen_green: selfen [Norb, Norb, Niw, Nk], hamk [Nk, Norb, Norb]."""
     Norb = hamk.shape[1]
-    z = (1j*np.asarray(wn)+mu)[:, None, None, None]*np.eye(Norb)                       # [Niw, 1, Norb, Norb]
+    metric = np.eye(Norb)[None, :, :] if overlap is None else overlap
+    z = (1j*np.asarray(wn)+mu)[:, None, None, None]*metric[None]                       # [Niw, Nk, Norb, Norb]
     G = np.linalg.inv(z-hamk[None]-np.transpose(selfen, (2, 3, 0, 1)))                  # [Niw, Nk, Norb, Norb]
     return np.ascontiguousarray(np.transpose(G, (2, 3, 0, 1)))
+
+
+def _metric_green(Gk: np.ndarray, overlap: np.ndarray | None) -> np.ndarray:
+    if overlap is None:
+        return Gk
+    return np.ascontiguousarray(np.einsum('kab,bcwk->acwk', overlap, Gk, optimize=True))
 
 
 def spectrum_on_path(k_sets: list, kmesh: int, bvec: np.ndarray, mu: float, ham_r: np.ndarray,
@@ -1267,7 +1289,7 @@ def spectrum_on_path(k_sets: list, kmesh: int, bvec: np.ndarray, mu: float, ham_
                      temp: float, sw_self: bool = True, sw_maxent: bool = False,
                      maxent_noise: float = 1.0e-4) -> tuple | None:
     """
-    @brief Spectral function A(k,w) = -Im Tr G(k,w+i delta) along a symmetry line.
+    @brief Spectral function A(k,w) = -Im Tr[S(k) G(k,w+i delta)] along a symmetry line.
            Bare bands by default; with sw_self the FLEX self-energy of self_en_wannier.npz is
            Fourier-interpolated onto the path and continued to the real axis (Pade, or MaxEnt
            with sw_maxent).
@@ -1305,8 +1327,11 @@ def spectrum_on_path(k_sets: list, kmesh: int, bvec: np.ndarray, mu: float, ham_
         # Sigma(k) = sum_R Sigma(R) e^{-2pi i k.R}; Sigma is not Hermitian, so gen_ham cannot be reused
         phase = np.exp(-2j*np.pi*klist.dot(rvec_s.T))                          # [Nks,Nr]
         selfen = np.ascontiguousarray(np.einsum('mnwr,kr->mnwk', sig_r, phase))  # [Norb,Norb,Niw,Nks]
-        ham_k = flibs.gen_ham(klist, ham_r, rvec)
-        Gk_mats = flibs.gen_green(selfen, ham_k, mu_self, temp_self)
+        if len(S_r):
+            ham_k, overlap = flibs.gen_ham(klist, ham_r, rvec, Ovl_r=S_r)
+        else:
+            ham_k, overlap = flibs.gen_ham(klist, ham_r, rvec), None
+        Gk_mats = _metric_green(flibs.gen_green(selfen, ham_k, mu_self, temp_self, overlap=overlap), overlap)
         if sw_maxent:
             # MaxEnt (ana_cont): regularized fit rather than exact interpolation, so it
             # does not chase Matsubara noise into spurious real-axis poles over wide
@@ -1318,7 +1343,8 @@ def spectrum_on_path(k_sets: list, kmesh: int, bvec: np.ndarray, mu: float, ham_
             # output_self_wannier); all sampling points (typically 15-30)
             iw_ir = npz['iw_ir']
             sel_ir = np.einsum('mnwr,kr->mnwk', npz['sigma_ir'], phase)
-            Gk = -flibs.pade_with_trace(_green_at(sel_ir, ham_k, mu_self, iw_ir), 1j*iw_ir, wlist+1j*delta).imag
+            G_ir = _metric_green(_green_at(sel_ir, ham_k, mu_self, iw_ir, overlap), overlap)
+            Gk = -flibs.pade_with_trace(G_ir, 1j*iw_ir, wlist+1j*delta).imag
         else:
             Niw = min(40, len(iw_grid))  # Pade becomes unstable with too many Matsubara points
             # A(k,w) = -Im Tr G(k,w+i*delta)
@@ -1349,14 +1375,18 @@ def output_Fk(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.nda
     """
     klist, kmap, invk = flibs.gen_irr_k_TRS(Nx, Ny, Nz)
     eig, uni = _bands.get_eigs(klist, ham_r, S_r, rvec)
+    overlap = None
+    if len(S_r):
+        ham_k, overlap = flibs.gen_ham(klist, ham_r, rvec, Ovl_r=S_r)
     if sw_self:
-        ham_k = flibs.gen_ham(klist, ham_r, rvec)
+        if overlap is None:
+            ham_k = flibs.gen_ham(klist, ham_r, rvec)
         loaded = _load_sigma_from_file(temp, Nw)
         if loaded is None:
             return
         sigmak, mu_self = loaded
         print(f'chem. pot. with self= {mu_self:.4f} eV', flush=True)
-        Gk = flibs.gen_green(sigmak, ham_k, mu_self, temp)
+        Gk = flibs.gen_green(sigmak, ham_k, mu_self, temp, overlap=overlap)
     else:
         Gk = flibs.gen_Green0(eig, uni, mu, temp, Nw)
     try:
@@ -1368,8 +1398,8 @@ def output_Fk(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.nda
     try:
         gap_iw = np.load('gap_iw.npy')
     except FileNotFoundError:   # older runs: uniform Matsubara
-        gap_iw = (2*np.arange(gap.shape[2])+1)*np.pi*temp
-    if gap.shape[2] != Nw or not np.allclose(gap_iw, iwlist, rtol=1e-10):
+        gap_iw = _freq_grid.uniform_fermion_frequencies(temp, gap.shape[2])
+    if gap.shape[2] != len(gap_iw) or not _on_active_grid(gap_iw, temp, Nw):
         print(f"Error: 'gap.npy' was solved on another frequency grid ({gap.shape[2]} points) than this run "
               f"(Nw = {Nw}, freq_grid / temp)", flush=True)
         return
@@ -1403,16 +1433,18 @@ def output_Fk(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.nda
     # only the kx-axis line (ky=kz=0) is written, so continue just those k-points:
     # MaxEnt costs ~0.1-0.5 s/k-point and would otherwise be wasted on the rest.
     sel = [i for i, km in enumerate(klist) if km[1] == 0.0 and km[2] == 0.0]
-    ir = _freq_grid.active_freq_grid() is not None
-    if ir and sw_maxent:
+    if _freq_grid.active_freq_grid() is None:
+        Gc, iwc, Npade = Gk, iwlist, 40
+    elif sw_maxent:
         # IR, MaxEnt: G on the lowest uniform w_n, evaluated through the basis
         Nu = 64
-        Gc, iwc = _freq_grid.to_uniform_fermion(Gk, temp, Nu), (2*np.arange(Nu)+1)*np.pi*temp
+        Gc, iwc = _freq_grid.to_uniform_fermion(Gk, temp, Nu), _freq_grid.uniform_fermion_frequencies(temp, Nu)
+        Npade = Nu
     else:
-        # Pade on IR takes the sampled G itself (all Nw points): the basis truncation in a uniform-grid
+        # IR, Pade: the sampled G itself (all Nw points); the basis truncation in a uniform-grid
         # evaluation is smooth, and Pade continues it into spurious real-axis structure
-        Gc, iwc = Gk, iwlist
-    Npade = len(iwc) if ir else 40
+        Gc, iwc, Npade = Gk, iwlist, Nw
+    Gc = _metric_green(Gc, overlap)
     try:
         with open(f'Gpade.dat', 'w') as fp:
             if sw_maxent:

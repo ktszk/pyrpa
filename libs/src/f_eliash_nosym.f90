@@ -140,7 +140,7 @@ subroutine get_chi0_nosym(chi,Gk,kmap,olist,temp,Nx,Ny,Nz,Nw,Nkall,Norb,Nchi) bi
         !$omp parallel do private(i,j,jp,jm)
         do j=1,Nw
            jp=fg_pos(FG_BOSON,j)
-           jm=merge(jp,fg_neg(FG_BOSON,j,Nw),j==1)   ! slot of -v_j (v_0 = 0 is its own partner)
+           jm=fg_neg(FG_BOSON,j,Nw)   ! slot of -v_j (v_0 = 0 is its own partner: jm = jp)
            do i=1,Nkall
               chi(i,j,m,l)=tmp(kmap(1,i),kmap(2,i),kmap(3,i),jp)*weight
               chi(i,j,l,m)=conjg(tmp(kmap(1,i),kmap(2,i),kmap(3,i),jm))*weight !chi^lm(q,iv)=chi^*ml(q,-iv)
@@ -228,8 +228,8 @@ subroutine mkdelta_nosym(newdelta,fk,Vdelta,Vmat,kmap,ikmq,olist,Nkall,Nw,Nchi,N
   logical,dimension(Nchi,Nchi):: nzv
   complex(c_double),allocatable,dimension(:,:,:,:):: tmpVdelta,tmpdel,tmp
   complex(c_double),allocatable,dimension(:,:,:,:,:,:):: fr
-  complex(c_double),dimension(Norb,Norb):: fst   ! IR: raw sum of F_ab over (k, w), for the bare vertex
-  complex(c_double) dst
+  complex(c_double),dimension(Norb,Norb):: static_sum   ! IR: raw sum of F_ab over (k, w), for the bare vertex
+  complex(c_double) static_corr
 
   ! ichi(a,b): chi index of orbital pair (a,b), 0 if the pair is not in olist
   ! nzv(m,l): block (m,l) of V_Delta contributes (relative cut far below FFT round-off)
@@ -264,7 +264,7 @@ subroutine mkdelta_nosym(newdelta,fk,Vdelta,Vmat,kmap,ikmq,olist,Nkall,Nw,Nchi,N
            end do
         end do
         !$omp end parallel do
-        fst(a,b)=fg_static_term(tmpdel,Nx,Ny,Nz,Nw)   ! 0 on the uniform grid
+        static_sum(a,b)=fg_static_term(tmpdel,Nx,Ny,Nz,Nw)   ! 0 on the uniform grid
         call fg_forward(FG_FERMION,tmpdel,tmp,Nx,Ny,Nz,Nw)
         !$omp parallel workshare
         fr(:,:,:,:,a,b)=tmpdel(:,:,:,:)
@@ -278,7 +278,7 @@ subroutine mkdelta_nosym(newdelta,fk,Vdelta,Vmat,kmap,ikmq,olist,Nkall,Nw,Nchi,N
         !$omp parallel workshare
         tmpdel(:,:,:,:)=0.0d0
         !$omp end parallel workshare
-        dst=0.0d0
+        static_corr=0.0d0
         do b=1,Norb
            l=ichi(a,b)
            if(l==0)cycle
@@ -305,7 +305,7 @@ subroutine mkdelta_nosym(newdelta,fk,Vdelta,Vmat,kmap,ikmq,olist,Nkall,Nw,Nchi,N
               !$omp end do
               !$omp end parallel
               call fg_set_static(tmpVdelta,cmplx(-0.5d0*Vmat(m,l),0.0d0,kind=c_double),Nx,Ny,Nz,Nw) !bare -V/2
-              dst=dst-0.5d0*Vmat(m,l)*fst(b,c)
+              static_corr=static_corr-0.5d0*Vmat(m,l)*static_sum(b,c)
               call fg_forward(FG_BOSON,tmpVdelta,tmp,Nx,Ny,Nz,Nw)
               !$omp parallel do private(i,j,k)
               do n=1,int(fg_nt(Nw),c_int32_t)
@@ -331,7 +331,7 @@ subroutine mkdelta_nosym(newdelta,fk,Vdelta,Vmat,kmap,ikmq,olist,Nkall,Nw,Nchi,N
            end do
         end do
         !$omp end parallel do
-        if(.not.fg_uniform())newdelta(:,:,a,d)=newdelta(:,:,a,d)+dst   ! IR: bare vertex kept out of the transform
+        if(.not.fg_uniform())newdelta(:,:,a,d)=newdelta(:,:,a,d)+static_corr   ! IR: bare vertex kept out of the transform
      end do a_loop
   end do d_loop
   call fg_plans_free()

@@ -1282,7 +1282,7 @@ module freq_grid
   !> The frequency grid of the FFT-convolution kernels (chi0, Sigma, gap equation): where a stored
   !> Matsubara frequency sits in the (k-mesh x frequency) work array, its value, and the transform
   !> of that array between (k, i w) and (R, tau).  The kernels only call these, so the grid can be
-  !> switched without touching them -- see Doc/design_freq_grid.md.
+  !> switched without touching them.
   !>
   !> Uniform Matsubara grid (default).  The work array holds 2*Nw frequencies on a circular index:
   !> fermionic w_n (n = 0..Nw-1) at n+1 and -w_n at 2*Nw-n; bosonic v_m (m = 0..Nw-1) at m+1 and -v_m
@@ -1322,7 +1322,7 @@ module freq_grid
   real(c_double),allocatable,save:: ir_wF(:),ir_wB(:)               ! stored frequency values [Nw]
   complex(c_double),allocatable,save:: ir_fwdF(:,:),ir_bwdF(:,:)    ! (Ntau,2Nw) / (2Nw,Ntau)
   complex(c_double),allocatable,save:: ir_fwdB(:,:),ir_bwdB(:,:)
-  complex(c_double),allocatable,save:: ir_stat(:),ir_dens(:)        ! fermionic weights [2Nw]
+  complex(c_double),allocatable,save:: ir_static_wt(:),ir_dens(:)   ! fermionic tau=0 weights [2Nw]: raw / physical
   integer(c_int32_t),allocatable,save:: ir_rev(:)                   ! tau_i -> beta - tau_i [Ntau]
 contains
   logical function fg_uniform()
@@ -1345,7 +1345,9 @@ contains
     integer(c_int32_t),intent(in):: stat
     integer(c_int64_t),intent(in):: j
     integer(c_int64_t) p
-    p=j                            ! +w_{j-1} / +v_{j-1} (stat: same slot for both)
+    p=j                            ! +w_{j-1} / +v_{j-1}
+    ! stat is unused: the +w slots coincide for both statistics.  The dead branch only references it
+    ! to silence -Wunused-dummy-argument (the interface is kept symmetric with fg_neg).
     if(.false.)p=p+stat
   end function fg_pos_i64
 
@@ -1457,7 +1459,7 @@ contains
     st=(0.0d0,0.0d0)
     if(.not.ir_on)return
     do p=1,2*Nw
-       st=st+ir_stat(p)*sum(work(:,p))
+       st=st+ir_static_wt(p)*sum(work(:,p))
     end do
   end function fg_static_term
 
@@ -1502,34 +1504,41 @@ contains
     integer(c_int64_t),intent(in):: Nx,Ny,Nz,Nw
     complex(c_double),intent(inout):: work(Nx*Ny*Nz,fg_nt(Nw)),tmp(Nx*Ny*Nz,fg_nt(Nw))
     integer(c_int64_t) nk,n2,nt,nf
-    integer(c_int32_t) i32nk,i32n2,i32tau
     nk=Nx*Ny*Nz; n2=2*Nw; nt=fg_nt(Nw)
     if(Nw/=ir_Nw)then
        print'(A,2I8)','ERROR(freq_grid): Nw of the call and of the IR grid differ:',Nw,ir_Nw
        stop
     end if
     nf=merge(n2,n2-1,stat==FG_FERMION)            ! used frequency slots
-    i32nk=int(nk,c_int32_t); i32n2=int(n2,c_int32_t); i32tau=int(ir_Ntau,c_int32_t)
     if(fwd)then
        work(:,nf+1:nt)=(0.0d0,0.0d0)
        call fft3d_batch(work,tmp,Nx,Ny,Nz,n2,.true.)
        if(stat==FG_FERMION)then
-          call zgemm('N','T',i32nk,i32tau,i32n2,(1.0d0,0.0d0),work,i32nk,ir_fwdF,i32tau,(0.0d0,0.0d0),tmp,i32nk)
+          call freq_to_tau(ir_fwdF)
        else
-          call zgemm('N','T',i32nk,i32tau,i32n2,(1.0d0,0.0d0),work,i32nk,ir_fwdB,i32tau,(0.0d0,0.0d0),tmp,i32nk)
+          call freq_to_tau(ir_fwdB)
        end if
        work(:,1:ir_Ntau)=tmp(:,1:ir_Ntau)
        if(nt>ir_Ntau)work(:,ir_Ntau+1:nt)=(0.0d0,0.0d0)
     else
        if(stat==FG_FERMION)then
-          call zgemm('N','T',i32nk,i32n2,i32tau,(1.0d0,0.0d0),work,i32nk,ir_bwdF,i32n2,(0.0d0,0.0d0),tmp,i32nk)
+          call tau_to_freq(ir_bwdF)
        else
-          call zgemm('N','T',i32nk,i32n2,i32tau,(1.0d0,0.0d0),work,i32nk,ir_bwdB,i32n2,(0.0d0,0.0d0),tmp,i32nk)
+          call tau_to_freq(ir_bwdB)
        end if
        work(:,1:n2)=tmp(:,1:n2)
        if(nt>n2)work(:,n2+1:nt)=(0.0d0,0.0d0)
        call fft3d_batch(work,tmp,Nx,Ny,Nz,n2,.false.)
     end if
+  contains
+    subroutine freq_to_tau(mat)   ! tmp(:,1:Ntau) = work(:,1:2Nw) . mat^T,  mat (Ntau,2Nw)
+      complex(c_double),intent(in):: mat(:,:)
+      call zgemm('N','T',nk,ir_Ntau,n2,(1.0d0,0.0d0),work,nk,mat,ir_Ntau,(0.0d0,0.0d0),tmp,nk)
+    end subroutine freq_to_tau
+    subroutine tau_to_freq(mat)   ! tmp(:,1:2Nw) = work(:,1:Ntau) . mat^T,  mat (2Nw,Ntau)
+      complex(c_double),intent(in):: mat(:,:)
+      call zgemm('N','T',nk,n2,ir_Ntau,(1.0d0,0.0d0),work,nk,mat,n2,(0.0d0,0.0d0),tmp,nk)
+    end subroutine tau_to_freq
   end subroutine ir_transform
 
   subroutine fg_reverse(ii,ij,ik,iw,Nx,Ny,Nz,Nw,sg)
@@ -1581,18 +1590,18 @@ contains
     ir_on=.false.
   end subroutine fg_set_matsubara
 
-  subroutine fg_set_ir(Nw,Ntau,wF,wB,fwdF,bwdF,fwdB,bwdB,rev,stat,dens) bind(C)
+  subroutine fg_set_ir(Nw,Ntau,wF,wB,fwdF,bwdF,fwdB,bwdB,rev,static_wt,dens) bind(C)
     !> switch to the IR grid; the arrays are built by plibs.ir_grid (Fortran index order)
     integer(c_int64_t),intent(in):: Nw,Ntau
     real(c_double),intent(in):: wF(Nw),wB(Nw)
     complex(c_double),intent(in):: fwdF(Ntau,2*Nw),bwdF(2*Nw,Ntau),fwdB(Ntau,2*Nw),bwdB(2*Nw,Ntau)
     integer(c_int64_t),intent(in):: rev(Ntau)
-    complex(c_double),intent(in):: stat(2*Nw),dens(2*Nw)
-    if(allocated(ir_wF))deallocate(ir_wF,ir_wB,ir_fwdF,ir_bwdF,ir_fwdB,ir_bwdB,ir_stat,ir_dens,ir_rev)
+    complex(c_double),intent(in):: static_wt(2*Nw),dens(2*Nw)
+    if(allocated(ir_wF))deallocate(ir_wF,ir_wB,ir_fwdF,ir_bwdF,ir_fwdB,ir_bwdB,ir_static_wt,ir_dens,ir_rev)
     allocate(ir_wF(Nw),ir_wB(Nw),ir_fwdF(Ntau,2*Nw),ir_bwdF(2*Nw,Ntau),ir_fwdB(Ntau,2*Nw),ir_bwdB(2*Nw,Ntau),&
-         ir_stat(2*Nw),ir_dens(2*Nw),ir_rev(Ntau))
+         ir_static_wt(2*Nw),ir_dens(2*Nw),ir_rev(Ntau))
     ir_wF=wF; ir_wB=wB; ir_fwdF=fwdF; ir_bwdF=bwdF; ir_fwdB=fwdB; ir_bwdB=bwdB
-    ir_stat=stat; ir_dens=dens; ir_rev=int(rev,c_int32_t)
+    ir_static_wt=static_wt; ir_dens=dens; ir_rev=int(rev,c_int32_t)
     ir_Nw=Nw; ir_Ntau=Ntau; ir_on=.true.
   end subroutine fg_set_ir
 end module freq_grid

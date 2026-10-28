@@ -266,7 +266,7 @@ sw_omega = False  # True: real freq, False: Matsubara freq.
 sw_rescale_flex = True  # True: rescale self energy to make max|Sigma|~U, False: no rescaling
 freq_grid = 'matsubara'  # Matsubara-axis grid of FLEX/Eliashberg (option 14,15,16,23): 'matsubara' = Nw uniform points,
 # 'ir' = sparse sampling of the IR basis (needs sparse-ir; Nw is then fixed by the basis, ~15-30 points, and the
-# truncation error of the uniform grid is gone). self_en_wannier.npz stays uniform-Matsubara
+# truncation error of the uniform grid is gone). For a Pade continuation use ir_eps ~ 1e-14
 ir_wmax = None  # freq_grid='ir': spectral cutoff [eV]; None = 2 x the largest |e_k - mu| (FLEX spreads spectral weight
 # beyond the bare band, so the band width alone is too small for FLEX)
 ir_eps = 1.0e-8  # freq_grid='ir': accuracy of the IR basis
@@ -452,6 +452,35 @@ def get_eil_gap_fs(rvec: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, avec: n
                                     **set_eil_gauge(len(ham_r[0])))
         return fs, None  # the (int) gap_sym is baked into fs['phi']
     return None, eil_fs_kind  # model FS/cylinder: the int gap_sym -> continuum harmonic
+
+
+def setup_ir_grid(temp: float, mu: float, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray,
+                  Nx: int, Ny: int, Nz: int) -> int | None:
+    """
+    @brief Install the IR frequency grid (freq_grid='ir') for the FLEX/Eliashberg kernels.
+    @param ham_r, S_r, rvec, Nx, Ny, Nz: model and k-mesh, for the default cutoff ir_wmax=None
+           (2 x the largest |e_k - mu| on a k-mesh of at most 16^3)
+    @return the number of stored frequencies Nw of the grid, or None when sparse-ir is missing
+    """
+    try:
+        import sparse_ir  # noqa: F401
+    except ImportError:
+        print("Error: freq_grid='ir' needs the sparse-ir package (pip install sparse-ir)", flush=True)
+        return None
+    wmax = ir_wmax
+    if wmax is None:
+        _, kl = plibs.gen_klist(min(Nx, 16), min(Ny, 16), min(Nz, 16), sw_pp=False)
+        wmax = 2.0*np.abs(plibs.get_eigs(kl, ham_r, S_r, rvec)[0]-mu).max()
+    grid = plibs.ir_grid(temp, wmax, eps=ir_eps)
+    plibs.set_freq_grid(grid)
+    print(f"frequency grid: IR basis, wmax = {wmax:.3f} eV (Lambda = {wmax/temp:.1f}), eps = {ir_eps:.1e}: "
+          f"{grid['Nw']} fermionic/bosonic points, {grid['Ntau']} tau points", flush=True)
+    if sw_chi0_tail:
+        print("  sw_chi0_tail is for the uniform grid (no truncation error on the IR grid): ignored", flush=True)
+    if sw_in_self or sw_out_self:
+        print("  sigma.bin (sw_in_self / the sigma.bin part of sw_out_self) is uniform-grid only; "
+              "self_en.npz / self_en_wannier.npz are written as usual", flush=True)
+    return grid['Nw']
 
 
 def main() -> None:
@@ -757,30 +786,12 @@ def main() -> None:
             print('use fixed mu')
         print(f'Temperature = {temp:10.3e} eV ({temp/kb:.2f} K)', flush=True)
         print(f'chem. pot. = {mu:.4f} eV', flush=True)
-    # Matsubara grid of the FLEX/Eliashberg kernels (Nw_mats, sw_tail_run: Nw and sw_chi0_tail as this run uses
-    # them -- the globals themselves are not reassigned inside main)
-    Nw_mats, sw_tail_run = Nw, sw_chi0_tail
+    # Matsubara grid of the FLEX/Eliashberg kernels: Nw points uniform, or the IR sampling points
+    Nw_mats = Nw
     if freq_grid == 'ir' and option in MODES_IR:
-        try:
-            import sparse_ir  # noqa: F401
-        except ImportError:
-            print("Error: freq_grid='ir' needs the sparse-ir package (pip install sparse-ir)", flush=True)
+        Nw_mats = setup_ir_grid(temp, mu, ham_r, S_r, rvec, Nx, Ny, Nz)
+        if Nw_mats is None:
             return
-        wmax = ir_wmax
-        if wmax is None:
-            _, kl = plibs.gen_klist(min(Nx, 16), min(Ny, 16), min(Nz, 16), sw_pp=False)
-            wmax = 2.0*np.abs(plibs.get_eigs(kl, ham_r, S_r, rvec)[0]-mu).max()
-        grid = plibs.ir_grid(temp, wmax, eps=ir_eps)
-        plibs.set_freq_grid(grid)
-        Nw_mats = grid['Nw']
-        print(f"frequency grid: IR basis, wmax = {wmax:.3f} eV (Lambda = {wmax/temp:.1f}), eps = {ir_eps:.1e}: "
-              f"{Nw_mats} fermionic/bosonic points, {grid['Ntau']} tau points", flush=True)
-        if sw_chi0_tail:
-            print("  sw_chi0_tail is for the uniform grid (no truncation error on the IR grid): off", flush=True)
-            sw_tail_run = False
-        if sw_in_self or sw_out_self:
-            print("  sigma.bin (sw_in_self / the sigma.bin part of sw_out_self) is uniform-grid only; "
-                  "self_en.npz / self_en_wannier.npz are written as usual", flush=True)
     if option == CalcMode.BAND:  # plot band
         klist, spa_length, xticks = plibs.mk_klist(k_sets, kmesh, bvec)
         eig, uni = plibs.get_eigs(klist, ham_r, S_r, rvec)
@@ -1005,13 +1016,13 @@ def main() -> None:
                 plibs.calc_flex(Nx, Ny, Nz, Nw_mats, ham_r, S_r, rvec, mu, temp, chiolist, site,
                                 orb_dep, U, J, fill, sw_out_self, sw_in_self,
                                 Umat if orb_dep else None, Jmat if orb_dep else None,
-                                m_diis=m_diis_num, sw_rescale=sw_rescale_flex, sw_tail=sw_tail_run,
+                                m_diis=m_diis_num, sw_rescale=sw_rescale_flex, sw_tail=sw_chi0_tail,
                                 sigma_scale=sigma_in_scale)
             elif option == CalcMode.LIN_ELIASHBERG:  # calc gap function
                 plibs.calc_lin_eliashberg_eq(Nx, Ny, Nz, Nw_mats, ham_r, S_r, rvec, chiolist, site, plist, mu, temp, gap_sym, sw_self,
                                              orb_dep, U, J, fill, sw_from_file, sw_out_self, sw_in_self,
                                              Umat if orb_dep else None, Jmat if orb_dep else None,
-                                             sw_tail=sw_tail_run, sigma_scale=sigma_in_scale, iperm=iperm,
+                                             sw_tail=sw_chi0_tail, sigma_scale=sigma_in_scale, iperm=iperm,
                                              epa_pair_file=epa_pair_file, epa_pair_scale=epa_pair_scale)
             elif option == CalcMode.GAP_FUNCTION:  # post gap calculation, output gap function/anomalous green's function
                 sig = plibs.output_Fk(Nx, Ny, Nz, Nw_mats, ham_r, S_r, rvec, plist, mu, temp, sw_self, iperm=iperm)
@@ -1138,7 +1149,7 @@ def main() -> None:
                                  orb_dep, U, J, fill, sw_from_file, sw_out_self, sw_in_self,
                                  Umat if orb_dep else None, Jmat if orb_dep else None,
                                  m_diis=m_diis_num, sw_rescale=sw_rescale_flex,
-                                 sw_check_only=sw_check_only, sw_tail=sw_tail_run,
+                                 sw_check_only=sw_check_only, sw_tail=sw_chi0_tail,
                                  sigma_scale=sigma_in_scale, iperm=iperm)
 
 

@@ -318,7 +318,7 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,iprm,olist
   real(c_double) sgn,dprt
   complex(c_double),dimension(Norb,Norb):: dtrim
   logical(1),parameter:: sw_odd_freq=.false.
-  complex(c_double) vinf,st
+  complex(c_double) vinf,static_sum
 
   ! sgn: Pauli, F(-k,-ω) = sgn·F^T(k,ω);  dprt: inversion parity, F(-k,ω) = dprt·P F(k,ω) P
   ! -ω is rebuilt as F(k,-ω) = sgn·dprt·P F^*(k,ω) P, using F^T=F^* (Δ Hermitian: TRS lets the
@@ -349,7 +349,7 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,iprm,olist
            !$omp do private(i)
            do i=1,Nkall
               if(invk(2,i)==0)then !k,0
-                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j0)=Vdelta(invk(1,i),1,m,l) !j=1 corresponds to w_n=0
+                 tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j0)=Vdelta(invk(1,i),1,m,l) !stored j=1 is v=0 (slot j0)
               else if(invk(2,i)==1)then !-k,0
                  tmpVdelta(kmap(1,i),kmap(2,i),kmap(3,i),j0)=Vdelta(invk(1,i),1,l,m) !V^ml(-q,0)=V^lm(q,0)
               end if
@@ -393,7 +393,7 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,iprm,olist
            vinf=cmplx(0.5d0*(Smat(m,l)+sgn*Cmat(m,l)),0.0d0,kind=c_double) !bare vertex
            call fg_set_static(tmpVdelta,vinf,Nx,Ny,Nz,Nw)
            call fg_forward(FG_BOSON,tmpVdelta,tmp,Nx,Ny,Nz,Nw)
-           st=fg_static_term(tmpfk,Nx,Ny,Nz,Nw)   ! 0 on the uniform grid
+           static_sum=fg_static_term(tmpfk,Nx,Ny,Nz,Nw)   ! 0 on the uniform grid
            call fg_forward(FG_FERMION,tmpfk,tmp,Nx,Ny,Nz,Nw)
            !$omp parallel
            !$omp workshare
@@ -429,7 +429,7 @@ subroutine mkdelta_nsoc(newdelta,delta,Vdelta,Smat,Cmat,kmap,invk,prt,iprm,olist
            end do
            !$omp end parallel do
            if(.not.fg_uniform())then   ! IR: the bare vertex was kept out of the transform
-              newdelta(:,:,olist(l,1),olist(m,2))=newdelta(:,:,olist(l,1),olist(m,2))+vinf*st
+              newdelta(:,:,olist(l,1),olist(m,2))=newdelta(:,:,olist(l,1),olist(m,2))+vinf*static_sum
            end if
         end if
      end do
