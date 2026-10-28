@@ -49,7 +49,7 @@ end subroutine mkBdGhamk
 
 module calc_irr_chi_sc
   use occupation, only:occ_factor
-  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double,c_bool
   implicit none
 contains
   function irr_chi_sc(Nk,Norb,Nchi,uni,eig,ffermi,ol,temp,qshift,w,idelta,eps,sw_spsym)
@@ -110,7 +110,7 @@ contains
     integer(c_int64_t),intent(in),dimension(Nk):: qshift
     integer(c_int64_t),intent(in),dimension(Nchi,2):: ol
     real(c_double),intent(in):: temp,eps,idelta,w
-    logical,intent(in):: sw_spsym
+    logical(c_bool),intent(in):: sw_spsym
     real(c_double),intent(in),dimension(2*Norb,Nk):: eig,ffermi
     complex(c_double),intent(in),dimension(2*Norb,2*Norb,Nk):: uni
 
@@ -200,12 +200,12 @@ subroutine get_chi_irr_sc(chi,uni,eig,ffermi,qshift,ol,wl,Nchi,Norb,Nk,Nw,idelta
   !!@param sw_spsym,in: spin channel: .false. = Yosida-suppressed (singlet, or H ∥ d),
   !!                   .true.  = preserved at T=0 (triplet, H ⊥ d)
   use calc_irr_chi_sc
-  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double
+  use,intrinsic:: iso_c_binding, only:c_int32_t,c_int64_t,c_double,c_bool
   implicit none
   integer(c_int64_t),intent(in):: Nk,Norb,Nw,Nchi
   integer(c_int64_t),intent(in),dimension(Nk):: qshift
   integer(c_int64_t),intent(in),dimension(Nchi,2):: ol
-  logical,intent(in):: sw_spsym
+  logical(c_bool),intent(in):: sw_spsym
   real(c_double),intent(in):: temp,eps,idelta
   real(c_double),intent(in),dimension(2*Norb,Nk):: eig,ffermi
   real(c_double),intent(in),dimension(Nw):: wl

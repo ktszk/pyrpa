@@ -243,7 +243,6 @@ def calc_lin_eliash_nosym(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray,
     _, kmap, _ = flibs.gen_irr_k_TRS(Nx, Ny, Nz)
     klist = kmap / np.array([Nx, Ny, Nz], dtype=np.float64)
     eig, uni = _bands.get_eigs(klist, ham_s, S_s, rvec)
-    Norb = eig.shape[1]
     Gk = flibs.gen_Green0(eig, uni, mu, temp, Nw)
     if orb_dep:
         Vmat = flibs.gen_Vmatrix_orb(olist, slist, site_s, invs, Umat_s, Jmat_s)

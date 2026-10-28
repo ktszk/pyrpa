@@ -342,7 +342,7 @@ end subroutine calc_sigma
 subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill,temp,&
      scf_loop,pp,eps,Nkall,Nk,Nw,Norb,Nchi,Nx,Ny,Nz,sub_sigma,sw_out,sw_in,m_diis,sw_rescale,&
      sw_tail,sigma_scale,ovlk,nonorth) bind(C)
-  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t,c_bool
   use flex_scf, only:solve_mu,diis_state,diis_init,diis_free,mix_sigma
   use mkself_rn
   use freq_grid, only:fg_uniform
@@ -350,9 +350,9 @@ subroutine mkself(sigmak,mu,Smat,Cmat,kmap,invk,olist,hamk,eig,uni,mu_init,rfill
   integer(c_int64_t),intent(in):: Nw,Norb,Nchi,Nkall,Nk,Nx,Ny,Nz,scf_loop,m_diis
   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
   integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
-  logical(1),intent(in):: sw_in,sw_out,sw_rescale
-  logical(1),intent(in):: sw_tail  !< tail-corrected chi0 (chi0_tail_impl) instead of the sharp-cutoff convolution
-  logical(1),intent(in):: nonorth
+  logical(c_bool),intent(in):: sw_in,sw_out,sw_rescale
+  logical(c_bool),intent(in):: sw_tail  !< tail-corrected chi0 (chi0_tail_impl) instead of the sharp-cutoff convolution
+  logical(c_bool),intent(in):: nonorth
   integer(c_int64_t),intent(in):: sub_sigma
   real(c_double),intent(in):: temp,eps,pp,rfill,mu_init
   real(c_double),intent(in):: sigma_scale  !< multiply the sigma seed loaded via sw_in (U-annealing: ~(U_new/U_old)^2)
@@ -724,11 +724,11 @@ subroutine get_chis_chic(chis,chic,chi,Smat,Cmat,Nk,Nw,Nchi) bind(C)
 end subroutine get_chis_chic
 
 subroutine get_eig_or_tr_chi(chiqout,chi,invk,Nkall,Nk,Nchi,sw_eig) bind(C)
-   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t
+   use,intrinsic:: iso_c_binding, only:c_int64_t,c_double,c_int32_t,c_bool
    implicit none
    integer(c_int64_t),intent(in):: Nkall,Nk,Nchi
    integer(c_int64_t),intent(in),dimension(3,Nkall):: invk
-   logical,intent(in):: sw_eig
+   logical(c_bool),intent(in):: sw_eig
    complex(c_double),intent(in),dimension(Nk,Nchi,Nchi):: chi
    complex(c_double),intent(out),dimension(Nkall):: chiqout
 

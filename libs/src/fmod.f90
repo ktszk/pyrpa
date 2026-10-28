@@ -1065,10 +1065,10 @@ end module occupation
 
 subroutine openmp_params(omp_num,omp_check) bind(C)
   !$ use omp_lib
-  use,intrinsic:: iso_c_binding, only:c_int64_t
+  use,intrinsic:: iso_c_binding, only:c_int64_t,c_bool
   implicit none
   integer(c_int64_t),intent(out):: omp_num
-  logical(1),intent(out):: omp_check
+  logical(c_bool),intent(out):: omp_check
   !$ if(.true.)then
   !$   omp_check=.true.
   !$   omp_num=omp_get_max_threads()
@@ -1709,7 +1709,7 @@ subroutine get_eig_mlo(eig,uni,ham_k,Ovlk,Nk,Norb) bind(C)
   real(c_double),intent(out),dimension(Norb,Nk):: eig
   complex(c_double),intent(out),dimension(Norb,Norb,Nk):: uni
 
-  integer(c_int32_t) i,j,k,l,m,info
+  integer(c_int32_t) i,j,info
   integer(c_int64_t) lwork
   real(c_double) rwork(3*Norb-2),eq(Norb),norm
   complex(c_double) work_query(1)

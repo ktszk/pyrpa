@@ -57,7 +57,7 @@ subroutine get_QP(P,Q,a,xn,wlist,Nw,Np)
   complex(c_double),intent(in),dimension(Nw):: wlist
   complex(c_double),intent(out),dimension(Nw):: P,Q !output P_N,Q_N
 
-  integer(c_int32_t) i,j,k
+  integer(c_int32_t) i,j
   complex(c_double),dimension(Nw):: P0,P1,Q0,Q1
 
   Q0(:)=1.0d0
@@ -94,7 +94,7 @@ subroutine pade_analytic_continuation_arrays(arrayin,arrayout,&
   complex(c_double),intent(in),dimension(Niw):: iwlist
   complex(c_double),intent(out),dimension(Nk,Nw):: arrayout
 
-  integer(c_int32_t)i,j
+  integer(c_int32_t) i
   complex(c_double),dimension(Niw):: a
   complex(c_double),dimension(Nw):: P,Q
 

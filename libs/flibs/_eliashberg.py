@@ -545,7 +545,7 @@ def gen_Fk(Gk: np.ndarray, delta: np.ndarray, invk: np.ndarray) -> np.ndarray:
     @param   invk: Inverse k-point mapping [Nkall] int64
     @return    Fk: Anomalous Green's function [Norb, Norb, Nw, Nk] complex128
     """
-    Nkall, Nk, Nw, Norb = len(invk), len(Gk[0, 0, 0]), len(delta[0, 0]), len(delta)
+    Nk, Nw, Norb = len(Gk[0, 0, 0]), len(delta[0, 0]), len(delta)
     Fk = np.zeros((Norb, Norb, Nw, Nk), dtype=np.complex128)
     _loader._lib.mkfk_trs_nsoc_(Fk, Gk, delta, _loader.i64(Nk), _loader.i64(Nw), _loader.i64(Norb))
     return Fk

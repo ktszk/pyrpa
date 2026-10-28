@@ -341,73 +341,43 @@ import os
 import numpy as np
 import libs.flibs as flibs, libs.plibs as plibs
 import libs.plots as plots   # figures (matplotlib); plibs holds the calculations only
-import matplotlib.pyplot as plt
 # ----------------------------- initial settings --------------------------------------
-sw_gen_sym = False
-try:
-    kz
-except NameError:
-    kz = 0.0
-try:
-    mu0
-    sw_calc_mu = False
-except NameError:
-    sw_calc_mu = True
-try:
-    kscale
-except NameError:
-    kscale = 1.0
-try:
-    gap_rcut
-except NameError:
-    gap_rcut = None
-try:
-    abc
-except NameError:
+# Optional parameters may be left out of the header above: take them from it if set, else the default.
+kz = globals().get('kz', 0.0)
+mu0 = globals().get('mu0')            # fixed chemical potential; None: solve mu from fill
+sw_calc_mu = mu0 is None
+kscale = globals().get('kscale', 1.0)
+gap_rcut = globals().get('gap_rcut')
+if 'abc' not in globals():
     abc = [1., 1., 1.]
     print('abc not found, set to 1,1,1')
-try:
-    alpha_beta_gamma
-except NameError:
+if 'alpha_beta_gamma' not in globals():
     alpha_beta_gamma = [90., 90., 90]
     print('alpha_beta_gamma not found, set to 90,90,90')
 alatt = np.array(abc)
 deg = np.array(alpha_beta_gamma)
-if option in MODES_SYMLINE:  # modes using k_sets/xlabel (symmetry line)
-    try:
-        k_sets
-        xlabel
-    except NameError:
-        sw_gen_sym = True
-        k_sets, xlabel2 = plibs.get_symm_line(brav)
-        try:
-            xlabel
-            if len(xlabel) != len(k_sets):
-                xlabel = xlabel2
-        except NameError:
-            xlabel = xlabel2
+# symmetry line: the header's k_sets/xlabel if both are given, else the standard line of brav
+# (a header xlabel is kept when its length still matches)
+sw_gen_sym = option in MODES_SYMLINE and not ('k_sets' in globals() and 'xlabel' in globals())
+if sw_gen_sym:
+    k_sets, xlabel_gen = plibs.get_symm_line(brav)
+    if 'xlabel' not in globals() or len(xlabel) != len(k_sets):
+        xlabel = xlabel_gen
 # physical constants in SI/eV units, or all 1 in the dimensionless test mode (sw_unit=False)
 units = plibs.unit_constants(sw_unit)
 kb, ihbar = units.kb, units.ihbar   # used directly below (the drivers take `units`)
-try:
-    tempK
-    try:
-        temp
-        print('temp & tempK find, use temp')
-    except NameError:
-        temp = tempK*kb
-except NameError:
+if 'tempK' not in globals():
     print('tempK not found')
     exit()
-try:
-    m_diis_num
-except NameError:
-    m_diis_num = 5
+if 'temp' in globals():
+    print('temp & tempK find, use temp')
+else:
+    temp = tempK*kb
+m_diis_num = globals().get('m_diis_num', 5)
 if option in MODES_NEED_ROTMAT:
-    try:
-        RotMat
+    if 'RotMat' in globals():
         RotMat = np.array(RotMat)
-    except NameError:
+    else:
         print('No RotMat')
         RotMat = np.eye(3)
 # ------------------------ define functions -------------------------------------------
@@ -724,7 +694,7 @@ def main() -> None:
             # Only the pairs sitting on one site enter the vertices; the inter-site blocks
             # are zeros that would otherwise be reported as the minimum of U' and J.
             offdiag = plibs.site_block_mask(Norb, globals().get('site_prof', [1])) & ~np.eye(Norb, dtype=bool)
-            msg = (f'orbital dependent U,J'+(f' ({UJ_material} in {UJ_dir})' if UJ_material else '') +
+            msg = ('orbital dependent U,J'+(f' ({UJ_material} in {UJ_dir})' if UJ_material else '') +
                    f': U_ii= {np.diag(Umat).min():5.2f}-{np.diag(Umat).max():5.2f}')
             if offdiag.any():  # a one-orbital site has no inter-orbital U',J
                 msg += (f", U'_ij= {Umat[offdiag].min():5.2f}-{Umat[offdiag].max():5.2f}, "
@@ -854,37 +824,20 @@ def main() -> None:
                 w, sp, sus = plibs.calc_path_spectrum('phi', mu, temp, klist, qlist, chiolist, eig, uni, spa_length, Nw, Emax, delta)
                 print("write phi spectrum in png file", flush=True)
                 susfname = 'phi_spec.png'
-            plt.contourf(sp, w, abs(sus.imag), 100)
-            plt.colorbar()
-            plt.hot()
-            plt.savefig(fname=susfname, dpi=300)
+            plots.plot_susceptibility_path(sp, w, sus, susfname)
         elif option == CalcMode.CHIS_QPOINT:  # chis at q-point
             q_point = np.array(at_point)
             chis, chis_orb, wlist = plibs.chis_q_point(q_point, eig, uni, Emax, Nw, mu, temp, Smat, klist, chiolist, delta)
-            plt.plot(wlist, chis.imag)
-            plt.show()
-            for cso in chis_orb.T:
-                plt.plot(wlist, cso.imag)
-            plt.show()
+            plots.plot_chis_qpoint(wlist, chis, chis_orb)
         else:  # chis/phi qmap at ecut plane
             if option == CalcMode.CHIS_QMAP:  # chis spectrum ecut plane
                 sus, chi0, qx, qy = plibs.chis_qmap(Nx, Ny, Ecut, mu, temp, Smat, klist, chiolist, eig, uni, idelta=1.e-3)
-                plt.contourf(qx, qy, abs(chi0.imag), 100)
-                plt.colorbar()
-                plt.jet()
-                plt.savefig(fname='chi0map.png', dpi=300)
+                plots.plot_qmap(qx, qy, abs(chi0.imag), 'chi0map.png')
                 susfname = 'chismap.png'
             elif option == CalcMode.PHI_QMAP:
                 sus, qx, qy = plibs.phi_qmap(Nx, Ny, Ecut, mu, temp, klist, chiolist, eig, uni, idelta=1.e-3, sw_omega=sw_omega)
                 susfname = 'phimap.png'
-            if sw_omega:
-                plt.contourf(qx, qy, abs(sus.imag), 100)
-            else:
-                plt.contourf(qx, qy, abs(sus.real), 100)
-            plt.colorbar()
-            plt.jet()
-            # plt.show()
-            plt.savefig(fname=susfname, dpi=300)
+            plots.plot_qmap(qx, qy, abs(sus.imag) if sw_omega else abs(sus.real), susfname)
     elif option in MODES_CHIS_SC:  # calc chis at superconducting state
         sw_spsym = gap_sym < 0
         # model gap Delta(k) (gap_sym form factor, delta0 amplitude) on the full [0,1) k-mesh
@@ -897,11 +850,7 @@ def main() -> None:
                                                    delta, sw_spsym)
             w, sp = np.meshgrid(wlist, spa_length)   # [Nq,Nw], like sus
             print("write chis spectrum in png file", flush=True)
-            plt.contourf(sp, w, abs(sus.imag), 100)
-            plt.colorbar()
-            plt.hot()
-            plt.savefig(fname='chis_sc_spec.png', dpi=300)
-            plt.close()
+            plots.plot_susceptibility_path(sp, w, sus, 'chis_sc_spec.png')
         elif option == CalcMode.CHIS_QPOINT_SC:
             # --- BdG band structure along (0,0,0) -> (0,0.5,0) ---
             plots.plot_bdg_path(*plibs.bdg_bands_path(ham_r, S_r, rvec, mu, klist, gap_sym, delta0))
@@ -910,19 +859,11 @@ def main() -> None:
             print(f"q-point is ({q_point[0]:.3f}, {q_point[1]:.3f}, {q_point[2]:.3f})", flush=True)
             chis, chis_orb, wlist = plibs.chis_q_point_sc(q_point, hamk, deltak, mu, Emax, Nw, temp,
                                                           Smat, klist, chiolist, delta, sw_spsym)
-            plt.plot(wlist, chis.imag)
-            plt.savefig('chisq.png', dpi=150)
-            plt.clf()
-            # plt.show()
-            with open(f"chis_sc.dat", "w") as f:
+            plots.plot_chis_qpoint(wlist, chis, chis_orb, fname='chisq')
+            with open("chis_sc.dat", "w") as f:
                 for iw, ic in zip(wlist, chis):
                     f.write(f"{iw:5.3f}, {ic.imag:12.8f}, {ic.real:12.8f}\n")
-            for cso in chis_orb.T:
-                plt.plot(wlist, cso.imag)
-            # plt.show()
-            plt.savefig('chisq_orb.png', dpi=150)
-            plt.close()
-            with open(f"chis_scorb.dat", 'w') as f:
+            with open("chis_scorb.dat", 'w') as f:
                 for iw, ic in zip(wlist, chis_orb):
                     f.write(f"{iw:5.3f}, ")
                     for cso in ic:

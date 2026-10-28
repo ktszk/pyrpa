@@ -174,7 +174,7 @@ def solve_surface(coupling: float, temp: float, omega: np.ndarray, gap_sym: str,
     gpref = imp_gamma * (imp_c ** 2 + 1.0)
     wt = np.tile(omega.astype(np.complex128), (Ngrid, 1))   # w_tilde(x,n) [Ngrid,Nw]
     sigf = np.zeros((Ngrid, Nw), dtype=np.complex128)       # Sigma_f(x,n)
-    for it in range(itemax):
+    for _ in range(itemax):
         # all unfolded trajectories at once; out/in branches [Ngrid, Nbeta, Nw]
         om_arg = omega if clean else wt
         g_out, f_out, g_in, f_in = _surface_chords(Damp, phi_out, phi_in, om_arg,
@@ -310,7 +310,7 @@ def surface_ldos(Damp: np.ndarray, x: np.ndarray, wlist: np.ndarray, gap_sym: st
         """LDOS N(ix) for a given (possibly spin-shifted) retarded frequency [Nw]."""
         wt = np.tile(zomega, (Ng, 1))
         sigf = np.zeros((Ng, Nw), dtype=np.complex128)
-        for it in range(1 if clean else itemax):
+        for _ in range(1 if clean else itemax):
             g_out, f_out, g_in, f_in = _surface_chords(Damp, phi_out, phi_in,
                                                        zomega if clean else wt, hvf, dx, cosb,
                                                        sigf=None if clean else sigf)
@@ -484,7 +484,6 @@ def surface_ldos_fs(fs: dict, Damp: np.ndarray, x: np.ndarray, wlist: np.ndarray
     phi = _eilenberger.fs_form_factor(fs, gap_sym)
     vx, nf = fs['vx'], fs['nf']
     refl = _reflection_index(fs)
-    Ng, Nw = len(Damp), len(wlist)
     dx = x[1] - x[0]
     zomega = delta - 1j * wlist
     vmax = np.abs(vx).max()
@@ -565,7 +564,7 @@ def solve_surface_fs(coupling: float, temp: float, omega: np.ndarray, fs: dict, 
     vproj = np.abs(vx[out])                              # ds = dx/|v_x| (per chord)
     co = (nf[out] * np.conj(phi[out]))[None, :] / wsum
     ci = (nf[jj] * np.conj(phi[jj]))[None, :] / wsum
-    for it in range(itemax):
+    for _ in range(itemax):
         _, f_out, _, f_in = _surface_chords(Damp, phi[out], phi[jj], omega, 1.0, dx, vproj)
         fo = f_out.sum(axis=2)                            # [Ng, Nchord], summed over freq
         fi = f_in.sum(axis=2)

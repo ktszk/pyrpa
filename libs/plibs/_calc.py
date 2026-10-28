@@ -1419,7 +1419,7 @@ def output_Fk(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.nda
         Fktr = np.array([f.diagonal().sum() for f in Fk.T])
     print('output anomalous green function')
     try:
-        with open(f'Fk_tr.dat', 'w') as f:
+        with open('Fk_tr.dat', 'w') as f:
             for i, km in enumerate(kmap):
                 if km[2] == 0:
                     f.write(f'{km[0]:3} {km[1]:3} {Fktr[i].real:12.8f} {Fktr[i].imag:12.8f}\n')
@@ -1446,7 +1446,7 @@ def output_Fk(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.nda
         Gc, iwc, Npade = Gk, iwlist, Nw
     Gc = _metric_green(Gc, overlap)
     try:
-        with open(f'Gpade.dat', 'w') as fp:
+        with open('Gpade.dat', 'w') as fp:
             if sw_maxent:
                 # MaxEnt (ana_cont): regularized fit, so it does not chase Matsubara
                 # noise into spurious real-axis structure over this wide 500-point

@@ -130,7 +130,7 @@ def solve_vortex(coupling: float, temp: float, omega: np.ndarray, Dbulk: float =
     theta = np.linspace(0.0, 2.0 * np.pi, ntheta, endpoint=False)
     Nw = len(omega)
     Dr = Dbulk * np.tanh(rgrid / xi)               # standard vortex ansatz
-    for it in range(itemax):
+    for _ in range(itemax):
         Delta = _delta_grid(Dr, rgrid, Rg, phase, Dbulk)   # [ngrid, ngrid] (s, impact param)
         om3 = np.broadcast_to(omega, (ngrid, ngrid, Nw)).astype(np.complex128)
         dd3 = np.broadcast_to(Delta[:, :, None], (ngrid, ngrid, Nw))
@@ -354,7 +354,7 @@ def solve_vortex2d(coupling: float, temp: float, omega: np.ndarray, gap_sym: str
     gpref = imp_gamma * (imp_c ** 2 + 1.0)
     wt = np.broadcast_to(omega, (ngrid, ngrid, Nw)).copy()   # impurity-renormalized w (no Doppler)
     sigf = np.zeros((ngrid, ngrid, Nw), dtype=np.complex128)
-    for it in range(itemax):
+    for _ in range(itemax):
         accf = np.zeros((ngrid, ngrid), dtype=np.complex128)        # sum_beta conj(phi) sum_n f
         gacc = np.zeros((ngrid, ngrid, Nw), dtype=np.complex128)    # sum_beta g (for <g>)
         facc = np.zeros((ngrid, ngrid, Nw), dtype=np.complex128)
@@ -456,7 +456,6 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
     X, Y = np.meshgrid(xg, xg, indexing='ij')
     Nw = len(wlist)
     no_imp = (imp_gamma == 0.0)
-    use_pos = (not no_imp) or (field > 0.0)
     use_fs = fs is not None
     if use_fs:
         # trajectories in the plane PERPENDICULAR to B (fs_field_frame; bdir=None is
@@ -497,7 +496,7 @@ def vortex_ldos2d(Psi: np.ndarray, xg: np.ndarray, xi: float, wlist: np.ndarray,
         """N(x,y,w) for a given (possibly spin-shifted) retarded frequency [Nw]."""
         wt = np.broadcast_to(zomega, (ngrid, ngrid, Nw)).copy()
         sigf = np.zeros((ngrid, ngrid, Nw), dtype=np.complex128)
-        for it in range(1 if no_imp else itemax):
+        for _ in range(1 if no_imp else itemax):
             gacc = np.zeros((ngrid, ngrid, Nw), dtype=np.complex128)
             facc = np.zeros((ngrid, ngrid, Nw), dtype=np.complex128)
             dwt = wt - zomega
@@ -1311,7 +1310,7 @@ def calc_vortex_maxwell(coupling: float, temp: float, wc: float, gap_sym: str = 
     print(f"vortex Maxwell back-reaction (self-consistent A, finite kappa={kappa}): "
           f"{gap_sym}, B/Hc2={field}, T={temp/kb:.2f} K", flush=True)
     ng2 = min(ngrid, 41)
-    for ita in range(itemax_a):
+    for _ in range(itemax_a):
         xg, Psi, Db, xiv = solve_vortex2d(coupling, temp, omega, gap_sym, Lxi=Lxi, ngrid=ng2,
                                           nbeta=nbeta, field=field, qprof=(rgrid, aphi))
         Dr = _radial_amp(Psi, xg, rgrid)
@@ -1604,7 +1603,6 @@ def solve_lattice_sc(coupling: float, temp: float, omega: np.ndarray, gap_sym: s
         A = Dbulk * np.asarray(seed_profile)
     else:
         A = Dbulk * np.tanh(np.abs(_abrikosov_z(X, Y, g)) / 0.5)   # node at each core
-    Nw = len(omega)
     scA = bool(self_consistent_A and lam is not None)
     if scA:                                            # bulk superfluid density (London calibration)
         q0 = 0.05 * Dbulk / max(hvf_eff, 1e-12)
@@ -1715,7 +1713,7 @@ def lattice_dos_sc(state: dict, gap_sym: int | str | None, wlist: np.ndarray, de
     @return N(w)/N0 [Nw]
     """
     A = state['absD']; xi = state['xi']
-    Dbulk = state['Dbulk']; Ng = A.shape[0]
+    Dbulk = state['Dbulk']
     X, Y = state['X'], state['Y']
     g = state['geom']; Vw = state.get('Vw', 1)
     kappa = state.get('kappa'); lam = kappa * xi if kappa is not None else None
@@ -1745,7 +1743,7 @@ def lattice_dos_sc(state: dict, gap_sym: int | str | None, wlist: np.ndarray, de
     L = Lchord * xi; ds = ds_xi * xi
     ns = int(2 * L / ds) | 1; ic = ns // 2
     s = np.linspace(-L, L, ns)
-    ax = X.ravel(); ay = Y.ravel(); Nanch = ax.size
+    ax = X.ravel(); ay = Y.ravel()
     gsum = np.zeros(Nw)
     for ib in range(nbd):
         cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
@@ -1838,8 +1836,7 @@ def lattice_free_energy(state: dict, coupling: float, temp: float, omega: np.nda
     L = Lchord * xi; ds = ds_xi * xi
     ns = int(2 * L / ds) | 1; ic = ns // 2
     s = np.linspace(-L, L, ns)
-    ax = X.ravel(); ay = Y.ravel(); Nanch = ax.size
-    Nw = len(omega)
+    ax = X.ravel(); ay = Y.ravel()
     om_s, wsp = _zeeman_sectors(omega, h)
     if method is None:
         method = 'im' if h == 0.0 else 'coupling'
@@ -1944,7 +1941,7 @@ def calc_vortex_lattice_symmetry(coupling: float, temp: float, wc: float, gap_sy
                     best = (r, _apex_angle(r), np.degrees(th), F)
         r, apex, th, F = best
         sym = ('square' if abs(apex - 90) < 7 else 'triangular' if abs(apex - 120) < 7
-               else f'rhombic')
+               else 'rhombic')
         print(f"  B/Hc2={b:.3f}: min F={F:.5f} at apex={apex:.1f}deg (ratio={r:.3f}), "
               f"theta0={th:.1f}deg -> {sym}", flush=True)
         out.append((b, r, apex, th, F))

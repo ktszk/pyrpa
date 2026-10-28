@@ -1,10 +1,14 @@
 """Non-orthogonal Green functions and FLEX basis-normalization invariance."""
 import importlib.util
+import os
+import sys
 import numpy as np
 
-import libs.flibs as F
-import libs.plibs as P
-import _tools as T
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import libs.flibs as F  # noqa: E402
+import libs.plibs as P  # noqa: E402
+import _tools as T  # noqa: E402
 
 
 def test_nonorthogonal_green_matches_matrix_dyson():
@@ -124,31 +128,35 @@ def test_nonorthogonal_multiorbital_flex_soc_matches_nosoc():
             P.set_freq_grid(None)
 
 
-def test_nonorthogonal_reload_uses_overlap_for_both_spin_paths(tmp_path, monkeypatch):
+def test_nonorthogonal_reload_uses_overlap_for_both_spin_paths(tmp_path):
     from libs.plibs import _calc
-    monkeypatch.chdir(tmp_path)
-    n, nw, temp, mu = 4, 8, 0.1, -0.2
-    m = T.one_orbital_square(Nx=n, Ny=n, Nw=nw, temp=temp, mu=mu)
-    sr = np.zeros_like(m['ham_r'])
-    sr[0, 0, 0] = 1.4
-    state = _calc._prepare_kspace_state(n, n, 1, m['ham_r'], sr, m['rvec'], need_ham=True)
-    sigma = np.full((1, 1, nw, len(m['klist'])), 0.2-0.1j, dtype=np.complex128)
-    _calc._save_sigma(sigma, mu, temp)
-    with T.silence():
-        result = _calc._prepare_green_state_normal(state, m['olist'], (m['Smat'], m['Cmat']), mu, 0.5,
-                                                   temp, nw, n, n, 1, True, sw_from_file=True)
-    assert np.allclose(result['Gk'], F.gen_green(sigma, state['ham_k'], mu, temp, state['overlap_k']))
-    ham2_r, sr2, slist, invs = P.spin_double_model(m['ham_r'], sr)
-    state2 = _calc._prepare_kspace_state(n, n, 1, ham2_r, sr2, m['rvec'], need_ham=True)
-    ol2, site2 = P.spin_double_chiolist(m['olist'], m['site'], 1)
-    vmat = F.gen_Vmatrix(ol2, slist, site2, invs, 0.0, 0.0)
-    sigma2 = np.zeros((2, 2, nw, len(m['klist'])), dtype=np.complex128)
-    sigma2[0, 0] = sigma2[1, 1] = sigma[0, 0]
-    _calc._save_sigma(sigma2, mu, temp)
-    with T.silence():
-        result2 = _calc._prepare_green_state_soc(state2, ol2, slist, invs, vmat, mu, 1.0, temp, nw,
-                                                 n, n, 1, True, sw_from_file=True)
-    assert np.allclose(result2['Gk'], F.gen_green(sigma2, state2['ham_k'], mu, temp, state2['overlap_k']))
+    cwd = os.getcwd()
+    os.chdir(tmp_path)   # _save_sigma / the reload use the working directory
+    try:
+        n, nw, temp, mu = 4, 8, 0.1, -0.2
+        m = T.one_orbital_square(Nx=n, Ny=n, Nw=nw, temp=temp, mu=mu)
+        sr = np.zeros_like(m['ham_r'])
+        sr[0, 0, 0] = 1.4
+        state = _calc._prepare_kspace_state(n, n, 1, m['ham_r'], sr, m['rvec'], need_ham=True)
+        sigma = np.full((1, 1, nw, len(m['klist'])), 0.2-0.1j, dtype=np.complex128)
+        _calc._save_sigma(sigma, mu, temp)
+        with T.silence():
+            result = _calc._prepare_green_state_normal(state, m['olist'], (m['Smat'], m['Cmat']), mu, 0.5,
+                                                       temp, nw, n, n, 1, True, sw_from_file=True)
+        assert np.allclose(result['Gk'], F.gen_green(sigma, state['ham_k'], mu, temp, state['overlap_k']))
+        ham2_r, sr2, slist, invs = P.spin_double_model(m['ham_r'], sr)
+        state2 = _calc._prepare_kspace_state(n, n, 1, ham2_r, sr2, m['rvec'], need_ham=True)
+        ol2, site2 = P.spin_double_chiolist(m['olist'], m['site'], 1)
+        vmat = F.gen_Vmatrix(ol2, slist, site2, invs, 0.0, 0.0)
+        sigma2 = np.zeros((2, 2, nw, len(m['klist'])), dtype=np.complex128)
+        sigma2[0, 0] = sigma2[1, 1] = sigma[0, 0]
+        _calc._save_sigma(sigma2, mu, temp)
+        with T.silence():
+            result2 = _calc._prepare_green_state_soc(state2, ol2, slist, invs, vmat, mu, 1.0, temp, nw,
+                                                     n, n, 1, True, sw_from_file=True)
+        assert np.allclose(result2['Gk'], F.gen_green(sigma2, state2['ham_k'], mu, temp, state2['overlap_k']))
+    finally:
+        os.chdir(cwd)
 
 
 def test_nonorthogonal_flex_with_soc_matches_scaled_orthogonal_model():
@@ -239,3 +247,7 @@ def test_nonorthogonal_flex_is_covariant_under_an_orbital_rescaling():
     (s1, mu1, st1), (s2, mu2, st2) = res['norm'], res['raw']
     assert abs(mu1-mu2) < 1e-8 and abs(st1-st2) < 1e-8
     assert T.rel_err(s2, s1/np.outer(w, w)[:, :, None, None]) < 1e-7
+
+
+if __name__ == '__main__':
+    sys.exit(T.run_standalone(globals()))

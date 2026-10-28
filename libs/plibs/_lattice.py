@@ -32,8 +32,9 @@ def import_hoppings(fname: str, ftype: int) -> tuple[np.ndarray, np.ndarray, int
         rvec = np.loadtxt(f'{name}/irvec.txt')
         nr = rvec[:, 0].size
         ndegen = np.loadtxt(f'{name}/ndegen.txt')
-        tmp = np.array([complex(float(tp[0]), float(tp[1])) for tp in
-                        [f.strip(' ()\n').split(',') for f in open(f'{name}/ham_r.txt', 'r')]])
+        with open(f'{name}/ham_r.txt') as fh:
+            tmp = np.array([complex(float(tp[0]), float(tp[1])) for tp in
+                            [f.strip(' ()\n').split(',') for f in fh]])
         no = int(np.sqrt(tmp.size/nr))
         # Divide each R-block by its degeneracy weight (number of equivalent k-points)
         ham_r = (tmp.reshape(nr, no, no).T/ndegen).T.round(6).copy()
@@ -49,7 +50,8 @@ def import_hoppings(fname: str, ftype: int) -> tuple[np.ndarray, np.ndarray, int
         return (rvec, ham_r, no, nr)
 
     def import_hr(name: str) -> tuple:
-        tmp = [f.split() for f in open(f'{name}_hr.dat', 'r')]
+        with open(f'{name}_hr.dat') as fh:
+            tmp = [f.split() for f in fh]
         no, nr = int(tmp[1][0]), int(tmp[2][0])
         c2, tmp1 = 3, []
         while not len(tmp1) == nr:
@@ -63,7 +65,8 @@ def import_hoppings(fname: str, ftype: int) -> tuple[np.ndarray, np.ndarray, int
         return (rvec, ham_r, no, nr)
 
     def import_Hopping(name: str, sw_axis: bool = False) -> tuple:
-        tmp = [f.split() for f in open(f'{name}/Hopping.dat', 'r')]
+        with open(f'{name}/Hopping.dat') as fh:
+            tmp = [f.split() for f in fh]
         axis = np.array([[float(tp) for tp in tpp] for tpp in tmp[1:4]])
         no, nr = int(tmp[4][0]), int(tmp[4][1])
         tmp1 = np.array([[float(t) for t in tp] for tp in tmp[7+no:]])
@@ -118,7 +121,8 @@ def import_MLO_hoppings(name: str, normalize: bool = True) -> tuple[np.ndarray, 
     @return    no: the number of orbitals
     @return    nr: the number of r-vectors
     """
-    tmp = [f.split() for f in open(f'{name}', 'r')]
+    with open(name) as fh:
+        tmp = [f.split() for f in fh]
     tmp1 = np.array([[float(t) for t in tp] for tp in tmp])
     no = int(tmp1[:, 0].max())
     nr = int(len(tmp1)/(no*no))

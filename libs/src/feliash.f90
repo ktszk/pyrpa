@@ -110,7 +110,7 @@ subroutine lin_eliash(delta,chi,Gk,uni,init_delta,Smat,Cmat,vph,olist,prt,iprm,k
   complex(c_double),intent(inout),target,dimension(Nk,Nw,Nchi,Nchi):: chi
   real(c_double),intent(out):: lambda_out
 
-  integer(c_int32_t) i_iter,i_eig,i
+  integer(c_int32_t) i_iter,i_eig
   integer(c_int64_t) ivj,ivm,ivl
   integer(c_int32_t),parameter:: eig_max=2
   logical(1) sw_pair
@@ -244,8 +244,6 @@ subroutine mkfk_trs_nsoc(fk,Gk,delta,Nk,Nw,Norb)
   !!@param   fk,out: anomalous green function
   !!@param    Gk,in: normal green function
   !!@param delta,in: gap function
-  !!@param  invk,in: list of reverse k-points
-  !!@param Nkall,in: Number of all k-points
   !!@param    Nk,in: Number of irreducible k-points
   !!@param    Nw,in: Number of Matsubara frequencies
   !!@param  Norb,in: Number of orbitals

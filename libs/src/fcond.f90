@@ -92,7 +92,7 @@ subroutine calc_lij_wl(L11,L22,L12,vk,eig,ffermi,kweight,Norb,Nk,Nw,mu,wl,idelta
   !!@param  L12,out: L12 [Nw,3,3]
   !!@param   vk,in: group velocity [3,Norb,Norb,Nk]
   !!@param  eig,in: energy of bands [Norb,Nk]
-  !!@param   ff,in: fermi distribute function [Norb,Nk]
+  !!@param ffermi,in: fermi distribute function [Norb,Nk]
   !!@param kweight,in: weight of each k-point [Nk]; normalized by sum(kweight)
   !!@param Norb,in: The number of orbitals
   !!@param   Nk,in: The number of k-points

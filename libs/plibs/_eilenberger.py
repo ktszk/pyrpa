@@ -744,15 +744,15 @@ def calc_pauli_limit(Nx: int, Ny: int, Nz: int, wc: float, ham_r: np.ndarray, S_
         h_list = D0 * np.array([0.0, 0.3, 0.5, 0.6, 0.65, 0.7, 0.75, 0.8, 0.9, 1.0, 1.05])
     h_sp = 0.0
     try:
-        fh = open('pauli_gap.dat', 'w'); fh.write("# h/Delta0   Delta(h)/Delta0\n")
-        for h in h_list:
-            # start from Delta0 to follow the metastable SC branch up to the spinodal
-            Dh = solve_gap(temp, wf, phif, omega, 0.0, 1.0e8, coupling, h=float(h), damp_init=D0)
-            fh.write(f"{h/D0:10.4f} {Dh/D0:10.4f}\n")
-            print(f"  h/Delta0={h/D0:5.2f}: Delta/Delta0 = {Dh/D0:.4f}", flush=True)
-            if Dh > 0.1 * D0:                 # robust SC threshold (ignore tiny residuals)
-                h_sp = h
-        fh.close()
+        with open('pauli_gap.dat', 'w') as fh:
+            fh.write("# h/Delta0   Delta(h)/Delta0\n")
+            for h in h_list:
+                # start from Delta0 to follow the metastable SC branch up to the spinodal
+                Dh = solve_gap(temp, wf, phif, omega, 0.0, 1.0e8, coupling, h=float(h), damp_init=D0)
+                fh.write(f"{h/D0:10.4f} {Dh/D0:10.4f}\n")
+                print(f"  h/Delta0={h/D0:5.2f}: Delta/Delta0 = {Dh/D0:.4f}", flush=True)
+                if Dh > 0.1 * D0:                 # robust SC threshold (ignore tiny residuals)
+                    h_sp = h
     except OSError as e:
         print(f"Error writing pauli_gap.dat: {e}", flush=True)
     print(f"  spinodal h* (SC branch collapses) ~ {h_sp/D0:.2f} Delta0", flush=True)
@@ -1605,7 +1605,6 @@ def calc_fs_penetration(coupling: float, temp: float, wc: float, kind: str = 'el
     fs = build_model_fs(kind, Nth, mu, params, nkz=nkz, kz_max=kz_max) if fs is None else fs
     if not (isinstance(gap_sym, (int, np.integer)) and 'kf' in fs):
         gap_sym = _gap_sym_str(gap_sym)               # continuum harmonic (no lattice FS)
-    d3 = fs.get('nkz', 1) > 1
     # full-velocity weights <v_i^2>_nf (nf = dl/|v_par|), consistent with superfluid_density_fs
     vx2 = (fs['nf'] * fs['vx'] ** 2).sum()
     vy2 = (fs['nf'] * fs['vy'] ** 2).sum()

@@ -190,6 +190,7 @@ subroutine phiq_map(trphi,uni,eig,ffermi,klist,ol,mu,temp,ecut,idelta,eps,Nx,Ny,
   !!@param     Nchi,in: The footnote of chi
   !!@param sw_omega,in: switch matsubara or real frequency
   use calc_irr_phi
+  use,intrinsic:: iso_c_binding, only:c_bool
   implicit none
   integer(c_int64_t),intent(in):: Nx,Ny,Nk,Norb,Nchi
   integer(c_int64_t),intent(in),dimension(Nchi,2):: ol
@@ -198,7 +199,7 @@ subroutine phiq_map(trphi,uni,eig,ffermi,klist,ol,mu,temp,ecut,idelta,eps,Nx,Ny,
   real(c_double),intent(in),dimension(Norb,Nk):: eig,ffermi
   complex(c_double),intent(in),dimension(Norb,Norb,Nk):: uni
   complex(c_double),intent(out),dimension(Ny,Nx):: trphi
-  logical(1),intent(in):: sw_omega
+  logical(c_bool),intent(in):: sw_omega
 
   integer(c_int32_t) info
   integer(c_int64_t) i,j,l,m,n

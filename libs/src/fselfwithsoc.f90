@@ -130,7 +130,7 @@ subroutine mkself_soc(sigmak,mu,Vmat,kmap,invk,invs,olist,slist,hamk,eig,uni,mu_
      end if
      call get_V_soc_flex(chi,Vmat,olist,slist,Nk,Nw,Nchi,dcsub)
      print'(A16,E12.4,A5,E12.4)','Re V_sigma: max:',maxval(dble(chi)),' min:',minval(dble(chi))
-     call calc_sigma_soc(sigmak,Gk,chi,Vmat,kmap,invk,invs,olist,slist,sgnsig,sgnsig2,temp,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
+     call calc_sigma_soc(sigmak,Gk,chi,Vmat,kmap,invk,invs,olist,sgnsig,temp,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
      if(sub_sigma>0)then
         sub_self:block
           integer(c_int32_t) iw,l,m
@@ -345,16 +345,17 @@ subroutine get_rn_mkself_soc(rn,rmu,Gk,sigmak,hamk,uni,ovlk,nonorth,eig,kmult,te
   rn=(tmp+deltagk)/Nkall
 end subroutine get_rn_mkself_soc
 
-subroutine calc_sigma_soc(sigmak,Gk,Vsigma,Vmat,kmap,invk,invs,olist,slist,sgnsig,sgnsig2,temp,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
-  !> This function obtain new gap function Delta=sum VF
+subroutine calc_sigma_soc(sigmak,Gk,Vsigma,Vmat,kmap,invk,invs,olist,sgnsig,temp,Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz)
+  !> FLEX self-energy with SOC: Sigma = (T/N) sum_q V_sigma(q) G(k-q), as a (k, w) convolution
   !!@param sigmak,out: self energy
   !!@param      Gk,in: green function
-  !!@param  Vsigma,in: irreducible susceptibility and interaction
-  !!@param    Smat,in: S-matrix
-  !!@param    Cmat,in: C-matrix
+  !!@param  Vsigma,in: FLEX self-energy vertex V_sigma(q, iv)
+  !!@param    Vmat,in: bare SOC interaction (the v -> infinity limit of V_sigma)
   !!@param    kmap,in: property of k-point
   !!@param    invk,in: list of reverse k-points
+  !!@param    invs,in: spin-flip partner of each orbital
   !!@param   olist,in: property of chi footnote
+  !!@param  sgnsig,in: s_i s_j, the sign of G(-k) = G^T(k) under TRS with SOC
   !!@param    temp,in: Temperature
   !!@param   Nkall,in: Number of all k-points
   !!@param      Nk,in: Number of k-points
@@ -371,11 +372,10 @@ subroutine calc_sigma_soc(sigmak,Gk,Vsigma,Vmat,kmap,invk,invs,olist,slist,sgnsi
   integer(c_int64_t),intent(in):: Nkall,Nk,Nw,Nchi,Norb,Nx,Ny,Nz
   integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
-  integer(c_int64_t),intent(in),dimension(Norb):: slist,invs
+  integer(c_int64_t),intent(in),dimension(Norb):: invs
   real(c_double),intent(in):: temp
   real(c_double),intent(in),dimension(Nchi,Nchi):: Vmat
-  real(c_double),dimension(Norb,Norb):: sgnsig
-  real(c_double),dimension(Nchi,Nchi):: sgnsig2
+  real(c_double),intent(in),dimension(Norb,Norb):: sgnsig
   complex(c_double),intent(in),dimension(Nk,Nw,Nchi,Nchi):: Vsigma
   complex(c_double),intent(in),dimension(Nk,Nw,Norb,Norb):: Gk
   complex(c_double),intent(out),dimension(Nk,Nw,Norb,Norb):: sigmak

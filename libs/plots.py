@@ -185,7 +185,6 @@ def plot_band(eig: np.ndarray, spl: np.ndarray, xlabel: list, xticks: list, uni:
 def plot_FS(fscolors: list, klist: np.ndarray, color_option: int) -> None:
     fig = plt.figure()
     fig.add_subplot(111, aspect='equal')
-    col = ['r', 'g', 'b', 'c', 'm', 'y', 'k', 'w']
     if color_option == 0:
         for kl in klist:
             for kk in kl:
@@ -206,7 +205,7 @@ def plot_FS(fscolors: list, klist: np.ndarray, color_option: int) -> None:
             if vmax == vmin:
                 print(f"Warning: plot_FS has vmax=vmin={vmax}. Color map disabled", flush=True)
                 vmax = vmin + 1.0  # Set default value
-        for kl, fscol, cb in zip(klist, fscolors, col):
+        for kl, fscol in zip(klist, fscolors):
             for kk, fcol in zip(kl, fscol):
                 if color_option == 2:
                     clist = cm.jet((fcol-vmin)/(vmax-vmin))
@@ -248,7 +247,6 @@ def poly_vertices(polys: list) -> np.ndarray:
 def plot_3d_surf(fspolys: list, fscenters: np.ndarray, fscolors: list, surface_opt: int, bvec: np.ndarray) -> None:
     import mpl_toolkits.mplot3d.axes3d as axes3d
     import mpl_toolkits.mplot3d.art3d as art3d
-    import matplotlib.colors as colors
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
     clist = ['r', 'g', 'b', 'c', 'm', 'y', 'k', 'w']
@@ -435,6 +433,49 @@ def plot_cpa_spectrum(spa_length: np.ndarray, xticks: list, xlabel: list, wlist:
     plt.tight_layout()
     plt.savefig(fname, dpi=150)
     plt.show()
+
+
+def plot_susceptibility_path(sp: np.ndarray, w: np.ndarray, sus: np.ndarray, fname: str) -> None:
+    """
+    @brief Colour map |Im chi(q, w)| along a q-path (calc_path_spectrum, chis_spectrum_sc), saved to fname.
+    @param sp, w: meshgrids of the path coordinate and the energy [Nq, Nw]
+    @param   sus: susceptibility [Nq, Nw] complex
+    @param fname: output image
+    """
+    plt.contourf(sp, w, abs(sus.imag), 100, cmap='hot')
+    plt.colorbar()
+    plt.savefig(fname=fname, dpi=300)
+    plt.close()
+
+
+def plot_qmap(qx: np.ndarray, qy: np.ndarray, z: np.ndarray, fname: str) -> None:
+    """
+    @brief Colour map of a real quantity on the (qx, qy) plane (chis_qmap / phi_qmap), saved to fname.
+    @param qx, qy: meshgrids of the q-plane
+    @param      z: values [Nqx, Nqy] (real; the caller takes |Re| or |Im|)
+    @param  fname: output image
+    """
+    plt.contourf(qx, qy, z, 100, cmap='jet')
+    plt.colorbar()
+    plt.savefig(fname=fname, dpi=300)
+    plt.close()
+
+
+def plot_chis_qpoint(wlist: np.ndarray, chis: np.ndarray, chis_orb: np.ndarray, fname: str | None = None) -> None:
+    """
+    @brief Im chi_s(q, w) at one q-point: the total, then each orbital component (chis_q_point[_sc]).
+    @param    wlist: energies [Nw]
+    @param     chis: total susceptibility [Nw] complex
+    @param chis_orb: orbital components [Nw, Ncomp] complex
+    @param    fname: None: show both figures; else save fname.png and fname_orb.png
+    """
+    for y, tag in ((chis.imag[:, None], ''), (chis_orb.imag, '_orb')):
+        plt.plot(wlist, y)
+        if fname is None:
+            plt.show()
+        else:
+            plt.savefig(f'{fname}{tag}.png', dpi=150)
+        plt.close()
 
 
 def plot_bdg_path(ky: np.ndarray, eig_bdg: np.ndarray, fname: str = 'BdG_band.png') -> None:

@@ -459,7 +459,7 @@ def solve_surface_dvector(couplings: np.ndarray, temp: float, omega: np.ndarray,
     Damp = np.array([Dbulk[a] * np.tanh(x / xi) for a in range(nc)], dtype=np.complex128)
     fo = np.array([phitil[a](beta) for a in range(nc)])         # [nc, Nb] outgoing
     fi = np.array([phitil[a](np.pi - beta) for a in range(nc)])  # [nc, Nb] incoming
-    for it in range(itemax):
+    for _ in range(itemax):
         acc = np.zeros((nc, Ng), dtype=np.complex128)
         for ib in range(Nbeta):
             ds = dx / cosb[ib]
@@ -785,7 +785,7 @@ def solve_vortex2d_dvector(couplings: np.ndarray, temp: float, omega: np.ndarray
     if A_init is not None:
         A = np.array(A_init, dtype=np.complex128).reshape(nc, ngrid, ngrid).copy()
     ewind = np.exp(1j * theta)
-    for it in range(itemax):
+    for _ in range(itemax):
         accf = np.zeros((nc, ngrid, ngrid), dtype=np.complex128)
         for ib in range(nbeta):
             cb, sb = np.cos(dirs[ib]), np.sin(dirs[ib])
@@ -941,7 +941,6 @@ def solve_lattice_sc_dvector(couplings: np.ndarray, temp: float, omega: np.ndarr
             A[a] = Dbulk[a] * (np.tanh(Zg / 0.5) if mwind[a] != 0 else 1.0)
         else:
             A[a] = 0.15 * Dref * (1.0 - np.tanh(Zg / 0.5))   # core-peaked nucleation seed
-    Nw = len(om)
     om_dir = [om if dch is None
               else np.ascontiguousarray(om[None, None, :] + 1j * hvfarr[ib] * dch[:, :, None])
               for ib, (_, _, _, dch) in enumerate(chord)]
@@ -1005,7 +1004,7 @@ def lattice_dos_sc_dvector(state: dict, wlist: np.ndarray, delta: float | None =
     """
     import libs.plibs._eilenberger_vortex as _eilenberger_vortex
     A = state['A']; g = state['geom']; xi = state['xi']
-    Dbulk = state['Dbulk']; Dref = float(np.max(Dbulk)); Ng = A.shape[1]
+    Dbulk = state['Dbulk']; Dref = float(np.max(Dbulk))
     X, Y = state['X'], state['Y']
     channels = state['channels']; mwind = state['windings']
     Smats = [S for _, _, S in channels]; phitil = [ch[1] for ch in channels]; nc = len(channels)

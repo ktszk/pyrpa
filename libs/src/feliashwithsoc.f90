@@ -116,7 +116,7 @@ contains
     integer(c_int32_t) q
     call mkfk_trs_soc(op_fk,op_Gk,v_in,op_sgnsig,op_slist,op_invk,op_invs,op_idk,op_ipk,&
          op_Nkall,op_Nk,op_Ndk,op_Nw,op_Norb,op_gap_sym)
-    call mkdelta_soc(w_out,op_fk,op_chi,op_Vmat,op_sgnsig,op_sgnsig2,op_prt,op_kmap,op_invk,op_invs,&
+    call mkdelta_soc(w_out,op_fk,op_chi,op_Vmat,op_sgnsig2,op_prt,op_kmap,op_invk,op_invs,&
          op_invschi,op_olist,op_slist,op_idk,op_ipk,&
          op_Nkall,op_Nk,op_Ndk,op_Nw,op_Nchi,op_Norb,op_Nx,op_Ny,op_Nz,op_gap_sym)
     call project_parity(w_out)
@@ -298,7 +298,7 @@ subroutine lin_eliash_soc(delta_full,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,p
   op_invschi=>invschi; op_idk=>idk; op_ipk=>ipk; op_Vmat=>Vmat; op_sgnsig=>sgnsig
   op_sgnsig2=>sgnsig2; op_prt=>prt; op_Gk=>Gk; op_chi=>chi; op_fk=>fk
   if(arnoldi_m>0)then !--- Arnoldi solver (shared with lin_eliash, see module eliash_krylov)
-     call get_initial_delta_soc(newdelta,init_delta,uni,kmap,slist,invk,invs,idk,ipk,&
+     call get_initial_delta_soc(newdelta,init_delta,uni,slist,invk,invs,idk,ipk,&
           Nkall,Nk,Ndk,Nw,Norb,gap_sym)
      if(gap_sym==gap_unit .or. gap_sym==par_mix)then
         call arnoldi_two_pass(lambda_out,delta,newdelta,ks,arnoldi_m,eps,apply_op)
@@ -308,11 +308,11 @@ subroutine lin_eliash_soc(delta_full,chi,Gk,uni,init_delta,Vmat,sgnsig,sgnsig2,p
      end if
   else !--- Power method
      eigenval_loop:do i_eig=1,eig_max !solve eig_val using power method, 1st eig is usually large negative value
-     call get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,invs,idk,ipk,Nkall,Nk,Ndk,Nw,Norb,gap_sym)
+     call get_initial_delta_soc(delta,init_delta,uni,slist,invk,invs,idk,ipk,Nkall,Nk,Ndk,Nw,Norb,gap_sym)
      count=0 !count too small eigenvalue
      iter_loop:do i_iter=1, itemax !iteration
         call mkfk_trs_soc(fk,Gk,delta,sgnsig,slist,invk,invs,idk,ipk,Nkall,Nk,Ndk,Nw,Norb,gap_sym)
-        call mkdelta_soc(newdelta,fk,chi,Vmat,sgnsig,sgnsig2,prt,kmap,invk,invs,invschi,olist,slist,idk,ipk,&
+        call mkdelta_soc(newdelta,fk,chi,Vmat,sgnsig2,prt,kmap,invk,invs,invschi,olist,slist,idk,ipk,&
              Nkall,Nk,Ndk,Nw,Nchi,Norb,Nx,Ny,Nz,gap_sym)
         call project_parity(newdelta)
         call project_spin(newdelta)
@@ -472,7 +472,7 @@ subroutine mkfk_trs_soc(fk,Gk,delta,sgnsig,slist,invk,invs,idk,ipk,Nkall,Nk,Ndk,
   end do
 end subroutine mkfk_trs_soc
   
-subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,prt,kmap,invk,invs,invschi,olist,slist,idk,ipk,&
+subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig2,prt,kmap,invk,invs,invschi,olist,slist,idk,ipk,&
      Nkall,Nk,Ndk,Nw,Nchi,Norb,Nx,Ny,Nz,gap_sym)
   !> new gap function Delta = sum V F.  delta (here F) and newdelta live on the Ndk stored k-points
   !> (get_delta_kmap_soc); F at the other points is rebuilt by parity, F(-k) = pp·P F(k) P.
@@ -487,7 +487,6 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,prt,kmap,invk,i
   integer(c_int64_t),intent(in),dimension(Nchi,2):: olist
   integer(c_int64_t),intent(in),dimension(Norb):: slist,invs
   integer(c_int64_t),intent(in),dimension(Nchi):: invschi
-  real(c_double),intent(in),dimension(Norb,Norb):: sgnsig
   real(c_double),intent(in),dimension(Nchi,Nchi):: Vmat,sgnsig2
   complex(c_double),intent(in),dimension(Nk,Nw,Nchi,Nchi):: Vdelta
   complex(c_double),intent(in),dimension(Ndk,Nw,Norb,Norb):: delta
@@ -622,12 +621,11 @@ subroutine mkdelta_soc(newdelta,delta,Vdelta,Vmat,sgnsig,sgnsig2,prt,kmap,invk,i
   !$omp end parallel
 end subroutine mkdelta_soc
 
-subroutine get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,invs,idk,ipk,Nkall,Nk,Ndk,Nw,Norb,gap_sym)
+subroutine get_initial_delta_soc(delta,init_delta,uni,slist,invk,invs,idk,ipk,Nkall,Nk,Ndk,Nw,Norb,gap_sym)
   !> make orbital basis initial gap function
   !!@param     delta,out: gap function
   !!@param init_delta,in: band basis initial gap function
   !!@param        uni,in: unitary matrix
-  !!@param       kmap,in: property of k-points
   !!@param       invk,in: footnote of reverse k
   !!@param      Nkall,in: Number of all k-points
   !!@param         Nk,in: Number of irreducible k-points
@@ -639,7 +637,7 @@ subroutine get_initial_delta_soc(delta,init_delta,uni,kmap,slist,invk,invs,idk,i
   use constant
   implicit none
   integer(c_int64_t),intent(in):: Nw,Norb,Nkall,Nk,Ndk,gap_sym
-  integer(c_int64_t),intent(in),dimension(3,Nkall):: kmap,invk
+  integer(c_int64_t),intent(in),dimension(3,Nkall):: invk
   integer(c_int64_t),intent(in),dimension(Nkall):: idk,ipk
   integer(c_int64_t),intent(in),dimension(Norb):: slist,invs
   real(c_double),intent(in),dimension(Nk,Norb):: init_delta
