@@ -275,7 +275,7 @@ sw_self = False  # True: use calculated self energy for spectrum band plot
 sw_out_self = False  # True: write the FLEX self-energy to sigma.bin/self_en.npz (also triggers gap output in option 15,23; option 23 with sw_self also writes the SC-state self-energy to self_en_sc.npz)
 sw_in_self = False  # True: load the previous self-energy from sigma.bin as the initial guess for the SC loop (a seed with a different Nw is auto re-gridded in place onto the current Nw)
 sigma_in_scale = 1.0  # factor multiplying the sigma seed loaded via sw_in_self; for U-annealing set (U_new/U_old)**2 (Sigma ~ U^2)
-sw_from_file = False  # True: read the self-energy from sigma.bin and skip FLEX (solve Eliashberg with it directly)
+sw_from_file = False  # True (with sw_self): read the self-energy from self_en.npz and skip FLEX (solve Eliashberg with it directly)
 sw_check_only = False  # True: stop after linear Eliashberg (also stops if Stoner factor>=1 or lambda<1)
 # ----- symmetry-free linearized Eliashberg (option 15 with sw_nosym): Zeeman field / FFLO -----
 sw_nosym = False  # True: option 15 solves the gap equation on the full BZ with NO TRS/inversion (bare G, RPA);

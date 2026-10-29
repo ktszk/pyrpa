@@ -17,6 +17,12 @@
 # which knows the CPU tables; the /proc/cpuinfo flag fallback below is only for
 # nodes without gcc.  Hand-written flag tables are brittle -- this kernel spells
 # Zen 4's flags avx512_vbmi2/avx512_vnni, other kernels use avx512vbmi2.
+#
+# Intel nodes are reported as the x86-64 level their flags support (x86-64-v4:
+# AVX-512 F/BW/CD/DQ/VL, x86-64-v3: AVX2/FMA/BMI2, else x86-64-v2) rather than
+# gcc's generation name: Intel generations differ in many small ISA extensions
+# (AVX-VNNI, AMX, ...), and a level is what _loader.py can check safely on any
+# node.  AMD nodes keep gcc's znver* name.
 
 set -u
 CACHE="$(dirname "$0")/.arch_cache"
@@ -35,10 +41,16 @@ LOCAL_ONLY=${LOCAL_ONLY:-0}
 # ---- the probe, run ON each node (stdin of sh -s) --------------------------
 PROBE='
   m=$(awk -F: "/model name/{sub(/^ /,\"\",\$2); print \$2; exit}" /proc/cpuinfo)
+  v=$(awk -F: "/^vendor_id/{gsub(/[ \t]/,\"\",\$2); print \$2; exit}" /proc/cpuinfo)
+  f=$(awk "/^flags/{print; exit}" /proc/cpuinfo)
+  has() { for x in "$@"; do case " $f " in *" $x "*) ;; *) return 1 ;; esac; done; }
   a=$(gcc -march=native -Q --help=target 2>/dev/null |
       awk "/^ *-march=/{gsub(/[ \t]/,\"\",\$0); sub(/^-march=/,\"\"); print; exit}")
-  if [ -z "$a" ] || [ "$a" = "native" ]; then     # no gcc: fall back to the flags
-    f=$(awk "/^flags/{print; exit}" /proc/cpuinfo)
+  if [ "$v" = GenuineIntel ]; then                # Intel: the x86-64 level (see above)
+    if has avx512f avx512bw avx512cd avx512dq avx512vl; then a=x86-64-v4
+    elif has avx2 fma bmi2; then a=x86-64-v3
+    else a=x86-64-v2; fi
+  elif [ -z "$a" ] || [ "$a" = "native" ]; then   # no gcc: fall back to the flags
     case " $f " in
       *" avx512f "*) case " $f " in *znver*|*" avx512_bf16 "*|*" avx512bf16 "*) a=znver4 ;;
                                     *) a=skylake-avx512 ;; esac ;;
@@ -48,6 +60,13 @@ PROBE='
   fi
   echo "${m:-unknown}|$a"
 '
+
+# portable default for a node that cannot be probed: the AVX2 level of this host's vendor
+if awk -F: '/^vendor_id/{exit !($2 ~ /GenuineIntel/)}' /proc/cpuinfo 2>/dev/null; then
+  DEFAULT_ARCH=x86-64-v3
+else
+  DEFAULT_ARCH=znver3
+fi
 
 probe_local() { printf "%s" "$PROBE" | sh -s; }
 
@@ -97,7 +116,7 @@ else
     if [ -z "${r:-}" ]; then
       # unreachable node: do NOT guess, and do not silently drop it either
       echo "detect_arch: WARNING: could not probe $n -- keeping the portable default" >&2
-      r="unreachable|znver3"
+      r="unreachable|$DEFAULT_ARCH"
     fi
     TABLE="${TABLE}${n}|${r}
 "

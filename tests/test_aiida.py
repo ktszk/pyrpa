@@ -30,8 +30,9 @@ except ImportError:
 
 HOP = os.path.join(ROOT, 'inputs', 'square.hop')
 _profile_loaded = False
-# small one-orbital square-lattice run (Stoner factor ~0.8, below the magnetic instability)
-FILL, TEMP, U, MESH, NW = 0.45, 0.02, 1.0, [8, 8, 1], 64
+# small one-orbital square-lattice run below the magnetic instability (Stoner factor 0.72 in RPA, 0.59 in
+# FLEX); U = 1 is far beyond it here (RPA 2.4), where FLEX settles on unphysical Stoner > 1 fixed points
+FILL, TEMP, U, MESH, NW = 0.45, 0.02, 0.3, [8, 8, 1], 64
 # Eilenberger: coupling and cutoff that put T well below Tc
 EIL = dict(coupling=1.0, temp=0.005, wc=0.5)
 
@@ -199,6 +200,138 @@ def test_aiida_eilenberger_surface_and_vortex_match_plibs():
     assert np.allclose(vort['profile'].get_array('grid'), rg) and np.allclose(vort['profile'].get_array('delta'), dv)
     assert abs(dv[0]) < 1e-6*abs(dv[-1])                   # the vortex core
     assert {'vortex_gap.dat', 'vortex_ldos.dat'} <= set(vort['files'].list_object_names())
+
+
+def _write_mlo_file(path):
+    """Unnormalized two-orbital MLO model in the ftype=3 text format (i j R ReH ImH ReS ImS, H in Ry)."""
+    m = T.two_orbital_square(Nx=8, Ny=8, Nw=16, temp=0.05, mu=-0.2)
+    sr = np.zeros_like(m['ham_r'])
+    sr[0] = [[0.3, 0.05], [0.05, 0.8]]
+    sr[1] = sr[2] = [[0.02, 0.01], [0.01, -0.03]]
+    with open(path, 'w') as f:
+        for i in range(2):
+            for j in range(2):
+                for r, R in enumerate(m['rvec']):
+                    h, s = m['ham_r'][r, i, j]/P.RY_TO_EV, sr[r, i, j]
+                    f.write(f'{i+1} {j+1} {R[0]:.0f} {R[1]:.0f} {R[2]:.0f} '
+                            f'{h.real:.10f} {h.imag:.10f} {s.real:.10f} {s.imag:.10f}\n')
+
+
+def test_aiida_mlo_flex_and_eliashberg_match_flibs(tmp_path):
+    """MLO basis (ftype=3): the overlap of the normalized orbitals is carried through mu, FLEX and the
+    linearized Eliashberg equation exactly as the direct calls with overlap= do."""
+    pa = _setup()
+    path = str(tmp_path/'model.mlo')
+    _write_mlo_file(path)
+    fill, temp, mesh, nw, u, j = 0.8, 0.05, [8, 8, 1], 32, 1.0, 0.1
+    with T.silence():
+        res, node = pa.eliashberg_workflow.run_get_node(
+            hop_file=orm.SinglefileData(path), ftype=orm.Int(3), fill=orm.Float(fill), temp=orm.Float(temp),
+            U=orm.Float(u), J=orm.Float(j), mesh=orm.List(mesh), Nw=orm.Int(nw), gap_sym=orm.Int(1),
+            use_flex=orm.Bool(True))
+    assert node.is_finished_ok
+    rvec, ham_r, S_r, Norb, _ = P.import_MLO_hoppings(path)
+    assert np.allclose(res['hoppings'].get_array('S_r'), S_r)
+    Nk, kl = P.gen_klist(*mesh, sw_pp=False)
+    assert abs(res['mu'].value-P.calc_mu(P.get_eigs(kl, ham_r, S_r, rvec)[0], Nk, fill, temp)) < 1e-12
+    klist, kmap, invk = F.gen_irr_k_TRS(*mesh)
+    hamk, ovk = F.gen_ham(klist, ham_r, rvec, Ovl_r=S_r)
+    eig, uni = F.get_eig(hamk, ovk)
+    olist, site = P.get_chi_orb_list(Norb, [Norb])
+    Smat, Cmat = F.gen_SCmatrix(olist, site, U=u, J=j)
+    with T.silence():
+        sigma, mu = F.mkself(Smat, Cmat, kmap, invk, olist, hamk, eig, uni, res['mu'].value, fill, temp, nw,
+                             *mesh, False, False, overlap=ovk)
+        Gk = F.gen_green(sigma, hamk, mu, temp, overlap=ovk)
+        chi0, stoner = F.get_chi0(Smat, Cmat, Gk, olist, kmap, invk, temp, *mesh)
+        _, lam = F.linearized_eliashberg(chi0, Gk, uni, P.get_initial_gap(klist, Norb, 1), Smat, Cmat, olist,
+                                         F.get_plist(rvec, ham_r), kmap, invk, *mesh, temp, 1, overlap=ovk)
+    assert abs(res['mu_self'].value-mu) < 1e-12
+    assert np.allclose(res['sigma'].get_array('sigma'), sigma, rtol=0, atol=1e-12)
+    assert abs(res['stoner'].value-stoner) < 1e-12
+    assert abs(res['lambda_eliash'].value-lam) < 1e-8
+
+
+def test_aiida_options_flex_info_runtime_and_storage():
+    """options: an unconverged FLEX loop fails (unless allowed) and flex_info reports it; store_sigma=False
+    runs FLEX -> Eliashberg as one step with the same lambda and no Sigma node; the IR grid of the FLEX
+    step is reused downstream; a uniform Umat/Jmat equals the uniform U, J; every step records runtime."""
+    pa = _setup()
+    inputs = dict(_model_inputs(), gap_sym=orm.Int(1), use_flex=orm.Bool(True))
+    with T.silence():
+        ref, node = pa.eliashberg_workflow.run_get_node(**inputs)
+        lean = pa.eliashberg_workflow(**inputs, options=orm.Dict({'store_sigma': False, 'store_gap': False}))
+    assert ref['flex_info']['converged'] and ref['flex_info']['iterations'] > 0
+    assert abs(lean['lambda_eliash'].value-ref['lambda_eliash'].value) < 1e-12
+    assert 'sigma' not in lean and 'gap' not in lean and 'gap_wannier' in lean
+    assert all('runtime' in c.outputs for c in node.called if c.process_label != 'load_hoppings'
+               and c.process_label != 'chemical_potential')
+    um = [[U]]   # one orbital: U on the site, no U', J
+    with T.silence():
+        orb = pa.eliashberg_workflow(**inputs, options=orm.Dict({'Umat': um, 'Jmat': [[0.0]]}))
+    assert abs(orb['lambda_eliash'].value-ref['lambda_eliash'].value) < 1e-12
+    with T.silence():
+        ir = pa.eliashberg_workflow(**inputs, options=orm.Dict({'freq_grid': 'ir', 'ir_wmax': 10.0}))
+    assert ir['flex_info']['converged']
+    assert 'ir_wmax' in ir['sigma'].get_arraynames() and ir['sigma'].get_array('sigma').shape[2] < NW
+    assert abs(ir['mu_self'].value-ref['mu_self'].value) < 5e-3     # uniform Nw=64 vs IR: cutoff error
+    failed = False   # AiiDA re-raises what the calcfunction raised (wrapped or not, depending on the version)
+    try:
+        with T.silence():
+            pa.flex_workflow(**_model_inputs(), options=orm.Dict({'scf_loop': 2}))
+    except Exception:
+        failed = True
+    assert failed, 'an unconverged FLEX loop was accepted'
+    with T.silence():
+        loose = pa.flex_workflow(**_model_inputs(), options=orm.Dict({'scf_loop': 2, 'require_converged': False}))
+    assert not loose['flex_info']['converged'] and loose['flex_info']['iterations'] == 2
+    try:
+        pa._opts(orm.Dict({'no_such_option': 1}))
+        raise AssertionError('an unknown option was accepted')
+    except ValueError:
+        pass
+
+
+def test_aiida_soc_flex_and_eliashberg_match_flibs():
+    """soc=True: the spinful square_2orb_soc model through FLEX (mkself_soc), the SOC susceptibility and
+    the SOC linearized Eliashberg equation, exactly as the direct calls with main.py's spin labels; with
+    store_sigma=False the one-step path gives the same lambda."""
+    pa = _setup()
+    hop = os.path.join(ROOT, 'inputs', 'square_2orb_soc.hop')
+    if not os.path.exists(hop):
+        T.skip('inputs/square_2orb_soc.hop not found')
+    fill, temp, mesh, nw, u, j = 2.0, 0.05, [8, 8, 1], 32, 0.5, 0.05
+    inputs = dict(hop_file=orm.SinglefileData(hop), ftype=orm.Int(1), fill=orm.Float(fill), temp=orm.Float(temp),
+                  U=orm.Float(u), J=orm.Float(j), mesh=orm.List(mesh), Nw=orm.Int(nw), gap_sym=orm.Int(1),
+                  use_flex=orm.Bool(True))
+    with T.silence():
+        res, node = pa.eliashberg_workflow.run_get_node(**inputs, options=orm.Dict({'soc': True}))
+        lean = pa.eliashberg_workflow(**inputs, options=orm.Dict({'soc': True, 'store_sigma': False}))
+    assert node.is_finished_ok and res['flex_info']['converged']
+    assert 'stoner' not in res and 'chiszz' in res['chi'].get_arraynames()
+    rvec, ham_r, Norb, _ = P.import_hoppings(hop, 1)
+    klist, kmap, invk = F.gen_irr_k_TRS(*mesh)
+    hamk = F.gen_ham(klist, ham_r, rvec)
+    eig, uni = F.get_eig(hamk)
+    slist = np.ones(Norb, dtype=np.int64)
+    slist[(Norb+1)//2:] = -1
+    invs = np.concatenate([np.arange((Norb+1)//2, Norb), np.arange((Norb+1)//2)])+1
+    olist, site = P.get_chi_orb_list(Norb, [Norb])
+    Vmat = F.gen_Vmatrix(olist, slist, site, invs, u, j)
+    with T.silence():
+        sigma, mu = F.mkself_soc(Vmat, kmap, invk, invs, olist, slist, hamk, eig, uni, res['mu'].value, fill,
+                                 temp, nw, *mesh, False, False)
+        Gk = F.gen_green(sigma, hamk, mu, temp)
+        chi, sg, sg2, isc = F.get_chi0_soc(Vmat, Gk, olist, slist, kmap, invk, invs, temp, *mesh)
+        _, chiszz, _, _, _ = F.get_chis_chic_soc(chi, Vmat, olist, slist, invs)
+        _, lam = F.linearized_eliashberg_soc(chi, Gk, uni, P.get_initial_gap(klist, Norb, 1), Vmat, sg, sg2,
+                                             F.get_plist(rvec, ham_r), slist, olist, kmap, invk, invs, isc,
+                                             *mesh, temp, 1)
+    assert abs(res['mu_self'].value-mu) < 1e-12
+    assert np.allclose(res['sigma'].get_array('sigma'), sigma, rtol=0, atol=1e-12)
+    assert np.allclose(res['chi'].get_array('chiszz'), chiszz, rtol=0, atol=1e-12)
+    assert abs(res['lambda_eliash'].value-lam) < 1e-8
+    assert abs(lean['lambda_eliash'].value-lam) < 1e-8 and 'sigma' not in lean
 
 
 if __name__ == '__main__':

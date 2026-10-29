@@ -3,8 +3,8 @@
 # valid values: ifort, ifx, flang, amdflang, gfortran
 #
 # Default toolchain is ifx+MKL (the toolchain the shipped libfmod.so is built
-# with). On these AMD CPUs `-march=<ARCH>` makes ifx emit vector code with NO
-# Intel CPUID dispatch (verified), so it runs at full width on AMD.
+# with). `-march=<ARCH>` makes ifx emit vector code with NO Intel CPUID dispatch
+# (verified), so it runs at full width on AMD as well as on Intel CPUs.
 #
 # flang/amdflang (ROCm's LLVM flang) + AOCL is a fully supported alternative:
 #   module load AMD/ROCm AMD/AOCL && make FC=flang
@@ -13,15 +13,33 @@
 # bundled pocketfft.
 #
 # --- Target CPU architecture -------------------------------------------------
-# ARCH selects the -march target. Default znver3 is the lowest common
-# denominator across the machines this runs on, so ONE binary works everywhere:
-#   znver3  Zen 3  (e.g. Ryzen 7 5700G) -- AVX2, portable, DEFAULT
-#   znver4  Zen 4  (e.g. Ryzen 9 7900)  -- AVX-512, faster but SIGILLs on Zen 3
-# Build the portable default with `make`; on a Zen 4 box get full AVX-512 with:
-#   make ARCH=znver4
-ARCH ?= znver3
+# ARCH selects the -march target. The default is the portable AVX2 level of the
+# build host's vendor, so ONE binary works on every node of that kind:
+#   AMD    znver3     Zen 3 (e.g. Ryzen 7 5700G) -- AVX2, DEFAULT on AMD
+#          znver4     Zen 4 (e.g. Ryzen 9 7900)  -- AVX-512, SIGILLs on Zen 3
+#   Intel  x86-64-v3  AVX2/FMA (Haswell and later) -- DEFAULT on Intel
+#          x86-64-v4  AVX-512 F/BW/CD/DQ/VL (Skylake-SP and later) -- SIGILLs without it
+#          or a CPU name (skylake-avx512, icelake-server, sapphirerapids, ...)
+# Build the portable default with `make`; for AVX-512 on nodes that have it:
+#   make ARCH=znver4          (Zen 4)
+#   make ARCH=x86-64-v4       (Intel Xeon with AVX-512)
+# x86-64-v3 also runs on Zen, so a cluster mixing both vendors can use it alone.
+_CPU_VENDOR := $(shell awk -F: '/^vendor_id/{gsub(/[ \t]/,"",$$2); print $$2; exit}' /proc/cpuinfo 2>/dev/null)
+ifeq ($(_CPU_VENDOR),GenuineIntel)
+  ARCH ?= x86-64-v3
+  DISPATCH_ARCHS ?= x86-64-v3 x86-64-v4
+else
+  ARCH ?= znver3
+  DISPATCH_ARCHS ?= znver3 znver4
+endif
+# -mtune takes CPU names only: an x86-64-vN level tunes for 'generic'
+MTUNE = $(if $(filter x86-64%,$(ARCH)),generic,$(ARCH))
+# ifort (classic) knows neither znver* nor the x86-64-vN levels: plain ISA switches
+# for those (no Intel CPUID check, unlike -x<code>), its own -march for Intel CPU names
+IFORT_ARCH = $(if $(filter znver% x86-64-v3,$(ARCH)),-mavx2,$(if $(filter x86-64-v4,$(ARCH)),-march=skylake-avx512,$(if $(filter x86-64 x86-64-v2,$(ARCH)),-msse4.2,-march=$(ARCH))))
 #
-# For MKL BLAS/FFT to also use wider kernels on these AMD CPUs, run with e.g.
+# MKL picks its BLAS/FFT kernels by CPUID. On Intel CPUs that is automatic; on AMD
+# CPUs let it use the wider kernels with, e.g.,
 #   export MKL_ENABLE_INSTRUCTIONS=AVX512   (Zen 4)   or  AVX2 (Zen 3)
 #
 # Auto-selection: take the first toolchain actually installed, in preference
@@ -84,7 +102,7 @@ endif
 ifneq ($(origin CXX),command line)
   CXX := $(_CXX_DEFAULT)
 endif
-CXXFLAGS := -O3 -march=$(ARCH) -mtune=$(ARCH) -funroll-loops -fPIC -std=c++17
+CXXFLAGS := -O3 -march=$(ARCH) -mtune=$(MTUNE) -funroll-loops -fPIC -std=c++17
 
 # Scalar libraries (MKL/AOCL/OpenBLAS); override via SL variable, e.g. SL=OpenBLAS.
 # Auto-selection follows the modules actually loaded: AMD's compiler pairs with
@@ -244,7 +262,7 @@ ifneq ($(filter $(FCFAM),ifort ifx),)
 endif
 
 ifeq ($(FCFAM),ifort)
-  FFLAGS_COMMON += -mavx2  -qopenmp -heap-arrays
+  FFLAGS_COMMON += $(IFORT_ARCH) -qopenmp -heap-arrays
   # Threaded MKL layer (same libiomp5 as -qopenmp): FFTs, planned from serial code with
   # dfftw_plan_with_nthreads, run on all threads; MKL stays single-threaded when called
   # from inside our own OpenMP regions (MKL_DYNAMIC default), so those BLAS calls do not
@@ -252,9 +270,10 @@ ifeq ($(FCFAM),ifort)
   LIBS := -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core $(FFT_LIBS)
 endif
 ifeq ($(FCFAM),ifx)
-  # ifx is LLVM-based: -march=$(ARCH) tunes for the target Zen core and emits
-  # vector code with no Intel CPUID dispatch (znver4 -> AVX-512, znver3 -> AVX2).
-  # ifx does not accept -mtune=znver*, so -march alone carries the tuning.
+  # ifx is LLVM-based: -march=$(ARCH) tunes for the target core and emits vector
+  # code with no Intel CPUID dispatch (znver4, x86-64-v4 -> AVX-512; znver3,
+  # x86-64-v3 -> AVX2). ifx does not accept -mtune=znver*, so -march alone carries
+  # the tuning.
   FFLAGS_COMMON += -march=$(ARCH) -funroll-loops \
                    -qopenmp -init:snan -finline-functions -heap-arrays
   # Threaded MKL layer (same libiomp5 as -qopenmp): FFTs, planned from serial code with
@@ -267,12 +286,12 @@ ifeq ($(FCFAM),gfortran)
   # gfortran needs preprocessing enabled when using -MMD
   # also use free form and unlimited line length to avoid truncation errors
   FFLAGS_COMMON += -cpp -ffree-form -ffree-line-length-none \
-                   -march=$(ARCH) -mtune=$(ARCH) -funroll-loops \
+                   -march=$(ARCH) -mtune=$(MTUNE) -funroll-loops \
                    -fopenmp -finline-functions -fimplicit-none \
                    -finit-integer=NaN -finit-real=NaN
   LIBS= -lopenblas $(FFT_LIBS)
   ifeq ($(SL),MKL)
-    LIBS := -lmkl_rt $(FFT_LIBS)
+    LIBS := -lmkl_gf_lp64 -lmkl_gnu_thread -lmkl_core $(FFT_LIBS)
   endif
   ifeq ($(SL),AOCL)
     LIBS := -lblis -lflame -lm -lpthread $(FFT_LIBS)
@@ -287,7 +306,7 @@ endif
 # own OpenMP regions, so a threaded BLAS would oversubscribe. MKL likewise uses
 # the sequential layer to avoid clashing with flang's own libomp.
 ifeq ($(FCFAM),flang)
-  FFLAGS_COMMON += -march=$(ARCH) -mtune=$(ARCH) -funroll-loops -fopenmp
+  FFLAGS_COMMON += -march=$(ARCH) -mtune=$(MTUNE) -funroll-loops -fopenmp
   # FFTZ's -L/-rpath must precede AOCL's (AMD-FFTW libfftw3.so lives there).
   LDFLAGS_EXTRA := $(FFT_LDFLAGS) $(AOCL_LDFLAGS)
   LIBS := -lblis -lflame -lm -lpthread $(FFT_LIBS)
@@ -346,17 +365,19 @@ THISDIR := $(dir $(lastword $(MAKEFILE_LIST)))
 
 all: $(FLIBSO)
 
-# Runtime CPU dispatch across machines: build BOTH a portable AVX2 library
-# (libfmod_znver3.so) and an AVX-512 one (libfmod_znver4.so). _loader.py picks
-# libfmod_znver4.so at import when the running CPU has AVX-512 (Zen 4), else the
-# znver3 one -- so ONE checkout runs everywhere yet uses AVX-512 only on Zen 4.
+# Runtime CPU dispatch across machines: build BOTH a portable AVX2 library and an
+# AVX-512 one -- DISPATCH_ARCHS, by default znver3 znver4 on an AMD build host and
+# x86-64-v3 x86-64-v4 on an Intel one. _loader.py picks the AVX-512 library at
+# import when the running CPU has AVX-512, else the AVX2 one -- so ONE checkout
+# runs everywhere yet uses AVX-512 only where it is safe.
 # (A single fat binary is not viable here: Intel -ax auto-dispatch gates on a
 #  genuine-Intel CPUID and would never take the AVX-512 path on AMD, and Fortran
 #  has no per-function multiversioning like C's target_clones.)
 dispatch:
-	$(MAKE) ARCH=znver3 FLIBSO=libfmod_znver3.so
-	$(MAKE) ARCH=znver4 FLIBSO=libfmod_znver4.so
-	@echo "Built libfmod_znver3.so (AVX2) and libfmod_znver4.so (AVX-512); _loader.py selects at runtime."
+	@for a in $(DISPATCH_ARCHS); do \
+	    $(MAKE) ARCH=$$a FLIBSO=libfmod_$$a.so || exit 1; \
+	 done
+	@echo "Built: $(foreach a,$(DISPATCH_ARCHS),libfmod_$(a).so); _loader.py selects at runtime."
 
 # Same idea, but with the target list DETECTED from the cluster's node inventory
 # instead of hard-coded: detect_arch.sh asks every compute node what gcc calls
@@ -364,7 +385,7 @@ dispatch:
 # ARCH_LIST=... to override, `sh detect_arch.sh --refresh` to re-probe).  Never
 # uses -march=native: that would target the BUILD host and SIGILL on any older
 # node.  Recursive '=' so the probe only runs when this target is actually used.
-ARCH_LIST = $(shell sh $(THISDIR)detect_arch.sh 2>/dev/null || echo znver3)
+ARCH_LIST = $(shell sh $(THISDIR)detect_arch.sh 2>/dev/null || echo $(ARCH))
 auto:
 	@sh $(THISDIR)detect_arch.sh --table
 	@for a in $(ARCH_LIST); do \

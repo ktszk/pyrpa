@@ -167,6 +167,38 @@ def test_runtime_arch_dispatch_never_offers_an_illegal_library():
     # an unknown -march is offered, but only behind everything recognised
     mixed = _loader._select_library(['libfmod_znver3', 'libfmod_futurearch'], zen3)
     assert mixed[0] == 'libfmod_znver3' and 'libfmod_futurearch' in mixed
+    # Intel: make auto / dispatch build the x86-64 levels; x86-64-v4 needs the whole AVX-512 set
+    v3 = {'sse2', 'avx', 'avx2', 'fma', 'bmi1', 'bmi2', 'f16c', 'movbe'}
+    v4 = v3 | {'avx512f', 'avx512bw', 'avx512cd', 'avx512dq', 'avx512vl'}
+    intel = ['libfmod_x86-64-v3', 'libfmod_x86-64-v4']
+    assert _loader._select_library(intel, v4)[0] == 'libfmod_x86-64-v4'
+    assert _loader._select_library(intel, v3) == ['libfmod_x86-64-v3']
+    assert _loader._select_library(intel, v3 | {'avx512f'}) == ['libfmod_x86-64-v3']   # AVX-512F alone (KNL-like)
+    assert _loader._select_library(['libfmod_sapphirerapids'], v4) == []                # no AMX, BF16, VNNI
+
+
+def test_gfortran_build_gets_its_runtime_environment(tmp_path):
+    """A gfortran build (libgomp, libgfortran) next to numpy's libiomp5 needs OMP_WAIT_POLICY=PASSIVE and an
+    unbuffered stdout; an Intel build is left alone, and a value the user set is kept."""
+    import libs.flibs._loader as _loader
+    gnu, intel = tmp_path/'libfmod_gnu.so', tmp_path/'libfmod_intel.so'
+    gnu.write_bytes(b'\x7fELF...libgomp.so.1\x00...libgfortran.so.5\x00...')
+    intel.write_bytes(b'\x7fELF...libiomp5.so\x00...')
+    keys = ('OMP_WAIT_POLICY', 'GFORTRAN_UNBUFFERED_PRECONNECTED')
+    saved = {k: os.environ.pop(k, None) for k in keys}
+    try:
+        _loader._gfortran_runtime_env(intel)
+        assert not any(k in os.environ for k in keys)
+        _loader._gfortran_runtime_env(gnu)
+        assert os.environ['OMP_WAIT_POLICY'] == 'PASSIVE' and os.environ['GFORTRAN_UNBUFFERED_PRECONNECTED'] == 'y'
+        os.environ['OMP_WAIT_POLICY'] = 'ACTIVE'
+        _loader._gfortran_runtime_env(gnu)
+        assert os.environ['OMP_WAIT_POLICY'] == 'ACTIVE'
+    finally:
+        for k, v in saved.items():
+            os.environ.pop(k, None)
+            if v is not None:
+                os.environ[k] = v
 
 
 if __name__ == '__main__':

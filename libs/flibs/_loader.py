@@ -1,4 +1,5 @@
 import ctypes
+import os
 import pathlib
 import numpy as np
 
@@ -12,23 +13,38 @@ __all__ = [
 _LIB_DIR = pathlib.Path(__file__).resolve().parents[1]
 
 
-# -march target -> (rank, CPU flag it requires).  Higher rank = newer ISA, so the
-# best library a CPU can run is the highest-ranked entry whose flag it has.  Only
-# the targets `make auto` / `make dispatch` can emit need to be listed; an unknown
-# suffix is treated as rank 0 with no requirement, i.e. usable but least preferred.
+# -march target -> (rank, CPU flags it requires).  Higher rank = newer ISA, so the
+# best library a CPU can run is the highest-ranked entry all of whose flags it has
+# (the /proc/cpuinfo names).  `make auto` emits gcc's znver* names on AMD and the
+# x86-64 levels on Intel (detect_arch.sh); the Intel CPU names are for an explicit
+# `make ARCH=<name>`.  An unknown suffix is treated as rank 0 with no requirement,
+# i.e. usable but least preferred.
+_V3 = ("avx2", "fma", "bmi1", "bmi2", "f16c", "movbe")
+_V4 = _V3 + ("avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl")
 _ARCH_REQUIREMENTS = {
-    "znver5":         (5, "avx512f"),
-    "znver4":         (4, "avx512f"),
-    "x86-64-v4":      (4, "avx512f"),
-    "sapphirerapids": (4, "avx512f"),
-    "icelake-server": (4, "avx512f"),
-    "skylake-avx512": (4, "avx512f"),
-    "znver3":         (2, "avx2"),
-    "znver2":         (2, "avx2"),
-    "znver1":         (2, "avx2"),
-    "x86-64-v3":      (2, "avx2"),
-    "haswell":        (2, "avx2"),
-    "x86-64-v2":      (1, None),
+    "znver5":         (5, ("avx512f",)),
+    "znver4":         (4, ("avx512f",)),
+    "x86-64-v4":      (4, _V4),
+    "skylake-avx512": (4, _V4),
+    "cascadelake":    (4, _V4 + ("avx512_vnni",)),
+    "cooperlake":     (4, _V4 + ("avx512_vnni", "avx512_bf16")),
+    "icelake-server": (4, _V4 + ("avx512_vnni", "avx512_vbmi2", "avx512_bitalg")),
+    "icelake-client": (4, _V4 + ("avx512_vnni", "avx512_vbmi2", "avx512_bitalg")),
+    "tigerlake":      (4, _V4 + ("avx512_vnni", "avx512_vbmi2", "avx512_vp2intersect")),
+    "sapphirerapids": (4, _V4 + ("avx512_vnni", "avx512_vbmi2", "avx512_bf16", "amx_tile")),
+    "emeraldrapids":  (4, _V4 + ("avx512_vnni", "avx512_vbmi2", "avx512_bf16", "amx_tile")),
+    "graniterapids":  (4, _V4 + ("avx512_vnni", "avx512_vbmi2", "avx512_bf16", "amx_tile")),
+    "znver3":         (2, ("avx2",)),
+    "znver2":         (2, ("avx2",)),
+    "znver1":         (2, ("avx2",)),
+    "x86-64-v3":      (2, _V3),
+    "haswell":        (2, _V3),
+    "broadwell":      (2, _V3 + ("adx",)),
+    "skylake":        (2, _V3 + ("adx",)),
+    "alderlake":      (2, _V3 + ("adx", "avx_vnni")),
+    "raptorlake":     (2, _V3 + ("adx", "avx_vnni")),
+    "meteorlake":     (2, _V3 + ("adx", "avx_vnni")),
+    "x86-64-v2":      (1, ("sse4_2", "popcnt")),
 }
 
 
@@ -48,7 +64,7 @@ def _select_library(names: list, flags: set) -> list:
     """Rank the available libfmod variants for a CPU with `flags`.
 
     `names` are library stems found on disk (libfmod_znver4, libfmod, ...).  A
-    variant is usable when the CPU has the flag its -march implies; the generic
+    variant is usable when the CPU has every flag its -march implies; the generic
     'libfmod' from a plain `make` is always usable but always last, since its
     ARCH is whatever the builder chose.  Returns the usable stems, best first.
     Kept separate from the file system so it can be tested on any machine.
@@ -60,10 +76,28 @@ def _select_library(names: list, flags: set) -> list:
             continue
         if not name.startswith("libfmod_"):
             continue
-        rank, need = _ARCH_REQUIREMENTS.get(name[len("libfmod_"):], (0, None))
-        if need is None or need in flags:
+        rank, need = _ARCH_REQUIREMENTS.get(name[len("libfmod_"):], (0, ()))
+        if all(f in flags for f in need):
             ranked.append((rank, name))
     return [name for _, name in sorted(ranked, key=lambda t: -t[0])]
+
+
+def _gfortran_runtime_env(path: pathlib.Path) -> None:
+    """Environment a gfortran build needs, set before it is loaded unless the user chose otherwise.
+    * OMP_WAIT_POLICY=PASSIVE: the build runs on libgomp, while numpy (MKL) keeps its own libiomp5
+      pool in the same process; both spin-wait between parallel regions and fight for the cores,
+      which slows a run down by ~100x on a fully used node.  libgomp reads it when it is loaded.
+    * GFORTRAN_UNBUFFERED_PRECONNECTED=y: libgfortran buffers unit 6 when it is not a terminal and
+      writes it only at exit, so the kernels' progress lines (the FLEX log the AiiDA steps read,
+      'eliash=') would not reach a redirected stdout while the run goes on."""
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return
+    if b"libgomp.so" in data:
+        os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
+    if b"libgfortran.so" in data:
+        os.environ.setdefault("GFORTRAN_UNBUFFERED_PRECONNECTED", "y")
 
 
 def _load_library() -> np.ndarray:
@@ -78,6 +112,7 @@ def _load_library() -> np.ndarray:
     """
     stems = sorted(p.stem for p in _LIB_DIR.glob("libfmod*.so"))
     for name in _select_library(stems, _cpu_flags()):
+        _gfortran_runtime_env(_LIB_DIR / f"{name}.so")
         return np.ctypeslib.load_library(name, str(_LIB_DIR))
     # Nothing usable found by name; let load_library raise a clear error.
     return np.ctypeslib.load_library("libfmod", str(_LIB_DIR))

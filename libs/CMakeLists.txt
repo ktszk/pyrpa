@@ -7,7 +7,7 @@
 #        toolchain from what is installed / loaded, CPU targets from the
 #        cluster's node inventory (libs/detect_arch.sh) -> one
 #        libfmod_<target>.so per distinct node CPU, exactly like `make auto`.
-#    cmake -S libs -B build -DARCH=znver4
+#    cmake -S libs -B build -DARCH=znver4          (Intel: -DARCH=x86-64-v4)
 #        a single libfmod.so for one target, like `make ARCH=znver4`.
 #    cmake -S libs -B build -DFC_COMPILER=gfortran -DSL=MKL -DARCH_LIST="znver3;znver4"
 #        everything pinned by hand.
@@ -159,22 +159,52 @@ elseif(NOT ARCH_LIST)
   if(_rc EQUAL 0 AND _detected)
     string(REPLACE "\n" ";" ARCH_LIST "${_detected}")
   else()
-    set(ARCH_LIST "znver3")      # portable AVX2 baseline
-    message(WARNING "detect_arch.sh unavailable; falling back to ARCH_LIST=znver3")
+    # portable AVX2 level of the build host's vendor, as the makefile's default ARCH
+    file(STRINGS /proc/cpuinfo _vendor REGEX "^vendor_id" LIMIT_COUNT 1)
+    if(_vendor MATCHES "GenuineIntel")
+      set(ARCH_LIST "x86-64-v3")
+    else()
+      set(ARCH_LIST "znver3")
+    endif()
+    message(WARNING "detect_arch.sh unavailable; falling back to ARCH_LIST=${ARCH_LIST}")
   endif()
 endif()
+
+# -mtune takes CPU names only (an x86-64-vN level tunes for 'generic'); ifort knows
+# neither znver* nor the levels: plain ISA switches for those (no Intel CPUID check,
+# unlike -x<code>), its own -march for Intel CPU names -- as in the makefile
+function(arch_flags arch out_march out_mtune)
+  if(arch MATCHES "^x86-64")
+    set(${out_mtune} "generic" PARENT_SCOPE)
+  else()
+    set(${out_mtune} "${arch}" PARENT_SCOPE)
+  endif()
+  if(FCFAM STREQUAL "ifort")
+    if(arch MATCHES "^znver" OR arch STREQUAL "x86-64-v3")
+      set(${out_march} "-mavx2" PARENT_SCOPE)
+    elseif(arch STREQUAL "x86-64-v4")
+      set(${out_march} "-march=skylake-avx512" PARENT_SCOPE)
+    elseif(arch STREQUAL "x86-64" OR arch STREQUAL "x86-64-v2")
+      set(${out_march} "-msse4.2" PARENT_SCOPE)
+    else()
+      set(${out_march} "-march=${arch}" PARENT_SCOPE)
+    endif()
+  else()
+    set(${out_march} "-march=${arch}" PARENT_SCOPE)
+  endif()
+endfunction()
 
 # ---- flags and libraries, per compiler family ------------------------------
 set(FFLAGS -O3 -fPIC)
 set(CXXFLAGS -O3 -funroll-loops -fPIC -std=c++17)
 
 if(FCFAM STREQUAL "ifort")
-  list(APPEND FFLAGS -mavx2 -qopenmp -heap-arrays)
+  list(APPEND FFLAGS -qopenmp -heap-arrays)   # the ISA switch comes from arch_flags
   # threaded MKL layer (same libiomp5 as -qopenmp): see the note in makefile
   set(BLAS_LIBS -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core)
 elseif(FCFAM STREQUAL "ifx")
   # ifx is LLVM-based: -march=<target> emits vector code with no Intel CPUID
-  # dispatch, so it runs at full width on AMD.  It rejects -mtune=znver*.
+  # dispatch, so it runs at full width on AMD as well as Intel.  It rejects -mtune=znver*.
   list(APPEND FFLAGS -funroll-loops -qopenmp -init:snan -finline-functions -heap-arrays)
   # threaded MKL layer (same libiomp5 as -qopenmp): see the note in makefile
   set(BLAS_LIBS -lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core)
@@ -183,7 +213,8 @@ elseif(FCFAM STREQUAL "gfortran")
                      -fopenmp -finline-functions -fimplicit-none
                      -finit-integer=NaN -finit-real=NaN)
   if(SL STREQUAL "MKL")
-    set(BLAS_LIBS -lmkl_rt)
+    # GNU threading layer: gfortran's libgomp, as in the makefile
+    set(BLAS_LIBS -lmkl_gf_lp64 -lmkl_gnu_thread -lmkl_core)
   elseif(SL STREQUAL "AOCL")
     set(BLAS_LIBS -lblis -lflame -lm -lpthread)
   else()
@@ -267,12 +298,13 @@ function(add_fmod_variant arch outname)
     Fortran_MODULE_DIRECTORY "${CMAKE_BINARY_DIR}/mod/${arch}"
     # land next to the makefile's output: _loader.py loads from libs/
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+  arch_flags("${arch}" _fmarch _mtune)
   target_compile_options(${outname} PRIVATE
-    $<$<COMPILE_LANGUAGE:Fortran>:${FFLAGS};-march=${arch}>
-    $<$<COMPILE_LANGUAGE:CXX>:${CXXFLAGS};-march=${arch};-mtune=${arch}>)
+    $<$<COMPILE_LANGUAGE:Fortran>:${FFLAGS};${_fmarch}>
+    $<$<COMPILE_LANGUAGE:CXX>:${CXXFLAGS};-march=${arch};-mtune=${_mtune}>)
   # ifx has no -mtune=znver*; every other family takes it
   if(NOT FCFAM STREQUAL "ifx" AND NOT FCFAM STREQUAL "ifort")
-    target_compile_options(${outname} PRIVATE $<$<COMPILE_LANGUAGE:Fortran>:-mtune=${arch}>)
+    target_compile_options(${outname} PRIVATE $<$<COMPILE_LANGUAGE:Fortran>:-mtune=${_mtune}>)
   endif()
   target_link_options(${outname} PRIVATE ${FFLAGS} ${LINK_EXTRA})
   target_link_libraries(${outname} PRIVATE ${BLAS_LIBS} ${FFT_LIBS})

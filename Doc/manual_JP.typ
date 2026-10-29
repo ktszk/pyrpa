@@ -1,6 +1,6 @@
 //文章フォーマット設定
-#set text(font: "Times New Roman", size: 11pt)
-#show regex("[\u3000-\u9fa5]"): set text(font: "Yu Gothic", lang: "ja")
+#set text(font: ("Times New Roman", "Liberation Serif"), size: 11pt)
+#show regex("[\u3000-\u9fa5\uff00-\uffef]"): set text(font: ("Yu Gothic", "Noto Sans CJK JP"), lang: "ja")
 #set page(paper: "a4", margin: (x: 2cm, y: 2cm))
 #set math.equation(numbering: numbering.with("(1)"), supplement: "式")
 #set heading(numbering: "1.")
@@ -10,7 +10,7 @@
 #align(center)[
   #text(size: 18pt, weight: "bold")[pyrpa マニュアル]
   #v(0.5em)
-  #text(size: 11pt)[2025年]
+  #text(size: 11pt)[2026年]
 ]
 
 #v(1em)
@@ -28,39 +28,30 @@ pyrpaは, モデルハミルトニアン（タイトバインディング模型�
 - 弱磁場ホール係数 $R_H$, ホールキャリア密度, ホール移動度の計算（バンド分解による二流体分析付き）
 - RPA（乱雑位相近似）に基づくスピン感受率 $chi_s$ およびペアリング感受率 $phi$ の計算
 - 超伝導状態における動的スピン感受率 $chi_s^"SC"$ の計算
-- FLEX（揺らぎ交換近似）による自己エネルギーの計算
+- FLEX（揺らぎ交換近似）による自己エネルギーの計算（一様な松原周波数, または IR 基底）
 - 線形 Eliashberg 方程式による超伝導固有値・ギャップ関数の計算
 - 非線形 Eliashberg 方程式による自己無撞着 SC ギャップ関数の計算
 - バンドフィリング・サイクロトロン質量・dHvA 振動数の計算
 - 準古典 Eilenberger/Riccati ソルバ: $T_c$, 磁場侵入長, 表面 Andreev 束縛状態, 渦・渦格子
 - 超伝導状態の NMR: BdG スピン帯磁率から Knight shift $K(T)$ と $1\/(T_1 T)$
 - 不純物・CPA を含むスペクトル関数の計算
+- 対称性を仮定しない線形 Eliashberg 方程式（Zeeman 場, FFLO の対運動量 $bold(Q)$）
+- 非直交 MLO 基底（ecalj）での RPA / FLEX / Eliashberg
+- AiiDA による来歴付き実行（`examples/aiida`）
 
 pyrpaはすべての設定を`main.py`の上部にある変数を書き換えることで行います。ライブラリのimport行より上にある変数のみを変更することを想定しています。
 
 = 本改訂での変更点
 
-以下の変更は過去のバージョンで得られた結果を変えます。特に最初の 2 点は過去の計算結果そのものを無効にし, ギャップ調和関数の変更は中心格子・六方晶セルでの結果を全て変えます。残りは出力内容, あるいは受け付ける設定が変わります。本改訂より前の出力がある場合は, 下記に照らして確認してください。
+以下は過去のバージョンで得た結果を変えます。該当する計算は再計算してください（以前の改訂での変更点は git の履歴を参照してください）。
 
-- *時間反転対称性下の既約 $bold(k)$ メッシュ.* `generate_irr_kpoint_inv` は $bold(k)$ 点の座標を許容誤差 $1\/max(N_x,N_y,N_z)$ — ちょうどメッシュ間隔 1 つ分 — で照合しており, $1\/N$ が2進小数で表せない場合に *隣の点* に誤マッチしていました。$N$ が 2 のべき乗（$4,8,16,32,64$）のメッシュは影響を受けませんが, それ以外は影響を受けます（例: $12^3$ では 1728 点中 919 点が誤対応）。現在は整数メッシュ添字から構成しており, 全てのメッシュで厳密です。2 のべき乗以外のメッシュで得た FLEX / Eliashberg / SC-$chi$ の結果は信頼できないものとして再計算してください。同ルーチンは $O(N_"kall"^2)$ でしたが $O(N_"kall")$ になりました（$64^3$ で 9.2 s $arrow$ 0.009 s）。
+- *非直交 MLO 基底（ftype=3,4）の FLEX・Eliashberg.* 自己エネルギーを含む計算で $G^(-1)$ に重なり行列 $S$ が入っておらず（$G^(-1) = i omega + mu - H - Sigma$）, 粒子数の補正項とも整合していませんでした。Cu の MLO 模型では FLEX の $mu$ が裸の値から約 $+2.9$ eV ずれ, Stoner 因子が負になります。現在は $G^(-1) = (i omega + mu) S - H - Sigma$, 粒子数は $"tr"(S G)$ です。*以前の MLO の FLEX, FLEX を使った Eliashberg, 自己エネルギー付きスペクトルは全て誤りです。* RPA（$Sigma = 0$）は固有ベクトルから $G_0$ を作っていたので正しく, 変わりません。
+- *MLO 軌道の規格化.* ecalj の MLO はノルムが 1 ではなく（Cu: $S_(a a)(0)$ が s で 0.016, d で 0.565）, 生の軌道に置いた U は実効的に $U\/S_(a a)(0)^2$ 程度で効いていました（Cu の RPA, U = 1 で Stoner 因子 85）。現在は読み込み時に各軌道をノルム 1 に規格化します（バンドは不変）。U, J, 軌道の重み, 軌道表示の $Sigma$ や $Delta$ の値は変わり, 規格化前に保存したファイルとは規約が合いません。バンド間の速度行列要素（Löwdin 直交化を通るもの）は数 % 変わり, 光学伝導度・反射率もそれに応じて変わります（Cu で $Delta R lt.eq 0.02$）。群速度とそれだけを使う量（Boltzmann 輸送, 有効質量, dHvA）は変わりません。
+- *MLO での `sw_chi0_tail`.* $tau = 0$ での $G_0$ の跳びを単位行列と仮定していたため, 非直交基底では打ち切り誤差が $O(1\/N_w^2)$ にならず $O(1\/N_w)$ のままでした。現在は跳び $S^(-1)(bold(k))$ と密度行列の $bold(k)$ 畳み込みで扱います。
+- *非線形 Eliashberg 方程式（option=23）.* 超伝導状態の正常グリーン関数を, 前の反復の $F$ を使った $G = G_0 (1 + Delta F^dagger)$ の部分反復ではなく, Nambu の Dyson 方程式 $G = [G_0^(-1) + Delta G_0^dagger Delta^dagger]^(-1)$ から直接求めるようにしました（旧方式は $Delta$ がおよそ $pi T$ を超えると発散）。`sw_self=True` では各反復で $Sigma$ の静的部分を差し引き（`sub_sigma`, $mu$ を固定しているため）, $Sigma$ も混合率 `pp` で混合します。$Delta$ が NaN/Inf になった場合は収束扱いにせずエラーで止まります。収束したギャップと $Sigma$ は以前と変わります。
+- *Fortran 側の論理型.* Python から 1 バイトの `c_bool` で渡しているのに Fortran 側が既定の 4 バイトの `logical` で受けていた引数がありました（超伝導状態の $chi$ のスピンチャンネル `sw_spsym`, $chi$ の先頭固有値とトレースの切り替え `sw_eig` など）。残りの 3 バイトは不定なので, 実行環境によっては誤った値として読まれていた可能性があります。option=12, 13, 27 の結果に疑問がある場合は再計算してください。
 
-- *$N_x$ が奇数かつ $N_y$ が偶数の既約ウェッジ.* このパリティの組み合わせは `gen_irr_k` の未実装分岐であり, ウェッジが埋められないまま `klist` の範囲外に書き込むため $N_z >= 3$ でクラッシュしていました。現在は実装済みで, $8 times 8 times 6$ までの 384 通りのメッシュ／パリティ全てについて `TRS_irr.typ` の記述と一致することを確認しています。
-
-- *伝導計算のスピン縮退.* option=5, 6 はスピン因子を `sw_soc` から取るようになりました。従来は無条件に $g_s=2$ としていたため, 両スピンを含むハミルトニアンでは結果が 2 倍ずれていました。
-
-- *ホール係数.* $R_H$ は $sigma_(x y)\/(sigma_(x x) sigma_(y y))$ ではなく完全な伝導率テンソルから構成するようになり, ホールキャリア密度はキャリアの型を添えた正の値として出力されます。option=5 を参照してください。
-
-- *ギャップ形状因子をデカルト格子調和関数で構成.* `gap_sym` は従来 *簡約座標* の関数（$cos(2 pi k_x) - cos(2 pi k_y)$ など）として評価しており, これがラベル通りの対称性を持つのは正方晶・直交系の 1 サイト格子だけでした。fcc・bcc・六方晶のセルでは, その関数は周期的ではあっても $B_(1g)$ ではなく, 結晶のデカルト $C_(4z)$ で符号が反転しません（実測: 破れは $O(1)$, 六方晶の $E_(2g)$ 二重項ノルムは 100% ずれます）。現在は模型の $bold(R)$ シェル上の $sum_bold(R) K_Gamma (hat(bold(R))) e^(i bold(k) dot bold(R))$ として構成し, $K_Gamma$ をデカルト空間で評価します。これによりラベル通りの既約表現と $bold(k)$ 空間の周期性が任意のブラベー格子で成立します（$10^(-15)$ で確認）。直交系の 1 サイト格子では全ての `gap_sym`・任意の軸比について従来の式をビット単位で再現するため, そこでの結果は変わりません。中心格子や六方晶のセルで自明でない `gap_sym` を使った計算 — SC-$chi$（option=12,13）, NMR（option=27）, Eilenberger の形状因子（option=24,25,26）, Eliashberg の初期値（option=15,23） — は値が変わり, 新しい方が正しい値です。構成方法と多サイトセルに残る制約は `gap_sym` の節を参照してください。
-
-- *`sw_dec_axis` を描画モード限定に.* 軸の分解は中心格子を慣用的な直交軸に unfold するもので, 10 軌道（2-Fe）のフェルミ面やバンド構造を 5 軌道（1-Fe）のものと比較できるようにするための機能です。一方で $bold(R)$ に半整数成分が残るため, 分解後の簡約座標 $bold(k)$ について $H(bold(k))$ が周期的でなくなり, BZ 和・FFT 畳み込み・既約ウェッジの折り畳み・セル体積としての $det("avec")$ がいずれも無効になります。現在は option=0, 2, 3 でのみ受け付け, それ以外のモードは静かに誤った値を返す代わりにエラーで停止します。従来この機能の動機だったギャップの対称性については, 上項の通り不要になりました。
-
-- *線形 Eliashberg 方程式の多軌道 triplet（SOC なし）.* $Delta$ は既約 $bold(k)$ リスト上に保持し, $-bold(k)$ 側は空間反転パリティから復元していますが, $bold(k) = -bold(k)$ となる点（TRIM）は 1 回しか保存されないため, そこではパリティが課されていませんでした。奇パリティ（triplet, `gap_sym` $< 0$）のギャップは TRIM にパリティを破る成分を残し, *多軌道*模型ではこれが $lambda$ に効きます: 2 軌道 $d_(x z)\/d_(y z)$ 模型（$4 times 4$, $N_w = 4$, $U = 1$, $J = 0.3$）で厳密値 $0.00779$ に対し $lambda = 0.0215$ でした。現在は TRIM でパリティを課しています。1 軌道模型と全ての singlet（`gap_sym` $gt.eq 0$）は影響を受けません（後者は条件が恒等的に満たされるため）。本改訂より前の多軌道 triplet の結果は再計算してください。
-
-- *Arnoldi ソルバーが返すギャップ関数が誤っていた.* `arnoldi_m > 0` の場合, 第 2 パスは最も負の固有ベクトルで deflation したカーネルを回すため, その Ritz ベクトルは *deflation 後*の演算子の固有ベクトルであり, 取り除いた成分を戻していませんでした。固有値 $lambda$ は正しい一方, 返される $Delta(bold(k), i omega_n)$ は固有ベクトルになっていません（相対残差 $approx 0.7$）。Arnoldi で得たギャップ関数 — `gap.npy`, `gap_{i j}.dat`, 出力した `gap_wannier`, およびそれらを使う計算（option=16, 24〜26, 27）— は再計算してください。固有値そのものと, べき乗法（`arnoldi_m = 0`）の結果は影響を受けません。あわせて TRS 系の 2 つのソルバーは*実*内積を使うようにしました。これらのカーネルは $Delta$ の一部を複素共役で埋めるため実数体上でしか線形でなく, 複素 Krylov 空間では両者が混ざって $lambda$ がずれます（SOC triplet で最大 $10^(-4)$）。
-
-- *SOC ありの `gap_sym` $= plus.minus 1$ はパリティのみを指定.* 従来は $Delta_(arrow.t arrow.b) = minus.plus Delta_(arrow.b arrow.t)$ も課していましたが, これは SOC が無いときだけの対称性です。SOC があるとパリティセクターの中でスピン singlet と triplet は混ざるため, スピン構造を固定すると $lambda$ が正しい値より大きく下振れします。現在は `gap_sym` の符号がギャップの空間反転パリティ（正: 偶, 負: 奇）だけを決め, スピン構造は自由にします。パリティセクターには目的の状態の相手（異スピン・奇周波数）も同居するため, Arnoldi ソルバーはセクターの最大固有値ではなく `gap_sym` のスピン性格に一致するブランチを返します。これにより SOC を 0 に近づけたときに $lambda$ が連続につながります。$L_z s_z$ 型 SOC を入れた $d_(x z)\/d_(y z)$ 模型では `gap_sym` $= 1$ で $lambda = 0.0539 arrow.r 0.0592$ と変わります。SOC が*無い*場合は singlet/triplet が厳密なセクターなので従来通り射影され（実行時に $G$ から判定）, 結果はビット単位で不変です。べき乗法にはブランチ追跡がないため, SOC がある場合は Arnoldi ソルバーを使ってください。
-
-- *SOC FLEX の自己エネルギーが過大だった.* RPA の行列級数は 2 次の自己エネルギー図を 2 つのスピンチャンネル経由で数えるため, SOC なしの頂点は $-1\/4 (hat(S)+hat(C)) chi_0 (hat(S)+hat(C))$ の相殺項で余分な 1 つを取り除いています。SOC 版の頂点にはこの項が無く, $Sigma$ が相互作用の構造に依存した倍率で過大評価されていました（厳密な 2 次と比較して 1 軌道で $2$ 倍, 2 軌道 $J = 0$ で $1.5$ 倍）。現在は自己エネルギーのチャンネルで常にこの相殺項を適用します。スピン自由度を持つが SOC の無い模型では SOC なし FLEX を $10^(-11)$ の精度で再現します（$U = 0.5$ でも一致するので, 2 次だけでなく RPA の全次数で正しい補正です）。*本改訂より前の SOC FLEX の結果は全て誤りであり, 再計算が必要です*（保存済みの `sigma.bin` と, それを種にした計算を含みます）。ペアリング頂点には二重計上が無いため影響を受けず, 線形 Eliashberg 方程式はこの項を必要としません。現在は 1 つの頂点ルーチンが引数でチャンネルを切り替えて両方を担っています。
+新しい機能（以前の結果は変えません）: IR 基底の周波数格子（`freq_grid='ir'`, option=14 の節）, 対称性を仮定しない線形 Eliashberg（`sw_nosym`, option=15 の節）, AiiDA インターフェース, gfortran でビルドしたライブラリの自動設定（「Fortran カーネルのビルド」の節）。
 
 = 動作環境
 
@@ -70,8 +61,11 @@ pyrpaはすべての設定を`main.py`の上部にある変数を書き換える
 - `scipy`
 - `matplotlib`
 - `skimage`（フェルミ面プロット option=2,3, サイクロトロン質量 option=18, dHvA 軌道 option=19 で使用）
+- `sparse-ir`（任意。IR 基底 `freq_grid='ir'` で使用。1.x, 2.x; 2.1.6 で確認）
+- `ana_cont`（任意。MaxEnt による解析接続 `sw_maxent=True` で使用）
+- `aiida-core`（任意。AiiDA インターフェース `examples/aiida/` でのみ使用。「AiiDA インターフェース」の節を参照）
 
-Fortran カーネル `libs/libfmod.so` をあらかじめコンパイルしておく必要があります。`libs/flibs`, `libs/plibs` はこれを呼び出す純 Python パッケージです。線形 / 非線形 Eliashberg・FLEX・SC chi 計算は OpenMP 並列の Fortran ルーチン経由で実行されます。
+Python は 3.11 以降が必要です（`U`, `J` のパラメータセットの読み込みに標準の `tomllib` を使います）。Fortran カーネル `libs/libfmod.so` をあらかじめコンパイルしておく必要があります。`libs/flibs`, `libs/plibs` はこれを呼び出す純 Python パッケージです。線形 / 非線形 Eliashberg・FLEX・SC chi 計算は OpenMP 並列の Fortran ルーチン経由で実行されます。
 
 == Fortran カーネルのビルド
 
@@ -80,13 +74,13 @@ Fortran カーネル `libs/libfmod.so` をあらかじめコンパイルして�
 #table(
   columns: (auto, 1fr),
   [`make auto`], [*クラスタでの推奨.* ツールチェインはインストール／ロード状況から, CPU ターゲットは計算ノード自身から自動判定します。見つかった CPU の種類ごとに `libfmod_<target>.so` を 1 つずつビルドし, `libs/flibs/_loader.py` が実行ノードで使える最良のものを import 時に選びます。],
-  [`make`], [単一ターゲットのライブラリを 1 つ。`ARCH`（既定 `znver3` = 可搬な AVX2 ベースライン）, `FC`, `SL` は自動判定またはコマンドラインの指定に従います。],
-  [`make dispatch`], [`znver3` + `znver4` の固定ペア。すなわち検出を省いた `make auto` です。],
+  [`make`], [単一ターゲットのライブラリを 1 つ。`ARCH`（既定はビルドするマシンのベンダーの可搬な AVX2 ベースライン: AMD では `znver3`, Intel では `x86-64-v3`）, `FC`, `SL` は自動判定またはコマンドラインの指定に従います。],
+  [`make dispatch`], [AVX2 と AVX-512 の固定ペア（AMD では `znver3` + `znver4`, Intel では `x86-64-v3` + `x86-64-v4`; `DISPATCH_ARCHS` で変更可）。すなわち検出を省いた `make auto` です。],
 )
 
 明示指定が常に優先されます: `make FC=ifx SL=MKL ARCH=znver4`, `make auto ARCH_LIST="znver3 znver4"` など。
 
-*何を, どこから判定するか.* `FC` は `PATH` 上の `ifx`, `ifort`, `flang`, `amdflang`, `gfortran` の最初に見つかったもの, `SL` は実際にロードされているモジュール（`MKLROOT` $arrow$ MKL, `AOCL_ROOT` $arrow$ AOCL, どちらも無ければ OpenBLAS）に従います。root が設定されていないライブラリを選ぶと, BLAS シンボルが未解決のまま import 時に初めて落ちる `libfmod.so` ができてしまうためです。一方 *CPU ターゲット* はビルドホストから取ってはいけません。Zen 4 のログインノードで `-march=native` を使うと, Zen 3 の計算ノードでは SIGILL で落ちる AVX-512 コードができます。そこで `libs/detect_arch.sh` は, スケジューラの台帳（Slurm の `sinfo`, PBS の `pbsnodes`, いずれも無ければ自機のみ）にある各ノードに対して `gcc -march=native` がその CPU を何と呼ぶかを問い合わせ, 重複を除いたターゲットを出力します。
+*何を, どこから判定するか.* `FC` は `PATH` 上の `ifx`, `ifort`, `flang`, `amdflang`, `gfortran` の最初に見つかったもの, `SL` は実際にロードされているモジュール（`MKLROOT` $arrow$ MKL, `AOCL_ROOT` $arrow$ AOCL, どちらも無ければ OpenBLAS）に従います。root が設定されていないライブラリを選ぶと, BLAS シンボルが未解決のまま import 時に初めて落ちる `libfmod.so` ができてしまうためです。一方 *CPU ターゲット* はビルドホストから取ってはいけません。Zen 4 のログインノードで `-march=native` を使うと, Zen 3 の計算ノードでは SIGILL で落ちる AVX-512 コードができます。そこで `libs/detect_arch.sh` は, スケジューラの台帳（Slurm の `sinfo`, PBS の `pbsnodes`, いずれも無ければ自機のみ）にある各ノードに対して `gcc -march=native` がその CPU を何と呼ぶかを問い合わせ, 重複を除いたターゲットを出力します。Intel のノードは世代名（`sapphirerapids` など）ではなく, フラグから決まる x86-64 のレベル（AVX-512 F/BW/CD/DQ/VL があれば `x86-64-v4`, AVX2/FMA/BMI2 なら `x86-64-v3`）で報告します。Intel の世代ごとの細かな拡張命令（AVX-VNNI, AMX など）の違いで, 古いノードに新しい世代向けのライブラリが渡されるのを避けるためです。`x86-64-v3` は Zen でも動くので, AMD と Intel が混ざったクラスタはこれ 1 つで済みます。
 
 ```
 $ sh libs/detect_arch.sh --table
@@ -98,7 +92,9 @@ yakisoba     AMD Ryzen 9 7900X 12-Core Processor      znver4
 
 結果は `libs/.arch_cache` にキャッシュされます。`sh libs/detect_arch.sh --refresh` で再取得, `--local` で自機のみに限定できます。応答しないノードは黙って無視されるのではなく, 可搬な既定値 `znver3` を寄与したうえで警告が出ます。`slurm.conf` に `Features=znver3` / `znver4` を設定しておけば, 検出はジョブ投入なしの `sinfo` 参照だけで済みます（クラスタを管理できる場合はこちらを推奨）。
 
-実行時に手で選ぶ必要はありません。`_loader.py` が CPU のフラグを読み, そのマシンで実際に実行できる最上位 ISA の `libfmod_*.so` を読み込みます（見つからなければ通常の `libfmod.so`）。AMD 上で MKL を使う場合は `MKL_ENABLE_INSTRUCTIONS=AVX512`（Zen 4）または `AVX2`（Zen 3）も export し, `OMP_NUM_THREADS` は決め打ちではなくスケジューラの値（`$SLURM_CPUS_PER_TASK`）から設定してください。
+実行時に手で選ぶ必要はありません。`_loader.py` が CPU のフラグを読み, そのマシンで実際に実行できる最上位 ISA の `libfmod_*.so` を読み込みます（見つからなければ通常の `libfmod.so`）。各ターゲットに必要な CPU フラグの組（例えば `x86-64-v4` なら AVX-512 F/BW/CD/DQ/VL の全て）を確かめてから選びます。`make ARCH=sapphirerapids` のように Intel の世代名でビルドすることもでき, その場合もその世代の拡張命令（AMX, AVX512-BF16 など）があるノードでだけ選ばれます。MKL は Intel CPU では命令セットを自動で選びます。AMD 上で MKL を使う場合は `MKL_ENABLE_INSTRUCTIONS=AVX512`（Zen 4）または `AVX2`（Zen 3）も export し, `OMP_NUM_THREADS` は決め打ちではなくスケジューラの値（`$SLURM_CPUS_PER_TASK`）から設定してください。
+
+*gfortran でビルドする場合.* gfortran は同じファイル内で同じ外部手続きを異なる整数の型で呼ぶとエラーにするため, BLAS/LAPACK の整数引数はファイルごとに型を揃えています（`fmod.f90` では `c_int64_t`）。MKL と組み合わせる場合（`SL=MKL`）は GNU のスレッド層（`-lmkl_gf_lp64 -lmkl_gnu_thread -lmkl_core`）とリンクします。gfortran 版は OpenMP に libgomp を使う一方, MKL 版の numpy は libiomp5 を使うため, 同じ Python プロセスで 2 つの OpenMP ランタイムが待機中のスレッドを回し続けてコアを奪い合い, 何十倍も遅くなることがあります。`_loader.py` は libgomp とリンクした `libfmod` を読み込む前に `OMP_WAIT_POLICY=PASSIVE` を設定します。また libgfortran は標準出力が端末でないと Fortran の出力をプロセス終了までため込むため, `GFORTRAN_UNBUFFERED_PRECONNECTED=y` も設定します（FLEX の反復のログを途中で見られるように。AiiDA インターフェースはこのログで収束を判定します）。いずれもユーザーが値を設定していればそちらを優先します。ifx/ifort 版は numpy と同じ libiomp5 を使うので影響を受けません。
 
 *CMake.* `libs/CMakeLists.txt` でも同じ判定・同じ成果物が得られます（CMake を好む場合や IDE 連携が必要な場合）。
 
@@ -120,9 +116,9 @@ cmake -S libs -B build -DFC_COMPILER=gfortran -DSL=MKL -DARCH_LIST="znver3;znver
   columns: (auto, 1fr),
   [*ftype*], [*ファイル形式*],
   [0], [`{fname}/` ディレクトリ内に `ham_r.txt`, `irvec.txt`, `ndegen.txt` が存在する形式],
-  [1], [`{fname}.input` ファイル（独自形式）],
+  [1], [`fname` で指定したファイル（独自形式。`.input`, `.hop` など拡張子も含めて指定）],
   [2], [`{fname}_hr.dat` ファイル（Wannier90のデフォルトホッピングファイル）。*第一原理計算との連携では通常これを使用*],
-  [3], [MLO（最局在ワニエ）基底の非直交基底ホッピング形式],
+  [3], [ecalj の MLO 基底（非直交）のテキスト形式。$H(R)$ と重なり積分 $S(R)$ を含む],
   [4], [`{fname}/` ディレクトリ内の `HamRsMLO`, `HamiltonianPMTInfo`（ecalj `job_mlo` のバイナリ出力）。ftype=3 と同じく非直交 MLO 基底で, 重なり積分 $S(R)$ も同時に読み込みます。ftype=3,4 とも, 読み込み時に各軌道をノルム 1 に規格化します（$D = "diag" S(R=0)$ として $H(R), S(R) -> D^(-1\/2) (dot) D^(-1\/2)$。バンドは不変; ecalj の MLO は規格化されておらず, Cu では $S_(a a)(0)$ が s で 0.016, d で 0.565）],
   [その他], [`Hopping.dat` ファイル（ecaljのホッピングファイル）],
 )
@@ -136,7 +132,7 @@ ftype = 2
 
 == スピン軌道相互作用（`sw_soc`）
 
-`sw_soc = True` にすることでスピン軌道相互作用（SOC）を考慮した計算を行います。SOC を含む系では, ハミルトニアンがスピン自由度を含む（軌道数が 2 倍になる）形式である必要があります。FLEX (option=14) および線形 Eliashberg (option=15) は SOC 対応版が用意されています（内部で `calc_flex_soc` / `calc_lin_eliash_soc` を呼びます）。非線形 Eliashberg (option=23) と SC chi (option=12,13) は現状 SOC 非対応です。
+`sw_soc = True` にすることでスピン軌道相互作用（SOC）を考慮した計算を行います。SOC を含む系では, ハミルトニアンがスピン自由度を含む（軌道数が 2 倍になる）形式である必要があります。FLEX (option=14) および線形 Eliashberg (option=15) は SOC 対応版が用意されています（内部で `calc_flex_soc` / `calc_lin_eliash_soc` を呼びます）。いずれも IR 基底と非直交 MLO 基底に対応しています。非線形 Eliashberg (option=23) と SC chi (option=12,13) は現状 SOC 非対応です。スピンの並びは既定で「全軌道の up の後に全軌道の down」で, 別の並びの場合は `slist`（各軌道のスピン $plus.minus 1$）と `invs`（1 始まりの逆スピンの相手）を定義してください。
 
 = ブラベー格子の設定（`brav`）
 
@@ -159,16 +155,6 @@ ftype = 2
 = 計算モード（`option`）
 
 計算内容は `option` 変数の整数値で指定します。`CalcMode` IntEnum の値を直接指定することもできます（例: `option = CalcMode.LIN_ELIASHBERG`）。各モードの詳細を以下に示します。
-
-#block(stroke: 1pt + red, inset: 8pt, radius: 4pt)[
-  *注意: 未検証モードについて*
-
-  以下のモードは `main.py` の `CalcMode` 定義で *(not implemented)* と注記されており, 実装の正確性が十分に検証されていません。結果の物理的妥当性・数値精度は保証されないため, 使用する場合は *自己責任* でご利用ください。出力を論文等で引用する前には独立な手段による検証を強く推奨します。
-
-  - option=20 (`ELECTRON_MASS`): symmetry line 上の電子質量
-  - option=21 (`SPECTRUM_IMPURITY`): 不純物入りスペクトル関数
-  - option=23 (`NONLIN_ELIASHBERG`): 非線形 Eliashberg 方程式
-]
 
 == option=0: バンドプロット (`BAND`)
 
@@ -196,9 +182,9 @@ Marching cubes アルゴリズムを用いて 3 次元フェルミ面をポリ�
 
 一体グリーン関数のトレースの虚部から電子のスペクトル関数
 
-$ A(bold(k), omega) = -1/pi "Im" "Tr" G(bold(k), omega + i delta) $
+$ A(bold(k), omega) = -1/pi "Im" "Tr" [S(bold(k)) G(bold(k), omega + i delta)] $
 
-を計算し, symmetry line に沿って描画します。`sw_self=True` の場合は FLEX 計算で求めた自己エネルギーを取り込み, 相互作用の効果を含めたスペクトルを計算します。
+を計算し, symmetry line に沿って描画します（直交基底では $S = 1$）。`sw_self=True` の場合は FLEX 計算が書き出した `self_en_wannier.npz` の自己エネルギーを $bold(k)$ 経路上へフーリエ補間し, Padé（`sw_maxent=True` では MaxEnt）で実軸へ接続して, 相互作用の効果を含めたスペクトルを計算します。IR 基底で解いた $Sigma$ はサンプリング点の値（`sigma_ir`）から接続します（option=14 の「周波数格子」の節）。
 
 == option=5: ボルツマン伝導係数 (`CONDUCTIVITY_BT`)
 
@@ -318,7 +304,7 @@ option=12 と同じ SC 状態の枠組みで, `at_point` で指定した $bold(q
 
 == option=14: FLEX 自己エネルギー計算 (`FLEX`)
 
-FLEX アルゴリズムを自己無撞着に解き, 電子の自己エネルギー $Sigma(bold(k), i omega_n)$ を松原周波数空間で計算します。得られた自己エネルギーは `sigma.bin` および `self_en.npz` に保存されます。
+FLEX アルゴリズムを自己無撞着に解き, 電子の自己エネルギー $Sigma(bold(k), i omega_n)$ を松原周波数空間で計算します。`sw_out_self=True` のとき, 得られた自己エネルギーは `self_en.npz`（周波数 `iw` と温度を記録）, `self_en_wannier.npz`（Wannier 実空間形式。option=4 と `tau_mode='flex'` が読む）, および一様格子では `sigma.bin`（`sw_in_self` の初期値用）に保存されます。
 
 - 非直交 MLO 基底（`ftype=3,4`）では $G^(-1) = (i omega + mu) S - H - Sigma$ を用い, 粒子数は $"tr"(S G)$ で評価します。`U`, `J` は規格化した MLO 軌道（ftype=3,4 の読み込み時に $S_(a a)(R=0) = 1$ とする）上の局所相互作用として扱い, 直交化した軌道上の相互作用とはみなしません。規格化しないと U は実効的に $U \/ S_(a a)(0)^2$ 程度で効きます（Cu の s 軌道で約 4000 倍）。線形・非線形 Eliashberg および自己エネルギー付きスペクトルにも同じ規約を使います。自己エネルギーファイルには重なり行列を保存しないため, 読み込み時には計算時と同じ基底・模型を指定してください。`tau_mode='flex'` の輸送計算は引き続き直交基底専用です。
 - `sw_out_self=True`: 自己エネルギーをファイルへ出力
@@ -327,7 +313,7 @@ FLEX アルゴリズムを自己無撞着に解き, 電子の自己エネルギ�
 - 温度アニーリング: 同一 `Nw` での小刻みな冷却（$T_"new"\/T_"old" gt.eq 0.8$ 程度）なら `sigma.bin` の生読み込みで十分です。生読み込みは周波数軸を $T_"old"\/T_"new"$ 倍に圧縮した seed に相当し, この圧縮が冷却に伴う $Sigma$ の増大を近似的に模倣するため, 近臨界では忠実な補間よりむしろ収束が速いことを確認しています。`Nw` を変える場合（生読み込みでは読めない唯一のケース）は Python ヘルパー `plibs.regrid_sigma_bin(temp_new=..., Nw_new=..., w_scale=...)` で `sigma.bin` を新グリッドへ再補間できます。元の温度・`Nw`・軌道数は `sigma.bin` 末尾のメタデータレコード（最近の `io_sigma` が自動追記; 旧コードの読み込みには影響しない末尾レコード）から自動取得され, 明示指定した値がフッタと矛盾する場合はエラーになります（フッタの無い旧ファイルでは `temp_old`/`Norb`/`Nw_old` の明示指定が必要）。`sw_in_self` の読み込み側でもフッタとの照合を行い, メッシュ（`Nw`/軌道数/k点数）が一致しない `sigma.bin` はエラー停止します（Fortran の read はレコードが大きい分には黙って壊れた並びを読んでしまうため, その事故を防ぐ検査です）。温度だけが異なる場合は T アニーリングとみなして情報表示のみで続行します。なお SOC 版（`mkself_soc`）の `sigma.bin` も同一形式に統一済みで, 本ヘルパーがそのまま使えます（旧・要素別レコード形式のファイルは読めません）（共役対称性 $Sigma_(l m)(-i omega) = Sigma_(m l)(i omega)^*$ による負周波数拡張つき 3 次スプライン; 循環畳み込みの折返しアーチファクトを持つ最終周波数点は除去し, カットオフ超過分は内側窓でフィットした $c_0 + c_1\/(i omega)$ tail で補完）。近臨界の冷却では `w_scale=temp_old/temp_new`（生読み込みと同じ圧縮）を推奨, 忠実な補間は `w_scale=1`（既定）です
 - `m_diis_num`: DIIS 履歴長（指定なしのデフォルトは 5）
 - `sw_rescale_flex=True`: 反復中に Stoner 因子 $S = max_bold(q) "eig"[chi_0(bold(q), 0) hat(S)]$ が 1 に達した場合, $chi_0(bold(q), i nu_n)$ を一律に $(1 - 10^(-4))\/S$ 倍して磁気不安定性による発散を回避
-- `sw_chi0_tail=True`: $chi_0$ を tail 補正付きで評価（既定 False; option=14,15,23 の SOC なし経路で有効）。$chi_0 = "conv"[G] - "conv"[G_0] + chi_0^"ref"$ と双線形分解し, ゆっくり減衰する $1\/(i omega)$ 参照部分（$G_0$ バブル）は虚時間の解析式で厳密に, FFT 畳み込みには速く減衰する残差（$G - G_0 tilde 1\/omega^2$）のみを通します。松原打ち切り誤差が $O(1\/N_w) -> O(1\/N_w^2)$ に改善します（検証済み: 厳密 Lindhard 関数に対し収束次数 1.0 → 2.0）。$chi_0$ 段のコストは約 3 倍。$N_w gt.eq 64$ 程度で有効（極端に小さい $N_w$ では参照バブルの $tau$ 離散化誤差の係数が大きく逆転し得ます）。改善された $chi_0$ は $chi_s$/$chi_c$, FLEX 頂点 $V_sigma$, ペアリング頂点 $V_Delta$ に自動的に伝播します。
+- `sw_chi0_tail=True`: $chi_0$ を tail 補正付きで評価（既定 True; option=14,15,23 の SOC なし経路で有効。非直交 MLO 基底にも対応し, IR 基底では打ち切り誤差がないので無視されます）。$chi_0 = "conv"[G] - "conv"[G_0] + chi_0^"ref"$ と双線形分解し, ゆっくり減衰する $1\/(i omega)$ 参照部分（$G_0$ バブル）は虚時間の解析式で厳密に, FFT 畳み込みには速く減衰する残差（$G - G_0 tilde 1\/omega^2$）のみを通します。松原打ち切り誤差が $O(1\/N_w) -> O(1\/N_w^2)$ に改善します（検証済み: 厳密 Lindhard 関数に対し収束次数 1.0 → 2.0）。$chi_0$ 段のコストは約 3 倍。$N_w gt.eq 64$ 程度で有効（極端に小さい $N_w$ では参照バブルの $tau$ 離散化誤差の係数が大きく逆転し得ます）。改善された $chi_0$ は $chi_s$/$chi_c$, FLEX 頂点 $V_sigma$, ペアリング頂点 $V_Delta$ に自動的に伝播します。
 
 *実装上の近似に関する注意*（いずれも計算コスト・数値安定性を考慮した意図的な仕様です）:
 
@@ -352,11 +338,19 @@ FLEX アルゴリズムを自己無撞着に解き, 電子の自己エネルギ�
 RPA または FLEX で求めた有効ペアリング相互作用を使い, 線形化された Eliashberg 方程式を固有値問題として解きます。最大固有値 $lambda$ と対応するギャップ関数 $Delta(bold(k), i omega_n)$ が得られます。$lambda = 1$ で超伝導転移温度 $T_c$ となります。デフォルトは shift + deflation 付き power method, `arnoldi_m > 0` で Arnoldi 法も選択可能です。
 
 - `sw_self=False`: 自己エネルギー補正なし（RPA）
-- `sw_self=True`: FLEX の自己エネルギーを用いる（`sigma.bin` が必要）
-- `sw_from_file=True`: `sigma.bin` からファイルを読み込み, FLEX 計算をスキップ
+- `sw_self=True`: FLEX の自己エネルギーを用いる（FLEX をその場で解きます）
+- `sw_from_file=True`（`sw_self=True` と併用）: option=14 が書き出した `self_en.npz` から自己エネルギーを読み込み, FLEX 計算をスキップ（周波数格子と温度が一致しない場合は拒否されます）
 - `gap_sym`: 初期ギャップ関数の対称性を指定（詳細は後述）
 - *SOC あり*（`sw_soc=True`）では `gap_sym` の符号はギャップの*空間反転パリティ*（正: 偶, 負: 奇）を決め, スピン構造は指定しません。SOC があるとパリティセクターの中でスピン singlet と triplet が混ざるためです。同じセクターには指定した状態の相手（異スピン・奇周波数）も同居するので, Arnoldi ソルバーはセクターの最大固有値ではなく `gap_sym` のスピン性格に一致するブランチを返します（SOC $arrow.r 0$ で $lambda$ が連続につながります）。*SOC がある場合は Arnoldi ソルバー（`arnoldi_m > 0`）を使ってください* — べき乗法にはブランチ追跡が無く, セクターの支配的な状態（奇周波数の相手になり得る）に収束します。SOC が無い場合は singlet/triplet が厳密なセクターなので従来通り射影され, `gap_sym` の意味も従来通りです
-- ギャップ関数は `gap.npy` と, 軌道ペアごとの `gap_11.dat`, `gap_12.dat`, …（軌道インデックスを 1 始まりにした `gap_{i j}.dat`）に出力される
+- ギャップ関数は `gap.npy` と, 軌道ペアごとの `gap_11.dat`, `gap_12.dat`, …（軌道インデックスを 1 始まりにした `gap_{i j}.dat`）に出力される（`sw_out_self=True` では `gap_iw.npy` と Wannier 実空間形式の `gap_wannier.npz` も）
+
+=== 対称性を仮定しない線形 Eliashberg（`sw_nosym`）
+
+`sw_nosym=True` にすると, option=15 は時間反転・空間反転対称性を仮定せずに全ブリルアンゾーン上でギャップ方程式を解きます（裸の $G$, RPA）。Zeeman 場や有限運動量の対（FFLO）のように, それらの対称性が破れる状況のためのものです。スピンを持たない模型（`sw_soc=False`）は自動的にスピン 2 重化されます。singlet/triplet への射影は行わず, `gap_sym` は初期値にだけ使われます。FLEX の自己エネルギーには対応していません（`sw_self` を指定しても裸の $G$ を使います）。
+
+- `zeeman_h`（3 成分, eV）: Zeeman 場 $H_Z = bold(h) dot bold(sigma)$（$g mu_B B\/2$ を含めた値）。化学ポテンシャルは同じ `fill` で解き直します。
+- `fflo_q`（整数 3 成分のリスト）: 対の運動量 $bold(Q) = (i_(Q x)\/N_x, i_(Q y)\/N_y, i_(Q z)\/N_z)$ の一覧。例えば `[[q, 0, 0] for q in range(5)]` で $k_x$ 方向に走査します。$chi_0$ と $V_Delta$ は一度だけ計算して全ての $bold(Q)$ で使い回し, $lambda(bold(Q))$ を `lambda_Q.dat` に出力します。ギャップは `gap_nosym.npz`, `gap_nosym.dat` に出力されます。
+- `nosym_arnoldi_m`（整数, 既定 60）: Arnoldi の Krylov 空間の次元。$lambda$ が小さい場合, $10^(-6)$ の精度には 60 程度以上が必要なことがあります。
 
 == option=16: ギャップ関数の後処理 (`GAP_FUNCTION`)
 
@@ -396,7 +390,12 @@ symmetry line 上で $m^* = hbar^2 (partial^2 E \/ partial bold(k)^2)^(-1)$ を�
 
 == option=21: 不純物入りスペクトル (`SPECTRUM_IMPURITY`)
 
-実空間スーパーセル上で不純物を加えたハミルトニアンを構築し, 不純物グリーン関数を介してスペクトル関数 $A(bold(k), omega)$ を計算します。`imp_list` で不純物サイトを指定。
+周期的なスーパーセル上にオンサイトの不純物ポテンシャルを置いたハミルトニアンを対角化し, 元の単位胞の $bold(k)$ へ unfold したスペクトル関数 $A(bold(k), omega)$ を計算します。
+
+- `imp_cell`（3 成分）: 各軸方向のスーパーセルの大きさ。ホッピングの到達距離の 2 倍より大きくしてください（$N_"cell" times N_"orb"$ 次元の行列を対角化します）。
+- `imp_sites`（`None` または整数のリスト）: スーパーセル内の不純物サイト（0 始まり, `gen_rlist` の順）。`None` では `imp_conc` の濃度でランダムに置きます（少なくとも 1 個）。
+- `imp_conc`, `imp_seed`: ランダム配置の濃度と乱数の種（`None` で毎回異なる配置）。
+- `imp_V`（実数 または $N_"orb" times N_"orb"$ 行列, eV）: オンサイトの不純物ポテンシャル（実数は単位行列の倍）。
 
 == option=22: CPA 伝導 / スペクトル (`SIGMA_CPA`)
 
@@ -413,12 +412,15 @@ Coherent Potential Approximation により混晶の自己エネルギーを反�
    - $lambda_"eliash" < 1$（$T >= T_c$, 超伝導不安定性なし）の場合も終了します。
    - `sw_check_only=True` の場合はここで終了し, $S$ と $lambda_"eliash"$ のみを報告します（非線形ループをスキップして温度走査で $T_c$ を素早く確認する用途）。
 2. 上記の線形固有ベクトルから対称性が正しい初期 Δ の形を取り, 振幅を BCS 弱結合比 $Delta_0 = 1.764 k_upright(B) T_c$ にスケールして非線形ループに渡します。
-3. 各反復: $Delta_"new" = T \/ N_k sum V_Delta dot F$ → 振幅方向 Newton（secant）加速 + DIIS 形状混合（バイパス時は線形混合 pp=0.3）→ $Sigma$ 更新 → SC Dyson で $G, F$ 更新 → $chi^"GG", chi^"FF"$ から $V_sigma, V_Delta$ 再構築
+3. 各反復: $Delta_"new" = T \/ N_k sum V_Delta dot F$ → 振幅方向 Newton（secant）加速 + DIIS 形状混合（バイパス時は線形混合 pp=0.3）→ $Sigma$ 更新（`sw_self=True`; 静的部分を差し引き, `pp` で混合）→ Nambu の Dyson 方程式 $G = [G_0^(-1) + Delta G_0^dagger Delta^dagger]^(-1)$, $F = -G_0 Delta G^dagger$ で $G, F$ 更新 → $chi^"GG", chi^"FF"$ から $V_sigma, V_Delta$ 再構築（$V$ を固定する設定ではこの段を省略）
 
 - `m_diis_num`: DIIS 履歴長（$>= 2$ で Pulay 外挿, それ以下は線形混合）
 - `sw_self=True`: FLEX 自己エネルギー込みで Σ-dressed Green's function を使う
-- `sw_from_file=True`: `sigma.bin` から自己エネルギーを読み込む
-- `sw_check_only`: 後述（5節「スイッチ類」）
+- `sw_from_file=True`: option=14 が書き出した `self_en.npz` から自己エネルギーを読み込む
+- `sw_check_only`: 後述（「スイッチ類」）
+- `sw_out_self=True`: ギャップを `gap.npy`, `gap_wannier.npz` に, `sw_self=True` では超伝導状態の $Sigma$ を `self_en_sc.npz`, `self_en_sc_wannier.npz` に出力します
+- 反復が発散した場合（$Delta$ が NaN/Inf）はエラーで停止し, ギャップを書き出しません。`itemax` 回で収束しなかった場合は警告を表示します
+- IR 基底（`freq_grid='ir'`）に対応しています
 - 振幅方向の Newton 加速によりギャップ振幅の収束が高速化されています（詳細は `libs/src/ffeliash.f90` の `sw_amp_newton` 関連コメント参照）
 - 詳細は `libs/src/ffeliash.f90` 参照
 
@@ -493,11 +495,11 @@ olist = [[0, 3], [1, 4], [2, 5]]
 
 == 基本設定
 
-- `fname` （文字列）: 入力ファイルのパス（`ftype`に応じた形式で指定, 拡張子は通常不要）
+- `fname` （文字列）: 入力ファイルまたはディレクトリのパス（`ftype` に応じた形式で指定。ftype=1 は拡張子込みのファイル名, ftype=2 は `_hr.dat` を除いた名前, ftype=0, 4 はディレクトリ）
 
-- `ftype` （整数）: 入力ハミルトニアンのファイル形式（4節参照）
+- `ftype` （整数）: 入力ハミルトニアンのファイル形式（「入力ファイルについて」の節を参照）
 
-- `brav` （整数）: ブラベー格子の種類（5節参照）
+- `brav` （整数）: ブラベー格子の種類（「ブラベー格子の設定」の節を参照）
 
 - `sw_soc` （bool）: スピン軌道相互作用を考慮するかどうかのスイッチ
 
@@ -507,7 +509,7 @@ olist = [[0, 3], [1, 4], [2, 5]]
 
 - `Nx, Ny, Nz` （整数）: 第一ブリルアンゾーン内の $bold(k)$ 点メッシュ数。フェルミ面積分や FFT-convolution（FLEX, Eliashberg, chi）で使用します。2 次元系では `Nz=1` とします。FLEX/Eliashberg 計算では FFT 効率の都合上 2 のべき乗（32, 64 など）が望ましく, メモリ消費は $tilde.equiv N_x N_y N_z dot N_w dot N_"orb"^2$ で増えます。
 
-- `Nw` （整数）: 松原周波数のメッシュ数（option=12,13,14,15,16,23 の FLEX/Eliashberg/SC chi 計算）または実周波数のメッシュ数（option=1,4 など）。温度 $T$ に対して $omega_n = (2n+1) pi T$ の形で $n=0,1,...,N_w-1$ まで取ります。低温ほど大きな $N_w$ が必要です（典型値: 256–1024）。実効的な周波数カットオフは $omega_c = (2 N_w - 1) pi T$ で温度に比例して縮み, 松原畳み込みは鋭い打ち切り（tail 補正なし）です。したがって `Nw` 固定のまま降温すると系統誤差が増えるため, 温度走査では最低温度でも $omega_c$ がバンド幅・`U` を十分上回るよう `Nw` を選んでください（option=14 の注意書きも参照）。
+- `Nw` （整数）: 松原周波数のメッシュ数（option=12,13,14,15,16,23 の FLEX/Eliashberg/SC chi 計算; `freq_grid='ir'` では使われません）または実周波数のメッシュ数（option=1,4 など）。温度 $T$ に対して $omega_n = (2n+1) pi T$ の形で $n=0,1,...,N_w-1$ まで取ります。低温ほど大きな $N_w$ が必要です（典型値: 256–1024）。実効的な周波数カットオフは $omega_c = (2 N_w - 1) pi T$ で温度に比例して縮み, 松原畳み込みは鋭い打ち切り（tail 補正なし）です。したがって `Nw` 固定のまま降温すると系統誤差が増えるため, 温度走査では最低温度でも $omega_c$ がバンド幅・`U` を十分上回るよう `Nw` を選んでください（option=14 の注意書きも参照）。
 
 - `kmesh` （整数）: バンド・スペクトルをsymmetry lineに沿って計算する際の$bold(k)$点数。大きいほど滑らかなプロットが得られます（例: 200～500程度）。
 
@@ -569,7 +571,7 @@ olist = [[0, 3], [1, 4], [2, 5]]
 
 == 軌道・相互作用パラメータ
 
-- `olist` （リスト）: カラープロット（color_option=1）で使用する軌道インデックスのリスト（7節参照）。
+- `olist` （リスト）: カラープロット（color_option=1）で使用する軌道インデックスのリスト（「カラープロット設定」の節を参照）。
 
 - `U` （実数, 単位: eV）: オンサイトクーロン斥力（ハバード$U$）。FLEX/RPA計算で使用。磁性・超伝導の計算には重要なパラメータです。
 
@@ -636,13 +638,13 @@ $s^plus.minus$（`gap_sym=2`）だけは例外で, シェルを対称性から�
 
 - `sw_self` （bool）: option=4 (スペクトル) / option=15 (線形 Eliashberg) / option=23 (非線形 Eliashberg) で FLEX の自己エネルギーを使うかどうか。`True` にすると繰り込まれたグリーン関数を用います。
 
-- `sw_out_self` （bool）: `True` にすると FLEX 計算の自己エネルギーを `sigma.bin` および `self_en.npz` に出力します。
+- `sw_out_self` （bool）: `True` にすると FLEX の自己エネルギーを `self_en.npz`, `self_en_wannier.npz`（一様格子では `sigma.bin` も）に, option=15, 23 ではギャップを `gap.npy`, `gap_iw.npy`, `gap_wannier.npz` に出力します。
 
 - `sw_in_self` （bool）: `True` にすると FLEX 計算の初期自己エネルギーとして前回の `sigma.bin` を読み込みます（自己無撞着ループの収束を早める）。
 
 - `sigma_in_scale` （float, 既定 1.0）: `sw_in_self=True` で読み込んだ $Sigma$ seed に掛ける係数。$U$ アニーリング用で, $(U_"new"\/U_"old")^2$ が目安（option=14 の説明参照）。
 
-- `sw_from_file` （bool）: `True` にすると自己エネルギーを `sigma.bin` から読み込み, FLEX 計算を実行せずに直接 Eliashberg 計算を行います。
+- `sw_from_file` （bool）: `True`（`sw_self=True` と併用）にすると自己エネルギーを `self_en.npz` から読み込み, FLEX 計算を実行せずに直接 Eliashberg 計算を行います。保存時と周波数格子・温度が異なる場合は読み込みを拒否します。
 
 - `sw_check_only` （bool）: option=23（非線形 Eliashberg）専用。`True` にすると内部の線形化 Eliashberg 解（Stoner 因子 $S$ と固有値 $lambda_"eliash"$）を計算した時点で停止し, 非線形ループを実行しません。温度走査で $T_c$（$lambda_"eliash"=1$ となる温度）の見積もりだけを高速に行いたい場合に使用します。$S >= 1$ または $lambda_"eliash" < 1$ の場合は, このフラグの値に関わらず非線形ループ手前で自動的に停止します。
 
@@ -650,7 +652,11 @@ $s^plus.minus$（`gap_sym=2`）だけは例外で, シェルを対称性から�
 
 - `freq_grid` （`'matsubara'` / `'ir'`, 既定 `'matsubara'`）, `ir_wmax` （float または None）, `ir_eps` （float, 既定 $10^(-8)$）: option=14, 15, 16, 23 の周波数格子。`'ir'` で IR 基底のスパースサンプリングを使います（option=14 の「周波数格子」の節を参照。Padé で実軸へ接続するなら `ir_eps=1e-14` 程度）。
 
-- `sw_chi0_tail` （bool）: option=14,15,23（SOC なし経路）で $chi_0$ を tail 補正付きで評価します（既定 False）。松原打ち切り誤差が $O(1\/N_w)$ から $O(1\/N_w^2)$ に改善し, 同じ精度なら小さい `Nw` で済みます（$chi_0$ 段のコスト約 3 倍, $N_w gt.eq 64$ 目安）。詳細は option=14 の注意書きを参照。
+- `sw_chi0_tail` （bool）: option=14,15,23（SOC なし経路）で $chi_0$ を tail 補正付きで評価します（既定 True。IR 基底では無視されます）。松原打ち切り誤差が $O(1\/N_w)$ から $O(1\/N_w^2)$ に改善し, 同じ精度なら小さい `Nw` で済みます（$chi_0$ 段のコスト約 3 倍, $N_w gt.eq 64$ 目安）。詳細は option=14 の注意書きを参照。
+
+- `sw_nosym`, `zeeman_h`, `fflo_q`, `nosym_arnoldi_m`: 対称性を仮定しない線形 Eliashberg（option=15 の節を参照）。
+
+- `imp_cell`, `imp_sites`, `imp_conc`, `imp_seed`, `imp_V`: 不純物スーパーセル（option=21 の節を参照）。
 
 - `sw_dec_axis` （bool, *フェルミ面プロット専用*）: True にすると格子ベクトルを慣用的な直交軸で表し直し, $bold(R)$ も合わせて変換します。これは*描画*のための機能で, 中心格子（とりわけ体心の 122 セル）を見慣れた箱に展開（unfold）し, 10 軌道（2-Fe）のフェルミ面を 5 軌道（1-Fe）のものと直接比較できるようにするためのものです。*物理的な* $bold(k)$ における $E(bold(k))$ は厳密に保存されます（全ての `brav` について $10^(-14)$ で確認）。
 
@@ -808,6 +814,16 @@ m_diis_num = 5            # DIIS Pulay 加速 + 振幅方向 Newton 加速
 
 低温（$T tilde.equiv T_c \/ 5$）では DIIS 履歴を 5–10 程度にすると収束が速くなります。
 
+== IR 基底での計算
+
+低温や, バンドが高エネルギーまで延びる模型（MLO 基底など）では, 一様な松原周波数より IR 基底の方が少ない周波数点で正確です。上の FLEX + 線形 Eliashberg の流れに次を加えるだけです。
+
+```python
+freq_grid = 'ir'     # Nw は使われない（点数は基底が決める）
+ir_wmax = None       # None: 2 x max|e_k - mu|
+ir_eps = 1.0e-8      # 実軸へ Padé 接続する場合は 1e-14 程度
+```
+
 == 超伝導状態の動的スピン感受率
 
 ギャップが開いた状態で $chi_s^"SC"(bold(q), omega)$ を計算し, スピン励起の SC ギャップ依存性を見る場合：
@@ -822,9 +838,106 @@ tempK = 50
 
 `option = 13` にすると `at_point` で指定した単一 $bold(q)$ 点での $chi_s^"SC"(omega)$ が得られます。
 
+= AiiDA インターフェース
+
+`examples/aiida/pyrpa_aiida.py` は, pyrpa の計算を AiiDA の `calcfunction` / `workfunction` として実行するサンプルです。各段階の入力・出力とそのつながり（来歴, provenance）が AiiDA のデータベースに記録されます。計算そのものは同じプロセスの中で `libs.plibs` / `libs.flibs` を直接呼んで行うため, computer・code・デーモンの設定は要りません。`main.py` をクラスタに投入する `CalcJob` は未実装です。
+
+== 導入
+
+```bash
+pip install aiida-core            # 2.9.4 で動作確認
+```
+
+依存パッケージが 60 個ほど入り, `click` や `ipython` などは版が変わることがあります。普段の計算環境を変えたくない場合は, MKL 版の numpy/scipy をそのまま使える仮想環境に入れてください。
+
+```bash
+python -m venv ~/venvs/pyrpa-aiida --system-site-packages
+source ~/venvs/pyrpa-aiida/bin/activate
+pip install aiida-core
+```
+
+テストと `run_example.py` は既定で一時プロファイル（`SqliteTempBackend`）を使うので, PostgreSQL・RabbitMQ・`verdi presto` は不要です（終了時に何も残りません）。結果を残す場合は `verdi presto` などでプロファイルを作り, `run_example.py --profile NAME` で指定します。
+
+== 提供するステップ
+
+#table(
+  columns: (32%, 1fr, 26%),
+  align: (left, left, left),
+  table.header([*ステップ*], [*内容*], [*主な出力*]),
+  [`load_hoppings`], [模型の読み込み（`ftype` は `main.py` と同じ。ftype=4 はディレクトリを `FolderData` で渡す）], [`rvec`, `ham_r` (, `S_r`)],
+  [`chemical_potential`], [裸のバンドの化学ポテンシャル（全 $bold(k)$ メッシュ）], [`mu`],
+  [`flex_self_energy`], [FLEX 自己エネルギー（`mkself` / SOC では `mkself_soc`）], [`sigma`, `mu_self`, `flex_info`],
+  [`rpa_susceptibility`], [$nu = 0$ の $chi_s$, $chi_c$（`sigma` を渡すと FLEX）], [`chi`, `stoner`],
+  [`linearized_eliashberg`], [線形 Eliashberg 方程式（RPA / FLEX）], [`lambda_eliash`, `gap`, `gap_wannier`],
+  [`flex_eliashberg`], [FLEX → $chi$ → $lambda$ を 1 ステップで実行し, $Sigma$ を保存しない], [上 3 つの結果],
+  [`eilenberger_bulk`], [均一系の Eilenberger 方程式（`gap_wannier` を形状因子にできる）], [`result`, `f_avg`],
+  [`eilenberger_surface`, \ `eilenberger_vortex`], [表面・渦糸（モデルフェルミ面）], [`profile`, `files`],
+)
+
+これらをつないだ workflow として `flex_workflow`（模型 → $mu$ → FLEX）, `eliashberg_workflow`（模型 → $mu$ → [FLEX] → $chi$, $lambda$）, `eliashberg_eilenberger_workflow`（その後 `eilenberger_bulk`）があります。RPA/FLEX のステップには全て `calcfunction` の出力として `runtime`（OpenMP のスレッド数と待ち方, `libfmod` のビルド, numpy の版, git のコミット）が付きます。
+
+配列は pyrpa の配置のまま保存します（$Sigma$, $Delta$ は既約 $bold(k)$ メッシュ上の `[Norb, Norb, Nw, Nk]`）。MLO 基底（ftype=3,4）は `main.py` と同じく読み込み時に軌道を規格化し, 以降の全ステップで $G^(-1) = (i omega + mu) S - H - Sigma$ を使います。
+
+== オプション（`options`）
+
+RPA/FLEX のステップと workflow は省略可能な `options`（`orm.Dict`）を取ります。`main.py` の冒頭で設定する項目に対応し, 既定値は `OPTION_DEFAULTS` にあります。知らないキーはエラーになります。
+
+#table(
+  columns: (24%, 14%, 1fr),
+  align: (left, left, left),
+  table.header([*キー*], [*既定値*], [*内容（`main.py` の対応項目）*]),
+  [`soc`], [`False`], [スピン軌道相互作用（`sw_soc`）。模型はスピン込みで, U, J・`Umat`・`site_prof` はスピン軌道について解釈します],
+  [`slist`, `invs`], [`None`], [スピンのラベル（$plus.minus 1$）と 1 始まりの逆スピン相手。`None` で `main.py` と同じ「全 up の後に全 down」],
+  [`site_prof`], [`None`], [サイトごとの軌道数（例: `[5, 5]`）。`None` は全軌道を 1 サイト],
+  [`chiolist`, `site`], [`None`], [$chi$ の軌道対（1 始まり）とそのサイト。例えば d 軌道だけに U を置くとき d--d の対だけにすると速くなります],
+  [`Umat`, `Jmat`], [`None`], [軌道依存の U, J（`orb_dep`）。1 サイト分を与えると全サイトに複製します（`plibs.expand_UJ_sites`）],
+  [`freq_grid`], [`'matsubara'`], [`'ir'` で IR 基底（`freq_grid`）。周波数点の数は基底が決めます],
+  [`ir_wmax`, `ir_eps`], [`None`, `1e-8`], [IR 基底の打ち切り（`None` で $2 max|epsilon_bold(k) - mu|$）と精度],
+  [`sw_tail`], [`False`], [テイル補正 $chi_0$（`sw_chi0_tail`）。SOC なし・一様格子のみ],
+  [`eps`, `pp`, `m_diis`, \ `scf_loop`, `sub_sigma`, \ `sw_rescale`], [`1e-4`, `0.3`, `5`, \ `300`, `1`, \ `False`], [FLEX ループの設定（`flibs.mkself`）],
+  [`require_converged`], [`True`], [FLEX が収束しない, または Stoner 因子 $>= 1$ で終わった場合にステップを失敗させる],
+  [`store_gap`], [`True`], [`False` で全周波数の $Delta$ を保存せず `gap_wannier` のみ],
+  [`store_sigma`], [`True`], [`False` で FLEX 付き `eliashberg_workflow` を `flex_eliashberg` の 1 ステップで実行し $Sigma$ を保存しない],
+)
+
+- *FLEX の収束（`flex_info`）.* Fortran の FLEX ループは収束したかどうかを返さないため, その出力ログ（`iter=`, `esterr=`）から反復回数・最後の esterr・収束の可否を記録します。Stoner 因子 $>= 1$ で終わった解は磁気的に不安定な非物理的な不動点で, 不安定性の近くでは反復の初期の振れでそこに落ちることがあるため, 収束とはみなしません。
+- *IR 基底の引き継ぎ.* FLEX の $Sigma$ には解いた IR 基底（`ir_wmax`, `ir_eps`）が記録され, それを使う後段のステップは同じ基底を使います（$mu_"self"$ に合わせて打ち切りを選び直すことはしません）。
+- *SOC.* $chi$ はスピンのチャンネル `chiszz`, `chispm`, `chisxx`, `chisyy` と `chic` を持ちます（`chis_q` は zz の先頭固有値）。Stoner 因子は出力しません（SOC の $chi_0$ には無く, `main.py` も出しません）。Eliashberg は対角パリティの模型のみで, `sw_tail` とは併用できません。SOC のギャップを `eilenberger_bulk` の形状因子にすることは未対応です。
+- *MLO と周波数の打ち切り.* MLO 模型はバンドが高エネルギーまで延びるため（Cu で約 $+30$ eV）, 一様格子では `sw_tail=True` か十分大きな `Nw`, あるいは `freq_grid='ir'` を使ってください。テイル補正なしの $N_w = 128$（窓 40 eV）では $lambda$ が数倍ずれた例があります。
+
+== 実行例
+
+`examples/aiida/run_example.py` で主なステップを試せます。
+
+```bash
+python examples/aiida/run_example.py --calc flex                      # square.hop: 模型 -> mu -> FLEX
+python examples/aiida/run_example.py --calc eliashberg --flex         # FLEX + 線形 Eliashberg
+python examples/aiida/run_example.py --calc eliashberg --flex --soc   # SOC（square_2orb_soc.hop, fill = 2）
+python examples/aiida/run_example.py --calc eliashberg --flex --mlo-demo   # 2 軌道 MLO 模型, IR 基底
+python examples/aiida/run_example.py --calc eliashberg --hop inputs/Cu --ftype 4 --fill 5.5 \
+    --options '{"freq_grid": "ir", "require_converged": true}'   # ecalj job_mlo のディレクトリ
+```
+
+`--options` には上の表のキーを JSON で渡します。Python から直接使う場合は次のようになります。
+
+```python
+import aiida
+from aiida import orm
+from aiida.storage.sqlite_temp import SqliteTempBackend
+aiida.load_profile(SqliteTempBackend.create_profile('pyrpa'), allow_switch=True)
+import pyrpa_aiida as pa          # examples/aiida を sys.path に入れておく
+
+res = pa.eliashberg_workflow(
+    hop_file=orm.SinglefileData('inputs/square.hop'), ftype=orm.Int(1), fill=orm.Float(0.45),
+    temp=orm.Float(0.02), U=orm.Float(0.3), J=orm.Float(0.0), mesh=orm.List([16, 16, 1]),
+    Nw=orm.Int(128), gap_sym=orm.Int(1), use_flex=orm.Bool(True),
+    options=orm.Dict({'freq_grid': 'ir', 'store_sigma': False}))
+print(res['lambda_eliash'].value, res['flex_info'].get_dict())
+```
+
 = テストコード
 
-`tests/` ディレクトリには, 数値カーネルと物理ベンチマークの回帰テストが 7 ファイル・173 項目 含まれています。`pytest` がインストールされていない環境でも, 各テストファイルを Python スクリプトとして直接実行できます。
+`tests/` ディレクトリには, 数値カーネルと物理ベンチマークの回帰テストが 17 ファイル・293 項目 含まれています。`pytest` がインストールされていない環境でも, 各テストファイルを Python スクリプトとして直接実行できます。
 
 実行前に Fortran 共有ライブラリ `libs/libfmod.so` がコンパイル済みである必要があります。未コンパイルの場合は `libs` ディレクトリで `make FC=<compiler> SL=<library>` を実行してください。
 
@@ -840,11 +953,12 @@ python tests/test_rpa_flex.py
 サマリ表付きで全て実行する場合（`pytest` 不要）:
 
 ```bash
-python tests/run_all.py          # 全ファイル
-python tests/run_all.py rpa      # ファイル名に "rpa" を含むものだけ
+python tests/run_all.py            # 全ファイル
+python tests/run_all.py rpa        # ファイル名に "rpa" を含むものだけ
+python tests/run_all.py --runslow  # slow マーカー付きのテストも含める
 ```
 
-`pytest` が利用できる環境では `pytest tests` でも実行できます。一部のテストは `tmp_path` フィクスチャを取るため `pytest` でのみ実行され, 単体ランナーではスキップされます。
+`pytest` が利用できる環境では `pytest tests` でも実行できます。`tmp_path` を取るテストには, 単体ランナーも一時ディレクトリを渡します。
 
 == ファイル別のカバー範囲
 
@@ -852,23 +966,43 @@ python tests/run_all.py rpa      # ファイル名に "rpa" を含むものだ�
   columns: (auto, auto, auto, 1fr),
   align: (left, right, right, left),
   table.header([*ファイル*], [*項目数*], [*時間*], [*確認している内容*]),
-  [`test_eilenberger.py`], [57], [437 s],
+  [`test_eliash_nosym.py`], [10], [158 s],
+    [対称性を仮定しない線形 Eliashberg（Zeeman 場, FFLO）, SOC 版との整合（裸の項 $-V\/2$, triplet の初期値とパリティ射影, バンド基底の出力）, 多軌道 triplet の厳密カーネルとの照合, SOC 下のブランチ追跡],
+  [`test_eilenberger.py`], [59], [143 s],
     [準古典 Eilenberger / Riccati ソルバー: 均一系の極限, Fortran カーネルと Python 参照実装の一致, 表面 Andreev 束縛状態, 渦糸および自己無撞着渦糸格子, 凝縮自由エネルギー, model / Wannier フェルミ面, Pauli 制限, triplet $d$-vector texture],
-  [`test_rpa_flex.py`], [34], [0.7 s],
-    [RPA / FLEX / Eliashberg の構成要素: 相互作用頂点, RPA 行列代数, 厳密 Lindhard 和・対バブルとの照合による $chi_0$ と $phi_0$, テイル補正 $chi_0$, 自己エネルギーの再グリッド, および時間反転対称性下の既約 $bold(k)$ メッシュ],
-  [`test_effmass.py`], [29], [3.8 s],
-    [直交基底・MLO 基底での逆有効質量（バンド間項, overlap 項, 縮退の扱い）と, dHvA 極値軌道の抽出: 断面の幾何, 開軌道の棄却, ゾーン還元],
-  [`test_nmr.py`], [22], [16 s],
+  [`test_freq_grid.py`], [13], [47 s],
+    [IR 基底: 基底の再現性, 厳密な $chi_0$, FLEX・線形 / 非線形 Eliashberg・SOC・`sw_nosym`・フォノン頂点が一様格子の $N_w -> infinity$ 極限と一致すること, IR での tail 補正の無視, サンプリング点からの Padé 接続],
+  [`test_nmr.py`], [22], [27 s],
     [超伝導状態の NMR: BCS ギャップ内挿, $bold(q)$ メッシュの折り畳み, 自己無撞着 Eliashberg ギャップの読み込み, Knight shift（Yosida と triplet）, Hebel--Slichter ピーク, ライン節の $T^3$ 則],
-  [`test_transport.py`], [18], [0.8 s],
-    [直流極限での Kubo$arrow.l.r$ボルツマン一致, Wiedemann--Franz 則, 対称化されたバンド間熱流頂点, バンド縮退, および弱磁場ホール応答: スカラー参照との $sigma^((1))$ 一致, $R_H arrow -1\/(n e)$ と格子角非依存性, Luttinger 体積によるキャリア密度],
-  [`test_velocity_mlo.py`], [7], [0.4 s],
+  [`test_rpa_flex.py`], [57], [18 s],
+    [RPA / FLEX / Eliashberg の構成要素: 相互作用頂点, RPA 行列代数, 厳密 Lindhard 和・対バブルとの照合による $chi_0$ と $phi_0$, tail 補正 $chi_0$, `mkself` / `mkself_soc` と二重計上の相殺, 非線形 Eliashberg の Nambu 解, 自己エネルギーの再グリッド, 時間反転対称性下の既約 $bold(k)$ メッシュ],
+  [`test_aiida.py`], [9], [16 s],
+    [AiiDA インターフェース（`examples/aiida`）: 各ステップと workflow が直接の `plibs` / `flibs` 呼び出しと一致すること（RPA / FLEX / Eliashberg, MLO, SOC, Eilenberger）, `options`（IR 基底, `Umat`, `store_sigma`, 収束しない FLEX の扱い）, 来歴の記録。`aiida-core` が無い環境ではスキップ],
+  [`test_nonorth_flex.py`], [8], [5 s],
+    [非直交（MLO）基底の Green 関数・FLEX・Eliashberg: 行列の Dyson 方程式, 基底のスケールに対する共変性, SOC 版との一致, IR, 自己エネルギーの再読み込み, tail 補正の 2 次収束, 軌道の規格化],
+  [`test_effmass.py`], [30], [3 s],
+    [直交基底・MLO 基底での逆有効質量（バンド間項, overlap 項, 縮退の扱い）と, dHvA 極値軌道の抽出: 断面の幾何, 開軌道の棄却, ゾーン還元],
+  [`test_transport.py`], [32], [1 s],
+    [直流極限での Kubo$arrow.l.r$ボルツマン一致, Wiedemann--Franz 則, 対称化されたバンド間熱流頂点, バンド縮退, $bold(k)$ 点の重み, 弱磁場ホール応答],
+  [`test_bz.py`], [6], [< 1 s],
+    [3 次元フェルミ面のための第一ブリルアンゾーンの幾何（面, 折り畳み）],
+  [`test_color.py`], [7], [< 1 s],
+    [反射率から色への変換（CIE XYZ, D65, sRGB）],
+  [`test_optical.py`], [9], [< 1 s],
+    [光学定数と非金属の色（屈折率, 反射率, 吸収係数, 透過, Kubelka--Munk）],
+  [`test_grid.py`], [6], [< 1 s],
+    [渦・渦格子ソルバーの Fortran グリッドカーネルと Riccati の chord カーネル],
+  [`test_impurity.py`], [7], [< 1 s],
+    [不純物スーパーセルと unfold したスペクトル（位相の符号, 総和則）],
+  [`test_phonon_pairing.py`], [3], [< 1 s],
+    [EPA からのフォノン媒介の対相互作用と線形 Eliashberg への寄与],
+  [`test_velocity_mlo.py`], [7], [< 1 s],
     [非直交（MLO）基底でのバンド速度: $-epsilon_n C^dagger (partial S\/partial k) C$ の overlap 項, エルミート性, 直交経路への完全一致でのディスパッチ],
-  [`test_tools.py`], [6], [0.5 s],
-    [他ファイルが照合先とする参照実装: Fermi / Bose 恒等式, 閉形式のモデル束, Fortran 畳み込みの検証に使う厳密 $chi_0$],
+  [`test_tools.py`], [8], [< 1 s],
+    [他ファイルが照合先とする参照実装（Fermi / Bose 恒等式, 閉形式のモデル, 厳密 $chi_0$）, CPU に応じたライブラリの選択（AMD, Intel）, gfortran 版の実行環境（`OMP_WAIT_POLICY`, 標準出力のバッファリング）の設定],
 )
 
-スイート全体で約 7.5 分かかり, そのほぼ全て（96%）が `test_eilenberger.py` です（準古典ソルバは 2 次元グリッド上の自己無撞着場の問題のため）。突出した項目はなく, 重い方から 4 つ（`test_vortex_in_plane_field`, `test_chiral_vortex`, `test_surface_gap_heals_to_bulk`, `test_free_energy_selects_the_chiral_partner`）が各 57–77 秒です。さらに軽くしたい場合はこれらの `Ng` / `nbeta` / `ngrid` / `eil_fs_nkz` を下げてください。他のファイルはいずれも 20 秒以内で終わります。
+スイート全体で約 7 分（ifx 版, 24 スレッド）かかり, その大半は `test_eliash_nosym.py` と `test_eilenberger.py` です（対称性なしのソルバーは全ブリルアンゾーンで解き, 準古典ソルバーは 2 次元グリッド上の自己無撞着場の問題のため）。他のファイルはいずれも 1 分以内で終わります。`test_aiida.py` は `aiida-core` が, `test_freq_grid.py` は `sparse-ir` が無い環境ではスキップされます。
 
 = トラブルシューティング
 
@@ -883,6 +1017,12 @@ python tests/run_all.py rpa      # ファイル名に "rpa" を含むものだ�
 - *非線形 Eliashberg が発散する*: `m_diis_num` を 5–10 に増やす, `tempK` を上げる, `Nw` を増やすなどを試してください。`sw_check_only=True` で先に Stoner 因子 $S$ と固有値 $lambda_"eliash"$ を確認するのも有効です。$S$ が 1 を超えている場合は磁気不安定なので `U` を下げる必要があり, $lambda_"eliash" < 1$ の場合はまだ $T_c$ 以上なので降温してください（いずれの場合も非線形ループは自動的に実行されません）。
 
 - *FLEX で max$|Sigma|$ が発散*: `sw_rescale_flex=True` を設定するか, `U` を下げてください。
+
+- *`[FLEX] WARNING: Stoner factor >= 1 at the final iteration` が出る*: その温度・相互作用では正常状態が磁気的に不安定で, 得られた $Sigma$ は物理的な解ではありません。不安定性の近くでは反復の初期の振れで非物理的な不動点に落ち, 混合率や周波数格子の違いで別の値に「収束」することもあります。`U` を下げるか温度を上げてください。
+
+- *gfortran でビルドしたライブラリが非常に遅い*: OpenMP ランタイムの競合です（「Fortran カーネルのビルド」の節）。`_loader.py` が `OMP_WAIT_POLICY=PASSIVE` を自動で設定しますが, 環境変数で別の値を指定している場合はそれが優先されます。
+
+- *MLO 模型で Stoner 因子や $lambda$ が異常に大きい / 周波数の端でギャップや $Sigma$ が乱れる*: MLO のバンドは高エネルギーまで延びるため（Cu で約 $+30$ eV）, 一様格子で窓 $(2 N_w - 1) pi T$ が足りないと $chi_0$ の打ち切り誤差が大きくなります。`sw_chi0_tail=True` のまま `Nw` を増やすか, `freq_grid='ir'` を使ってください。U を d 軌道だけに置く dp 模型では, `orb_dep` の `Umat`/`Jmat` で s, p の行と列を 0 にし, `chiolist` を d--d の組に限ると速くなります。
 
 - *伝導率の単位が合わない*: `sw_unit=True` になっているか確認してください。`False` にすると無次元系になります。
 

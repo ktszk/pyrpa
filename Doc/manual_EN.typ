@@ -9,7 +9,7 @@
 #align(center)[
   #text(size: 18pt, weight: "bold")[pyrpa Manual]
   #v(0.5em)
-  #text(size: 11pt)[2025]
+  #text(size: 11pt)[2026]
 ]
 
 #v(1em)
@@ -27,39 +27,30 @@ The main features currently supported are:
 - Weak-field Hall coefficient $R_H$, Hall carrier density and Hall mobility, with a band-resolved (two-fluid) decomposition
 - Spin susceptibility $chi_s$ and pairing susceptibility $phi$ based on RPA
 - Dynamic spin susceptibility $chi_s^"SC"$ in the superconducting state
-- Self-energy calculation via FLEX (Fluctuation EXchange approximation)
+- Self-energy calculation via FLEX (Fluctuation EXchange approximation), on uniform Matsubara frequencies or the IR basis
 - Linearized Eliashberg equation for the superconducting eigenvalue and gap function
 - Nonlinear Eliashberg equation for self-consistent SC gap functions
 - Band filling, cyclotron mass, and dHvA frequency calculations
 - Quasiclassical Eilenberger/Riccati solvers: $T_c$, penetration depth, surface Andreev bound states, vortices and vortex lattices
 - NMR in the superconducting state: Knight shift $K(T)$ and $1\/(T_1 T)$ from the BdG spin susceptibility
 - Spectral function with impurities and via CPA
+- Linearized Eliashberg equation without symmetry assumptions (Zeeman field, FFLO pair momentum $bold(Q)$)
+- RPA / FLEX / Eliashberg in a non-orthogonal MLO basis (ecalj)
+- Provenance-tracked runs through AiiDA (`examples/aiida`)
 
 All settings in pyrpa are controlled by modifying variables at the top of `main.py`, above the library import lines.
 
 = Notes on This Revision
 
-Several changes alter results produced by earlier versions. The first two invalidate previously computed data outright, and the gap-harmonic change alters every result computed on a centred or hexagonal cell; the rest change what is reported or what is accepted. If you have output from before this revision, re-check it against the notes below.
+The following changes alter results obtained with earlier versions; recompute the affected calculations (the notes of earlier revisions are in the git history).
 
-- *Irreducible $bold(k)$-mesh under time reversal.* `generate_irr_kpoint_inv` matched $bold(k)$-point coordinates with a tolerance of $1\/max(N_x,N_y,N_z)$ — exactly one mesh spacing — and silently matched a *neighbouring* point whenever $1\/N$ was not a binary fraction. Meshes with $N$ a power of two ($4,8,16,32,64$) were unaffected; others were not, e.g. $12^3$ mismapped 919 of its 1728 points. The mapping is now built from integer mesh indices and is exact for every mesh. Any FLEX / Eliashberg / SC-$chi$ result obtained on a non-power-of-two mesh should be regarded as unreliable and recomputed. The same routine was $O(N_"kall"^2)$ and is now $O(N_"kall")$ (9.2 s $arrow$ 0.009 s at $64^3$).
+- *FLEX and Eliashberg in a non-orthogonal MLO basis (ftype=3,4).* With a self-energy, $G^(-1)$ lacked the overlap $S$ ($G^(-1) = i omega + mu - H - Sigma$) and did not match the particle-number correction. For the Cu MLO model the FLEX $mu$ moved by about $+2.9$ eV from the bare value and the Stoner factor came out negative. Now $G^(-1) = (i omega + mu) S - H - Sigma$ and the particle number is $"tr"(S G)$. *Earlier MLO FLEX results, Eliashberg on top of them and self-energy-corrected spectra are all wrong.* RPA ($Sigma = 0$) built $G_0$ from the eigenvectors and is unchanged.
+- *Normalized MLO orbitals.* ecalj's MLOs do not have unit norm (Cu: $S_(a a)(0) = 0.016$ for s, $0.565$ for d), so a U on the raw orbitals acted with a strength of about $U\/S_(a a)(0)^2$ (Cu RPA at U = 1: Stoner factor 85). The orbitals are now normalized on reading (the bands are unchanged). U, J, orbital weights and orbital-basis values of $Sigma$ and $Delta$ change, and files saved before do not follow the new convention. Interband velocity matrix elements (through the Löwdin orthogonalization) change by a few percent, and so do the optical conductivity and reflectivity (Cu: $Delta R lt.eq 0.02$). Group velocities and everything built only on them (Boltzmann transport, effective masses, dHvA) are unchanged.
+- *`sw_chi0_tail` in an MLO basis.* The $tau = 0$ jump of $G_0$ was taken as the unit matrix, so in a non-orthogonal basis the truncation error stayed $O(1\/N_w)$ instead of $O(1\/N_w^2)$. The jump $S^(-1)(bold(k))$ is now convolved with the density matrix over $bold(k)$.
+- *Nonlinear Eliashberg equation (option=23).* The normal Green's function of the SC state is now solved from the Nambu Dyson equation $G = [G_0^(-1) + Delta G_0^dagger Delta^dagger]^(-1)$ instead of the sub-iteration $G = G_0 (1 + Delta F^dagger)$ with the previous $F$ (which diverged once $Delta$ exceeded about $pi T$). With `sw_self=True` the static part of $Sigma$ is subtracted every iteration (`sub_sigma`; $mu$ is fixed in this loop) and $Sigma$ is mixed with the rate `pp`. A non-finite $Delta$ now stops with an error instead of being reported as converged. Converged gaps and $Sigma$ change.
+- *Logical arguments of the Fortran kernels.* Some arguments passed from Python as a one-byte `c_bool` were received as a default four-byte `logical` (the spin channel `sw_spsym` of the SC-state $chi$, the eigenvalue/trace switch `sw_eig` of $chi$, ...). The other three bytes are undefined, so depending on the run they may have been misread; recompute option=12, 13, 27 results if in doubt.
 
-- *Irreducible wedge for $N_x$ odd with $N_y$ even.* That parity combination was an unimplemented branch in `gen_irr_k`: the wedge was left unfilled and the routine wrote past the end of `klist`, crashing for $N_z >= 3$. It is now implemented, and the wedge has been verified against `TRS_irr.typ` for all 384 mesh/parity combinations up to $8 times 8 times 6$.
-
-- *Spin degeneracy in transport.* option=5 and option=6 now take the spin factor from `sw_soc`. Previously $g_s=2$ was applied unconditionally, so results for a Hamiltonian that already carried both spins were a factor of two off.
-
-- *Hall coefficient.* $R_H$ is now formed from the full conductivity tensors rather than from $sigma_(x y)\/(sigma_(x x) sigma_(y y))$, and the Hall carrier density is reported as a positive number with its carrier type. See option=5.
-
-- *Gap form factors are Cartesian lattice harmonics.* `gap_sym` used to be evaluated as a function of the *fractional* coordinates ($cos(2 pi k_x) - cos(2 pi k_y)$ and so on), which carries the labelled symmetry only on a tetragonal / orthogonal single-site lattice: on an fcc, bcc or hexagonal cell that function is periodic but is not $B_(1g)$ at all — it does not change sign under the crystal's Cartesian $C_(4z)$ (checked: the violation is $O(1)$, and the hexagonal $E_(2g)$ doublet norm is off by 100%). The form factors are now built as $sum_bold(R) K_Gamma (hat(bold(R))) e^(i bold(k) dot bold(R))$ over the $bold(R)$ shells of the model, with $K_Gamma$ evaluated in Cartesian space; the labelled irrep and the $bold(k)$-space periodicity now both hold in any Bravais lattice (to $10^(-15)$). On an orthogonal single-site lattice the new harmonics reproduce the old ones bit for bit, for every `gap_sym` and any axis ratio, so results there are unchanged. Anything computed on a centred or hexagonal cell with a non-trivial `gap_sym` — SC-$chi$ (option=12,13), NMR (option=27), the Eilenberger form factor (option=24,25,26) and the Eliashberg seed (option=15,23) — changes, and the new value is the correct one. See the `gap_sym` section for the construction and its remaining multi-site caveat.
-
-- *`sw_dec_axis` is restricted to the plotting modes.* The axis decomposition unfolds a centred cell into the conventional orthogonal axes, which is what makes a 10-orbital (2-Fe) Fermi surface or band structure comparable with a 5-orbital (1-Fe) one. It leaves $bold(R)$ with half-integer components, however, so $H(bold(k))$ is no longer periodic in the decomposed fractional $bold(k)$: BZ sums, FFT convolutions, irreducible-wedge folding and $det("avec")$ as a cell volume are all invalid. It is now accepted for option=0, 2 and 3 only, and any other mode stops with an error instead of returning a quietly wrong number. The gap symmetries that used to motivate it no longer need it (see the item above).
-
-- *Multi-orbital triplet of the linearized Eliashberg equation (no SOC).* $Delta$ is stored on the irreducible $bold(k)$-list, and the $-bold(k)$ half is rebuilt from inversion parity — but a $bold(k) = -bold(k)$ point (TRIM) is stored only once, so parity was never imposed there. An odd-parity (triplet, `gap_sym` $< 0$) gap therefore kept a parity-violating component at the TRIM, which in a *multi-orbital* model feeds back into $lambda$: for a two-orbital $d_(x z)\/d_(y z)$ model ($4 times 4$, $N_w = 4$, $U = 1$, $J = 0.3$) $lambda = 0.0215$ instead of the exact $0.00779$. Parity is now imposed at the TRIM. Single-orbital models and every singlet (`gap_sym` $gt.eq 0$) are unaffected, in the latter case because the condition is satisfied identically. Multi-orbital triplet results from before this revision should be recomputed.
-
-- *Arnoldi solver returned a wrong gap function.* With `arnoldi_m > 0`, the second pass runs the kernel deflated against the most-negative eigenvector, so its Ritz vector solves the *deflated* operator, not the kernel itself; the deflated component was never added back. The eigenvalue $lambda$ was correct, but the returned $Delta(bold(k), i omega_n)$ was not an eigenvector (residual $approx 0.7$ relative). Any gap function — `gap.npy`, `gap_{i j}.dat`, an exported `gap_wannier` and anything downstream of them (option=16, 24–27) — produced by an Arnoldi run should be recomputed; eigenvalues and power-method runs (`arnoldi_m = 0`) are unaffected. Both TRS solvers also now use a *real* inner product, since their kernels build part of $Delta$ by conjugation and are therefore linear over the reals only; a complex Krylov space mixed the two halves and shifted $lambda$ (up to $10^(-4)$ in the SOC triplet).
-
-- *`gap_sym` $= plus.minus 1$ with SOC now fixes the parity only.* The SOC solver used to impose $Delta_(arrow.t arrow.b) = minus.plus Delta_(arrow.b arrow.t)$ as well, which is a symmetry only without SOC: with SOC, spin singlet and triplet mix inside a parity sector, and forcing the spin structure pushed $lambda$ far below the correct value. Now the sign of `gap_sym` sets the inversion parity of the gap (positive: even, negative: odd) and the spin structure is left free. Because a parity sector also contains the opposite-spin, odd-frequency partner, the Arnoldi solver returns the branch whose spin character matches `gap_sym` rather than the largest eigenvalue of the sector, which keeps $lambda$ continuous as the SOC strength goes to zero. For a $d_(x z)\/d_(y z)$ model with $L_z s_z$ SOC, `gap_sym` $= 1$ gives $lambda = 0.0592$ instead of $0.0539$. *Without* SOC the singlet/triplet sector is exact and is still projected out (detected at run time from $G$), so no-SOC results are bit-for-bit unchanged. The power method has no branch tracking; use the Arnoldi solver when SOC is present.
-
-- *SOC FLEX self-energy was overestimated.* The RPA matrix series reaches the second-order self-energy diagram through two spin channels, and the no-SOC vertex removes the extra copy with a $-1\/4 (hat(S)+hat(C)) chi_0 (hat(S)+hat(C))$ counterterm. The SOC vertex had no such term, so $Sigma$ came out too large by a factor that depends on the interaction structure — $2$ for one orbital, $1.5$ for two orbitals at $J = 0$, measured against the exact second order. The counterterm is now always applied in the self-energy channel. A model that carries spin but no SOC reproduces the no-SOC FLEX exactly (to $10^(-11)$, including at $U = 0.5$, so the correction is right to all orders in the RPA and not just at second order). *Every SOC FLEX result from before this revision is wrong and must be recomputed*, including stored `sigma.bin` files and anything seeded from them. The pairing vertex is unaffected — it has no double counting — so the linearized Eliashberg equation never needed this term; one vertex routine now serves both, with an argument selecting the channel.
+New features (earlier results unchanged): the IR-basis frequency grid (`freq_grid='ir'`, see option=14), the symmetry-free linearized Eliashberg equation (`sw_nosym`, see option=15), the AiiDA interface, and the automatic setting for gfortran builds (see "Building the Fortran kernel").
 
 = Requirements
 
@@ -69,8 +60,11 @@ The following Python packages are required:
 - `scipy`
 - `matplotlib`
 - `skimage` (used for Fermi surface plots option=2,3, cyclotron mass option=18, and dHvA orbits option=19)
+- `sparse-ir` (optional; the IR basis, `freq_grid='ir'`; 1.x, 2.x, tested with 2.1.6)
+- `ana_cont` (optional; MaxEnt analytic continuation, `sw_maxent=True`)
+- `aiida-core` (optional; only for the AiiDA interface in `examples/aiida/`, see "AiiDA Interface")
 
-The Fortran kernel `libs/libfmod.so` must be compiled beforehand; `libs/flibs` and `libs/plibs` are pure-Python packages that wrap it. The FLEX, linear/nonlinear Eliashberg, and SC chi calculations are executed via OpenMP-parallel Fortran routines.
+Python 3.11 or later is required (the standard `tomllib` reads the stored U, J parameter sets). The Fortran kernel `libs/libfmod.so` must be compiled beforehand; `libs/flibs` and `libs/plibs` are pure-Python packages that wrap it. The FLEX, linear/nonlinear Eliashberg, and SC chi calculations are executed via OpenMP-parallel Fortran routines.
 
 == Building the Fortran kernel
 
@@ -79,13 +73,13 @@ Run one of these in `libs`:
 #table(
   columns: (auto, 1fr),
   [`make auto`], [*Recommended on a cluster.* Detects everything: the toolchain from what is installed and loaded, and the CPU targets from the compute nodes themselves. Builds one `libfmod_<target>.so` per distinct CPU type found, and `libs/flibs/_loader.py` picks the best one the running node supports at import.],
-  [`make`], [One library for one target: `ARCH` (default `znver3`, the portable AVX2 baseline), `FC` and `SL` as detected or as given on the command line.],
-  [`make dispatch`], [The fixed `znver3` + `znver4` pair, i.e. `make auto` without the detection step.],
+  [`make`], [One library for one target: `ARCH` (default: the portable AVX2 baseline of the build host's vendor, `znver3` on AMD and `x86-64-v3` on Intel), `FC` and `SL` as detected or as given on the command line.],
+  [`make dispatch`], [A fixed AVX2 + AVX-512 pair (`znver3` + `znver4` on AMD, `x86-64-v3` + `x86-64-v4` on Intel; `DISPATCH_ARCHS` overrides it), i.e. `make auto` without the detection step.],
 )
 
 Explicit settings always win: `make FC=ifx SL=MKL ARCH=znver4`, or `make auto ARCH_LIST="znver3 znver4"`.
 
-*What is detected, and where from.* `FC` is the first of `ifx`, `ifort`, `flang`, `amdflang`, `gfortran` on `PATH`; `SL` follows the modules actually loaded (`MKLROOT` $arrow$ MKL, `AOCL_ROOT` $arrow$ AOCL, otherwise OpenBLAS) — selecting a library whose root is not set is what used to yield a `libfmod.so` with unresolved BLAS symbols that failed only at import. The *CPU targets*, however, must not come from the build host: `-march=native` on a Zen 4 login node produces AVX-512 code that dies with SIGILL on a Zen 3 compute node. `libs/detect_arch.sh` therefore asks each node in the scheduler's inventory (Slurm `sinfo`, PBS `pbsnodes`, else just this machine) what `gcc -march=native` calls its CPU, and prints the distinct targets:
+*What is detected, and where from.* `FC` is the first of `ifx`, `ifort`, `flang`, `amdflang`, `gfortran` on `PATH`; `SL` follows the modules actually loaded (`MKLROOT` $arrow$ MKL, `AOCL_ROOT` $arrow$ AOCL, otherwise OpenBLAS) — selecting a library whose root is not set is what used to yield a `libfmod.so` with unresolved BLAS symbols that failed only at import. The *CPU targets*, however, must not come from the build host: `-march=native` on a Zen 4 login node produces AVX-512 code that dies with SIGILL on a Zen 3 compute node. `libs/detect_arch.sh` therefore asks each node in the scheduler's inventory (Slurm `sinfo`, PBS `pbsnodes`, else just this machine) what `gcc -march=native` calls its CPU, and prints the distinct targets. Intel nodes are reported by their x86-64 level rather than their generation name (`x86-64-v4` with AVX-512 F/BW/CD/DQ/VL, `x86-64-v3` with AVX2/FMA/BMI2), so that per-generation extensions (AVX-VNNI, AMX, ...) never hand an older node a library built for a newer one; `x86-64-v3` also runs on Zen, so one library covers a mixed AMD/Intel cluster:
 
 ```
 $ sh libs/detect_arch.sh --table
@@ -97,7 +91,9 @@ yakisoba     AMD Ryzen 9 7900X 12-Core Processor      znver4
 
 The result is cached in `libs/.arch_cache`; `sh libs/detect_arch.sh --refresh` re-probes, `--local` limits it to the current machine. A node that cannot be probed does not silently drop out: it contributes the portable `znver3` default and a warning. Setting `Features=znver3` / `znver4` in `slurm.conf` makes the probe a plain `sinfo` query with no job submission at all — worth doing if you administer the cluster.
 
-At run time nothing has to be selected by hand: `_loader.py` reads the CPU flags and loads the highest-ISA `libfmod_*.so` the machine can actually execute, falling back to a plain `libfmod.so`. For MKL on AMD also export `MKL_ENABLE_INSTRUCTIONS=AVX512` (Zen 4) or `AVX2` (Zen 3), and set `OMP_NUM_THREADS` from the scheduler (`$SLURM_CPUS_PER_TASK`) rather than hard-coding it.
+At run time nothing has to be selected by hand: `_loader.py` reads the CPU flags and loads the highest-ISA `libfmod_*.so` the machine can actually execute, falling back to a plain `libfmod.so`. Each target is chosen only when the CPU has its whole set of flags (for `x86-64-v4`, all of AVX-512 F/BW/CD/DQ/VL). An Intel generation name can be built as well (`make ARCH=sapphirerapids`); it is then chosen only on nodes with that generation's extensions (AMX, AVX512-BF16, ...). MKL picks its instruction set by itself on Intel CPUs. For MKL on AMD also export `MKL_ENABLE_INSTRUCTIONS=AVX512` (Zen 4) or `AVX2` (Zen 3), and set `OMP_NUM_THREADS` from the scheduler (`$SLURM_CPUS_PER_TASK`) rather than hard-coding it.
+
+*Building with gfortran.* gfortran rejects calls to one external procedure with different integer kinds within a file, so the integer arguments of BLAS/LAPACK are kept to one kind per file (`c_int64_t` in `fmod.f90`). With MKL (`SL=MKL`) the GNU threading layer is linked (`-lmkl_gf_lp64 -lmkl_gnu_thread -lmkl_core`). A gfortran build runs its OpenMP on libgomp, while the MKL build of numpy uses libiomp5: in one Python process the two runtimes keep their idle threads spinning and fight for the cores, which can slow a run down by orders of magnitude. `_loader.py` therefore sets `OMP_WAIT_POLICY=PASSIVE` before loading a `libfmod` linked against libgomp. libgfortran also holds Fortran output back until exit when stdout is not a terminal, so `GFORTRAN_UNBUFFERED_PRECONNECTED=y` is set as well (the FLEX iteration log then shows up as it runs; the AiiDA interface judges convergence from it). A value set by the user takes precedence in both cases. ifx/ifort builds share libiomp5 with numpy and are not affected.
 
 *CMake.* `libs/CMakeLists.txt` builds the same thing with the same detection, for people who prefer it or need it for an IDE:
 
@@ -119,9 +115,9 @@ The format of the input Hamiltonian file is specified by the `ftype` variable. A
   columns: (auto, 1fr),
   [*ftype*], [*File format*],
   [0], [Directory `{fname}/` containing `ham_r.txt`, `irvec.txt`, and `ndegen.txt`],
-  [1], [A single `{fname}.input` file (custom format)],
+  [1], [The file given by `fname` (custom format; give the full name including its extension, e.g. `.input`, `.hop`)],
   [2], [`{fname}_hr.dat` file (Wannier90 default hopping file). *This is the standard choice when interfacing with first-principles codes.*],
-  [3], [Non-orthogonal basis hopping in MLO (Maximally Localized Orbital) format],
+  [3], [Text format of ecalj's (non-orthogonal) MLO basis, holding $H(R)$ and the overlap $S(R)$],
   [4], [Directory `{fname}/` containing `HamRsMLO` and `HamiltonianPMTInfo` (binary output of ecalj `job_mlo`). Same non-orthogonal MLO basis as ftype=3; the overlap $S(R)$ is read alongside $H(R)$. For ftype=3,4 every orbital is scaled to unit norm on reading ($H(R), S(R) -> D^(-1\/2) (dot) D^(-1\/2)$ with $D = "diag" S(R=0)$; the bands are unchanged; ecalj's MLOs are not normalized, e.g. Cu: $S_(a a)(0) = 0.016$ for s, $0.565$ for d)],
   [Other], [`Hopping.dat` file (ecalj hopping file)],
 )
@@ -135,7 +131,7 @@ ftype = 2
 
 == Spin-Orbit Coupling (`sw_soc`)
 
-Setting `sw_soc = True` enables spin-orbit coupling (SOC). For SOC-active systems, the Hamiltonian must include spin degrees of freedom (i.e., the orbital dimension is doubled). FLEX (option=14) and the linearized Eliashberg equation (option=15) have SOC-aware implementations (`calc_flex_soc` / `calc_lin_eliash_soc` are dispatched internally). The nonlinear Eliashberg solver (option=23) and SC chi (option=12,13) currently do not support SOC.
+Setting `sw_soc = True` enables spin-orbit coupling (SOC). For SOC-active systems, the Hamiltonian must include spin degrees of freedom (i.e., the orbital dimension is doubled). FLEX (option=14) and the linearized Eliashberg equation (option=15) have SOC-aware implementations (`calc_flex_soc` / `calc_lin_eliash_soc` are dispatched internally). Both also work with the IR basis and a non-orthogonal MLO basis. The nonlinear Eliashberg solver (option=23) and SC chi (option=12,13) currently do not support SOC. The spin ordering is by default all orbitals spin up, then all spin down; for another ordering define `slist` (spin $plus.minus 1$ of each orbital) and `invs` (1-based opposite-spin partner).
 
 = Bravais Lattice Setting (`brav`)
 
@@ -158,16 +154,6 @@ The `brav` variable specifies the type of Bravais lattice. This is used for comp
 = Calculation Modes (`option`)
 
 The type of calculation is selected by setting the integer variable `option`. The `CalcMode` IntEnum can also be used directly (e.g. `option = CalcMode.LIN_ELIASHBERG`). Each mode is described below.
-
-#block(stroke: 1pt + red, inset: 8pt, radius: 4pt)[
-  *Notice: Unverified modes*
-
-  The following modes are tagged *(not implemented)* in the `CalcMode` definition in `main.py`, meaning that the correctness of their implementation has not been sufficiently verified. The physical validity and numerical accuracy of their output are *not guaranteed*; use them *at your own risk*. Independent cross-checks are strongly recommended before citing any results in publications.
-
-  - option=20 (`ELECTRON_MASS`): electron mass along the symmetry line
-  - option=21 (`SPECTRUM_IMPURITY`): spectral function with impurities
-  - option=23 (`NONLIN_ELIASHBERG`): nonlinear Eliashberg equation
-]
 
 == option=0: Band Plot (`BAND`)
 
@@ -195,9 +181,9 @@ With `color_option=ColorMode.GAP` (3), the surface is colored by $"Re"[phi(bold(
 
 Computes the electron spectral function from the imaginary part of the trace of the single-particle Green's function,
 
-$ A(bold(k), omega) = -1/pi "Im" "Tr" G(bold(k), omega + i delta) $
+$ A(bold(k), omega) = -1/pi "Im" "Tr" [S(bold(k)) G(bold(k), omega + i delta)] $
 
-and plots it along the symmetry line. With `sw_self=True`, the self-energy from a FLEX calculation is incorporated to include interaction effects.
+and plots it along the symmetry line ($S = 1$ in an orthogonal basis). With `sw_self=True`, the self-energy in `self_en_wannier.npz` written by FLEX is Fourier-interpolated onto the $bold(k)$ path and continued to the real axis with Padé (MaxEnt with `sw_maxent=True`) to include interaction effects. A $Sigma$ solved on the IR basis is continued from its sampled values (`sigma_ir`; see "Frequency grid" under option=14).
 
 == option=5: Boltzmann Transport (`CONDUCTIVITY_BT`)
 
@@ -317,7 +303,7 @@ This mode additionally produces:
 
 == option=14: FLEX Self-Energy (`FLEX`)
 
-Solves the FLEX equations self-consistently to obtain the electron self-energy $Sigma(bold(k), i omega_n)$ in Matsubara frequency space. The result is saved to `sigma.bin` and `self_en.npz`.
+Solves the FLEX equations self-consistently to obtain the electron self-energy $Sigma(bold(k), i omega_n)$ in Matsubara frequency space. With `sw_out_self=True` it is saved to `self_en.npz` (recording the frequencies `iw` and the temperature), `self_en_wannier.npz` (Wannier real-space form, read by option=4 and `tau_mode='flex'`) and, on the uniform grid, `sigma.bin` (seed for `sw_in_self`).
 
 - For a non-orthogonal MLO basis (`ftype=3,4`), $G^(-1) = (i omega + mu) S - H - Sigma$ and the particle number uses $"tr"(S G)$. `U` and `J` are local interactions in the normalized MLO orbitals ($S_(a a)(R=0) = 1$, set when ftype=3,4 is read), not in an orthogonalized basis. Without the normalization U would act with a strength of about $U \/ S_(a a)(0)^2$ (some 4000 times U for the s orbital of Cu). Linear and nonlinear Eliashberg and self-energy-corrected spectra use the same convention. Self-energy files do not store the overlap, so use the same basis and model when loading them. Transport with `tau_mode='flex'` still requires an orthogonal basis.
 - `sw_out_self=True`: write the self-energy to file
@@ -326,7 +312,7 @@ Solves the FLEX equations self-consistently to obtain the electron self-energy $
 - Temperature annealing: for stepwise cooling at fixed `Nw` ($T_"new"\/T_"old" gt.eq 0.8$ or so) the raw reuse of `sigma.bin` is sufficient. Raw reuse amounts to a seed with the frequency axis compressed by $T_"old"\/T_"new"$, and this compression approximately mimics the growth of $Sigma$ upon cooling — near criticality it converges faster than a faithful interpolation. When `Nw` must change (the one case raw reuse cannot handle), the Python helper `plibs.regrid_sigma_bin(temp_new=..., Nw_new=..., w_scale=...)` re-interpolates `sigma.bin` onto the new mesh. The original temperature, `Nw` and orbital count are taken automatically from a metadata record appended at the end of `sigma.bin` by recent `io_sigma` versions (a trailing record, invisible to older readers); explicitly passed values that contradict the footer raise an error (files without the footer require explicit `temp_old`/`Norb`/`Nw_old`). The `sw_in_self` reader also checks the footer: a `sigma.bin` whose mesh (`Nw`/orbital count/k-points) disagrees with the run aborts with an error (a Fortran read silently accepts a record that is larger than requested, scrambling the layout — this check prevents that accident); a differing temperature alone is treated as T-annealing and only reported. The SOC path (`mkself_soc`) now writes the same single-record format, so the helper applies to its files as well (the retired element-wise SOC files are no longer readable) (cubic spline with the conjugate-symmetric extension $Sigma_(l m)(-i omega) = Sigma_(m l)(i omega)^*$ to negative frequencies; the outermost stored frequency, which carries the wrap-around artifact of the circular convolution, is discarded, and points beyond the cutoff are filled with a $c_0 + c_1\/(i omega)$ tail fitted on an interior window). For near-critical cooling use `w_scale=temp_old/temp_new` (the same compression as raw reuse); `w_scale=1` (default) gives the faithful interpolation
 - `m_diis_num`: DIIS history length (default 5 if undefined)
 - `sw_rescale_flex=True`: if the Stoner factor $S = max_bold(q) "eig"[chi_0(bold(q), 0) hat(S)]$ reaches 1 during the iteration, uniformly rescale $chi_0(bold(q), i nu_n)$ by $(1 - 10^(-4))\/S$ to avoid the magnetic-instability divergence
-- `sw_chi0_tail=True`: evaluate $chi_0$ with a tail correction (default False; no-SOC path of option=14,15,23).  The bubble is split bilinearly as $chi_0 = "conv"[G] - "conv"[G_0] + chi_0^"ref"$: the slowly decaying $1\/(i omega)$ reference part (the $G_0$ bubble) is evaluated exactly in imaginary time, and only the fast-decaying residual ($G - G_0 tilde 1\/omega^2$) passes through the FFT convolution.  The Matsubara truncation error improves from $O(1\/N_w)$ to $O(1\/N_w^2)$ (validated against the exact Lindhard function: convergence order 1.0 -> 2.0).  The $chi_0$ stage costs about 3x; effective for $N_w gt.eq 64$ (at very small $N_w$ the tau-discretization prefactor of the reference bubble can dominate).  The improved $chi_0$ propagates automatically into $chi_s$/$chi_c$, the FLEX vertex $V_sigma$ and the pairing vertex $V_Delta$.
+- `sw_chi0_tail=True`: evaluate $chi_0$ with a tail correction (default True; no-SOC path of option=14,15,23; also in a non-orthogonal MLO basis, and ignored on the IR basis, which has no truncation error).  The bubble is split bilinearly as $chi_0 = "conv"[G] - "conv"[G_0] + chi_0^"ref"$: the slowly decaying $1\/(i omega)$ reference part (the $G_0$ bubble) is evaluated exactly in imaginary time, and only the fast-decaying residual ($G - G_0 tilde 1\/omega^2$) passes through the FFT convolution.  The Matsubara truncation error improves from $O(1\/N_w)$ to $O(1\/N_w^2)$ (validated against the exact Lindhard function: convergence order 1.0 -> 2.0).  The $chi_0$ stage costs about 3x; effective for $N_w gt.eq 64$ (at very small $N_w$ the tau-discretization prefactor of the reference bubble can dominate).  The improved $chi_0$ propagates automatically into $chi_s$/$chi_c$, the FLEX vertex $V_sigma$ and the pairing vertex $V_Delta$.
 
 *Notes on the built-in approximations* (all are deliberate choices made for computational cost and numerical stability):
 
@@ -351,11 +337,19 @@ With `freq_grid='ir'`, the frequency axis of option=14, 15, 16, 23 ($chi_0$, $Si
 Solves the linearized Eliashberg equation as an eigenvalue problem using the effective pairing interaction from RPA or FLEX. The largest eigenvalue $lambda$ and the corresponding gap function $Delta(bold(k), i omega_n)$ are obtained. The superconducting transition temperature $T_c$ corresponds to $lambda = 1$. The default solver is a power method with shift + deflation; setting `arnoldi_m > 0` enables an Arnoldi solver.
 
 - `sw_self=False`: no self-energy corrections (pure RPA)
-- `sw_self=True`: uses the FLEX self-energy (requires `sigma.bin`)
-- `sw_from_file=True`: loads the self-energy from `sigma.bin` without re-running FLEX
+- `sw_self=True`: uses the FLEX self-energy (FLEX is solved on the spot)
+- `sw_from_file=True` (with `sw_self=True`): loads the self-energy from `self_en.npz` written by option=14 without re-running FLEX (rejected when the frequency grid or the temperature differ)
 - `gap_sym`: sets the initial symmetry of the gap function (see below)
 - *With SOC* (`sw_soc=True`) the sign of `gap_sym` fixes the *inversion parity* of the gap (positive: even, negative: odd), not the spin structure: spin singlet and triplet mix inside a parity sector once SOC is present. Such a sector also holds the opposite-spin, odd-frequency partner of the state you asked for, so the Arnoldi solver returns the branch whose spin character matches `gap_sym` instead of the largest eigenvalue of the sector; this keeps $lambda$ continuous as the SOC strength goes to zero. *Use the Arnoldi solver (`arnoldi_m > 0`) with SOC* — the power method has no branch tracking and converges to the dominant state of the sector, which may be the odd-frequency partner. Without SOC singlet and triplet are exact sectors and are projected out as before (detected at run time), so `gap_sym` keeps its usual singlet/triplet meaning there
-- Gap functions are written to `gap.npy` and to one file per orbital pair — `gap_11.dat`, `gap_12.dat`, … (`gap_{i j}.dat`, 1-based orbital indices)
+- Gap functions are written to `gap.npy` and to one file per orbital pair — `gap_11.dat`, `gap_12.dat`, … (`gap_{i j}.dat`, 1-based orbital indices) (with `sw_out_self=True` also `gap_iw.npy` and the Wannier real-space `gap_wannier.npz`)
+
+=== Linearized Eliashberg without symmetry assumptions (`sw_nosym`)
+
+With `sw_nosym=True`, option=15 solves the gap equation on the full Brillouin zone without assuming time-reversal or inversion symmetry (bare $G$, RPA), for situations that break them, such as a Zeeman field or pairs of finite momentum (FFLO). A spinless model (`sw_soc=False`) is spin-doubled automatically. There is no singlet/triplet projection; `gap_sym` only seeds the iteration. The FLEX self-energy is not supported (with `sw_self` the bare $G$ is still used).
+
+- `zeeman_h` (3 components, eV): Zeeman field $H_Z = bold(h) dot bold(sigma)$ ($g mu_B B\/2$ absorbed). The chemical potential is re-solved at the same `fill`.
+- `fflo_q` (list of integer triples): the pair momenta $bold(Q) = (i_(Q x)\/N_x, i_(Q y)\/N_y, i_(Q z)\/N_z)$, e.g. `[[q, 0, 0] for q in range(5)]` scans along $k_x$. $chi_0$ and $V_Delta$ are computed once and reused for every $bold(Q)$; $lambda(bold(Q))$ goes to `lambda_Q.dat`, the gap to `gap_nosym.npz` and `gap_nosym.dat`.
+- `nosym_arnoldi_m` (integer, default 60): dimension of the Krylov space; a small $lambda$ may need about 60 or more for $10^(-6)$ accuracy.
 
 == option=16: Gap Function Post-Processing (`GAP_FUNCTION`)
 
@@ -395,7 +389,12 @@ Computes $m^* = hbar^2 (partial^2 E \/ partial bold(k)^2)^(-1)$ along the symmet
 
 == option=21: Spectrum with Impurities (`SPECTRUM_IMPURITY`)
 
-Builds a real-space supercell Hamiltonian containing impurities and computes the spectral function $A(bold(k), omega)$ via the impurity Green's function. The impurity sites are specified in `imp_list`.
+Diagonalizes the Hamiltonian of a periodic supercell carrying on-site impurity potentials and unfolds the spectral function $A(bold(k), omega)$ onto the $bold(k)$ of the original cell.
+
+- `imp_cell` (3 components): supercell size per axis; it must exceed twice the hopping range (a matrix of dimension $N_"cell" times N_"orb"$ is diagonalized).
+- `imp_sites` (`None` or list of integers): impurity sites in the supercell (0-based, `gen_rlist` order); `None` places them at random with concentration `imp_conc` (at least one).
+- `imp_conc`, `imp_seed`: concentration and random seed of the random placement (`None`: a different placement every run).
+- `imp_V` (number or $N_"orb" times N_"orb"$ matrix, eV): on-site impurity potential (a number multiplies the unit matrix).
 
 == option=22: CPA Conductivity / Spectrum (`SIGMA_CPA`)
 
@@ -412,12 +411,15 @@ The initial gap is now generated automatically inside the solver — there is no
    - If $lambda_"eliash" < 1$ ($T >= T_c$, no SC instability), the routine also stops.
    - If `sw_check_only=True`, the routine stops here and only reports $S$ and $lambda_"eliash"$ — useful for quickly scanning temperature to bracket $T_c$ without running the expensive nonlinear loop.
 2. The symmetry-correct shape from this linear eigenvector is kept, and its amplitude is rescaled to the BCS weak-coupling value $Delta_0 = 1.764 k_upright(B) T_c$ before entering the nonlinear loop.
-3. Each iteration: $Delta_"new" = T \/ N_k sum V_Delta dot F$ → amplitude-direction Newton (secant) acceleration + DIIS shape mixing (falls back to linear mixing pp=0.3 when bypassed) → update $Sigma$ → SC Dyson updates of $G, F$ → recompute $V_sigma, V_Delta$ from $chi^"GG", chi^"FF"$
+3. Each iteration: $Delta_"new" = T \/ N_k sum V_Delta dot F$ → amplitude-direction Newton (secant) acceleration + DIIS shape mixing (falls back to linear mixing pp=0.3 when bypassed) → update $Sigma$ (`sw_self=True`; static part subtracted, mixed with `pp`) → $G, F$ from the Nambu Dyson equation $G = [G_0^(-1) + Delta G_0^dagger Delta^dagger]^(-1)$, $F = -G_0 Delta G^dagger$ → recompute $V_sigma, V_Delta$ from $chi^"GG", chi^"FF"$ (skipped when $V$ is kept fixed)
 
 - `m_diis_num`: DIIS history length ($>= 2$ enables Pulay extrapolation; otherwise linear mixing)
 - `sw_self=True`: include FLEX self-energy via the $Sigma$-dressed Green's function
-- `sw_from_file=True`: read self-energy from `sigma.bin`
+- `sw_from_file=True`: read the self-energy from `self_en.npz` written by option=14
 - `sw_check_only`: see "Switch Variables" below
+- `sw_out_self=True`: writes the gap to `gap.npy`, `gap_wannier.npz` and, with `sw_self=True`, the SC-state $Sigma$ to `self_en_sc.npz`, `self_en_sc_wannier.npz`
+- A diverging iteration (non-finite $Delta$) stops with an error and writes no gap; reaching `itemax` without convergence prints a warning
+- Works on the IR basis (`freq_grid='ir'`)
 - Amplitude-direction Newton acceleration speeds up convergence of the gap magnitude (see the `sw_amp_newton` comments in `libs/src/ffeliash.f90`)
 - See `libs/src/ffeliash.f90` for implementation details
 
@@ -492,11 +494,11 @@ This section explains all parameters in the upper part of `main.py`, including t
 
 == Basic Settings
 
-- `fname` (string): Path to the input file. The format depends on `ftype`; the file extension is usually omitted.
+- `fname` (string): Path to the input file or directory, as `ftype` requires (ftype=1: the file name including its extension, ftype=2: the name without `_hr.dat`, ftype=0, 4: a directory).
 
-- `ftype` (integer): Input Hamiltonian file format (see Section 4).
+- `ftype` (integer): Input Hamiltonian file format (see "Input Files").
 
-- `brav` (integer): Bravais lattice type (see Section 5).
+- `brav` (integer): Bravais lattice type (see "Bravais Lattice Setting").
 
 - `sw_soc` (bool): Switch to enable spin-orbit coupling.
 
@@ -506,7 +508,7 @@ This section explains all parameters in the upper part of `main.py`, including t
 
 - `Nx, Ny, Nz` (integer): Number of $bold(k)$-point mesh divisions in the first Brillouin zone along $x$, $y$, $z$. Used for 3D $bold(k)$-space integrations and FFT-based convolutions (FLEX, Eliashberg, chi). For 2D systems, set `Nz=1`. Powers of 2 (32, 64, ...) are preferred for FFT efficiency. Memory consumption scales as $tilde.equiv N_x N_y N_z dot N_w dot N_"orb"^2$.
 
-- `Nw` (integer): Number of Matsubara frequencies for FLEX/Eliashberg/SC-chi calculations (option=12,13,14,15,16,23), or number of real-frequency points for DOS/spectral function calculations (option=1,4, etc.). Matsubara frequencies are $omega_n = (2n+1) pi T$ for $n = 0, 1, \ldots, N_w - 1$. Lower temperatures require larger $N_w$ (typical: 256–1024). The effective frequency cutoff $omega_c = (2 N_w - 1) pi T$ shrinks proportionally to $T$, and the Matsubara convolutions use a sharp cutoff (no tail correction), so a temperature scan at fixed `Nw` accumulates a systematic drift; choose `Nw` so that $omega_c$ safely exceeds the bandwidth and `U` at the lowest temperature (see also the notes under option=14).
+- `Nw` (integer): Number of Matsubara frequencies for FLEX/Eliashberg/SC-chi calculations (option=12,13,14,15,16,23; not used with `freq_grid='ir'`), or number of real-frequency points for DOS/spectral function calculations (option=1,4, etc.). Matsubara frequencies are $omega_n = (2n+1) pi T$ for $n = 0, 1, \ldots, N_w - 1$. Lower temperatures require larger $N_w$ (typical: 256–1024). The effective frequency cutoff $omega_c = (2 N_w - 1) pi T$ shrinks proportionally to $T$, and the Matsubara convolutions use a sharp cutoff (no tail correction), so a temperature scan at fixed `Nw` accumulates a systematic drift; choose `Nw` so that $omega_c$ safely exceeds the bandwidth and `U` at the lowest temperature (see also the notes under option=14).
 
 - `kmesh` (integer): Number of $bold(k)$ points along the symmetry line for band and spectral function plots. Larger values yield smoother plots (200–500 is typical).
 
@@ -568,7 +570,7 @@ Spin degeneracy in both transport modes (option=5,6) follows `sw_soc`: with `sw_
 
 == Orbital and Interaction Parameters
 
-- `olist` (list): Orbital indices for color plotting (`color_option=1`); see Section 7.
+- `olist` (list): Orbital indices for color plotting (`color_option=1`); see "Color Plot Settings".
 
 - `U` (float, unit: eV): On-site Coulomb repulsion (Hubbard $U$). Used in FLEX/RPA calculations. This is a key parameter controlling magnetic and superconducting instabilities.
 
@@ -635,13 +637,13 @@ Two caveats remain. The shell of a chiral pair is shared between its two partner
 
 - `sw_self` (bool): If `True`, the FLEX self-energy is incorporated into option=4 (spectrum), option=15 (linear Eliashberg), or option=23 (nonlinear Eliashberg) via the renormalized Green's function.
 
-- `sw_out_self` (bool): If `True`, the FLEX self-energy is written to `sigma.bin` and `self_en.npz`. Also used to trigger writing the gap function in option=15.
+- `sw_out_self` (bool): If `True`, the FLEX self-energy is written to `self_en.npz`, `self_en_wannier.npz` (and `sigma.bin` on the uniform grid), and in option=15, 23 the gap to `gap.npy`, `gap_iw.npy`, `gap_wannier.npz`.
 
 - `sw_in_self` (bool): If `True`, the previous FLEX self-energy is loaded from `sigma.bin` as the initial guess for the iterative self-consistent loop.
 
 - `sigma_in_scale` (float, default 1.0): Factor multiplying the $Sigma$ seed loaded via `sw_in_self=True`. Intended for $U$-annealing; $(U_"new"\/U_"old")^2$ is a reasonable choice (see the notes under option=14).
 
-- `sw_from_file` (bool): If `True`, the self-energy is read from `sigma.bin` and the FLEX calculation is skipped. The Eliashberg equation is then solved directly with this pre-computed self-energy.
+- `sw_from_file` (bool): If `True` (with `sw_self=True`), the self-energy is read from `self_en.npz` and the FLEX calculation is skipped; the Eliashberg equation is then solved directly with it. A file written on another frequency grid or at another temperature is rejected.
 
 - `sw_check_only` (bool): Used only by option=23 (nonlinear Eliashberg). If `True`, the routine stops right after the internal linearized-Eliashberg solve (reporting the Stoner factor $S$ and eigenvalue $lambda_"eliash"$) without running the nonlinear loop — handy for quickly bracketing $T_c$ via a temperature scan. Regardless of this flag, the nonlinear loop is also skipped automatically whenever $S >= 1$ or $lambda_"eliash" < 1$.
 
@@ -649,7 +651,11 @@ Two caveats remain. The shell of a chiral pair is shared between its two partner
 
 - `freq_grid` (`'matsubara'` / `'ir'`, default `'matsubara'`), `ir_wmax` (float or None), `ir_eps` (float, default $10^(-8)$): frequency grid of option=14, 15, 16, 23; `'ir'` uses the sparse sampling of the IR basis (see "Frequency grid" under option=14; `ir_eps=1e-14` or so for a Padé continuation).
 
-- `sw_chi0_tail` (bool): For option=14,15,23 (no-SOC path), evaluate $chi_0$ with the tail-corrected convolution (default False). The Matsubara truncation error improves from $O(1\/N_w)$ to $O(1\/N_w^2)$, so a smaller `Nw` reaches the same accuracy (the $chi_0$ stage costs about 3x; effective for $N_w gt.eq 64$). See the notes under option=14.
+- `sw_chi0_tail` (bool): For option=14,15,23 (no-SOC path), evaluate $chi_0$ with the tail-corrected convolution (default True; ignored on the IR basis). The Matsubara truncation error improves from $O(1\/N_w)$ to $O(1\/N_w^2)$, so a smaller `Nw` reaches the same accuracy (the $chi_0$ stage costs about 3x; effective for $N_w gt.eq 64$). See the notes under option=14.
+
+- `sw_nosym`, `zeeman_h`, `fflo_q`, `nosym_arnoldi_m`: the symmetry-free linearized Eliashberg equation (see option=15).
+
+- `imp_cell`, `imp_sites`, `imp_conc`, `imp_seed`, `imp_V`: the impurity supercell (see option=21).
 
 - `sw_dec_axis` (bool, *Fermi-surface plots only*): If `True`, the lattice vectors are re-expressed in the conventional orthogonal axes and $bold(R)$ is transformed with them. This is a *drawing* aid: it unfolds a centred cell — the body-centred 122 cell above all — into the familiar box, which is what makes a 10-orbital (2-Fe) Fermi surface directly comparable with a 5-orbital (1-Fe) one. $E(bold(k))$ at a given *physical* $bold(k)$ is preserved exactly (checked to $10^(-14)$ for every `brav`).
 
@@ -807,6 +813,16 @@ m_diis_num = 5            # DIIS Pulay acceleration + amplitude-direction Newton
 
 At low temperatures ($T tilde.equiv T_c \/ 5$), increasing the DIIS history to 5–10 typically accelerates convergence.
 
+== Calculations on the IR Basis
+
+At low temperatures, or for models whose bands reach high energies (an MLO basis, for example), the IR basis is accurate with far fewer frequencies than uniform Matsubara frequencies. Add to the FLEX + linearized Eliashberg flow above:
+
+```python
+freq_grid = 'ir'     # Nw is not used (the basis sets the number of frequencies)
+ir_wmax = None       # None: 2 x max|e_k - mu|
+ir_eps = 1.0e-8      # about 1e-14 for a Pade continuation to the real axis
+```
+
 == Dynamic Spin Susceptibility in the SC State
 
 To probe the SC-gap dependence of spin excitations, compute $chi_s^"SC"(bold(q), omega)$ with a finite gap:
@@ -821,53 +837,171 @@ tempK = 50
 
 Setting `option = 13` instead computes $chi_s^"SC"(omega)$ at the single $bold(q)$ point given by `at_point`.
 
+= AiiDA Interface
+
+`examples/aiida/pyrpa_aiida.py` runs pyrpa calculations as AiiDA `calcfunction`s / `workfunction`s, so the inputs and outputs of every step and the links between them (provenance) are recorded in the AiiDA database. The calculation itself runs in the same process through `libs.plibs` / `libs.flibs`, so no computer, code or daemon has to be configured. A `CalcJob` that submits `main.py` to a cluster is not implemented.
+
+== Installation
+
+```bash
+pip install aiida-core            # tested with 2.9.4
+```
+
+It brings about 60 dependencies and may change the versions of packages such as `click` or `ipython`. To keep the working environment untouched, install it into a virtual environment that still sees the MKL builds of numpy/scipy:
+
+```bash
+python -m venv ~/venvs/pyrpa-aiida --system-site-packages
+source ~/venvs/pyrpa-aiida/bin/activate
+pip install aiida-core
+```
+
+The tests and `run_example.py` use a temporary profile (`SqliteTempBackend`) by default, so PostgreSQL, RabbitMQ and `verdi presto` are not needed (nothing is kept afterwards). To keep the results, create a profile (e.g. `verdi presto`) and pass it with `run_example.py --profile NAME`.
+
+== Steps
+
+#table(
+  columns: (32%, 1fr, 26%),
+  align: (left, left, left),
+  table.header([*Step*], [*What it does*], [*Main outputs*]),
+  [`load_hoppings`], [read the model (`ftype` as in `main.py`; for ftype=4 the directory is passed as `FolderData`)], [`rvec`, `ham_r` (, `S_r`)],
+  [`chemical_potential`], [chemical potential of the bare bands (full $bold(k)$ mesh)], [`mu`],
+  [`flex_self_energy`], [FLEX self-energy (`mkself`, with SOC `mkself_soc`)], [`sigma`, `mu_self`, `flex_info`],
+  [`rpa_susceptibility`], [$chi_s$, $chi_c$ at $nu = 0$ (FLEX when `sigma` is given)], [`chi`, `stoner`],
+  [`linearized_eliashberg`], [linearized Eliashberg equation (RPA / FLEX)], [`lambda_eliash`, `gap`, `gap_wannier`],
+  [`flex_eliashberg`], [FLEX → $chi$ → $lambda$ in one step, $Sigma$ not stored], [the results of the three above],
+  [`eilenberger_bulk`], [homogeneous Eilenberger equation (`gap_wannier` can be the form factor)], [`result`, `f_avg`],
+  [`eilenberger_surface`, \ `eilenberger_vortex`], [surface and vortex (model Fermi surface)], [`profile`, `files`],
+)
+
+The workflows `flex_workflow` (model → $mu$ → FLEX), `eliashberg_workflow` (model → $mu$ → [FLEX] → $chi$, $lambda$) and `eliashberg_eilenberger_workflow` (then `eilenberger_bulk`) chain them. Every RPA/FLEX step also outputs `runtime` (OpenMP threads and wait policy, the `libfmod` build, the numpy version, the git commit).
+
+Arrays keep pyrpa's layout ($Sigma$, $Delta$ as `[Norb, Norb, Nw, Nk]` on the irreducible $bold(k)$ mesh). An MLO basis (ftype=3,4) is normalized on reading as in `main.py`, and every later step uses $G^(-1) = (i omega + mu) S - H - Sigma$.
+
+== Options (`options`)
+
+The RPA/FLEX steps and the workflows take an optional `options` (`orm.Dict`) holding what `main.py` sets in its header; the defaults are in `OPTION_DEFAULTS`, and an unknown key is an error.
+
+#table(
+  columns: (24%, 14%, 1fr),
+  align: (left, left, left),
+  table.header([*Key*], [*Default*], [*Meaning (`main.py` counterpart)*]),
+  [`soc`], [`False`], [spin-orbit coupling (`sw_soc`): the model is spinful, and U, J, `Umat` and `site_prof` refer to its spin-orbitals],
+  [`slist`, `invs`], [`None`], [spin labels ($plus.minus 1$) and 1-based opposite-spin partners; `None`: `main.py`'s order, all up then all down],
+  [`site_prof`], [`None`], [orbitals per site (e.g. `[5, 5]`); `None`: one site holding every orbital],
+  [`chiolist`, `site`], [`None`], [orbital-pair basis of $chi$ (1-based) and its sites; restricting it to the d--d pairs, e.g., speeds up a U on the d orbitals only],
+  [`Umat`, `Jmat`], [`None`], [orbital-dependent U, J (`orb_dep`); one site's worth is copied onto every site (`plibs.expand_UJ_sites`)],
+  [`freq_grid`], [`'matsubara'`], [`'ir'`: the IR basis (`freq_grid`); the number of frequencies is set by the basis],
+  [`ir_wmax`, `ir_eps`], [`None`, `1e-8`], [cutoff of the IR basis (`None`: $2 max|epsilon_bold(k) - mu|$) and its accuracy],
+  [`sw_tail`], [`False`], [tail-corrected $chi_0$ (`sw_chi0_tail`); no SOC, uniform grid only],
+  [`eps`, `pp`, `m_diis`, \ `scf_loop`, `sub_sigma`, \ `sw_rescale`], [`1e-4`, `0.3`, `5`, \ `300`, `1`, \ `False`], [FLEX loop controls (`flibs.mkself`)],
+  [`require_converged`], [`True`], [fail the step when FLEX does not converge or ends with a Stoner factor $>= 1$],
+  [`store_gap`], [`True`], [`False`: do not store $Delta$ on all frequencies, only `gap_wannier`],
+  [`store_sigma`], [`True`], [`False`: run the FLEX `eliashberg_workflow` as the single step `flex_eliashberg`, without storing $Sigma$],
+)
+
+- *FLEX convergence (`flex_info`).* The Fortran FLEX loop does not return whether it converged, so its log (`iter=`, `esterr=`) gives the iteration count, the final esterr and the verdict. A loop that ends with a Stoner factor $>= 1$ has settled on a magnetically unstable, unphysical fixed point -- near the instability the first overshoots of the iteration can throw it there -- and does not count as converged.
+- *The IR grid is passed on.* A FLEX $Sigma$ records the IR basis it was solved on (`ir_wmax`, `ir_eps`), and the steps built on it use the same basis (the cutoff is not re-derived from $mu_"self"$).
+- *SOC.* $chi$ holds the spin channels `chiszz`, `chispm`, `chisxx`, `chisyy` and `chic` (`chis_q` is the zz leading eigenvalue). No Stoner factor is output (the SOC $chi_0$ has none, and `main.py` does not report one). The Eliashberg step needs a diagonal parity, and `sw_tail` is not available. Using an SOC gap as the form factor of `eilenberger_bulk` is not supported.
+- *MLO and the frequency cutoff.* MLO bands reach high energies (about $+30$ eV for Cu), so on the uniform grid use `sw_tail=True` or a large enough `Nw`, or `freq_grid='ir'`. Without the tail correction at $N_w = 128$ (a 40 eV window), $lambda$ was off by several times in one example.
+
+== Examples
+
+`examples/aiida/run_example.py` runs the main steps:
+
+```bash
+python examples/aiida/run_example.py --calc flex                      # square.hop: model -> mu -> FLEX
+python examples/aiida/run_example.py --calc eliashberg --flex         # FLEX + linearized Eliashberg
+python examples/aiida/run_example.py --calc eliashberg --flex --soc   # SOC (square_2orb_soc.hop, fill = 2)
+python examples/aiida/run_example.py --calc eliashberg --flex --mlo-demo   # two-orbital MLO model, IR basis
+python examples/aiida/run_example.py --calc eliashberg --hop inputs/Cu --ftype 4 --fill 5.5 \
+    --options '{"freq_grid": "ir", "require_converged": true}'   # directory of the ecalj job_mlo output
+```
+
+`--options` takes the keys of the table above as JSON. From Python:
+
+```python
+import aiida
+from aiida import orm
+from aiida.storage.sqlite_temp import SqliteTempBackend
+aiida.load_profile(SqliteTempBackend.create_profile('pyrpa'), allow_switch=True)
+import pyrpa_aiida as pa          # with examples/aiida on sys.path
+
+res = pa.eliashberg_workflow(
+    hop_file=orm.SinglefileData('inputs/square.hop'), ftype=orm.Int(1), fill=orm.Float(0.45),
+    temp=orm.Float(0.02), U=orm.Float(0.3), J=orm.Float(0.0), mesh=orm.List([16, 16, 1]),
+    Nw=orm.Int(128), gap_sym=orm.Int(1), use_flex=orm.Bool(True),
+    options=orm.Dict({'freq_grid': 'ir', 'store_sigma': False}))
+print(res['lambda_eliash'].value, res['flex_info'].get_dict())
+```
+
 = Test Suite
 
-The `tests/` directory contains regression tests for the numerical kernels and physics benchmarks: 173 tests across seven files. Each file can be run directly as a Python script, so `pytest` is optional.
+`tests/` holds regression tests of the numerical kernels and physics benchmarks: 17 files, 293 tests. Each test file can also be run directly as a Python script where `pytest` is not installed.
 
-Before running the tests, the Fortran shared library `libs/libfmod.so` must be compiled. If it is missing, enter the `libs` directory and run `make FC=<compiler> SL=<library>`.
+The Fortran shared library `libs/libfmod.so` must be compiled first; if it is not, run `make FC=<compiler> SL=<library>` in the `libs` directory.
 
 == How to Run
 
-Run individual test files directly:
+Individually:
 
 ```bash
 python tests/test_transport.py
 python tests/test_rpa_flex.py
 ```
 
-Run everything with a summary table (no `pytest` needed):
+All at once with a summary table (no `pytest` needed):
 
 ```bash
-python tests/run_all.py          # everything
-python tests/run_all.py rpa      # only files matching "rpa"
+python tests/run_all.py            # every file
+python tests/run_all.py rpa        # only files whose name contains "rpa"
+python tests/run_all.py --runslow  # also the tests marked slow
 ```
 
-If `pytest` is available, the whole directory can also be run with `pytest tests`. A handful of tests take a `tmp_path` fixture and are reachable only under `pytest`; the standalone runner skips them.
+Where `pytest` is available, `pytest tests` works too. Tests that take a `tmp_path` get a temporary directory from the standalone runner as well.
 
-== Coverage by file
+== Coverage by File
 
 #table(
   columns: (auto, auto, auto, 1fr),
   align: (left, right, right, left),
-  table.header([*File*], [*Tests*], [*Time*], [*What it pins down*]),
-  [`test_eilenberger.py`], [57], [437 s],
+  table.header([*File*], [*Tests*], [*Time*], [*What is checked*]),
+  [`test_eliash_nosym.py`], [10], [158 s],
+    [the symmetry-free linearized Eliashberg equation (Zeeman field, FFLO), consistency with the SOC solver (bare term $-V\/2$, triplet seeds and parity projection, band-basis output), multi-orbital triplets against the exact kernel, branch tracking under SOC],
+  [`test_eilenberger.py`], [59], [143 s],
     [Quasiclassical Eilenberger/Riccati solvers: homogeneous limits, Fortran kernels against Python references, surface Andreev states, vortices and self-consistent vortex lattices, condensation free energy, model and Wannier Fermi surfaces, Pauli limiting, triplet $d$-vector textures],
-  [`test_rpa_flex.py`], [34], [0.7 s],
-    [RPA/FLEX/Eliashberg building blocks: interaction vertices, RPA algebra, $chi_0$ and $phi_0$ against exact Lindhard/pair sums, tail-corrected $chi_0$, self-energy regridding, and the irreducible $bold(k)$-mesh under time reversal],
-  [`test_effmass.py`], [29], [3.8 s],
-    [Inverse effective mass in the orthogonal and MLO bases (interband and overlap terms, degeneracies), and the dHvA extremal-orbit machinery: slice geometry, open-orbit rejection, and the zone reduction],
-  [`test_nmr.py`], [22], [16 s],
-    [NMR in the SC state: BCS gap interpolation, $bold(q)$-mesh folding, loading a self-consistent Eliashberg gap, Knight shift (Yosida vs triplet), Hebel--Slichter peak and the $T^3$ law of line nodes],
-  [`test_transport.py`], [18], [0.8 s],
-    [Kubo$arrow.l.r$Boltzmann equivalence in the dc limit, Wiedemann--Franz, the symmetrized interband heat-current vertex, band degeneracies, and the weak-field Hall response: $sigma^((1))$ against the scalar reference, $R_H arrow -1\/(n e)$ and its independence of the lattice angle, and Luttinger-volume carrier densities],
-  [`test_velocity_mlo.py`], [7], [0.4 s],
-    [Band velocity in a non-orthogonal (MLO) basis: the $-epsilon_n C^dagger (partial S\/partial k) C$ overlap term, Hermiticity, and bit-for-bit dispatch back to the orthogonal path],
-  [`test_tools.py`], [6], [0.5 s],
-    [The shared references the other files check against: Fermi/Bose identities, closed-form model bundles, and the exact $chi_0$ used to validate the Fortran convolution],
+  [`test_freq_grid.py`], [13], [47 s],
+    [the IR basis: reproduction by the basis, the exact $chi_0$, FLEX, linearized/nonlinear Eliashberg, SOC, `sw_nosym` and the phonon vertex against the $N_w -> infinity$ limit of the uniform grid, the tail correction being ignored on IR, Padé from the sampling points],
+  [`test_nmr.py`], [22], [27 s],
+    [NMR in the SC state: BCS gap interpolation, $bold(q)$-mesh folding, loading self-consistent Eliashberg gaps, Knight shift (Yosida and triplet), Hebel--Slichter peak, $T^3$ law of line nodes],
+  [`test_rpa_flex.py`], [57], [18 s],
+    [Building blocks of RPA / FLEX / Eliashberg: interaction vertices, RPA matrix algebra, $chi_0$ and $phi_0$ against exact Lindhard sums and pair bubbles, tail-corrected $chi_0$, `mkself` / `mkself_soc` and the double-counting cancellation, the Nambu solution of the nonlinear Eliashberg loop, self-energy regridding, the TRS irreducible $bold(k)$ mesh],
+  [`test_aiida.py`], [9], [16 s],
+    [The AiiDA interface (`examples/aiida`): every step and workflow matches the direct `plibs` / `flibs` calls (RPA / FLEX / Eliashberg, MLO, SOC, Eilenberger), the `options` (IR basis, `Umat`, `store_sigma`, an unconverged FLEX loop) and the recorded provenance. Skipped without `aiida-core`],
+  [`test_nonorth_flex.py`], [8], [5 s],
+    [Green's functions, FLEX and Eliashberg in a non-orthogonal (MLO) basis: the matrix Dyson equation, covariance under an orbital rescaling, agreement with the SOC solver, IR, reloading the self-energy, second-order convergence of the tail correction, orbital normalization],
+  [`test_effmass.py`], [30], [3 s],
+    [Inverse effective masses in orthogonal and MLO bases (interband term, overlap term, degeneracies), and dHvA extremal orbits: section geometry, rejection of open orbits, zone reduction],
+  [`test_transport.py`], [32], [1 s],
+    [Kubo$arrow.l.r$Boltzmann agreement in the DC limit, Wiedemann--Franz law, symmetrized interband heat vertex, band degeneracy, $bold(k)$-point weights, weak-field Hall response],
+  [`test_bz.py`], [6], [< 1 s],
+    [first-Brillouin-zone geometry of the 3D Fermi surface (faces, folding)],
+  [`test_color.py`], [7], [< 1 s],
+    [reflectivity to colour (CIE XYZ, D65, sRGB)],
+  [`test_optical.py`], [9], [< 1 s],
+    [optical constants and non-metal colours (refractive index, reflectivity, absorption, transmission, Kubelka--Munk)],
+  [`test_grid.py`], [6], [< 1 s],
+    [Fortran grid kernels of the vortex/vortex-lattice solvers and the Riccati chord kernel],
+  [`test_impurity.py`], [7], [< 1 s],
+    [impurity supercell and the unfolded spectrum (sign of the phase, sum rules)],
+  [`test_phonon_pairing.py`], [3], [< 1 s],
+    [phonon-mediated pairing from EPA and its entry into the linearized Eliashberg equation],
+  [`test_velocity_mlo.py`], [7], [< 1 s],
+    [Band velocities in a non-orthogonal (MLO) basis: the $-epsilon_n C^dagger (partial S\/partial k) C$ overlap term, hermiticity, exact dispatch to the orthogonal path],
+  [`test_tools.py`], [8], [< 1 s],
+    [the shared references the other files check against (Fermi/Bose identities, closed-form models, the exact $chi_0$), CPU-dependent library selection (AMD, Intel), the runtime environment of gfortran builds (`OMP_WAIT_POLICY`, stdout buffering)],
 )
 
-The whole suite takes about 7.5 minutes, and `test_eilenberger.py` is essentially all of it (96%) — the quasiclassical solvers are self-consistent field problems on a 2D grid. No single test dominates: the four heaviest (`test_vortex_in_plane_field`, `test_chiral_vortex`, `test_surface_gap_heals_to_bulk`, `test_free_energy_selects_the_chiral_partner`) take 57–77 s each. Reduce their `Ng`/`nbeta`/`ngrid`/`eil_fs_nkz` if a faster suite is needed; every other file finishes in under 20 s.
+The whole suite takes about 7 minutes (ifx build, 24 threads), most of it in `test_eliash_nosym.py` and `test_eilenberger.py` (the symmetry-free solver works on the full Brillouin zone, and the quasiclassical solvers are self-consistent field problems on 2D grids). Every other file finishes within a minute. `test_aiida.py` is skipped without `aiida-core`, `test_freq_grid.py` without `sparse-ir`.
 
 = Troubleshooting
 
@@ -882,6 +1016,12 @@ The whole suite takes about 7.5 minutes, and `test_eilenberger.py` is essentiall
 - *Nonlinear Eliashberg diverges*: Increase `m_diis_num` to 5–10, raise `tempK`, or increase `Nw`. Running with `sw_check_only=True` first to inspect the Stoner factor $S$ and eigenvalue $lambda_"eliash"$ is also useful. If $S$ exceeds 1, the system is magnetically unstable and `U` must be reduced; if $lambda_"eliash" < 1$, you are still above $T_c$ and need to lower the temperature (in either case the nonlinear loop is skipped automatically).
 
 - *FLEX self-energy diverges*: Set `sw_rescale_flex=True` or reduce `U`.
+
+- *`[FLEX] WARNING: Stoner factor >= 1 at the final iteration`*: the normal state is magnetically unstable at this temperature and interaction, and the $Sigma$ obtained is not a physical solution. Near the instability the first overshoots of the iteration can throw it onto an unphysical fixed point, and it may "converge" to different values for a different mixing rate or frequency grid. Lower `U` or raise the temperature.
+
+- *A gfortran build is very slow*: two OpenMP runtimes compete (see "Building the Fortran kernel"). `_loader.py` sets `OMP_WAIT_POLICY=PASSIVE` automatically, but a value set in the environment takes precedence.
+
+- *Huge Stoner factor or $lambda$ for an MLO model / gap or $Sigma$ disturbed at the frequency edge*: MLO bands reach high energies (about $+30$ eV for Cu), and when the uniform window $(2 N_w - 1) pi T$ is too small the truncation error of $chi_0$ grows large. Keep `sw_chi0_tail=True` and raise `Nw`, or use `freq_grid='ir'`. For a dp model with U on the d orbitals only, zero the s, p rows and columns of `Umat`/`Jmat` (`orb_dep`) and restrict `chiolist` to the d--d pairs, which is also faster.
 
 - *Transport coefficients have wrong units*: Make sure `sw_unit=True`. Setting it to `False` switches to a dimensionless unit system.
 
