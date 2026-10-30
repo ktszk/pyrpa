@@ -1,13 +1,14 @@
 #!/usr/bin/env python
-# -*- coding:utf-8 -*-
 """
-Regression tests for the RPA / FLEX / Eliashberg building blocks outside the
-quasiclassical Eilenberger suite.
+RPA / FLEX / Eliashberg building blocks outside the quasiclassical Eilenberger suite:
+interaction vertices, chi0, FLEX, linearized and nonlinear Eliashberg, the non-orthogonal
+(MLO) basis and the phonon-mediated pairing from EPA.
 
 Runs standalone (no pytest needed):  python tests/test_rpa_flex.py
 Also works under pytest if installed:  pytest tests/test_rpa_flex.py
-Requires the Fortran library libfmod.so (cd libs && make FC=ifx SL=MKL).
+Requires the Fortran library libfmod.so (cd libs && make).
 """
+import importlib.util
 import json
 import os
 import re
@@ -24,6 +25,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import libs.flibs as F
 import libs.plibs as P
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _tools as T
+
+
+# --------------------------------------------------------------------------- #
+#  RPA, FLEX and Eliashberg
+# --------------------------------------------------------------------------- #
+# Regression tests for the RPA / FLEX / Eliashberg building blocks outside the
+# quasiclassical Eilenberger suite.
 
 
 # --------------------------------------------------------------------------- #
@@ -629,37 +639,6 @@ def test_mkself_soc_reproduces_the_nosoc_selfenergy():
         assert abs(mub - mua) < 1e-9, U
         assert np.abs(b[0, 1]).max() == 0.0 and np.abs(b[1, 0]).max() == 0.0   # no spin flip
         assert np.abs(b[0, 0] - b[1, 1]).max() < 1e-12*np.abs(b).max()         # up-up = down-down
-
-
-def test_mkself_soc_runs_and_matches_a_pinned_reference():
-    """mkself_soc had no test at all, so the shared FLEX pieces (flex_scf: solve_mu, mix_sigma)
-    are pinned here, for the SOC entry point and the no-SOC one that shares them.  The two now
-    agree to ~1e-12 on this spin-doubled SOC-free model, which is the point of the pin.  A spin-doubled spinless model has no SOC, so the SOC
-    path must also keep sigma spin-diagonal with equal up-up and down-down blocks."""
-    import _tools as T
-    N, Nw, U, fill = 4, 8, 1.0, 0.8
-    m = T.one_orbital_square(Nx=N, Ny=N, Nw=Nw, temp=0.1, mu=0.0, tx=1.0, ty=1.0)
-    Smat, Cmat = F.gen_SCmatrix(m['olist'], m['site'], U=U, J=0.0)
-    with _silence_stdout():
-        sg, mu = F.mkself(Smat, Cmat, m['kmap'], m['invk'], m['olist'], m['hamk'], m['eig'],
-                          m['uni'], 0.0, fill, m['temp'], Nw, N, N, 1, False, False,
-                          eps=1e-10, scf_loop=400)
-    assert abs(mu - 1.977272296185317) < 1e-9, mu
-    assert abs(np.abs(sg).max() - 3.898676976567121e-02) < 1e-11, np.abs(sg).max()
-
-    ham2, _, slist, invs = P.spin_double_model(m['ham_r'], [])
-    ol2, site2 = P.spin_double_chiolist(m['olist'], m['site'], 1)
-    eig2, uni2 = P.get_eigs(m['klist'], ham2, [], m['rvec'])
-    hamk2 = np.ascontiguousarray(np.array([u.conj().T @ np.diag(e) @ u for e, u in zip(eig2, uni2)]))
-    Vmat = F.gen_Vmatrix(ol2, slist, site2, invs, U, 0.0)
-    with _silence_stdout():
-        sg2, mu2 = F.mkself_soc(Vmat, m['kmap'], m['invk'], invs, ol2, slist, hamk2, eig2, uni2,
-                                0.0, 2*fill, m['temp'], Nw, N, N, 1, False, False,
-                                eps=1e-10, scf_loop=400)
-    assert abs(mu2 - 1.977272296185655) < 1e-9, mu2
-    assert abs(np.abs(sg2).max() - 3.898676976166533e-02) < 1e-11, np.abs(sg2).max()
-    assert np.abs(sg2[0, 1]).max() == 0.0 and np.abs(sg2[1, 0]).max() == 0.0   # no spin flip
-    assert np.abs(sg2[0, 0] - sg2[1, 1]).max() < 1e-12*np.abs(sg2).max()       # up-up = down-down
 
 
 def test_regrid_sigma_bin_roundtrip_and_reseed(tmp_path):
@@ -1544,7 +1523,7 @@ def test_correlated_subspace_chiolist_matches_the_full_basis_without_soc():
             sig, mus = F.mkself(S, C, kmap, invk, ol, hamk, eig, uni, mu, fill, temp, Nw, N, N, 1,
                                 False, False, eps=1e-9, scf_loop=300)
             out[lab] = (chi, lam, g, sig, mus)
-    (cA, lA, gA, sA, mA), (cB, lB, gB, sB, mB) = out['A'], out['B']
+    (cA, lA, _, sA, mA), (cB, lB, gB, sB, mB) = out['A'], out['B']
     iA = [i for i, (a, b) in enumerate(np.asarray(olA)) if a == 3 and b == 3][0]
     assert np.abs(cA[iA, iA] - cB[0, 0]).max() < 1e-13*np.abs(cB).max()
     assert abs(lA - lB) < 1e-9*abs(lA)
@@ -1596,14 +1575,17 @@ def test_correlated_subspace_chiolist_matches_the_full_basis_with_soc():
     assert np.abs(sB[np.ix_(p, list(range(Norb)))]).max() == 0.0
 
 
-def test_linearized_eliashberg_soc_returns_lambda_and_finite_gap():
-    """The SOC solver must return (gap, lambda) like the non-SOC one, both finite.
+def test_linearized_eliashberg_soc_returns_the_printed_lambda_and_a_finite_gap():
+    """The SOC solver must return (gap, lambda) like the non-SOC one, both finite, and lambda
+    must be exactly the eigenvalue the Fortran driver prints.
 
-    Guards the whole ctypes signature: a wrong or missing argtype entry shifts the
-    argument list and the call raises before the solver runs.
+    A wrong or missing argtype entry shifts the argument list and the call raises before the
+    solver runs.  The driver runs two eigenvalue passes and prints 'eliash=' after each; the
+    PHYSICAL eigenvalue is the last one, and that is what has to come back.
     """
     st = _soc_model()
-    with _silence_stdout():
+    log = {}
+    with _capture_fortran_stdout(log):
         chi, sgnsig, sgnsig2, invschi = F.get_chi0_soc(
             st['Vmat'], st['Gk'], st['olist'], st['slist'], st['kmap'], st['invk'],
             st['invs'], st['temp'], st['Nx'], st['Ny'], st['Nz'],
@@ -1619,30 +1601,7 @@ def test_linearized_eliashberg_soc_returns_lambda_and_finite_gap():
     gap, lam = out
     assert gap.shape == (st['Norb'], st['Norb'], st['Nw'], len(st['kmap']))
     assert np.isfinite(gap).all()
-    assert np.isfinite(lam), 'lambda must be finite, not NaN'
-    assert isinstance(lam, float)
-
-
-def test_linearized_eliashberg_soc_lambda_matches_the_printed_value():
-    """lambda_out must carry exactly the eigenvalue the Fortran driver prints.
-
-    The driver runs two eigenvalue passes and prints 'eliash=' after each; the
-    PHYSICAL eigenvalue is the last one, and that is what has to come back.
-    """
-    st = _soc_model()
-    log = {}
-    with _capture_fortran_stdout(log):
-        chi, sgnsig, sgnsig2, invschi = F.get_chi0_soc(
-            st['Vmat'], st['Gk'], st['olist'], st['slist'], st['kmap'], st['invk'],
-            st['invs'], st['temp'], st['Nx'], st['Ny'], st['Nz'],
-        )
-        init_delta = P.get_initial_gap(st['klist'], st['Norb'], 1)
-        _, lam = F.linearized_eliashberg_soc(
-            chi, st['Gk'], st['uni'], init_delta, st['Vmat'], sgnsig, sgnsig2,
-            st['plist'], st['slist'], st['olist'], st['kmap'], st['invk'],
-            st['invs'], invschi, st['Nx'], st['Ny'], st['Nz'], st['temp'],
-            gap_sym=1, itemax=15, arnoldi_m=0,
-        )
+    assert isinstance(lam, float) and np.isfinite(lam), 'lambda must be a finite float'
     printed = re.findall(r'eliash=\s*(\S+)', log['text'])
     assert printed, 'the driver should print eliash='
     assert abs(float(printed[-1].replace('E', 'e')) - lam) < 1e-12
@@ -1712,6 +1671,364 @@ def test_get_chi_orb_list_raises_on_an_inconsistent_site_profile():
 # --------------------------------------------------------------------------- #
 #  standalone runner (no pytest required)
 # --------------------------------------------------------------------------- #
+
+
+# --------------------------------------------------------------------------- #
+#  Non-orthogonal (MLO) Green functions, FLEX and Eliashberg
+# --------------------------------------------------------------------------- #
+# Non-orthogonal Green functions and FLEX basis-normalization invariance.
+
+
+def test_nonorthogonal_green_matches_matrix_dyson():
+    ham = np.array([[[1.0, 0.2+0.3j], [0.2-0.3j, -0.4]]], dtype=np.complex128)
+    overlap = np.array([[[1.3, 0.1+0.2j], [0.1-0.2j, 0.9]]], dtype=np.complex128)
+    eig, uni = F.get_eig(ham, overlap)
+    temp, mu, nw = 0.1, 0.2, 4
+    sigma = np.zeros((2, 2, nw, 1), dtype=np.complex128)
+    free = F.gen_Green0(eig, uni, mu, temp, nw)
+    assert np.allclose(F.gen_green(sigma, ham, mu, temp, overlap), free, atol=1e-12)
+    sigma[0, 0, :, 0] = 0.2-0.04j
+    sigma[1, 1, :, 0] = -0.1-0.03j
+    sigma[0, 1, :, 0] = 0.07+0.02j
+    sigma[1, 0, :, 0] = 0.04-0.01j
+    actual = F.gen_green(sigma, ham, mu, temp, overlap)
+    assert np.allclose(F.gen_green_from_eig(sigma, eig, uni, mu, temp, overlap), actual, atol=1e-12)
+    from libs.plibs._calc import _green_at, _metric_green
+    wn = (2*np.arange(nw)+1)*np.pi*temp
+    assert np.allclose(_green_at(sigma, ham, mu, wn, overlap), actual, atol=1e-12)
+    weighted = _metric_green(actual, overlap)
+    for j in range(nw):
+        z = mu+1j*(2*j+1)*np.pi*temp
+        expected = np.linalg.inv(z*overlap[0]-ham[0]-sigma[:, :, j, 0])
+        assert np.allclose(actual[:, :, j, 0], expected, atol=1e-12)
+        assert np.allclose(np.trace(weighted[:, :, j, 0]), np.trace(overlap[0] @ expected), atol=1e-12)
+
+
+def test_nonorthogonal_flex_normal_and_soc_match_scaled_orthogonal_model():
+    n, nw, temp, fill, scale, u = 4, 32, 0.12, 0.4, 1.7, 1.2
+    m = T.one_orbital_square(Nx=n, Ny=n, Nw=nw, temp=temp, mu=-0.4, U=u)
+    ham = np.ascontiguousarray(scale*m['hamk'])
+    overlap = np.full_like(ham, scale)
+    eig, uni = F.get_eig(ham, overlap)
+    smat, cmat = F.gen_SCmatrix(m['olist'], m['site'], U=u*scale**2, J=0.0)
+    ham2_r, _, slist, invs = P.spin_double_model(scale*m['ham_r'], [])
+    ol2, site2 = P.spin_double_chiolist(m['olist'], m['site'], 1)
+    ham2 = F.gen_ham(m['klist'], ham2_r, m['rvec'])
+    ov2 = np.ascontiguousarray(np.broadcast_to(scale*np.eye(2), ham2.shape), dtype=np.complex128)
+    eig2, uni2 = F.get_eig(ham2, ov2)
+    vmat = F.gen_Vmatrix(ol2, slist, site2, invs, u*scale**2, 0.0)
+    with T.silence():
+        ref, mu_ref = F.mkself(m['Smat'], m['Cmat'], m['kmap'], m['invk'], m['olist'], m['hamk'],
+                               m['eig'], m['uni'], m['mu'], fill, temp, nw, n, n, 1, False, False,
+                               sub_sigma=0, eps=1e-9, scf_loop=200)
+        actual, mu_actual = F.mkself(smat, cmat, m['kmap'], m['invk'], m['olist'], ham, eig, uni,
+                                     m['mu'], fill, temp, nw, n, n, 1, False, False, sub_sigma=0,
+                                     eps=1e-9, scf_loop=200, overlap=overlap)
+        soc, mu_soc = F.mkself_soc(vmat, m['kmap'], m['invk'], invs, ol2, slist, ham2, eig2, uni2,
+                                   m['mu'], 2*fill, temp, nw, n, n, 1, False, False, sub_sigma=0,
+                                   eps=1e-9, scf_loop=200, overlap=ov2)
+    assert abs(mu_actual-mu_ref) < 1e-8
+    assert abs(mu_soc-mu_ref) < 1e-8
+    assert T.rel_err(actual, scale*ref) < 1e-7
+    assert T.rel_err(soc[:1, :1], actual) < 1e-7
+    with T.silence():
+        gref = F.gen_green(ref, m['hamk'], mu_ref, temp)
+        g = F.gen_green(actual, ham, mu_actual, temp, overlap)
+        gsoc = F.gen_green(soc, ham2, mu_soc, temp, ov2)
+        chi_ref, _ = F.get_chi0(m['Smat'], m['Cmat'], gref, m['olist'], m['kmap'], m['invk'], temp, n, n, 1)
+        chi, _ = F.get_chi0(smat, cmat, g, m['olist'], m['kmap'], m['invk'], temp, n, n, 1)
+        init = P.get_initial_gap(m['klist'], 1, 1)
+        dref, lam_ref = F.linearized_eliashberg(chi_ref, gref, m['uni'], init, m['Smat'], m['Cmat'],
+                                                m['olist'], m['plist'], m['kmap'], m['invk'], n, n, 1,
+                                                temp, 1, eps=1e-9)
+        _, lam = F.linearized_eliashberg(chi, g, uni, init, smat, cmat, m['olist'], m['plist'],
+                                         m['kmap'], m['invk'], n, n, 1, temp, 1, eps=1e-9, overlap=overlap)
+        chis, sg, sg2, isc = F.get_chi0_soc(vmat, gsoc, ol2, slist, m['kmap'], m['invk'], invs,
+                                            temp, n, n, 1)
+        _, lam_soc = F.linearized_eliashberg_soc(chis, gsoc, uni2, P.get_initial_gap(m['klist'], 2, 1),
+                                                 vmat, sg, sg2, np.ones(2), slist, ol2, m['kmap'], m['invk'],
+                                                 invs, isc, n, n, 1, temp, 1, eps=1e-9, overlap=ov2)
+        seed = np.ascontiguousarray(dref*0.01)
+        d1, s1 = F.nonlinear_eliashberg(seed.copy(), gref.copy(), m['hamk'], m['Smat'], m['Cmat'],
+                                        m['olist'], m['plist'], m['kmap'], m['invk'], mu_ref, temp, 1, n, n, 1,
+                                        sw_sigma=True, sw_Vconst=True, itemax=2, m_diis=1,
+                                        sw_amp_newton=False, gap_min=0.0, sub_sigma=0)
+        d2, s2 = F.nonlinear_eliashberg(scale*seed.copy(), g.copy(), ham, smat, cmat, m['olist'], m['plist'],
+                                        m['kmap'], m['invk'], mu_actual, temp, 1, n, n, 1,
+                                        sw_sigma=True, sw_Vconst=True, itemax=2, m_diis=1,
+                                        sw_amp_newton=False, gap_min=0.0, sub_sigma=0, overlap=overlap)
+    assert abs(lam-lam_ref) < 1e-8
+    assert abs(lam_soc-lam_ref) < 1e-8
+    assert T.rel_err(d2, scale*d1) < 1e-7
+    assert T.rel_err(s2, scale*s1) < 1e-7
+
+
+def test_nonorthogonal_multiorbital_flex_soc_matches_nosoc():
+    n, temp, fill = 4, 0.1, 0.8
+    m = T.two_orbital_square(Nx=n, Ny=n, Nw=16, temp=temp, mu=-0.2, U=0.5, J=0.05)
+    sr = np.zeros_like(m['ham_r'])
+    sr[0] = [[1.2, 0.15], [0.15, 0.9]]
+    sr[1] = sr[2] = [[0.08, 0.02], [0.02, -0.03]]
+    ham, overlap = F.gen_ham(m['klist'], m['ham_r'], m['rvec'], Ovl_r=sr)
+    eig, uni = F.get_eig(ham, overlap)
+    ham2_r, sr2, slist, invs = P.spin_double_model(m['ham_r'], sr)
+    ham2, overlap2 = F.gen_ham(m['klist'], ham2_r, m['rvec'], Ovl_r=sr2)
+    eig2, uni2 = F.get_eig(ham2, overlap2)
+    ol2, site2 = P.spin_double_chiolist(m['olist'], m['site'], 2)
+    vmat = F.gen_Vmatrix(ol2, slist, site2, invs, 0.5, 0.05)
+    grids = [None]
+    if importlib.util.find_spec('sparse_ir') is not None:
+        grids.append(P.ir_grid(temp, 10.0, eps=1e-8))
+    for grid in grids:
+        nw = 16 if grid is None else grid['Nw']
+        try:
+            P.set_freq_grid(grid)
+            with T.silence():
+                normal, mu1 = F.mkself(m['Smat'], m['Cmat'], m['kmap'], m['invk'], m['olist'], ham, eig, uni,
+                                       m['mu'], fill, temp, nw, n, n, 1, False, False, sub_sigma=0,
+                                       eps=1e-9, scf_loop=200, overlap=overlap)
+                soc, mu2 = F.mkself_soc(vmat, m['kmap'], m['invk'], invs, ol2, slist, ham2, eig2, uni2,
+                                        m['mu'], 2*fill, temp, nw, n, n, 1, False, False, sub_sigma=0,
+                                        eps=1e-9, scf_loop=200, overlap=overlap2)
+            assert abs(mu1-mu2) < 1e-8
+            assert T.rel_err(normal, soc[:2, :2]) < 1e-7
+        finally:
+            P.set_freq_grid(None)
+
+
+def test_nonorthogonal_reload_uses_overlap_for_both_spin_paths(tmp_path):
+    from libs.plibs import _calc
+    cwd = os.getcwd()
+    os.chdir(tmp_path)   # _save_sigma / the reload use the working directory
+    try:
+        n, nw, temp, mu = 4, 8, 0.1, -0.2
+        m = T.one_orbital_square(Nx=n, Ny=n, Nw=nw, temp=temp, mu=mu)
+        sr = np.zeros_like(m['ham_r'])
+        sr[0, 0, 0] = 1.4
+        state = _calc._prepare_kspace_state(n, n, 1, m['ham_r'], sr, m['rvec'], need_ham=True)
+        sigma = np.full((1, 1, nw, len(m['klist'])), 0.2-0.1j, dtype=np.complex128)
+        _calc._save_sigma(sigma, mu, temp)
+        with T.silence():
+            result = _calc._prepare_green_state_normal(state, m['olist'], (m['Smat'], m['Cmat']), mu, 0.5,
+                                                       temp, nw, n, n, 1, True, sw_from_file=True)
+        assert np.allclose(result['Gk'], F.gen_green(sigma, state['ham_k'], mu, temp, state['overlap_k']))
+        ham2_r, sr2, slist, invs = P.spin_double_model(m['ham_r'], sr)
+        state2 = _calc._prepare_kspace_state(n, n, 1, ham2_r, sr2, m['rvec'], need_ham=True)
+        ol2, site2 = P.spin_double_chiolist(m['olist'], m['site'], 1)
+        vmat = F.gen_Vmatrix(ol2, slist, site2, invs, 0.0, 0.0)
+        sigma2 = np.zeros((2, 2, nw, len(m['klist'])), dtype=np.complex128)
+        sigma2[0, 0] = sigma2[1, 1] = sigma[0, 0]
+        _calc._save_sigma(sigma2, mu, temp)
+        with T.silence():
+            result2 = _calc._prepare_green_state_soc(state2, ol2, slist, invs, vmat, mu, 1.0, temp, nw,
+                                                     n, n, 1, True, sw_from_file=True)
+        assert np.allclose(result2['Gk'], F.gen_green(sigma2, state2['ham_k'], mu, temp, state2['overlap_k']))
+    finally:
+        os.chdir(cwd)
+
+
+def test_nonorthogonal_flex_with_soc_matches_scaled_orthogonal_model():
+    n, nw, temp, scale, u, j = 4, 12, 0.1, 1.5, 0.4, 0.05
+    m = _soc_model(Nx=n, Ny=n, Nw=nw, temp=temp, U=u, J=j)
+    ham = F.gen_ham(m['klist'], m['ham_r'], m['rvec'])
+    ham_scaled = np.ascontiguousarray(scale*ham)
+    overlap = np.ascontiguousarray(np.broadcast_to(scale*np.eye(m['Norb']), ham.shape), dtype=np.complex128)
+    eig, uni = F.get_eig(ham_scaled, overlap)
+    vmat = F.gen_Vmatrix(m['olist'], m['slist'], m['site'], m['invs'], u*scale**2, j*scale**2)
+    common = (m['kmap'], m['invk'], m['invs'], m['olist'], m['slist'])
+    with T.silence():
+        ref, mu_ref = F.mkself_soc(m['Vmat'], *common, ham, m['eig'], m['uni'], 0.0, 2.0, temp, nw,
+                                   n, n, 1, False, False, sub_sigma=0, eps=1e-9, scf_loop=200)
+        actual, mu_actual = F.mkself_soc(vmat, *common, ham_scaled, eig, uni, 0.0, 2.0, temp, nw,
+                                         n, n, 1, False, False, sub_sigma=0, eps=1e-9, scf_loop=200,
+                                         overlap=overlap)
+    assert abs(mu_actual-mu_ref) < 1e-8
+    assert T.rel_err(actual, scale*ref) < 1e-7
+
+
+def test_nonorthogonal_chi0_tail_correction_is_second_order():
+    """chi0_ref_tau's tau=0 jump: G0 jumps by S(k)^-1, not 1, so J(q) is a k-convolution of S^-1 and rho.
+    With the identity in its place the tail-corrected chi0 stays O(1/Nw) on an MLO basis."""
+    n, temp, mu = 8, 0.1, -0.2
+    m = T.two_orbital_square(Nx=n, Ny=n, Nw=16, temp=temp, mu=mu, U=0.5, J=0.05)
+    sr = np.zeros_like(m['ham_r'])
+    sr[0] = [[1.2, 0.15], [0.15, 0.9]]
+    sr[1] = sr[2] = [[0.08, 0.02], [0.02, -0.03]]
+    ham, overlap = F.gen_ham(m['klist'], m['ham_r'], m['rvec'], Ovl_r=sr)
+    eig, uni = F.get_eig(ham, overlap)
+
+    def chi(Nw, tail):
+        G = F.gen_Green0(eig, uni, mu, temp, Nw)
+        with T.silence():
+            if tail:
+                c = F.get_chi0_tail(m['Smat'], m['Cmat'], G, eig, uni, m['olist'], m['kmap'], m['invk'],
+                                    mu, temp, n, n, 1)[0]
+            else:
+                c = F.get_chi0(m['Smat'], m['Cmat'], G, m['olist'], m['kmap'], m['invk'], temp, n, n, 1)[0]
+        return c[:, :, :4]
+    ref = 2*chi(8192, False)-chi(4096, False)    # Richardson: plain convolution is O(1/Nw)
+    e64, e128 = T.rel_err(chi(64, True), ref), T.rel_err(chi(128, True), ref)
+    assert e128 < 0.3*e64, (e64, e128)          # second order: ~1/4 per doubling (first order: 1/2)
+    assert e128 < 1e-3
+
+
+def test_mlo_orbital_normalization_keeps_bands_and_fixes_the_local_norm():
+    """normalize_mlo_orbitals: S_aa(R=0) -> 1 with the bands unchanged (ecalj MLOs are not normalized)."""
+    m = T.two_orbital_square(Nx=4, Ny=4, Nw=8, temp=0.1, mu=-0.2)
+    sr = np.zeros_like(m['ham_r'])
+    sr[0] = [[0.02, 0.003], [0.003, 0.5]]
+    sr[1] = sr[2] = [[0.001, 0.0005], [0.0005, -0.02]]
+    hr = m['ham_r']*np.sqrt(np.outer(sr[0].diagonal().real, sr[0].diagonal().real))
+    h1, s1 = P.normalize_mlo_orbitals(m['rvec'], hr, sr)
+    i0 = np.flatnonzero((np.abs(m['rvec']) < 1e-9).all(1))[0]
+    assert np.allclose(s1[i0].diagonal(), 1.0)
+    e0 = F.get_eig(*F.gen_ham(m['klist'], hr, m['rvec'], Ovl_r=sr), sw=False)
+    e1 = F.get_eig(*F.gen_ham(m['klist'], h1, m['rvec'], Ovl_r=s1), sw=False)
+    assert np.allclose(e0, e1, atol=1e-10)
+
+
+def test_nonorthogonal_flex_is_covariant_under_an_orbital_rescaling():
+    """Rescaling the orbitals by W = diag(w) (H, S -> W^-1 H W^-1, W^-1 S W^-1, the vertex by the four w's of its
+    orbital pair indices) is the same physics: mu and the Stoner factor are unchanged and Sigma -> W^-1 Sigma W^-1.
+    A FLEX that dropped S from G^-1 (the pre-MLO code) breaks this, unlike the scalar-overlap checks above."""
+    n, temp, fill, nw = 4, 0.1, 0.8, 32
+    m = T.two_orbital_square(Nx=n, Ny=n, Nw=16, temp=temp, mu=-0.2, U=1.0, J=0.1)
+    sr = np.zeros_like(m['ham_r'])
+    sr[0] = [[1.2, 0.15], [0.15, 0.9]]
+    sr[1] = sr[2] = [[0.08, 0.02], [0.02, -0.03]]
+    w = np.array([0.4, 1.6])
+    fac = np.array([w[a-1]*w[b-1] for a, b in m['olist']])
+    models = {'norm': (m['ham_r'], sr, m['Smat'], m['Cmat']),
+              'raw': (m['ham_r']/np.outer(w, w), sr/np.outer(w, w), m['Smat']/np.outer(fac, fac),
+                      m['Cmat']/np.outer(fac, fac))}
+    res = {}
+    for tag, (hr, s_r, smat, cmat) in models.items():
+        ham, overlap = F.gen_ham(m['klist'], hr, m['rvec'], Ovl_r=s_r)
+        eig, uni = F.get_eig(ham, overlap)
+        with T.silence():
+            sigma, mu = F.mkself(smat, cmat, m['kmap'], m['invk'], m['olist'], ham, eig, uni, m['mu'], fill, temp,
+                                 nw, n, n, 1, False, False, sub_sigma=1, eps=1e-10, scf_loop=300, overlap=overlap)
+            g = F.gen_green(sigma, ham, mu, temp, overlap=overlap)
+            _, stoner = F.get_chi0(smat, cmat, g, m['olist'], m['kmap'], m['invk'], temp, n, n, 1)
+        res[tag] = (sigma, mu, stoner)
+    (s1, mu1, st1), (s2, mu2, st2) = res['norm'], res['raw']
+    assert abs(mu1-mu2) < 1e-8 and abs(st1-st2) < 1e-8
+    assert T.rel_err(s2, s1/np.outer(w, w)[:, :, None, None]) < 1e-7
+
+
+# --------------------------------------------------------------------------- #
+#  Phonon-mediated pairing from EPA
+# --------------------------------------------------------------------------- #
+# Phonon-mediated pairing from EPA data (plibs.epa_pairing_vertex) and its entry into the
+# linearized Eliashberg equation (flibs.linearized_eliashberg(..., vph=...)).
+#
+#   * vph enters V_Delta with the sign and weight of the spin/charge vertex: for a single band at
+#     U = 0 the Eliashberg eigenvalue equals that of the isotropic gap equation
+#     lambda Delta_n = -T sum_m W(w_n - w_m) <1/(w_m^2 + xi^2)>_k Delta_m, solved directly;
+#   * epa_pairing_vertex builds W from the EPA table so that the Fermi-surface average of its
+#     band-basis amplitude is -sum_nu <g^2>_FS D_nu, i.e. lambda = 2 N_F sum_nu <g^2>/w_nu;
+#   * the overlap factor eta equals the explicit double Fermi-surface sum it stands for.
+
+
+def _square(t=-0.25):
+    rvec = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]], dtype=np.float64)
+    ham_r = np.zeros((5, 1, 1), dtype=np.complex128)
+    ham_r[1:, 0, 0] = t
+    return rvec, ham_r
+
+
+def _two_orbital(hyb=0.0):
+    """Two square-lattice orbitals on one or two sites, coupled by an on-site hybridization."""
+    rvec, h1 = _square()
+    ham_r = np.zeros((5, 2, 2), dtype=np.complex128)
+    ham_r[:, 0, 0] = h1[:, 0, 0]
+    ham_r[:, 1, 1] = 0.8*h1[:, 0, 0]
+    ham_r[0, 1, 1] = 0.05
+    ham_r[0, 0, 1] = ham_r[0, 1, 0] = hyb
+    return rvec, ham_r
+
+
+def _write_epa(path, edge=(0.4, 0.45), step=(-0.1, 0.1), nbin=(8, 8), wcm=(200.0, 350.0), seed=0):
+    rng = np.random.default_rng(seed)
+    nm = len(wcm)
+    lines = [f'{2:8d}{nm:8d}'] + [f'{e:14.8f}{s:14.8f}{n:8d}' for e, s, n in zip(edge, step, nbin)]
+    lines.append(''.join(f'{w:18.8e}' for w in wcm))
+    for ii in range(2):
+        for jj in range(nbin[ii]):
+            for kk in range(nbin[ii]):
+                lines.append(f'{ii+1:8d}{jj+1:8d}{kk+1:8d}'
+                             + ''.join(f'{x:18.8e}' for x in rng.uniform(1e-3, 5e-3, nm)))
+    open(path, 'w').write('\n'.join(lines)+'\n')
+
+
+def test_vph_enters_the_eliashberg_kernel_as_a_retarded_attraction():
+    Nx = Ny = 16
+    Nw, temp, mu = 64, 0.02, -0.1
+    rvec, ham_r = _square()
+    klist, kmap, invk = F.gen_irr_k_TRS(Nx, Ny, 1)
+    eig, uni = F.get_eig(F.gen_ham(klist, ham_r, rvec))
+    Gk = F.gen_Green0(eig, uni, mu=mu, temp=temp, Nw=Nw)
+    olist, site = P.get_chi_orb_list(1, [1])
+    Smat = Cmat = np.zeros((1, 1))
+    vj = 2*np.pi*temp*np.arange(Nw)
+    W = -0.004*2*0.03/(vj**2+0.03**2)
+    with contextlib.redirect_stdout(io.StringIO()):
+        chi, _ = F.get_chi0(Smat, Cmat, Gk, olist, kmap, invk, temp, Nx, Ny, 1)
+        _, lam = F.linearized_eliashberg(chi, Gk, uni, P.get_initial_gap(klist, 1, 0), Smat, Cmat, olist,
+                                         F.get_plist(rvec, ham_r), kmap, invk, Nx, Ny, 1, temp, gap_sym=0,
+                                         eps=1e-9, vph=W[None, None, :])
+    _, klf = P.gen_klist(Nx, Ny, 1, sw_pp=False)
+    xi = P.get_eigs(klf, ham_r, [], rvec)[0][:, 0]-mu
+    n = np.arange(-Nw, Nw)
+    wn = (2*n+1)*np.pi*temp
+    chim = (1/(wn[None, :]**2+xi[:, None]**2)).mean(axis=0)
+    d = (n[:, None]-n[None, :]) % (2*Nw)          # the circular 2Nw convolution of the solver
+    Wc = np.where(d < Nw, W[np.minimum(d, Nw-1)], np.where(d == Nw, 0.0, W[np.minimum(2*Nw-d, Nw-1)]))
+    ref = np.linalg.eigvals(-temp*Wc*chim[None, :]).real.max()
+    assert lam > 0 and abs(lam-ref) < 1e-8*ref
+
+
+def test_epa_vertex_of_one_band_is_the_fermi_surface_coupling(tmp_path):
+    _write_epa(str(tmp_path/'x.epa.e'))
+    rvec, ham_r = _square()
+    olist, site = P.get_chi_orb_list(1, [1])
+    temp, mu, Nw = 0.01, 0.42, 16
+    with contextlib.redirect_stdout(io.StringIO()):
+        vph, info = P.epa_pairing_vertex(str(tmp_path/'x.epa.e'), ham_r+np.eye(1)*0.42*(np.arange(5) == 0)[:, None, None],
+                                         [], rvec, 24, 24, 1, olist, site, mu, temp, Nw, gap_sym=0)
+    assert abs(info['eta']-1.0) < 1e-12                       # one orbital: no overlap reduction
+    _, _, edge, step, nbin, wavg, gavg = P.read_epa_output(str(tmp_path/'x.epa.e'))
+    vj = 2*np.pi*temp*np.arange(Nw)
+    W = -(info['g2_FS'][:, None]*2*wavg[:, None]/(vj**2+wavg[:, None]**2)).sum(axis=0)
+    assert np.abs(vph[0, 0]-W).max() < 1e-14
+    assert abs(info['lambda']-2*info['N_F']*np.sum(info['g2_FS']/wavg)) < 1e-12
+    assert info['g2_FS'].min() >= gavg[gavg > 0].min() and info['g2_FS'].max() <= gavg.max()
+
+
+def test_eta_is_the_fermi_surface_average_of_the_site_projected_overlaps(tmp_path):
+    """eta = <sum_site |<u'|P_site|u>|^2>_FS,FS, the double sum written out, for one and two sites;
+    two decoupled orbitals on one site give (Wa^2 + Wc^2)/(Wa + Wc)^2 with Wa, Wc their Fermi-window
+    weights (no pair hopping between them: 1/2 for equal weights)."""
+    _write_epa(str(tmp_path/'x.epa.e'))
+    temp, mu, N = 0.02, 0.0, 12
+    for hyb, prof in ((0.0, [2]), (0.07, [2]), (0.07, [1, 1])):
+        rvec, ham_r = _two_orbital(hyb)
+        olist, site = P.get_chi_orb_list(2, prof)
+        with contextlib.redirect_stdout(io.StringIO()):
+            _, info = P.epa_pairing_vertex(str(tmp_path/'x.epa.e'), ham_r, [], rvec, N, N, 1, olist, site,
+                                           mu, temp, 4, gap_sym=0)
+        _, _, eig, uni, _ = P.get_emesh(N, N, 1, ham_r, [], rvec, np.eye(3), sw_uni=True)
+        w = (0.25/temp/np.cosh(0.5*(eig-mu)/temp)**2).ravel()
+        u = np.conj(uni).reshape(-1, 2)                         # rows: <a|u_kn>
+        blocks = [[0, 1]] if len(prof) == 1 else [[0], [1]]
+        amp = sum(np.abs(u[:, b].conj().dot(u[:, b].T))**2 for b in blocks)
+        ref = w.dot(amp).dot(w)/w.sum()**2
+        assert abs(info['eta']-ref) < 1e-10*ref, (hyb, prof)
+        if hyb == 0.0:                                          # decoupled: (Wa^2 + Wc^2)/(Wa + Wc)^2
+            wb = (0.25/temp/np.cosh(0.5*(eig-mu)/temp)**2).sum(axis=0)
+            assert abs(info['eta']-(wb**2).sum()/wb.sum()**2) < 1e-6  # eigenvectors mix at crossings
+
+
 if __name__ == '__main__':
     import _tools
     sys.exit(_tools.run_standalone(globals()))

@@ -597,18 +597,19 @@ def get_initial_delta(init_delta: np.ndarray, uni: np.ndarray, kmap: np.ndarray,
     return delta
 
 
-def get_band_to_orb_delta(init_delta: np.ndarray, uni: np.ndarray) -> np.ndarray:
+def get_band_to_orb_delta(init_delta: np.ndarray, uni: np.ndarray,
+                          overlap: np.ndarray | None = None) -> np.ndarray:
     """
     @brief Transform the gap function from band-diagonal representation to orbital basis.
     The eigenvector matrices returned by get_eig/get_eigs are stored as row-eigenvectors,
-    i.e. U(k) H(k) = E(k) U(k). Under this convention used with mkBdGhamk,
-    the orbital-basis pairing matrix is
-    delta_orb(k) = U(k)^T * diag(delta_n(k)) * U(k).
-    This is the inverse of the band-projection in get_initial_delta / conv_delta_orb_to_band:
-    given a band-diagonal gap it returns the full Norb×Norb orbital-basis matrix.
+    i.e. U(k) H(k) = E(k) U(k), and the orbital-basis pairing matrix is
+    delta_orb(k) = U(k)^dagger * diag(delta_n(k)) * U(k),
+    the form for which the BdG matrix of mkBdGhamk splits into the bands.
+    In a non-orthogonal basis U is S-orthonormal and the covariant gap S delta_orb S is returned.
     @param init_delta: Band-diagonal gap amplitudes [Norb, Nk] complex128
                        (C-order [Norb, Nk] == Fortran dimension(Nk, Norb))
     @param       uni: Row-eigenvector matrices [Nk, Norb, Norb] complex128
+    @param   overlap: overlap S(k) [Nk, Norb, Norb], or None for an orthogonal basis
     @return    delta: Gap function in orbital basis [Nk, Norb, Norb] complex128
                       (same layout as hamk from gen_ham; matches mkBdGhamk delta argument)
     """
@@ -619,7 +620,10 @@ def get_band_to_orb_delta(init_delta: np.ndarray, uni: np.ndarray) -> np.ndarray
     uni_f = np.asfortranarray(np.transpose(uni, (1, 2, 0)))
     delta_f = np.zeros((Norb, Norb, Nk), dtype=np.complex128, order='F')
     _loader._lib.get_band_to_orb_delta(delta_f, init_delta_f, uni_f, _loader.i64(Nk), _loader.i64(Norb))
-    return np.ascontiguousarray(np.transpose(delta_f, (2, 0, 1)))
+    delta = np.ascontiguousarray(np.transpose(delta_f, (2, 0, 1)))
+    if overlap is not None:
+        delta = np.ascontiguousarray(overlap @ delta @ overlap)
+    return delta
 
 
 def remap_gap(delta0: np.ndarray, plist: np.ndarray, invk: np.ndarray, gap_sym: int | str | None,

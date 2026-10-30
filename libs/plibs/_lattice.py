@@ -59,9 +59,21 @@ def import_hoppings(fname: str, ftype: int) -> tuple[np.ndarray, np.ndarray, int
             c2 = c2+1
         ndegen = np.array([float(t) for t in tmp1])
         tmp1 = [[float(t) for t in tp] for tp in tmp[c2:]]
-        tmp = np.array([complex(tp[5], tp[6]) for tp in tmp1])
+        if len(tmp1) != nr*no*no or np.any(ndegen <= 0):
+            raise ValueError(f'invalid number of hopping entries or degeneracy in {name}_hr.dat')
         rvec = np.array([tmp1[no*no*i][:3] for i in range(nr)])
-        ham_r = (tmp.reshape((nr, no, no)).T/ndegen).T.round(6).copy()
+        ham_r = np.empty((nr, no, no), dtype=np.complex128)
+        for ir in range(nr):
+            block = tmp1[ir*no*no:(ir+1)*no*no]
+            seen = set()
+            for row in block:
+                i, j = int(row[3])-1, int(row[4])-1
+                if (row[:3] != rvec[ir].tolist() or row[3] != i+1 or row[4] != j+1
+                        or not (0 <= i < no and 0 <= j < no) or (i, j) in seen):
+                    raise ValueError(f'invalid orbital indices or R-vector in {name}_hr.dat, R block {ir}')
+                ham_r[ir, i, j] = complex(row[5], row[6])/ndegen[ir]
+                seen.add((i, j))
+        ham_r = ham_r.round(6)
         return (rvec, ham_r, no, nr)
 
     def import_Hopping(name: str, sw_axis: bool = False) -> tuple:

@@ -36,42 +36,21 @@ def get_eigs(klist: np.ndarray, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.nda
     @return   eig: eigenvalues of Hamiltonian
     @return   uni: unitary matrix of eigenfunctions
     """
-    if len(S_r) == 0:
-        ham_k = flibs.gen_ham(klist, ham_r, rvec)
-        eig, uni = flibs.get_eig(ham_k)
-        if sw_uni:
-            return uni
-        else:
-            return eig, uni
-    else:
-        ham_k, S_k = flibs.gen_ham(klist, ham_r, rvec, Ovl_r=S_r)
-        eig, uni = flibs.get_eig(ham_k, S_k)
-        if sw_std:
-            # Normalize each eigenvector column so orbital weights sum to 1 (MLO basis is non-orthogonal)
-            norm = np.sqrt((abs(uni)**2).sum(axis=2))
-            if sw_uni:
-                return np.array([[u/nm for u, nm in zip(un, nor)] for un, nor in zip(uni, norm)])
-            else:
-                return eig, np.array([[u/nm for u, nm in zip(un, nor)] for un, nor in zip(uni, norm)])
-        else:
-            if sw_uni:
-                return uni
-            else:
-                return eig, uni
+    ham_k, S_k = flibs.gen_ham_overlap(klist, ham_r, rvec, S_r)
+    eig, uni = flibs.get_eig(ham_k, S_k)
+    if S_k is not None and sw_std:
+        # MLO basis is non-orthogonal: normalize each eigenvector (row) so its orbital weights sum to 1
+        uni = uni/np.sqrt((abs(uni)**2).sum(axis=2))[:, :, None]
+    return uni if sw_uni else (eig, uni)
 
 
-def _solve_mu(func: collections.abc.Callable, emin: float, emax: float, label: str) -> float:
-    """Bracket the chemical potential with brentq; if filling lies outside the band
-    range, clamp to the closer boundary (shared by calc_mu and calc_mu_imp)."""
-    try:
-        return scopt.brentq(func, emin, emax)
-    except ValueError:
-        # filling is outside the computed band range; clamp to the closer boundary
-        if func(emin)*func(emax) > 0:
-            mu = emin if abs(func(emin)) < abs(func(emax)) else emax
-            print(f"Warning: {label} could not bracket the chemical potential. Clamped to mu={mu:.4f} eV", flush=True)
-            return mu
-        raise
+def _solve_mu(func: collections.abc.Callable, emin: float, emax: float, temp: float, label: str) -> float:
+    """Solve the filling equation on a bracket including the finite-temperature tails."""
+    lo, hi = emin-40.0*temp, emax+40.0*temp
+    flo, fhi = func(lo), func(hi)
+    if not np.isfinite(flo) or not np.isfinite(fhi) or (flo > 0 and fhi > 0) or (flo < 0 and fhi < 0):
+        raise ValueError(f'{label}: cannot bracket the requested filling at T={temp:g} eV')
+    return scopt.brentq(func, lo, hi)
 
 
 def calc_mu(eig: np.ndarray, Nk: int, fill: float, temp: float, kweight: np.ndarray | None = None) -> float:
@@ -83,6 +62,8 @@ def calc_mu(eig: np.ndarray, Nk: int, fill: float, temp: float, kweight: np.ndar
     @param  temp: Temperature
     @param kweight: k-point weights [Nk] (None: uniform mesh); the electron count is then
                     sum_k w_k sum_n f(e_nk) = fill * sum_k w_k
+    At exactly empty or full filling, the returned finite value represents the saturated
+    numerical Fermi function; a strictly finite-temperature solution is at infinity.
     @return   mu: chemical potential
     """
     if temp <= 0:
@@ -97,7 +78,7 @@ def calc_mu(eig: np.ndarray, Nk: int, fill: float, temp: float, kweight: np.ndar
 
         def func(mu: float) -> np.ndarray:
             return fill*w.sum()-(flibs.get_ffermi(eig, mu, temp).sum(axis=1)*w).sum()
-    return _solve_mu(func, eig.min(), eig.max(), 'calc_mu')
+    return _solve_mu(func, eig.min(), eig.max(), temp, 'calc_mu')
 
 
 def calc_mu_imp(eigs: np.ndarray, Nsite: int, fill: float, temp: float) -> float:
@@ -115,7 +96,7 @@ def calc_mu_imp(eigs: np.ndarray, Nsite: int, fill: float, temp: float) -> float
 
     def func(mu: float) -> np.ndarray:
         return (fill*Nsite-0.5*(1.0-np.tanh(0.5*(eigs-mu)*itemp)).sum())
-    return _solve_mu(func, eigs.min(), eigs.max(), 'calc_mu_imp')
+    return _solve_mu(func, eigs.min(), eigs.max(), temp, 'calc_mu_imp')
 
 
 def get_kf_points(eig: np.ndarray, mesh: int, mu: float, kz: float) -> tuple[list, list]:

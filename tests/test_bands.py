@@ -1,42 +1,388 @@
 #!/usr/bin/env python
-# -*- coding:utf-8 -*-
 """
-Regression / physics tests for the band-basis inverse effective mass tensor
-(get_imassk / get_imassk_mlo in libs/src/fmod.f90, wrapped by
-libs/flibs/_hamiltonian.py get_imassk / get_mass).
+Bands and Fermi-surface geometry: reading Wannier90 hoppings and the Fourier phase of
+gen_ham, the 1st Brillouin zone of the 3D Fermi-surface plot, group velocities and inverse
+effective masses (orthogonal and MLO bases), cyclotron orbits and dHvA extremal orbits.
 
-Both routines must reproduce the SECOND derivative of the band energy,
-
-    (1/m*)_ab ~ d2 eps_n / dk_a dk_b ,
-
-which has two pieces the old implementation did not have:
-
-  * the interband (level repulsion) term of 2nd-order perturbation theory,
-        2 sum_{m!=n} Re[H~^a_nm H~^b_mn] / (eps_n - eps_m) ,
-    present for ANY basis and typically the same size as the diagonal term --
-    the old get_imassk was diag(U^H d2H/dk2 U) alone;
-  * for a NON-ORTHOGONAL (MLO) basis (ftype 3/4), the overlap terms coming from
-    H C = eps S C with the k-dependent normalization C^H S C = 1.
-
-The reference here is a central finite difference of eps_n(k) itself, which knows
-about all of it.  Bands that are near-degenerate somewhere on the test k-points are
-excluded: the band-resolved mass genuinely does not exist at a crossing, and both
-the routine (deg_thresh) and the finite difference break down there.
-
-Runs standalone (no pytest needed):  python tests/test_effmass.py
-Also works under pytest if installed:  pytest tests/test_effmass.py
-Requires the Fortran library libfmod.so (cd libs && make FC=ifx SL=MKL).
+Runs standalone (no pytest needed):  python tests/test_bands.py
+Also works under pytest if installed:  pytest tests/test_bands.py
+Requires the Fortran library libfmod.so (cd libs && make).
 """
+import itertools
 import os
 import sys
+
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 import libs.flibs as F
 import libs.plibs as P
 import _tools as T
+
+
+# --------------------------------------------------------------------------- #
+#  Wannier90 hopping input and the Fourier phase of gen_ham
+# --------------------------------------------------------------------------- #
+
+
+def test_wannier90_orbital_indices_and_fourier_phase(tmp_path):
+    matrices = np.array([[[0.1, 0.3], [0.3, -0.2]],
+                         [[0.2, 0.4], [-0.1, -0.3]],
+                         [[0.2, -0.1], [0.4, -0.3]]], complex)
+    rvec = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0]])
+    prefix = tmp_path/'model'
+    lines = ['test', '2', '3', '1 2 2']
+    for r, matrix, weight in zip(rvec, matrices, [1, 2, 2]):
+        for i, j in [(1, 0), (0, 1), (0, 0), (1, 1)]:
+            z = matrix[i, j]*weight
+            lines.append(f'{r[0]} {r[1]} {r[2]} {i+1} {j+1} {z.real} {z.imag}')
+    (tmp_path/'model_hr.dat').write_text('\n'.join(lines)+'\n')
+    r, h, _, _ = P.import_hoppings(str(prefix), 2)
+    assert np.array_equal(r, rvec)
+    assert np.allclose(h, matrices)
+    ks = np.array([[0.17, 0, 0], [-0.17, 0, 0]])
+    expected = np.einsum('kr,rij->kij', np.exp(-2j*np.pi*ks@rvec.T), matrices)
+    actual = F.gen_ham(ks, h, r)
+    assert np.allclose(actual, expected)
+    assert np.allclose(actual[1], actual[0].conj())
+    assert not np.allclose(actual[0], actual[0].T)
+
+
+# --------------------------------------------------------------------------- #
+#  1st Brillouin zone of the 3D Fermi-surface plot
+# --------------------------------------------------------------------------- #
+# Tests for the 1st Brillouin zone geometry used by the 3D Fermi-surface plot
+# (libs/plibs/_lattice.py: bz_faces, bz_face_planes, fold_to_bz, and the folding
+# step inside libs/plibs/_bands.py: gen_3d_surf_points).
+#
+# Marching cubes runs on the parallelepiped k_frac in [-1/2,1/2]^3, i.e. on the
+# primitive reciprocal CELL, while BZedge draws the Wigner-Seitz cell.  The two
+# coincide only for a primitive lattice; on a body/face/base-centred or otherwise
+# skewed cell the sheet sticks out of the drawn zone unless it is folded back, so
+# what has to be pinned is:
+#
+#   * the zone really is the Wigner-Seitz cell -- 6 faces for simple cubic, 14
+#     (truncated octahedron) for fcc, 12 (rhombic dodecahedron) for bcc, 8 for
+#     hexagonal -- with no redundant tangent planes among them
+#   * folding moves nothing: the translates of the parallelepiped tile k-space, so
+#     the folded polygons cover the same total area, with nothing duplicated
+#   * after folding, no vertex of any sheet (nor any polygon centre fed back to
+#     get_colors) lies outside the zone
+#   * a primitive lattice is left strictly untouched
+
+
+# primitive translation vectors of the lattices under test [Angstrom]
+AVEC = {
+    'cubic': 3.0*np.eye(3),
+    'fcc': 3.6*np.array([[0., .5, .5], [.5, 0., .5], [.5, .5, 0.]]),
+    'bcc': 3.0*np.array([[-.5, .5, .5], [.5, -.5, .5], [.5, .5, -.5]]),
+    'hexagonal': np.array([[3., 0., 0.], [-1.5, 1.5*np.sqrt(3.), 0.], [0., 0., 10.]]),
+}
+NFACE = {'cubic': 6, 'fcc': 14, 'bcc': 12, 'hexagonal': 8}
+
+
+def _poly_area(polys):
+    """Total area of a list of convex polygons, summed over a triangle fan."""
+    tot = 0.
+    for p in polys:
+        p = np.asarray(p, dtype=float)
+        tot += .5*sum(np.linalg.norm(np.cross(b-p[0], a-p[0])) for a, b in zip(p[1:-1], p[2:]))
+    return tot
+
+
+def _nn_model(avec):
+    """Single-orbital nearest-neighbour model on the given lattice."""
+    rv = np.array([r for r in itertools.product((-1, 0, 1), repeat=3) if r != (0, 0, 0)], dtype=float)
+    dist = np.linalg.norm(rv.dot(avec), axis=1)
+    rvec = rv[np.isclose(dist, dist.min())]
+    return rvec, np.full((len(rvec), 1, 1), -0.5+0j)
+
+
+def _outside(points, bvec):
+    """Largest signed distance of any point beyond a zone face (<=0 means inside)."""
+    nvec, dist = P.bz_face_planes(bvec)
+    return float((np.asarray(points, dtype=float).reshape(-1, 3).dot(nvec.T)-dist).max())
+
+
+def test_zone_is_the_wigner_seitz_cell():
+    """Face count and face distance of the 1st BZ, and no redundant planes: a bisector
+    that only touches the cell along an edge (G=(1,1,0) for a cubic lattice) must not be
+    counted as a face, or the clipper wastes passes on planes that cut nothing."""
+    for name, avec in AVEC.items():
+        bvec = P.get_bvec(avec)
+        nvec, dist = P.bz_face_planes(bvec)
+        assert len(nvec) == NFACE[name], f'{name}: {len(nvec)} faces, expected {NFACE[name]}'
+        assert np.allclose(np.linalg.norm(nvec, axis=1), 1.), f'{name}: normals are not unit'
+        assert len(P.bz_faces(bvec)) == NFACE[name], f'{name}: bz_faces disagrees with bz_face_planes'
+        # every face polygon sits ON its own plane and inside all the others
+        for face in P.bz_faces(bvec):
+            s = face.dot(nvec.T)-dist
+            assert np.isclose(s.max(), 0., atol=1e-9*dist.max()), f'{name}: a face lies outside the zone'
+            assert np.isclose(np.abs(s).min(), 0., atol=1e-9*dist.max()), f'{name}: a face is on no plane'
+
+
+def test_parallelepiped_sticks_out_of_the_zone():
+    """The premise of the fold: the sampled cell is NOT the zone for a centred lattice."""
+    corners = np.array(list(itertools.product((-.5, .5), repeat=3)))
+    for name, avec in AVEC.items():
+        bvec = P.get_bvec(avec)
+        out = _outside(corners.dot(bvec), bvec)
+        if name == 'cubic':
+            assert out <= 1e-12, 'the cubic cell should already be the zone'
+        else:
+            assert out > 1e-3, f'{name}: the sampled cell was expected to overflow the zone'
+
+
+def test_folding_conserves_area_and_lands_inside():
+    """Folding is a bijection of the sampled cell onto the zone: no area is lost,
+    duplicated, or left outside."""
+    rng = np.random.default_rng(0)
+    tris = rng.uniform(-.5, .5, size=(300, 3, 3))
+    for name, avec in AVEC.items():
+        bvec = P.get_bvec(avec)
+        cart = tris.dot(bvec)
+        folded = P.fold_to_bz(cart, bvec)
+        assert _outside(np.vstack([np.asarray(p) for p in folded]), bvec) <= 1e-9, \
+            f'{name}: a folded polygon is still outside the zone'
+        assert np.isclose(_poly_area(folded), _poly_area(cart), rtol=1e-10), \
+            f'{name}: folding changed the total area'
+
+
+def test_primitive_lattice_is_untouched():
+    """Nothing to fold on a simple cubic cell: the triangles must come back as they were."""
+    rng = np.random.default_rng(1)
+    bvec = P.get_bvec(AVEC['cubic'])
+    cart = rng.uniform(-.5, .5, size=(50, 3, 3)).dot(bvec)
+    folded = P.fold_to_bz(cart, bvec)
+    assert len(folded) == len(cart)
+    assert np.array_equal(np.array(folded), cart)
+
+
+def test_fermi_sheet_is_folded_into_the_zone():
+    """The reported bug: with a centred lattice the 3D Fermi surface left the BZ frame.
+    The sheet must end up inside the zone, with its area (and the polygon centres that
+    carry the colours) unchanged."""
+    for name in ('fcc', 'bcc'):
+        avec = AVEC[name]
+        bvec = P.get_bvec(avec)
+        rvec, ham_r = _nn_model(avec)
+        S_r = np.array([])
+        raw, _, braw = P.gen_3d_surf_points(16, rvec, ham_r, S_r, 1.0, 1.0, bvec, sw_fold=False)
+        fold, cent, bfold = P.gen_3d_surf_points(16, rvec, ham_r, S_r, 1.0, 1.0, bvec)
+        assert braw == bfold and len(raw) > 0, f'{name}: no Fermi sheet to test'
+        assert _outside([v for p in raw for v in np.asarray(p).reshape(-1, 3)], bvec) > 1e-3, \
+            f'{name}: the unfolded sheet was expected to leave the zone'
+        for sheet, centre in zip(fold, cent):
+            verts = np.vstack([np.asarray(p) for p in sheet])
+            assert _outside(verts, bvec) <= 1e-9, f'{name}: the folded sheet leaves the zone'
+            # the centres are fed back to get_eigs/get_colors as FRACTIONAL k
+            assert len(centre) == len(sheet), f'{name}: one centre per polygon'
+            assert _outside(np.asarray(centre).dot(bvec), bvec) <= 1e-9, \
+                f'{name}: a polygon centre lies outside the zone'
+        assert np.isclose(sum(_poly_area(s) for s in fold),
+                          sum(_poly_area(np.asarray(s)) for s in raw), rtol=1e-8), \
+            f'{name}: folding changed the Fermi-surface area'
+
+
+def test_kscale_disables_the_fold():
+    """kscale != 1 is a deliberate request for another k-window (the manual sells it as a
+    display scale), so the sheet must be left where the sampling put it."""
+    avec = AVEC['fcc']
+    bvec = P.get_bvec(avec)
+    rvec, ham_r = _nn_model(avec)
+    sheets, _, _ = P.gen_3d_surf_points(12, rvec, ham_r, np.array([]), 1.0, [1., 1., .5], bvec)
+    assert isinstance(sheets[0], np.ndarray) and sheets[0].shape[1:] == (3, 3), \
+        'the sheet was folded although kscale != 1'
+
+
+# --------------------------------------------------------------------------- #
+#  standalone runner (no pytest required)
+# --------------------------------------------------------------------------- #
+
+
+# --------------------------------------------------------------------------- #
+#  Group velocity in a non-orthogonal (MLO) basis
+# --------------------------------------------------------------------------- #
+# Regression / physics tests for the group velocity in a NON-ORTHOGONAL (MLO) basis
+# (get_veloc_mlo / get_vnm_mlo in libs/src/fmod.f90, wrapped by
+# libs/flibs/_hamiltonian.py get_vk / get_vnm / get_veloc / get_vnmk).
+#
+# The MLO hoppings (ftype 3 = *.input MLO file, ftype 4 = ecalj job_mlo binaries)
+# carry an overlap matrix S(R), so the bands come from the GENERALIZED problem
+#
+#     H(k) C = eps S(k) C ,     C^H S(k) C = 1        (get_eig_mlo)
+#
+# whose Hellmann-Feynman velocity has an extra overlap-derivative term
+#
+#     v_n = (C^H dH/dk C)_nn - eps_n (C^H dS/dk C)_nn .
+#
+# Dropping that term (the plain get_veloc used for an orthogonal basis) gives a
+# velocity that is simply wrong -- O(100%) off for a real ecalj model.  The tests
+# below lock the correct expression in by comparing against a central finite
+# difference of the generalized eigenvalues themselves.
+#
+# The models here are synthetic (random H(R), S(R) with the Hermiticity of a real
+# tight-binding model) so the tests need no input files.
+
+
+_mlo_model = T.mlo_model
+
+
+# --------------------------------------------------------------------------- #
+#  helpers
+# --------------------------------------------------------------------------- #
+def _fd_velocity(klist, ham_r, S_r, rvec, h=1e-5):
+    """d eps_n / dk from a central difference.  get_vlm0 differentiates the phase
+    exp(-2 pi i k.R), i.e. it returns d/d(2 pi k_frac), so the fractional-k
+    finite difference is divided by 2 pi to match."""
+    Nk, Norb = len(klist), ham_r.shape[1]
+    fd = np.zeros((Nk, Norb, 3), dtype=np.float64)
+    for a in range(3):
+        dk = np.zeros(3)
+        dk[a] = h
+        ep = _eig_uni(np.ascontiguousarray(klist + dk), ham_r, S_r, rvec)[0]
+        em = _eig_uni(np.ascontiguousarray(klist - dk), ham_r, S_r, rvec)[0]
+        fd[:, :, a] = (ep - em) / (2.0 * h) / (2.0 * np.pi)
+    return fd
+
+
+def _random_klist(Nk=12, seed=7):
+    rng = np.random.default_rng(seed)
+    return np.ascontiguousarray(rng.random((Nk, 3)))
+
+
+# --------------------------------------------------------------------------- #
+#  tests
+# --------------------------------------------------------------------------- #
+def test_generalized_eigenvectors_are_S_orthonormal():
+    """get_eig_mlo returns C with C^H S C = 1 -- the normalization get_veloc_mlo
+    assumes when it subtracts eps * (C^H dS/dk C).  numpy sees the Fortran arrays
+    transposed, so the Fortran C is uni[i].T and the check reads
+    uni S uni^H = 1 on the numpy side (row b of uni[i] = eigenvector of band b)."""
+    rvec, ham_r, S_r, Norb, _ = _mlo_model(seed=1)
+    klist = _random_klist()
+    _, Sk = F.gen_ham(klist, ham_r, rvec, Ovl_r=S_r)
+    _, uni = _eig_uni(klist, ham_r, S_r, rvec)
+    for i in range(len(klist)):
+        gram = uni[i] @ Sk[i] @ uni[i].conj().T
+        assert np.abs(gram - np.eye(Norb)).max() < 1e-10
+
+
+def test_mlo_velocity_matches_finite_difference():
+    """v_n = (C^H dH/dk C)_nn - eps_n (C^H dS/dk C)_nn reproduces d eps_n/dk."""
+    rvec, ham_r, S_r, _, _ = _mlo_model(seed=2)
+    klist = _random_klist()
+    mrot = np.eye(3)
+    eig, uni = _eig_uni(klist, ham_r, S_r, rvec)
+
+    v = F.get_veloc(klist, ham_r, rvec, mrot, uni, S_r, eig)
+    fd = _fd_velocity(klist, ham_r, S_r, rvec)
+    assert np.abs(v - fd).max() < 1e-5 * max(1.0, np.abs(fd).max())
+
+
+def test_overlap_term_is_not_negligible():
+    """Guard against a silent regression to the orthogonal formula: without the
+    dS/dk term the velocity misses the finite difference by a large margin."""
+    rvec, ham_r, S_r, _, _ = _mlo_model(seed=2)
+    klist = _random_klist()
+    mrot = np.eye(3)
+    eig, uni = _eig_uni(klist, ham_r, S_r, rvec)
+
+    fd = _fd_velocity(klist, ham_r, S_r, rvec)
+    v_no_ovl = F.get_veloc(klist, ham_r, rvec, mrot, uni)     # orthogonal formula
+    assert np.abs(v_no_ovl - fd).max() > 0.05 * np.abs(fd).max()
+
+
+def test_vnm_mlo_diagonal_equals_band_velocity():
+    """The interband routine must reduce to get_veloc_mlo on the band diagonal:
+    v_nn = H~_nn - eps_n S~_nn = d eps_n/dk.  get_vnm_mlo reaches it through the
+    Loewdin route (G = C^H dX/dk X C with X = S^1/2), i.e. a different sequence of
+    zgemm/zheev than get_veloc_mlo, so the two agree to roundoff rather than bitwise
+    -- hence a relative tolerance."""
+    rvec, ham_r, S_r, Norb, _ = _mlo_model(seed=3)
+    klist = _random_klist()
+    mrot = np.eye(3)
+    eig, uni = _eig_uni(klist, ham_r, S_r, rvec)
+
+    v = F.get_veloc(klist, ham_r, rvec, mrot, uni, S_r, eig)
+    vnm = F.get_vnmk(klist, ham_r, rvec, mrot, uni, S_r, eig)
+    diag = np.einsum('knni->kni', vnm).real
+    assert np.abs(diag - v).max() < 1e-12 * max(1.0, np.abs(v).max())
+
+
+def test_vnm_mlo_is_hermitian():
+    """H~ is Hermitian and the Loewdin correction enters as -(G E + E G^H), which is
+    Hermitian by construction, so the interband velocity matrix stays Hermitian in the
+    band indices."""
+    rvec, ham_r, S_r, _, _ = _mlo_model(seed=4)
+    klist = _random_klist()
+    eig, uni = _eig_uni(klist, ham_r, S_r, rvec)
+    vnm = F.get_vnmk(klist, ham_r, rvec, np.eye(3), uni, S_r, eig)
+    assert np.abs(vnm - vnm.conj().transpose(0, 2, 1, 3)).max() < 1e-12
+
+
+def test_axis_rotation_matches_orthogonal_convention():
+    """mrot must act on the Cartesian axes exactly as in the orthogonal get_veloc:
+    v_rot = mrot @ v, i.e. v_rot = v @ mrot.T on the [Nk,Norb,3] arrays -- the same for both
+    routines, and independent of the memory layout of mrot (the wrappers pass it in Fortran order)."""
+    rvec, ham_r, S_r, _, _ = _mlo_model(seed=5)
+    klist = _random_klist()
+    mrot = np.ascontiguousarray([[0.0, 1.0, 0.0],
+                                 [2.0, 0.0, 0.0],
+                                 [0.0, 0.0, 3.0]])
+    eig, uni = _eig_uni(klist, ham_r, S_r, rvec)
+    v1 = F.get_veloc(klist, ham_r, rvec, np.eye(3), uni, S_r, eig)
+    v2 = F.get_veloc(klist, ham_r, rvec, mrot, uni, S_r, eig)
+    assert np.abs(v2 - v1 @ mrot.T).max() < 1e-12
+
+    # same convention on the orthogonal path, so ftype 4 stays consistent with the rest
+    hamk = F.gen_ham(klist, ham_r, rvec)
+    eo, uo = F.get_eig(hamk)
+    w1 = F.get_veloc(klist, ham_r, rvec, np.eye(3), uo)
+    w2 = F.get_veloc(klist, ham_r, rvec, mrot, uo)
+    assert np.abs(w2 - w1 @ mrot.T).max() < 1e-12
+
+
+def test_orthogonal_path_untouched():
+    """S_r=[]/None must dispatch to the original get_veloc/get_vnm bit-for-bit."""
+    rvec, ham_r, _, _, _ = _mlo_model(seed=6)
+    klist = _random_klist()
+    mrot = np.eye(3)
+    hamk = F.gen_ham(klist, ham_r, rvec)
+    eig, uni = F.get_eig(hamk)
+
+    assert np.array_equal(F.get_veloc(klist, ham_r, rvec, mrot, uni),
+                          F.get_veloc(klist, ham_r, rvec, mrot, uni, [], eig))
+    assert np.array_equal(F.get_vnmk(klist, ham_r, rvec, mrot, uni),
+                          F.get_vnmk(klist, ham_r, rvec, mrot, uni, None, eig))
+
+
+# --------------------------------------------------------------------------- #
+#  Inverse effective mass, cyclotron and dHvA orbits
+# --------------------------------------------------------------------------- #
+# Regression / physics tests for the band-basis inverse effective mass tensor
+# (get_imassk / get_imassk_mlo in libs/src/fmod.f90, wrapped by
+# libs/flibs/_hamiltonian.py get_imassk / get_mass).
+#
+# Both routines must reproduce the SECOND derivative of the band energy,
+#
+#     (1/m*)_ab ~ d2 eps_n / dk_a dk_b ,
+#
+# which has two pieces the old implementation did not have:
+#
+#   * the interband (level repulsion) term of 2nd-order perturbation theory,
+#         2 sum_{m!=n} Re[H~^a_nm H~^b_mn] / (eps_n - eps_m) ,
+#     present for ANY basis and typically the same size as the diagonal term --
+#     the old get_imassk was diag(U^H d2H/dk2 U) alone;
+#   * for a NON-ORTHOGONAL (MLO) basis (ftype 3/4), the overlap terms coming from
+#     H C = eps S C with the k-dependent normalization C^H S C = 1.
+#
+# The reference here is a central finite difference of eps_n(k) itself, which knows
+# about all of it.  Bands that are near-degenerate somewhere on the test k-points are
+# excluded: the band-resolved mass genuinely does not exist at a crossing, and both
+# the routine (deg_thresh) and the finite difference break down there.
+
 
 FD_STEP = 2.0e-4          # h for the finite-difference Hessian
 DEG_TOL = 2.0e-2          # bands closer than this anywhere are dropped from the comparison
@@ -46,10 +392,7 @@ DEG_TOL = 2.0e-2          # bands closer than this anywhere are dropped from the
 #  helpers
 # --------------------------------------------------------------------------- #
 def _eig_uni(klist, ham_r, S_r, rvec):
-    if S_r is None or len(S_r) == 0:
-        return F.get_eig(F.gen_ham(klist, ham_r, rvec))
-    hamk, Sk = F.gen_ham(klist, ham_r, rvec, Ovl_r=S_r)
-    return F.get_eig(hamk, Sk)
+    return F.get_eig(*F.gen_ham_overlap(klist, ham_r, rvec, S_r))
 
 
 def _fd_hessian(klist, ham_r, S_r, rvec, h=FD_STEP):
@@ -633,7 +976,6 @@ def test_follow_orbit_returns_none_when_the_orbit_is_gone():
     f = P.follow_orbit(image, rvec, ham_r, [], avec, mu, P.bfield_hat(0.0, 0.0),
                        4.0, dk, 0.1)
     assert f is not None and np.isclose(f['area'], belly['area'], rtol=1e-3)
-
 
 
 def test_band_mass_path_matches_tight_binding():

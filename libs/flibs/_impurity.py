@@ -123,7 +123,8 @@ def get_imp_spectrum(uni: np.ndarray, eigs: np.ndarray, mu: float, wlist: np.nda
 def solve_cpa(hamk: np.ndarray, VA: np.ndarray, VB: np.ndarray,
               x: float, zlist: np.ndarray, pp: float = 0.5,
               maxiter: int = 500, tol: float = 1.0e-10,
-              sigma_init: np.ndarray | None = None) -> np.ndarray:
+              sigma_init: np.ndarray | None = None,
+              Ovlk: np.ndarray | None = None) -> np.ndarray:
     """
     @brief Run CPA self-consistent loop over an array of complex frequencies.
     @param   hamk: k-space Hamiltonian [Nk, Norb, Norb] complex128
@@ -135,6 +136,7 @@ def solve_cpa(hamk: np.ndarray, VA: np.ndarray, VB: np.ndarray,
     @param maxiter: Maximum CPA iterations per frequency (default 500)
     @param    tol: Convergence tolerance (default 1e-10)
     @param sigma_init: Initial guess [Nw, Norb, Norb] complex128 (default: VCA = x*VA + (1-x)*VB)
+    @param   Ovlk: overlap matrices [Nk, Norb, Norb]; None means identity
     @return sigma_cpa: Converged CPA self-energy [Nw, Norb, Norb] complex128
     """
     Nk = len(hamk)
@@ -151,6 +153,30 @@ def solve_cpa(hamk: np.ndarray, VA: np.ndarray, VB: np.ndarray,
         vca = x * VA_c + (1.0 - x) * VB_c
         for iw in range(Nw):
             sigma_cpa[iw, :, :] = vca
+
+    if Ovlk is not None:
+        overlap = np.asarray(Ovlk, dtype=np.complex128)
+        if overlap.shape != hamk.shape:
+            raise ValueError('solve_cpa: overlap must have the same shape as hamk')
+        if not np.allclose(overlap, overlap.conj().transpose(0, 2, 1)):
+            raise ValueError('solve_cpa: overlap must be Hermitian')
+        np.linalg.cholesky(overlap)
+        identity = np.eye(Norb)
+        for iw, z in enumerate(zlist_c):
+            sigma = sigma_cpa[iw].copy()
+            for _ in range(maxiter):
+                gloc = np.linalg.inv(z*overlap - hamk - sigma).mean(axis=0)
+                da, db = VA_c-sigma, VB_c-sigma
+                ta = np.linalg.solve((identity-gloc@da).T, da.T).T
+                tb = np.linalg.solve((identity-gloc@db).T, db.T).T
+                residual = x*ta+(1.0-x)*tb
+                sigma += pp*residual
+                if np.linalg.norm(residual) < tol:
+                    break
+            else:
+                raise RuntimeError(f'solve_cpa: frequency index {iw} did not converge after {maxiter} iterations')
+            sigma_cpa[iw] = sigma
+        return sigma_cpa
 
     _loader._lib.solve_cpa_array(sigma_cpa, hamk, VA_c, VB_c,
                                  _loader.dbl(x), zlist_c,

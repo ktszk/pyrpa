@@ -230,13 +230,14 @@ subroutine get_band_to_orb_delta(delta,init_delta,uni,Nk,Norb) bind(C)
    !>
    !> and the orbital-basis pairing matrix is
   !>
-   !>   delta_orb(k)_{ab} = sum_n U_{n,a}(k) delta_n(k) U_{n,b}(k)
-   !>                     = U(k)^T * diag(delta_n(k)) * U(k)
+   !>   delta_orb(k)_{ab} = sum_n conjg(U_{n,a}(k)) delta_n(k) U_{n,b}(k)
+   !>                     = U(k)^dagger * diag(delta_n(k)) * U(k)
   !>
    !> where delta_n(k) are complex band-diagonal gap amplitudes and U(k) are
-   !> row-eigenvectors. This is the inverse of the band-projection step in
-   !> get_initial_delta / conv_delta_orb_to_band: given a band-diagonal gap,
-   !> it returns the full Norb x Norb matrix in orbital basis.
+   !> row-eigenvectors.  This is the form for which the BdG matrix of mkBdGhamk,
+   !> [[H, delta^dagger], [delta, -H]] in Python index order, splits into the bands
+   !> with E = +-sqrt(xi_n^2 + |delta_n|^2).  (U^T diag U, used before, differs from it
+   !> whenever the eigenvectors are complex.)
   !>
   !!@param     delta,out: gap function in orbital basis [Norb, Norb, Nk]
   !!@param init_delta,in: band-diagonal gap amplitudes [Nk, Norb] complex128
@@ -264,7 +265,7 @@ subroutine get_band_to_orb_delta(delta,init_delta,uni,Nk,Norb) bind(C)
         do b=1,Norb
            zsum=(0.0d0,0.0d0)
            do n=1,Norb
-              zsum=zsum+uni(n,a,i)*init_delta(i,n)*uni(n,b,i)
+              zsum=zsum+conjg(uni(n,a,i))*init_delta(i,n)*uni(n,b,i)
            end do
            delta(a,b,i)=zsum
         end do

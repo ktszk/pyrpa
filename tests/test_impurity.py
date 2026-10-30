@@ -125,6 +125,69 @@ def test_invalid_impurity_sites_are_rejected():
         raise AssertionError(f'imp_sites={bad} was accepted')
 
 
+def test_nonorthogonal_unfolding_and_cpa():
+    rvec = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0]], float)
+    ham_r = np.array([[[0.1, 0.2j], [-0.2j, 0.7]],
+                      [[-0.4, 0.1], [0.03j, -0.2]],
+                      [[-0.4, -0.03j], [0.1, -0.2]]], complex)
+    S_r = np.array([[[1, 0.15], [0.15, 1]],
+                    [[0.08, 0.02j], [0.01, 0.04]],
+                    [[0.08, 0.01], [-0.02j, 0.04]]], complex)
+    sites = np.array([], dtype=int)
+    H, rlist = P.impurity_supercell(ham_r, rvec, [4, 1, 1], sites, 0)
+    S, _ = P.impurity_supercell(S_r, rvec, [4, 1, 1], sites, 0)
+    eigs, uni = sclin.eigh(H, S)
+    ks = np.array([[0, 0, 0], [0.25, 0, 0], [0.5, 0, 0]])
+    hk, sk = F.gen_ham(ks, ham_r, rvec, Ovl_r=S_r)
+    w, eta = np.linspace(-2, 2, 121), 0.07
+    spectrum = P.unfolded_spectrum(eigs, uni, rlist, 2, ks, w, 0, eta, S)
+    for i in range(len(ks)):
+        bands = sclin.eigvalsh(hk[i], sk[i])
+        expected = ((eta/np.pi)/((w[:, None]-bands)**2+eta**2)).sum(axis=1)
+        assert np.allclose(spectrum[i], expected, atol=1e-10)
+
+    H_imp, _ = P.impurity_supercell(ham_r, rvec, [4, 1, 1], np.array([1]), 0.5)
+    eig_imp, u_imp = sclin.eigh(H_imp, S)
+    k_any = np.array([[0.13, 0, 0], [0.39, 0, 0]])
+    a = P.unfolded_spectrum(eig_imp, u_imp, rlist, 2, k_any, np.array([0.2]), 0, 1e5, S)
+    assert np.allclose(a[:, 0]*np.pi*1e5, 2, atol=1e-8)
+
+    va, vb = np.zeros((2, 2), complex), np.array([[0.4, 0.08j], [-0.08j, -0.2]])
+    z = np.array([0.3+0.4j, -0.1+0.8j])
+    sigma = F.solve_cpa(hk, va, vb, 0.4, z, Ovlk=sk)
+    eye = np.eye(2)
+    for iw, omega in enumerate(z):
+        gloc = np.linalg.inv(omega*sk-hk-sigma[iw]).mean(axis=0)
+        da, db = va-sigma[iw], vb-sigma[iw]
+        residual = 0.4*da@np.linalg.inv(eye-gloc@da)+0.6*db@np.linalg.inv(eye-gloc@db)
+        assert np.linalg.norm(residual) < 1e-9
+    identity = np.broadcast_to(eye, hk.shape).copy()
+    native = F.solve_cpa(hk, va, vb, 0.4, z)
+    python = F.solve_cpa(hk, va, vb, 0.4, z, Ovlk=identity)
+    assert np.allclose(native, python, atol=1e-9)
+
+
+def test_nonorthogonal_cpa_host_spectrum_and_saved_self_energy(tmp_path):
+    r = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0]], float)
+    h = np.array([[[0.2]], [[-0.3]], [[-0.3]]], complex)
+    s = np.array([[[1.]], [[0.1]], [[0.1]]], complex)
+    path = [[0, 0, 0], [0.5, 0, 0]]
+    mu, eta = 0.1, 0.04
+    cwd = os.getcwd()
+    try:
+        os.chdir(tmp_path)
+        _, _, w, A = P.calc_cpa(h, r, mu, 0.1, 4, 1, 1, 5, -0.5, 0.5, eta,
+                                 path, 4, np.eye(3), x_cpa=0.0, VB_shift=1.0, S_r=s)
+        assert np.allclose(np.load('self_en.npz')['arr_0'], 0)
+    finally:
+        os.chdir(cwd)
+    klist, _, _ = P.mk_klist(path, 4, np.eye(3))
+    hk, sk = F.gen_ham(klist, h, r, Ovl_r=s)
+    reference = -np.imag(sk[:, 0, 0, None] /
+                         ((w[None, :]+mu+1j*eta)*sk[:, 0, 0, None]-hk[:, 0, 0, None]))/np.pi
+    assert np.allclose(A, reference, atol=1e-11)
+
+
 if __name__ == '__main__':
     import _tools
     sys.exit(_tools.run_standalone(globals()))

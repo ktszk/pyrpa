@@ -48,6 +48,118 @@ def _gap(shape, Nk, D0):
     return g.reshape(Nk, 1, 1).astype(np.complex128)
 
 
+def test_nonorthogonal_sc_bubble_and_normal_limit():
+    import scipy.linalg as la
+    from libs.plibs._response import _prepare_sc_chi0_builder
+
+    _, ks = P.gen_klist(4, 1, 1, sw_pp=False)
+    r = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0]], float)
+    hr = np.array([[[0.1, 0.2], [0.2, 0.7]],
+                   [[0.05, 0.2], [0.03, -0.05]],
+                   [[0.05, 0.03], [0.2, -0.05]]], complex)
+    sr = np.array([[[1., 0.2], [0.2, 1.]],
+                   [[0.05, 0.08], [0.02, 0.04]],
+                   [[0.05, 0.02], [0.08, 0.04]]], complex)
+    h, s = F.gen_ham(ks, hr, r, Ovl_r=sr)
+    eig, uni = F.get_eig(h, s)
+    _, model_gap = P.sc_gap_on_mesh(4, 1, 1, hr, sr, r, 1, 0.2)
+    band_gap = uni @ model_gap @ uni.conj().transpose(0, 2, 1)
+    assert np.allclose(band_gap[:, 0, 1], 0, atol=1e-12)
+    assert np.allclose(band_gap[:, 0, 0], band_gap[:, 1, 1], atol=1e-12)
+    olist, site = P.get_chi_orb_list(2, [2])
+    q, wl, mu, temp, eta = np.array([0.25, 0, 0]), np.array([0.3]), 0.06, 0.12, 0.02
+    shift = F.get_qshift(ks, q)
+    builder = _prepare_sc_chi0_builder(h, np.zeros_like(h), mu, temp, ks, olist, wl, eta, False, s)
+    normal = F.get_chi_irr(uni, eig, F.get_ffermi(eig, mu, temp), shift, olist, wl, eta, temp)
+    assert np.allclose(builder(q), normal, atol=1e-11)
+
+    # Independent generalized BdG eigenvectors and Lehmann sum, with a finite gap.
+    gap = 0.12*s
+    bdg_e, bdg_v = [], []
+    for hk, sk, dk in zip(h, s, gap):
+        xi = hk-mu*sk
+        bdg = np.block([[xi, dk.conj().T], [dk, -xi]])
+        metric = la.block_diag(sk, sk)
+        en, vec = la.eigh(bdg, metric)
+        bdg_e.append(en)
+        bdg_v.append(vec.conj())
+    bdg_e, bdg_v = np.array(bdg_e), np.array(bdg_v)
+    occ = 1/(np.exp(bdg_e/temp)+1)
+    ref = np.zeros((len(olist), len(olist)), complex)
+    for k in range(len(ks)):
+        kp = int(shift[k])-1
+        for l in range(4):
+            for m in range(4):
+                weight = (occ[kp, l]-occ[k, m])/(wl[0]+bdg_e[k, m]-bdg_e[kp, l]+1j*eta)
+                b, p = [], []
+                for a, bidx in olist-1:
+                    b.append(bdg_v[kp, a, l].conjugate()*bdg_v[k, bidx, m])
+                    p.append(bdg_v[kp, bidx+2, l].conjugate()*bdg_v[k, a+2, m])
+                x = np.array(b)+np.array(p)
+                ref += 0.5*weight*np.outer(x, x.conj())/len(ks)
+    got = _prepare_sc_chi0_builder(h, gap, mu, temp, ks, olist, wl, eta, False, s)(q)
+    assert np.allclose(got[0], ref.T, atol=1e-11)
+    Smat, _ = F.gen_SCmatrix(olist, site, 0, 0)
+    res = P.nmr_sweep(h, gap, ks, np.array([[0, 0, 0], q]), mu, np.array([0.04]),
+                      0.1, Smat, olist, idelta=eta, overlap=s, verbose=False)
+    assert np.isfinite(res['K_sc']).all() and np.isfinite(res['R_sc']).all()
+
+
+def test_nonorthogonal_model_gap_and_fs_scale():
+    r = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0]], float)
+    h = np.array([[[0.1]], [[-0.3]], [[-0.3]]], complex)
+    s = np.array([[[1]], [[0.1]], [[0.1]]], complex)
+    k, gap = P.sc_gap_on_mesh(4, 1, 1, h, s, r, 1, [0.2])
+    _, metric = F.gen_ham(k, h, r, Ovl_r=s)
+    assert np.allclose((gap/metric)[:, 0, 0], 0.2*P.gap_symms(k, 1, 1)[0])
+    eig = np.array([[-0.1], [0.05], [0.3], [0.05]])
+    result = P.fermi_surface_gap(eig, 0, gap, window=0.2, overlap=metric)
+    reference = P.fermi_surface_gap(eig, 0, gap/metric, window=0.2)
+    assert np.allclose(result, reference)
+    h2 = np.array([[[0.1, 0.2j], [-0.2j, 0.7]]])
+    s2 = np.array([[[1., 0.3], [0.3, 1.]]], complex)
+    _, u = F.get_eig(h2, s2)
+    band_gap = np.array([[0.2], [-0.1]], complex)
+    orbital_gap = F.get_band_to_orb_delta(band_gap, u, s2)
+    assert np.allclose(u @ orbital_gap @ u.conj().transpose(0, 2, 1), np.diag(band_gap[:, 0]))
+
+
+def test_scalar_model_gap_preserves_orthogonal_result():
+    r = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]], float)
+    h = np.array([[[0.1, 0.2], [0.2, 0.7]],
+                  [[-0.4, 0], [0, -0.2]], [[-0.4, 0], [0, -0.2]],
+                  [[-0.2, 0], [0, -0.3]], [[-0.2, 0], [0, -0.3]]], complex)
+    ki, kmap, invk = F.gen_irr_k_TRS(4, 4, 1)
+    _, uni = P.get_eigs(ki, h, [], r)
+    for sym in (0, 1, -1):
+        initial = F.get_initial_delta(P.get_initial_gap(ki, 2, sym), uni, kmap, invk, 1, sym)
+        old = F.remap_gap(initial, np.ones(2), invk, sym)[:, :, 0, :].transpose(2, 0, 1)
+        old = 0.2*old/np.abs(old).max()
+        k, gap = P.sc_gap_on_mesh(4, 4, 1, h, [], r, sym, 0.2)
+        assert np.allclose(k, kmap/np.array([4, 4, 1]))
+        assert np.allclose(gap, old, atol=1e-12)
+
+
+def test_nonorthogonal_bdg_path_matches_mesh_gap():
+    import scipy.linalg as la
+    r = np.array([[0, 0, 0], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0]], float)
+    h = np.array([[[0.1, 0.2], [0.2, 0.7]],
+                  [[-0.4, 0.04], [0.01, -0.2]], [[-0.4, 0.01], [0.04, -0.2]],
+                  [[-0.2, 0], [0, -0.3]], [[-0.2, 0], [0, -0.3]]], complex)
+    s = np.array([[[1, 0.15], [0.15, 1]],
+                  [[0.04, 0.01], [0.02, 0.03]], [[0.04, 0.02], [0.01, 0.03]],
+                  [[0.02, 0], [0, 0.01]], [[0.02, 0], [0, 0.01]]], complex)
+    for sym, amplitude in ((0, 0.2), (1, 0.2), (1, [0.2, -0.1])):
+        k, gap = P.sc_gap_on_mesh(4, 4, 1, h, s, r, sym, amplitude)
+        ky, path_e = P.bdg_bands_path(h, s, r, 0.05, k, sym, amplitude, Nk_path=3)
+        for i, y in enumerate(ky):
+            idx = np.flatnonzero(np.all(np.isclose(k, [0, y, 0]), axis=1))[0]
+            hk, sk = F.gen_ham(k[idx:idx+1].copy(), h, r, Ovl_r=s)
+            xi, d = hk[0]-0.05*sk[0], gap[idx]
+            matrix = np.block([[xi, d.conj().T], [d, -xi]])
+            assert np.allclose(path_e[i], la.eigvalsh(matrix, la.block_diag(sk[0], sk[0])), atol=1e-11)
+
+
 # --------------------------------------------------------------------------- #
 #  BCS gap interpolation
 # --------------------------------------------------------------------------- #
@@ -181,7 +293,6 @@ def test_gap_from_eliashberg_rescales_to_the_fermi_surface(tmp_path):
     """gap_max sets the maximum ON the Fermi surface when eig/mu are supplied, and the
     zone-wide maximum otherwise -- the two differ for an anisotropic gap."""
     d, _, _, kfull = _write_gap_wannier(tmp_path)
-    Nk = len(kfull)
     eps = -2.0 * (np.cos(2 * np.pi * kfull[:, 0]) + np.cos(2 * np.pi * kfull[:, 1]))
     eig = np.repeat(eps[:, None], 2, axis=1)
     target = 0.03

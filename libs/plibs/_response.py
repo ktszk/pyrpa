@@ -89,12 +89,26 @@ def _solve_chis_path(qlist: np.ndarray, wlist: np.ndarray, olist: np.ndarray, Sm
     return np.array(chisq), np.array(chis_orbq)
 
 
+def _bdg_eig(hamk: np.ndarray, delta_k: np.ndarray, mu: float,
+             overlap: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+    """Eigenpairs of the BdG matrix of mkBdGhamk built from H(k) - mu S(k), energies relative to
+    mu; with an overlap the generalized problem with the metric diag(S, S)."""
+    Norb = hamk.shape[1]
+    if overlap is None:
+        return flibs.get_eig(flibs.mkBdGhamk(hamk - mu * np.eye(Norb), delta_k))
+    bdg = flibs.mkBdGhamk(np.ascontiguousarray(hamk - mu * overlap), delta_k)
+    metric = np.zeros_like(bdg)
+    metric[:, :Norb, :Norb] = overlap
+    metric[:, Norb:, Norb:] = overlap
+    return flibs.get_eig(bdg, metric)
+
+
 def _prepare_sc_chi0_builder(hamk: np.ndarray, delta_k: np.ndarray, mu: float, temp: float,
                              klist: np.ndarray, olist: np.ndarray, wlist: np.ndarray,
-                             idelta: float, sw_spsym: bool) -> collections.abc.Callable:
-    Norb = hamk.shape[1]
-    eig_BdG, uni_BdG = flibs.get_eig(flibs.mkBdGhamk(hamk - mu * np.eye(Norb), delta_k))
-    # mu=0: chemical potential is already absorbed into hamBdGk (hamk - mu*I), so BdG
+                             idelta: float, sw_spsym: bool,
+                             overlap: np.ndarray | None = None) -> collections.abc.Callable:
+    eig_BdG, uni_BdG = _bdg_eig(hamk, delta_k, mu, overlap)
+    # mu=0: the chemical potential is already absorbed into the BdG matrix (H - mu S), so the
     # quasi-particle energies are measured from zero and the Fermi level is at 0.
     ffermi_BdG = flibs.get_ffermi(eig_BdG, 0., temp)
 
@@ -212,7 +226,7 @@ def chis_q_point(q: np.ndarray, eig: np.ndarray, uni: np.ndarray, Emax: float,
 def chis_q_point_sc(q: np.ndarray, hamk: np.ndarray, delta_k: np.ndarray, mu: float,
                     Emax: float, Nw: int, temp: float, Smat: np.ndarray,
                     klist: np.ndarray, olist: np.ndarray, idelta: float,
-                    sw_spsym: bool = False) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+                    sw_spsym: bool = False, overlap: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     @brief Compute the spin susceptibility chi_s at a single q-point in the superconducting state.
     Builds the BdG Hamiltonian from hamk and the gap function delta_k, diagonalizes it,
@@ -231,13 +245,14 @@ def chis_q_point_sc(q: np.ndarray, hamk: np.ndarray, delta_k: np.ndarray, mu: fl
     @param sw_spsym: spin channel. False = the Yosida-suppressed one (singlet, or a
                      field parallel to the triplet d-vector); True = the one preserved
                      at T=0 (field perpendicular to d, e.g. in-plane for d||z)
+    @param  overlap: normal-state overlap S(k), or None for an orthogonal basis
     @return  trchis: Trace of spin susceptibility chi_s [Nw] complex128
     @return chis_orb: Orbital-resolved spin susceptibility
     @return   wlist: Frequency mesh [Nw] float64
     """
     qlist = np.asarray([q], dtype=np.float64)
     wlist = np.linspace(0, Emax, Nw)
-    chi0_builder = _prepare_sc_chi0_builder(hamk, delta_k, mu, temp, klist, olist, wlist, idelta, sw_spsym)
+    chi0_builder = _prepare_sc_chi0_builder(hamk, delta_k, mu, temp, klist, olist, wlist, idelta, sw_spsym, overlap)
     chisq, chis_orbq = _solve_chis_path(qlist, wlist, olist, Smat, chi0_builder)
     return chisq[0], chis_orbq[0], wlist
 
@@ -245,7 +260,7 @@ def chis_q_point_sc(q: np.ndarray, hamk: np.ndarray, delta_k: np.ndarray, mu: fl
 def chis_spectrum_sc(mu: float, temp: float, Smat: np.ndarray, hamk: np.ndarray,
                      delta_k: np.ndarray, klist: np.ndarray, qlist: np.ndarray,
                      olist: np.ndarray, Nw: int, Emax: float, idelta: float = 1.e-3,
-                     sw_spsym: bool = False) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+                     sw_spsym: bool = False, overlap: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     @brief Compute the spin susceptibility chi_s spectrum along a q-path in the superconducting state.
     The BdG Hamiltonian is built and diagonalized once before the q-loop.
@@ -264,12 +279,13 @@ def chis_spectrum_sc(mu: float, temp: float, Smat: np.ndarray, hamk: np.ndarray,
     @param sw_spsym: spin channel. False = the Yosida-suppressed one (singlet, or a
                      field parallel to the triplet d-vector); True = the one preserved
                      at T=0 (field perpendicular to d, e.g. in-plane for d||z)
+    @param  overlap: normal-state overlap S(k), or None for an orthogonal basis
     @return   chisq: Spin susceptibility trace at each q-point [Nq, Nw] complex128
     @return chis_orbq: Orbital-resolved spin susceptibility [Nq, ...]
     @return   wlist: Frequency mesh [Nw] float64
     """
     wlist = np.linspace(0, Emax, Nw)
-    chi0_builder = _prepare_sc_chi0_builder(hamk, delta_k, mu, temp, klist, olist, wlist, idelta, sw_spsym)
+    chi0_builder = _prepare_sc_chi0_builder(hamk, delta_k, mu, temp, klist, olist, wlist, idelta, sw_spsym, overlap)
     chisq, chis_orbq = _solve_chis_path(qlist, wlist, olist, Smat, chi0_builder, _PathWriter(trace_path='chi0_sc.dat'))
     return chisq, chis_orbq, wlist
 
@@ -652,7 +668,7 @@ def lattice_harmonic(klist: np.ndarray, avec: np.ndarray, rvec: np.ndarray, kind
 
 
 def _cart_gap_row(klist: np.ndarray, gap_sym: int, avec: np.ndarray,
-                  rvec: np.ndarray, rcut: float = None) -> np.ndarray:
+                  rvec: np.ndarray, rcut: float | None = None) -> np.ndarray:
     """One k-row of the Cartesian harmonic for gap_sym, normalized to the amplitude
     convention of the fractional formulas in gap_symms."""
     if gap_sym in _CART_CHIRAL:
@@ -667,13 +683,12 @@ def _cart_gap_row(klist: np.ndarray, gap_sym: int, avec: np.ndarray,
         return (_cart_gap_row(klist, g1, avec, rvec, rcut=rc)
                 + 1.0j * _cart_gap_row(klist, g2, avec, rvec, rcut=rc))
     kind, sgn, rms = _CART_GAP[gap_sym]
-    if kind == 's' and rcut is None and _HARM_SRCUT is not None:
-        rcut = _HARM_SRCUT          # A1g: the shell is a physical choice, see set_harmonic_lattice
     return sgn * lattice_harmonic(klist, avec, rvec, kind, rms=rms, rcut=rcut)
 
 
 def gap_symms(klist: np.ndarray, Norb: int, gap_sym: int,
-              avec: np.ndarray = None, rvec: np.ndarray = None) -> np.ndarray:
+              avec: np.ndarray | None = None, rvec: np.ndarray | None = None, *,
+              use_global: bool = True, s_rcut: float | None = None) -> np.ndarray:
     """
     @brief Pairing form factor phi(k) for one gap symmetry index, tiled over orbitals.
 
@@ -705,13 +720,17 @@ def gap_symms(klist: np.ndarray, Norb: int, gap_sym: int,
                     (None = the value stored by set_harmonic_lattice)
     @param    rvec: R-vectors of the model [Nr, 3] as integer fractional indices
                     (None = the value stored by set_harmonic_lattice)
+    @param use_global: use the registered lattice and s-shell cutoff for omitted arguments
+    @param s_rcut: explicit |R| cutoff for the s+- harmonic
     @return phi: form factor [Norb, Nk], complex for the chiral indices
     """
-    av = _HARM_AVEC if avec is None else np.asarray(avec, dtype=np.float64)
-    rv = _HARM_RVEC if rvec is None else np.asarray(rvec, dtype=np.float64)
+    av = (_HARM_AVEC if use_global else None) if avec is None else np.asarray(avec, dtype=np.float64)
+    rv = (_HARM_RVEC if use_global else None) if rvec is None else np.asarray(rvec, dtype=np.float64)
+    cutoff = _HARM_SRCUT if s_rcut is None and use_global else s_rcut
     if av is not None and rv is not None and (gap_sym in _CART_GAP or gap_sym in _CART_CHIRAL):
         try:
-            return np.tile(_cart_gap_row(klist, gap_sym, av, rv), (Norb, 1))
+            return np.tile(_cart_gap_row(klist, gap_sym, av, rv, rcut=cutoff if gap_sym == 2 else None),
+                           (Norb, 1))
         except ValueError as e:
             # too small an R set for this symmetry: keep working on the fractional
             # formula rather than aborting, but say so -- it is only labelled
@@ -751,7 +770,8 @@ def gap_symms(klist: np.ndarray, Norb: int, gap_sym: int,
 
 
 def get_initial_gap(klist: np.ndarray, Norb: int, gap_sym: int,
-                    avec: np.ndarray = None, rvec: np.ndarray = None) -> np.ndarray:
+                    avec: np.ndarray | None = None, rvec: np.ndarray | None = None, *,
+                    use_global: bool = True, s_rcut: float | None = None) -> np.ndarray:
     """
     @brief Generate an initial gap function with the specified pairing symmetry for gap equation iteration.
     @param   klist: k-point list in fractional coordinates [Nk, 3]
@@ -759,6 +779,8 @@ def get_initial_gap(klist: np.ndarray, Norb: int, gap_sym: int,
     @param gap_sym: Symmetry index: 0=s, 1=dx2-y2, 2=s+-, 3=dxy, 4=dxz, 5=dyz, -1=px, -2=py, -3=p+ip
     @param    avec: primitive translation vectors as rows [AA]
     @param    rvec: R-vectors [Nr, 3]
+    @param use_global: use the registered lattice and s-shell cutoff for omitted arguments
+    @param s_rcut: explicit |R| cutoff for the s+- harmonic
     @return init_gap: Initial gap function array [Norb, Nk]
     """
     if gap_sym >= 0:
@@ -768,7 +790,7 @@ def get_initial_gap(klist: np.ndarray, Norb: int, gap_sym: int,
         gapsym = ['s', 'px', 'py', 'p+ip']
         print('gap symmetry is '+gapsym[-gap_sym], flush=True)
     globals()['_HARM_LAST_RC'] = None
-    row = gap_symms(klist, Norb, gap_sym, avec=avec, rvec=rvec)
+    row = gap_symms(klist, Norb, gap_sym, avec=avec, rvec=rvec, use_global=use_global, s_rcut=s_rcut)
     if _HARM_LAST_RC is not None:
         # Which R shell the Cartesian harmonic ended up on -- for A1g (s+-) this is the
         # bond the sign change sits on, so it is worth seeing in the log (set_harmonic_lattice).
@@ -788,34 +810,46 @@ def get_initial_gap(klist: np.ndarray, Norb: int, gap_sym: int,
     return row
 
 
+def _form_factor_gap(form: np.ndarray, Norb: int, gap_sym: int,
+                     overlap: np.ndarray | None = None) -> np.ndarray:
+    """Orbital gap [Nk, Norb, Norb] complex128 of a form factor form [Nk] common to all bands:
+    form(k) S(k), the covariant band-uniform gap (form(k) times the unit matrix in an orthogonal
+    basis).  gap_sym=0 is the orbital unit matrix in either basis."""
+    metric = np.eye(Norb) if overlap is None or gap_sym == 0 else overlap
+    return np.asarray(form, dtype=np.complex128)[:, None, None] * metric
+
+
+def _damp_gamma_diamond(gap: np.ndarray, klist: np.ndarray) -> None:
+    """Halve bands 1,2 of a per-band gap [Nband, Nk] inside the Gamma-centred AFM diamond
+    |kx|+|ky| < 1/2 (in centred fractional coordinates), keeping the full gap in the M-centred
+    one -- a model choice for the 5-band iron pnictide, applied to the bands that exist."""
+    kc = klist - np.round(klist)
+    gap[1:3, (np.abs(kc[:, 0]) + np.abs(kc[:, 1])) < 0.5] *= .5
+
+
 def sc_gap_on_mesh(Nx: int, Ny: int, Nz: int, ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray,
-                   gap_sym: int, delta0: float | list, plist: np.ndarray,
-                   iperm: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+                   gap_sym: int, delta0: float | list) -> tuple[np.ndarray, np.ndarray]:
     """
     @brief Model superconducting gap Delta(k) in the orbital basis on the full k-mesh, for the
            SC-state susceptibility / NMR modes (BdG with a fixed gap).
-           delta0 a number: the gap_sym form factor is projected to the orbital basis
-           (get_initial_delta) and rescaled so that max|Delta| = delta0.
+           delta0 a number: the gap_sym form factor is common to all bands and rescaled
+           so that max|Delta| = delta0 (see _form_factor_gap).
            delta0 a list: one amplitude per band (signs give s+-), with bands 1,2 damped by 1/2
-           inside the Gamma-centred AFM diamond |kx|+|ky| < 1/2 (a model choice for the 5-band
-           iron pnictide, applied only to the bands that exist).
+           inside the Gamma-centred AFM diamond (_damp_gamma_diamond).
     @param Nx, Ny, Nz: k-mesh
     @param ham_r, S_r, rvec: Wannier Hamiltonian, overlap ([] if orthogonal) and R-vectors
     @param gap_sym: gap symmetry index
     @param  delta0: maximum gap [eV], or per-band amplitudes [Norb]
-    @param   plist: inversion parity per orbital (scalar delta0 only)
-    @param   iperm: orbital permutation of the inversion operator (None = identity)
     @return  klist: full k-mesh on [0,1) without endpoints [Nk, 3] (required by get_qshift)
     @return deltak: gap [Nk, Norb, Norb] complex128, paired with klist
     """
     Norb = ham_r.shape[1]
     if np.isscalar(delta0):
-        klist, kmap, invk = flibs.gen_irr_k_TRS(Nx, Ny, Nz)
-        eig, uni = _bands.get_eigs(klist, ham_r, S_r, rvec)
-        deltaini = flibs.remap_gap(flibs.get_initial_delta(get_initial_gap(klist, len(eig.T), gap_sym),
-                                                           uni, kmap, invk, 1, gap_sym), plist, invk, gap_sym,
-                                   iperm=iperm)
-        deltaini_static = np.ascontiguousarray(deltaini[:, :, 0, :].transpose(2, 0, 1))  # [Nkall,Norb,Norb]
+        # the full mesh in kmap (FFT) order
+        _, kmap, _ = flibs.gen_irr_k_TRS(Nx, Ny, Nz)
+        klist = kmap/np.array([Nx, Ny, Nz], dtype=np.float64)
+        overlap = flibs.gen_ham_overlap(klist, ham_r, rvec, S_r)[1]
+        deltaini_static = _form_factor_gap(get_initial_gap(klist, Norb, gap_sym)[0], Norb, gap_sym, overlap)
         print("maximum gap = %7.4f meV" % (delta0*1e3), flush=True)
         gap_max = abs(deltaini_static).max()
         if gap_max <= 0.0:
@@ -823,24 +857,16 @@ def sc_gap_on_mesh(Nx: int, Ny: int, Nz: int, ham_r: np.ndarray, S_r: np.ndarray
             deltak = deltaini_static.copy()
         else:
             deltak = delta0*deltaini_static/gap_max
-        # Full-grid klist in kmap (FFT) order: keeps deltak <-> klist index pairing
-        # consistent, and gives the [0,1) endpoint-free mesh required by get_qshift
-        klist = kmap/np.array([Nx, Ny, Nz], dtype=np.float64)
     else:
         # sw_pp=False: get_qshift requires the periodic [0,1) mesh without endpoints
         _, klist = _lattice.gen_klist(Nx, Ny, Nz, sw_pp=False)
-        eig, uni = _bands.get_eigs(klist, ham_r, S_r, rvec)
+        _, uni = _bands.get_eigs(klist, ham_r, S_r, rvec)
         inigap = gap_symms(klist, Norb, gap_sym)
-        for i, k in enumerate(klist):
-            # AFM-zone test in centered fractional coords: keep the full gap inside the
-            # M-centered diamond (|kx|+|ky|>=1/2) and damp bands 1,2 inside the
-            # Gamma-centered diamond (|kx|+|ky|<1/2).
-            kc = k-np.round(k)
-            if abs(kc[0])+abs(kc[1]) < 0.5:
-                inigap[1:3, i] *= .5   # bands 1,2 where they exist
+        _damp_gamma_diamond(inigap, klist)
         # delta0 is per-band [Norb]; broadcast over k: (inigap.T)[Nk,Norb] * delta0[Norb] -> [Norb,Nk]
         deltaini = (inigap.T*np.array(delta0, dtype=np.complex128)).T
-        deltak = flibs.get_band_to_orb_delta(deltaini, uni)
+        overlap = flibs.gen_ham_overlap(klist, ham_r, rvec, S_r)[1]
+        deltak = flibs.get_band_to_orb_delta(deltaini, uni, overlap)
     return klist, deltak
 
 
@@ -862,17 +888,17 @@ def bdg_bands_path(ham_r: np.ndarray, S_r: np.ndarray, rvec: np.ndarray, mu: flo
     Norb = ham_r.shape[1]
     kpath_bdg = np.zeros((Nk_path, 3))
     kpath_bdg[:, 1] = np.linspace(0, 0.5, Nk_path)
-    hamk_path = flibs.gen_ham(kpath_bdg, ham_r, rvec)
-    _, uni_path = _bands.get_eigs(kpath_bdg, ham_r, S_r, rvec)
+    hamk_path, overlap = flibs.gen_ham_overlap(kpath_bdg, ham_r, rvec, S_r)
     inigap_path = gap_symms(kpath_bdg, Norb, gap_sym)
     if np.isscalar(delta0):
-        # scale the band form factor so that its maximum over the k-mesh is delta0,
-        # the amplitude deltak was normalized to
-        fmax = np.abs(gap_symms(klist, 1, gap_sym)).max()
+        # the same normalization as sc_gap_on_mesh: the maximum of the mesh gap is delta0
+        mesh_overlap = flibs.gen_ham_overlap(klist, ham_r, rvec, S_r)[1]
+        fmax = np.abs(_form_factor_gap(gap_symms(klist, 1, gap_sym)[0], Norb, gap_sym, mesh_overlap)).max()
         scale = delta0 / fmax if fmax > 0 else delta0
-        deltak_path = flibs.get_band_to_orb_delta((inigap_path * scale).astype(np.complex128), uni_path)
+        deltak_path = scale*_form_factor_gap(inigap_path[0], Norb, gap_sym, overlap)
     else:
+        _, uni_path = _bands.get_eigs(kpath_bdg, ham_r, S_r, rvec)
+        _damp_gamma_diamond(inigap_path, kpath_bdg)
         deltak_path = flibs.get_band_to_orb_delta(
-            (inigap_path.T * np.array(delta0, dtype=np.complex128)).T, uni_path)
-    eig_BdG_path, _ = flibs.get_eig(flibs.mkBdGhamk(hamk_path - mu * np.eye(Norb), deltak_path))
-    return kpath_bdg[:, 1], eig_BdG_path
+            (inigap_path.T * np.array(delta0, dtype=np.complex128)).T, uni_path, overlap)
+    return kpath_bdg[:, 1], _bdg_eig(hamk_path, deltak_path, mu, overlap)[0]

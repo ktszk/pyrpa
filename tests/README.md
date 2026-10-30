@@ -23,14 +23,18 @@ python tests/run_all.py --runslow       # slow マーカー付きも含めて全
 
 | ファイル | 対象 |
 |---|---|
-| `test_rpa_flex.py` | RPA / FLEX / Eliashberg (χ0, 頂点, tail補正, mkself, mkself_soc と二重計上相殺 `sw_dcsub`) |
-| `test_nonorth_flex.py` | 非直交基底の Green 関数・FLEX・Eliashberg（SOC、IR、自己エネルギー再読み込み） |
-| `test_aiida.py` | AiiDA サンプル（examples/aiida）: RPA/FLEX（μ, Σ, χ, 線形化 Eliashberg）と Eilenberger（バルク・表面・渦糸）の calcfunction が plibs/flibs 直呼びと一致し、Eliashberg のギャップが Eilenberger に渡る来歴が記録される（aiida-core が無ければ SKIP） |
+| `test_bands.py` | バンドとフェルミ面の幾何: Wannier90 `_hr.dat` の読み込みと `gen_ham` の位相, 3次元フェルミ面用の第1ブリルアンゾーン, 群速度と逆有効質量 (直交・MLO 基底), サイクロトロン軌道と dHvA 極値軌道 |
+| `test_transport.py` | 輸送係数 (Boltzmann / Kubo, Wiedemann-Franz, k 点重み, ホール応答, 緩和時間モデル) |
+| `test_optical.py` | 光学定数, 反射率から色 (CIE XYZ, D65, sRGB) への変換, 非金属の色 (透過, Kubelka-Munk) |
+| `test_impurity.py` | 不純物スーパーセルと展開スペクトル (位相の符号, 総和則), CPA (非直交基底を含む) |
+| `test_rpa_flex.py` | RPA / FLEX / Eliashberg (χ0, 頂点, tail補正, mkself, mkself_soc と二重計上相殺), 非直交 (MLO) 基底の Green 関数・FLEX・Eliashberg, EPA からのフォノン媒介の対相互作用 |
 | `test_eliash_nosym.py` | 対称性なし線形化Eliashberg (Zeeman・FFLO), SOC版との整合 (裸の項 -V/2, triplet初期関数・パリティ射影, バンド基底出力), 多軌道tripletの厳密カーネル照合, SOC下のブランチ追跡 |
-| `test_eilenberger.py` | 準古典 Eilenberger (一様系・表面・渦・渦格子) |
-| `test_transport.py` | 輸送係数 (Boltzmann / Kubo, Wiedemann-Franz, k 点重み) |
-| `test_impurity.py` | 不純物スーパーセルと展開スペクトル (位相の符号, 総和則) |
-| `test_tools.py` | 共有ツール `_tools.py` 自体の自己検証 (使用例を兼ねる) |
+| `test_freq_grid.py` | IR 基底の周波数格子: FLEX・線形/非線形 Eliashberg・SOC・`sw_nosym` が一様格子の Nw→∞ 極限と一致すること (sparse-ir が無ければ SKIP) |
+| `test_nmr.py` | 超伝導状態の動的感受率 (非直交基底の BdG を含む) と NMR (Knight shift, 1/T1T) |
+| `test_eilenberger.py` | 準古典 Eilenberger (一様系・表面・渦・渦格子) と, 渦ソルバーの Fortran グリッド・chord カーネル |
+| `test_main.py` | `main.py` の Eilenberger モードでの化学ポテンシャルの扱い |
+| `test_aiida.py` | AiiDA サンプル（examples/aiida）: RPA/FLEX（μ, Σ, χ, 線形化 Eliashberg）と Eilenberger（バルク・表面・渦糸）の calcfunction が plibs/flibs 直呼びと一致し、Eliashberg のギャップが Eilenberger に渡る来歴が記録される（aiida-core が無ければ SKIP） |
+| `test_tools.py` | 共有ツール `_tools.py` 自体の自己検証 (使用例を兼ねる), CPU に応じたライブラリの選択, gfortran 版の実行環境 |
 | `_tools.py` | 共有ユーティリティ (下記) |
 | `conftest.py` | pytest 設定 (sys.path, `slow` マーカー, `silence` fixture) |
 | `run_all.py` | pytest 不要の一括ランナー |

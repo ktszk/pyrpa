@@ -285,7 +285,9 @@ def _fs_average(values: np.ndarray, w: np.ndarray) -> np.ndarray:
 def build_fs(eig: np.ndarray, klist: np.ndarray, mu: float, gap_sym: int, width: float, w_cut: float = 1.0e-4,
              uni: np.ndarray = None, gap_orbital: np.ndarray | collections.abc.Callable | None = None,
              delta0: np.ndarray | None = None, gauge: str = None, spin_map: tuple | None = None,
-             sw_band: bool = False) -> tuple:
+             sw_band: bool = False, *, harmonic_avec: np.ndarray | None = None,
+             harmonic_rvec: np.ndarray | None = None, harmonic_s_rcut: float | None = None,
+             use_global_harmonics: bool = True) -> tuple:
     """
     @brief Select Fermi-surface points from a band mesh and build their DOS
     weights and (normalized) pairing form factor.
@@ -325,6 +327,9 @@ def build_fs(eig: np.ndarray, klist: np.ndarray, mu: float, gap_sym: int, width:
     @param gauge,spin_map: pair-partner gauge (see set_pair_gauge); the mesh route
                    has no independently diagonalized u(-k), so 'diag' is rejected
     @param sw_band: also return per-point provenance (band index, mesh index, k_z)
+    @param harmonic_avec, harmonic_rvec: lattice and R-vectors for the analytic gap harmonic
+    @param harmonic_s_rcut: explicit |R| cutoff for the s+- harmonic
+    @param use_global_harmonics: use the registered harmonic lattice and cutoff when omitted
     @return (wf, phif) or (wf, phif, info): FS weights [Nfs], normalized form
             factor [Nfs] and optionally info = dict(band, ik, kz)
     """
@@ -347,7 +352,8 @@ def build_fs(eig: np.ndarray, klist: np.ndarray, mu: float, gap_sym: int, width:
         ev = ev / np.where(nrm > 0, nrm, 1.0)[:, None]
         phif = project_gap(ev, gap_orbital, klist[ik], None, gauge, spin_map)
     else:
-        phif = _response.gap_symms(klist, 1, gap_sym)[0][ik].astype(np.complex128)   # k only
+        phif = _response.gap_symms(klist, 1, gap_sym, avec=harmonic_avec, rvec=harmonic_rvec,
+                                   s_rcut=harmonic_s_rcut, use_global=use_global_harmonics)[0][ik].astype(np.complex128)
     if delta0 is not None:                           # per-band ratio / sign
         phif = phif * np.asarray(delta0, dtype=np.float64)[ib]
     # normalize so that <|phi|^2>_FS = 1 -> lambda is the dimensionless coupling

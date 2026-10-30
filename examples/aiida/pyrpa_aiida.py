@@ -7,8 +7,8 @@ computer, code or daemon has to be configured.  A CalcJob that submits main.py t
 next step and is not here.
 
 Model
-  load_hoppings          SinglefileData (hopping file; ftype=4: FolderData of the ecalj job_mlo
-                         binaries)                            -> ArrayData rvec, ham_r [, S_r]
+  load_hoppings          SinglefileData (hopping file; directory formats: FolderData)
+                         [, lattice: Dict avec, s_rcut]       -> ArrayData rvec, ham_r [, S_r, avec, s_rcut]
                          An MLO basis (ftype=3, 4) carries its overlap S_r, normalized orbitals as in
                          main.py, and every step below then works with G^-1 = (iw+mu) S - H - Sigma.
   chemical_potential     hoppings + fill, temp, mesh          -> Float mu
@@ -84,6 +84,30 @@ def _arrays(**arrays: np.ndarray) -> orm.ArrayData:
     for name, a in arrays.items():
         out.set_array(name, np.asarray(a))
     return out
+
+
+def _harmonic_args(hoppings: orm.ArrayData) -> dict:
+    """Explicit, provenance-backed harmonic lattice; never inherit process-global settings."""
+    names = hoppings.get_arraynames()
+    avec = hoppings.get_array('avec') if 'avec' in names else None
+    rcut = hoppings.get_array('s_rcut') if 's_rcut' in names else None
+    if avec is not None:
+        if avec.shape != (3, 3) or not np.isfinite(avec).all() or abs(np.linalg.det(avec)) < 1e-12:
+            raise ValueError('lattice avec must be a finite, non-singular 3x3 matrix')
+    if rcut is not None:
+        if rcut.shape != () or not np.isfinite(rcut) or float(rcut) <= 0 or avec is None:
+            raise ValueError('lattice s_rcut must be a positive finite scalar and requires avec')
+        rcut = float(rcut)
+    return dict(avec=avec, rvec=hoppings.get_array('rvec') if avec is not None else None,
+                s_rcut=rcut, use_global=False)
+
+
+def _harmonic_args_for_gap(hoppings: orm.ArrayData, gap_sym: int) -> dict:
+    args = _harmonic_args(hoppings)
+    if args['avec'] is None and gap_sym != 0:
+        print('Warning: no lattice avec supplied; using the fractional-coordinate gap harmonic, '
+              'whose symmetry may be incorrect for non-orthogonal or multi-site cells', flush=True)
+    return args
 
 
 def _npz_to_arraydata(path: str) -> orm.ArrayData:
@@ -206,27 +230,28 @@ def _frequency_grid(opts: dict, temp: float, mu: float, st: dict, sigma: orm.Arr
     """
     Install the Matsubara-axis grid of a step and yield its Nw (None: the uniform grid, use the Nw
     input).  A FLEX sigma records its grid (ir_wmax, ir_eps), and a step built on it uses that same
-    grid, so the auto cutoff is not re-derived from a shifted mu.
+    grid, so the auto cutoff is not re-derived from a shifted mu. Restore the previously active
+    grid on exit, including when a step fails or these contexts are nested.
     """
     on_ir = sigma is not None and 'ir_wmax' in sigma.get_arraynames()
     if sigma is not None and on_ir != (opts['freq_grid'] == 'ir'):
         raise ValueError(f"sigma was computed on the {'IR' if on_ir else 'uniform'} grid, "
                          f"options ask for freq_grid={opts['freq_grid']!r}")
-    if opts['freq_grid'] == 'matsubara':
-        yield None
-        return
-    if on_ir:
-        wmax, eps = float(sigma.get_array('ir_wmax')), float(sigma.get_array('ir_eps'))
-    else:
-        wmax = opts['ir_wmax'] if opts['ir_wmax'] is not None else 2.0*np.abs(st['eig']-mu).max()
-        eps = opts['ir_eps']
-    grid = plibs.ir_grid(temp, wmax, eps=eps)
-    plibs.set_freq_grid(grid)
-    try:
+    previous = plibs.active_freq_grid()
+    grid = None
+    if opts['freq_grid'] == 'ir':
+        if on_ir:
+            wmax, eps = float(sigma.get_array('ir_wmax')), float(sigma.get_array('ir_eps'))
+        else:
+            wmax = opts['ir_wmax'] if opts['ir_wmax'] is not None else 2.0*np.abs(st['eig']-mu).max()
+            eps = opts['ir_eps']
+        grid = plibs.ir_grid(temp, wmax, eps=eps)
         grid['ir_wmax'], grid['ir_eps'] = wmax, eps
+    try:
+        plibs.set_freq_grid(grid)
         yield grid
     finally:
-        plibs.set_freq_grid(None)
+        plibs.set_freq_grid(previous)
 
 
 def _grid_arrays(grid: dict | None) -> dict:
@@ -313,19 +338,23 @@ def _green(st: dict, mu: float, temp: float, Nw: int, sigma: orm.ArrayData | Non
 #  model
 # --------------------------------------------------------------------------- #
 @calcfunction
-def load_hoppings(hop_file: orm.SinglefileData | orm.FolderData, ftype: orm.Int) -> orm.ArrayData:
+def load_hoppings(hop_file: orm.SinglefileData | orm.FolderData, ftype: orm.Int,
+                  lattice: orm.Dict | None = None) -> orm.ArrayData:
     """
     Read the model as main.py does for this ftype: plibs.import_hoppings, or for an MLO basis
     import_MLO_hoppings (ftype=3, a file) / read_HamRsMLO (ftype=4, a FolderData holding HamRsMLO
-    and HamiltonianPMTInfo), which also give the overlap S_r of the normalized orbitals.
+    and HamiltonianPMTInfo), which also give the overlap S_r of the normalized orbitals.  lattice,
+    when given, records primitive vectors avec [3,3] in Angstrom and optional s_rcut in Angstrom.
     """
     # the readers take a path: copy the stored file(s) out of the repository
     with tempfile.TemporaryDirectory() as d:
         if isinstance(hop_file, orm.FolderData):
+            if ftype.value == 2:
+                raise ValueError('ftype=2 requires a SinglefileData containing the Wannier90 _hr.dat file')
             hop_file.base.repository.copy_tree(d)
             path = d
         else:
-            path = os.path.join(d, hop_file.filename)
+            path = os.path.join(d, 'model_hr.dat' if ftype.value == 2 else hop_file.filename)
             with hop_file.open(mode='rb') as src, open(path, 'wb') as dst:
                 dst.write(src.read())
         S_r = None
@@ -334,11 +363,21 @@ def load_hoppings(hop_file: orm.SinglefileData | orm.FolderData, ftype: orm.Int)
         elif ftype.value == 4:
             rvec, ham_r, S_r, _, _ = plibs.read_HamRsMLO(path)
         else:
-            rvec, ham_r, _, _ = plibs.import_hoppings(path, ftype.value)
+            prefix = path[:-len('_hr.dat')] if ftype.value == 2 else path
+            rvec, ham_r, _, _ = plibs.import_hoppings(prefix, ftype.value)
     arrays = dict(rvec=np.asarray(rvec, dtype=np.float64), ham_r=np.asarray(ham_r, dtype=np.complex128))
     if S_r is not None:
         arrays['S_r'] = np.asarray(S_r, dtype=np.complex128)
-    return _arrays(**arrays)
+    if lattice is not None:
+        lat = lattice.get_dict()
+        if set(lat) - {'avec', 's_rcut'} or 'avec' not in lat:
+            raise ValueError('lattice requires avec and accepts only avec and s_rcut')
+        arrays['avec'] = np.asarray(lat['avec'], dtype=np.float64)
+        if lat.get('s_rcut') is not None:
+            arrays['s_rcut'] = np.asarray(lat['s_rcut'], dtype=np.float64)
+    out = _arrays(**arrays)
+    _harmonic_args(out)
+    return out
 
 
 @calcfunction
@@ -417,7 +456,7 @@ def _eliashberg(st: dict, chi0: np.ndarray, tables: list | None, Gk: np.ndarray,
                 gap_sym: int, opts: dict) -> dict:
     """Linearized Eliashberg equation on chi0 (overwritten); lambda, gap_wannier and, with store_gap, the gap."""
     plist, iperm = _inversion(st)
-    init_delta = plibs.get_initial_gap(st['klist'], st['Norb'], gap_sym)
+    init_delta = plibs.get_initial_gap(st['klist'], st['Norb'], gap_sym, **st['harmonic_args'])
     if st['soc']:
         if iperm is not None:   # as main.py: the SOC kernels take a diagonal parity only
             raise ValueError('inversion exchanges orbitals (signed permutation), which the SOC Eliashberg '
@@ -481,6 +520,7 @@ def linearized_eliashberg(hoppings: orm.ArrayData, mu: orm.Float, temp: orm.Floa
     """
     opts = _opts(options)
     st = _normal_state(hoppings, mesh, U, J, opts)
+    st['harmonic_args'] = _harmonic_args_for_gap(hoppings, gap_sym.value)
     with _frequency_grid(opts, temp.value, mu.value, st, sigma) as grid:
         nw = Nw.value if grid is None else grid['Nw']
         Gk = _green(st, mu.value, temp.value, nw, sigma)
@@ -499,6 +539,7 @@ def flex_eliashberg(hoppings: orm.ArrayData, mu: orm.Float, fill: orm.Float, tem
     """
     opts = _opts(options)
     st = _normal_state(hoppings, mesh, U, J, opts)
+    st['harmonic_args'] = _harmonic_args_for_gap(hoppings, gap_sym.value)
     with _frequency_grid(opts, temp.value, mu.value, st) as grid:
         nw = Nw.value if grid is None else grid['Nw']
         sigmak, mu_self, info = _run_flex(st, mu.value, fill.value, temp.value, nw, opts)
@@ -534,8 +575,10 @@ def eilenberger_bulk(hoppings: orm.ArrayData, mu: orm.Float, temp: orm.Float, wc
         with _workdir():
             _arraydata_to_npz(gap_wannier, 'gap_wannier.npz')
             gorb = plibs.gap_orbital_from_wannier('gap_wannier', gap_iw.value)
+    harmonic = _harmonic_args_for_gap(hoppings, gap_sym.value) if gorb is None else _harmonic_args(hoppings)
     wf, phif, _ = plibs.build_fs(eig, klist, mu.value, gap_sym.value, fs_width.value, uni=uni, gap_orbital=gorb,
-                                 sw_band=True)
+                                 sw_band=True, harmonic_avec=harmonic['avec'], harmonic_rvec=harmonic['rvec'],
+                                 harmonic_s_rcut=harmonic['s_rcut'], use_global_harmonics=False)
     if len(wf) == 0:
         raise ValueError('eilenberger_bulk: no Fermi-surface points (check mu / fs_width)')
     T, g, c, lam_c = temp.value, imp_gamma.value, imp_c.value, coupling.value
@@ -591,9 +634,10 @@ def eilenberger_vortex(coupling: orm.Float, temp: orm.Float, wc: orm.Float, gap_
 # --------------------------------------------------------------------------- #
 @workfunction
 def flex_workflow(hop_file: orm.SinglefileData | orm.FolderData, ftype: orm.Int, fill: orm.Float, temp: orm.Float,
-                  U: orm.Float, J: orm.Float, mesh: orm.List, Nw: orm.Int, options: orm.Dict | None = None) -> dict:
+                  U: orm.Float, J: orm.Float, mesh: orm.List, Nw: orm.Int, options: orm.Dict | None = None,
+                  lattice: orm.Dict | None = None) -> dict:
     """hopping file -> bare mu -> FLEX self-energy, recorded as one provenance graph."""
-    hoppings = load_hoppings(hop_file, ftype)
+    hoppings = load_hoppings(hop_file, ftype, **_given_lattice(lattice))
     mu = chemical_potential(hoppings, fill, temp, mesh)
     flex = flex_self_energy(hoppings, mu, fill, temp, U, J, mesh, Nw, **_given(options))
     return {'hoppings': hoppings, 'mu': mu, 'sigma': flex['sigma'], 'mu_self': flex['mu_self'],
@@ -605,15 +649,20 @@ def _given(options: orm.Dict | None) -> dict:
     return {} if options is None else {'options': options}
 
 
+def _given_lattice(lattice: orm.Dict | None) -> dict:
+    return {} if lattice is None else {'lattice': lattice}
+
+
 @workfunction
 def eliashberg_workflow(hop_file: orm.SinglefileData | orm.FolderData, ftype: orm.Int, fill: orm.Float,
                         temp: orm.Float, U: orm.Float, J: orm.Float, mesh: orm.List, Nw: orm.Int, gap_sym: orm.Int,
-                        use_flex: orm.Bool = lambda: orm.Bool(False), options: orm.Dict | None = None) -> dict:
+                        use_flex: orm.Bool = lambda: orm.Bool(False), options: orm.Dict | None = None,
+                        lattice: orm.Dict | None = None) -> dict:
     """
     hopping file -> mu -> [FLEX Sigma] -> chi_s/chi_c and the linearized Eliashberg gap (RPA or FLEX).
     With FLEX and store_sigma=False the three steps run as one (flex_eliashberg) and Sigma is not stored.
     """
-    hoppings = load_hoppings(hop_file, ftype)
+    hoppings = load_hoppings(hop_file, ftype, **_given_lattice(lattice))
     mu = chemical_potential(hoppings, fill, temp, mesh)
     out = {'hoppings': hoppings, 'mu': mu}
     opt = _given(options)
@@ -639,12 +688,13 @@ def eliashberg_eilenberger_workflow(hop_file: orm.SinglefileData | orm.FolderDat
                                     temp: orm.Float, U: orm.Float, J: orm.Float, mesh: orm.List, Nw: orm.Int,
                                     gap_sym: orm.Int, wc: orm.Float, coupling: orm.Float, eil_mesh: orm.List,
                                     use_flex: orm.Bool = lambda: orm.Bool(False),
-                                    options: orm.Dict | None = None) -> dict:
+                                    options: orm.Dict | None = None, lattice: orm.Dict | None = None) -> dict:
     """
     eliashberg_workflow, then the homogeneous Eilenberger gap with the RPA/FLEX gap as the pairing
     form factor (on the bare-band Fermi surface at the bare mu, on eil_mesh).
     """
-    el = eliashberg_workflow(hop_file, ftype, fill, temp, U, J, mesh, Nw, gap_sym, use_flex, **_given(options))
+    el = eliashberg_workflow(hop_file, ftype, fill, temp, U, J, mesh, Nw, gap_sym, use_flex,
+                             **_given(options), **_given_lattice(lattice))
     eil = eilenberger_bulk(el['hoppings'], el['mu'], temp, wc, coupling, gap_sym, eil_mesh,
                            gap_wannier=el['gap_wannier'])
     return {**el, 'eilenberger': eil['result'], 'f_avg': eil['f_avg']}

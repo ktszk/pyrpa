@@ -3,7 +3,7 @@
 Run the pyrpa AiiDA sample (pyrpa_aiida.py) on inputs/square.hop.
 
   python examples/aiida/run_example.py [--calc CALC] [--profile NAME] [--hop PATH --ftype N]
-                                       [--options JSON] [--mlo-demo] [--soc]
+                                       [--options JSON] [--lattice JSON] [--mlo-demo] [--soc]
 
   CALC = flex         hopping file -> mu -> FLEX self-energy
          eliashberg   ... -> chi_s/chi_c, Stoner factor and the linearized Eliashberg lambda, gap
@@ -18,6 +18,8 @@ e.g. '{"freq_grid": "ir", "Umat": [[3.0]], "Jmat": [[0.0]], "store_sigma": false
 a small non-orthogonal (MLO, ftype=3) two-orbital model and runs on it with the IR grid.  --soc runs
 the spinful inputs/square_2orb_soc.hop (half filling, fill = 2) with soc=True; chi then holds the spin
 channels zz, +-, xx, yy and no Stoner factor is given.
+--lattice supplies primitive vectors and optionally the s+- shell cutoff, e.g.
+'{"avec": [[4,0,0],[0,4,0],[0,0,6]], "s_rcut": 4.0}' (Angstrom).
 
 The default temporary profile (SqliteTempBackend) needs no database, broker or `verdi presto` and
 keeps nothing; --profile NAME stores the nodes in an existing profile.  The AiiDA configuration
@@ -92,6 +94,7 @@ def main() -> None:
     ap.add_argument('--ftype', type=int, default=1, help='format of --hop, as in main.py')
     ap.add_argument('--fill', type=float, default=0.45, help='filling per spin')
     ap.add_argument('--options', default=None, help='JSON dict of pyrpa_aiida.OPTION_DEFAULTS')
+    ap.add_argument('--lattice', default=None, help='JSON dict with primitive vectors avec and optional s_rcut')
     ap.add_argument('--mlo-demo', action='store_true',
                     help='run on a small two-orbital MLO model (written to a temporary file) with the IR grid')
     ap.add_argument('--soc', action='store_true',
@@ -113,6 +116,8 @@ def main() -> None:
     else:
         aiida.load_profile(args.profile)
     inputs = model_inputs(args.hop, args.ftype, args.fill, options)   # nodes need the profile loaded
+    if args.lattice:
+        inputs['lattice'] = orm.Dict(json.loads(args.lattice))
 
     if args.calc == 'flex':
         res, node = pa.flex_workflow.run_get_node(**inputs)

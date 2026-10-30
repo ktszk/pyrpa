@@ -36,12 +36,10 @@ def _prepare_kspace_state(Nx: int, Ny: int, Nz: int, ham_r: np.ndarray, S_r: np.
         'uni': uni,
     }
     state['overlap_k'] = None
-    if len(S_r):
-        ham_k, state['overlap_k'] = flibs.gen_ham(klist, ham_r, rvec, Ovl_r=S_r)
+    if need_ham or len(S_r):
+        ham_k, state['overlap_k'] = flibs.gen_ham_overlap(klist, ham_r, rvec, S_r)
         if need_ham:
             state['ham_k'] = ham_k
-    elif need_ham:
-        state['ham_k'] = flibs.gen_ham(klist, ham_r, rvec)
     return state
 
 
@@ -1327,10 +1325,7 @@ def spectrum_on_path(k_sets: list, kmesh: int, bvec: np.ndarray, mu: float, ham_
         # Sigma(k) = sum_R Sigma(R) e^{-2pi i k.R}; Sigma is not Hermitian, so gen_ham cannot be reused
         phase = np.exp(-2j*np.pi*klist.dot(rvec_s.T))                          # [Nks,Nr]
         selfen = np.ascontiguousarray(np.einsum('mnwr,kr->mnwk', sig_r, phase))  # [Norb,Norb,Niw,Nks]
-        if len(S_r):
-            ham_k, overlap = flibs.gen_ham(klist, ham_r, rvec, Ovl_r=S_r)
-        else:
-            ham_k, overlap = flibs.gen_ham(klist, ham_r, rvec), None
+        ham_k, overlap = flibs.gen_ham_overlap(klist, ham_r, rvec, S_r)
         Gk_mats = _metric_green(flibs.gen_green(selfen, ham_k, mu_self, temp_self, overlap=overlap), overlap)
         if sw_maxent:
             # MaxEnt (ana_cont): regularized fit rather than exact interpolation, so it
@@ -1375,12 +1370,8 @@ def output_Fk(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.nda
     """
     klist, kmap, invk = flibs.gen_irr_k_TRS(Nx, Ny, Nz)
     eig, uni = _bands.get_eigs(klist, ham_r, S_r, rvec)
-    overlap = None
-    if len(S_r):
-        ham_k, overlap = flibs.gen_ham(klist, ham_r, rvec, Ovl_r=S_r)
+    ham_k, overlap = flibs.gen_ham_overlap(klist, ham_r, rvec, S_r)
     if sw_self:
-        if overlap is None:
-            ham_k = flibs.gen_ham(klist, ham_r, rvec)
         loaded = _load_sigma_from_file(temp, Nw)
         if loaded is None:
             return
@@ -1472,7 +1463,7 @@ def output_Fk(Nx: int, Ny: int, Nz: int, Nw: int, ham_r: np.ndarray, S_r: np.nda
 def calc_cpa_Akw(k_sets: list, kmesh: int, bvec: np.ndarray,
                  ham_r: np.ndarray, rvec: np.ndarray, mu: float,
                  sigma_cpa: np.ndarray, wlist: np.ndarray,
-                 zlist_real: np.ndarray) -> tuple:
+                 zlist_real: np.ndarray, S_r: np.ndarray | list | None = None) -> tuple:
     """
     Compute the CPA spectral function A(k,w) along a symmetry-line k-path.
     Returns (Akw [Nks, Nw], spa_length [Nks], xticks).
@@ -1480,7 +1471,12 @@ def calc_cpa_Akw(k_sets: list, kmesh: int, bvec: np.ndarray,
     Norb = ham_r.shape[1]
     Nw = len(wlist)
     klist_s, spa_length, xticks = _lattice.mk_klist(k_sets, kmesh, bvec)
-    hamk_s = flibs.gen_ham(klist_s, ham_r, rvec)
+    hamk_s, overlap = flibs.gen_ham_overlap(klist_s, ham_r, rvec, S_r)
+    if overlap is not None:
+        Gk = np.linalg.inv((zlist_real[:, None, None, None]+mu)*overlap[None]
+                           - hamk_s[None] - sigma_cpa[:, None])
+        Akw = (-np.trace(overlap[None] @ Gk, axis1=2, axis2=3).imag/np.pi).T
+        return Akw, spa_length, xticks
     hamk_s[:, range(Norb), range(Norb)] -= mu
     Nks = len(klist_s)
     Akw = np.zeros((Nks, Nw))
@@ -1508,7 +1504,7 @@ def calc_cpa_Akw(k_sets: list, kmesh: int, bvec: np.ndarray,
 
 def calc_cpa(ham_r: np.ndarray, rvec: np.ndarray, mu: float, temp: float, Nx: int, Ny: int, Nz: int, Nw: int,
              Emin: float, Emax: float, delta: float, k_sets: list, kmesh: int, bvec: np.ndarray,
-             x_cpa: float = 0.5, VB_shift: float = 1.0) -> tuple:
+             x_cpa: float = 0.5, VB_shift: float = 1.0, S_r: np.ndarray | list | None = None) -> tuple:
     """
     @brief Binary-alloy CPA: species A is the host (no perturbation), species B shifts every
            on-site level by VB_shift.  Solves the CPA self-energy on the real axis for the
@@ -1522,6 +1518,7 @@ def calc_cpa(ham_r: np.ndarray, rvec: np.ndarray, mu: float, temp: float, Nx: in
     @param k_sets, kmesh, bvec: symmetry line of the spectrum
     @param   x_cpa: concentration of species B
     @param VB_shift: on-site shift of species B [eV]
+    @param      S_r: host overlap S(R), or None for an orthogonal basis
     @return (spa_length, xticks, wlist, Akw): the real-axis CPA spectrum along the path
     """
     import scipy.io as scio
@@ -1533,22 +1530,25 @@ def calc_cpa(ham_r: np.ndarray, rvec: np.ndarray, mu: float, temp: float, Nx: in
     VB = VB_shift * np.eye(Norb, dtype=np.complex128)
     # sw_pp=False: periodic [0,1) mesh avoids double-counting the BZ boundary in the k-sum
     Nk, klist = _lattice.gen_klist(Nx, Ny, Nz, sw_pp=False)
-    hamk = flibs.gen_ham(klist, ham_r, rvec)
-    # shift onsite by -mu so that w=0 corresponds to the Fermi level
-    hamk[:, range(Norb), range(Norb)] -= mu
+    # shift by -mu so that w=0 is the Fermi level
+    hamk, overlap = flibs.gen_ham_overlap(klist, ham_r, rvec, S_r)
+    if overlap is None:
+        hamk[:, range(Norb), range(Norb)] -= mu
+    else:
+        hamk = hamk-mu*overlap
     # CPA on real axis for spectrum
     wlist = np.linspace(Emin, Emax, Nw)
     zlist_real = wlist + 1j*delta
     print(f"CPA: Norb={Norb}, Nk={Nk}, Nw={Nw}, x={x_cpa}", flush=True)
-    sigma_cpa = flibs.solve_cpa(hamk, VA, VB, x_cpa, zlist_real, pp=0.5)
+    sigma_cpa = flibs.solve_cpa(hamk, VA, VB, 1.0-x_cpa, zlist_real, pp=0.5, Ovlk=overlap)
     print("CPA converged", flush=True)
     # --- spectrum along symmetry line ---
-    Akw, spa_length, xticks = calc_cpa_Akw(k_sets, kmesh, bvec, ham_r, rvec, mu, sigma_cpa, wlist, zlist_real)
+    Akw, spa_length, xticks = calc_cpa_Akw(k_sets, kmesh, bvec, ham_r, rvec, mu, sigma_cpa, wlist, zlist_real, S_r)
     # --- CPA on Matsubara frequencies -> sigma.bin ---
     iwlist_mats = 1j*np.pi*temp*(2*np.arange(Nw, dtype=np.float64)+1)
     print(f"CPA Matsubara: Norb={Norb}, Nk={Nk}, Nw={Nw}, x={x_cpa}", flush=True)
     # reuse hamk (already shifted by -mu) computed above
-    sigma_cpa_mats = flibs.solve_cpa(hamk, VA, VB, x_cpa, iwlist_mats, pp=0.5)
+    sigma_cpa_mats = flibs.solve_cpa(hamk, VA, VB, 1.0-x_cpa, iwlist_mats, pp=0.5, Ovlk=overlap)
     print("CPA Matsubara converged", flush=True)
     # build (Norb, Norb, Nw, Nk_irr) array for sigma.bin
     # sigma_cpa_mats: (Nw, Norb, Norb) -> (Norb, Norb, Nw) -> broadcast over Nk_irr

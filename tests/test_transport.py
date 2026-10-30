@@ -159,6 +159,20 @@ def test_kweight_duplicated_mesh_matches_uniform():
     assert abs(m1-m2) < 1e-10
 
 
+def test_chemical_potential_outside_flat_band():
+    import libs.plibs as P
+    eig = np.zeros((4, 1))
+    temp = 0.1
+    for fill in (0.1, 0.9):
+        expected = temp*np.log(fill/(1.0-fill))
+        mu = P.calc_mu(eig, len(eig), fill, temp)
+        assert abs(mu-expected) < 1e-11
+        assert abs(F.get_ffermi(eig, mu, temp).mean()-fill) < 1e-12
+        assert abs(P.calc_mu_imp(eig.ravel(), len(eig), fill, temp)-expected) < 1e-11
+    with np.testing.assert_raises(ValueError):
+        P.calc_mu(eig, len(eig), 1.1, temp)
+
+
 def test_calc_lij_wl_matches_scalar():
     """The batched calc_Lij_wl must reproduce the single-frequency calc_Lij at
     each frequency on the mesh."""

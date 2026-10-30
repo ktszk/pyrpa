@@ -5,7 +5,7 @@ import libs.flibs._loader as _loader
 # Public API of this submodule; keeps `from ._x import *` in __init__.py from
 # re-exporting numpy, scipy, ctypes and the sibling packages imported above.
 __all__ = [
-    'omp_params', 'gen_ham', 'get_eig', 'get_ffermi', 'get_vlm0', 'get_vk', 'get_vnm', 'get_vnmk', 'get_veloc',
+    'omp_params', 'gen_ham', 'gen_ham_overlap', 'get_eig', 'get_ffermi', 'get_vlm0', 'get_vk', 'get_vnm', 'get_vnmk', 'get_veloc',
     'get_imass0', 'get_imassk', 'get_mass', 'get_qshift', 'get_iqshift', 'gen_irr_k_TRS', 'gen_kpoint_weight',
     'mkBdGhamk', 'get_plist'
 ]
@@ -202,6 +202,20 @@ def gen_ham(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
         return hamk, Ovlk
     else:
         return hamk
+
+
+def gen_ham_overlap(klist: np.ndarray, ham_r: np.ndarray, rvec: np.ndarray,
+                    S_r: np.ndarray | list | None) -> tuple[np.ndarray, np.ndarray | None]:
+    """
+    @brief H(k) and, for a non-orthogonal basis, S(k): gen_ham with the same return shape
+           whether or not the basis has an overlap.
+    @param  S_r: overlap blocks S(R) [Nr, Norb, Norb]; None or [] for an orthogonal basis
+    @return hamk: k-space Hamiltonian [Nk, Norb, Norb] complex128
+    @return Ovlk: k-space overlap [Nk, Norb, Norb] complex128, or None for an orthogonal basis
+    """
+    if S_r is None or len(S_r) == 0:
+        return gen_ham(klist, ham_r, rvec), None
+    return gen_ham(klist, ham_r, rvec, Ovl_r=S_r)
 
 
 def get_eig(hamk: np.ndarray, Ovlk: np.ndarray | None = None,

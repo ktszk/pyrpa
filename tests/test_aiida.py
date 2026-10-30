@@ -8,6 +8,7 @@ import contextlib
 import os
 import sys
 import tempfile
+from unittest import mock
 import numpy as np
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -93,6 +94,175 @@ def test_aiida_load_hoppings_and_mu_match_plibs():
     assert abs(mu.value-ref) < 1e-12
 
 
+def test_aiida_load_wannier90_single_file(tmp_path):
+    pa = _setup()
+    path = tmp_path/'any-name.dat'
+    path.write_text('Wannier90 test\n1\n3\n1 2 1\n'
+                    '0 0 0 1 1 0.5 0.0\n'
+                    '1 0 0 1 1 -2.0 0.0\n'
+                    '-1 0 0 1 1 -1.0 0.0\n')
+    with T.silence():
+        hop = pa.load_hoppings(orm.SinglefileData(str(path)), orm.Int(2))
+    assert np.array_equal(hop.get_array('rvec'), [[0, 0, 0], [1, 0, 0], [-1, 0, 0]])
+    assert np.allclose(hop.get_array('ham_r')[:, 0, 0], [0.5, -1.0, -1.0])
+    path.write_text('Wannier90 test\n2\n1\n1\n'
+                    '0 0 0 1 1 0 0\n0 0 0 2 1 0 -1\n'
+                    '0 0 0 1 2 0 1\n0 0 0 2 2 0 0\n')
+    with T.silence():
+        hop = pa.load_hoppings(orm.SinglefileData(str(path)), orm.Int(2))
+    expected = np.array([[0, 1j], [-1j, 0]])
+    assert np.array_equal(hop.get_array('ham_r')[0], expected)
+    assert np.array_equal(F.gen_ham(np.zeros((1, 3)), hop.get_array('ham_r'),
+                                    hop.get_array('rvec'))[0], expected)
+
+
+def test_aiida_harmonics_use_only_recorded_lattice():
+    pa = _setup()
+    avec, _ = P.get_ptv(np.array([4., 4., 4.]), np.array([90., 90., 90.]), 1)
+    rvec = np.array([[i, j, k] for i in range(-2, 3) for j in range(-2, 3)
+                     for k in range(-2, 3)], dtype=float)
+    square_r, square_h, _, _ = P.import_hoppings(HOP, 1)
+    ham_r = np.zeros((len(rvec), 1, 1), dtype=complex)
+    for r, h in zip(square_r, square_h):
+        ham_r[np.all(rvec == r, axis=1)] = h
+    hops = pa._arrays(rvec=rvec, ham_r=ham_r)
+    lattice_hops = pa._arrays(rvec=rvec, ham_r=ham_r, avec=avec, s_rcut=np.array(4.0))
+    params = dict(mu=orm.Float(-0.2), temp=orm.Float(EIL['temp']), wc=orm.Float(EIL['wc']),
+                  coupling=orm.Float(EIL['coupling']), gap_sym=orm.Int(2), mesh=orm.List([16, 16, 1]),
+                  fs_width=orm.Float(0.1))
+    captured = []
+    build_fs = P.build_fs
+
+    def capture(*args, **kwargs):
+        result = build_fs(*args, **kwargs)
+        captured.append(result[1].copy())
+        return result
+
+    with mock.patch.object(P, 'build_fs', capture):
+        try:
+            with T.silence():
+                P.set_harmonic_lattice(None, None)
+                pa.eilenberger_bulk(hops, **params)
+                pa.eilenberger_bulk(lattice_hops, **params)
+                P.set_harmonic_lattice(np.diag([2., 3., 5.]), rvec, s_rcut=3.0)
+                pa.eilenberger_bulk(hops, **params)
+                pa.eilenberger_bulk(lattice_hops, **params)
+        finally:
+            P.set_harmonic_lattice(None, None)
+    assert np.allclose(captured[0], captured[2])
+    assert np.allclose(captured[1], captured[3])
+    assert not np.allclose(captured[0], captured[1])
+    _, klist, eig, _, _ = P.get_emesh(16, 16, 1, ham_r, [], rvec, np.eye(3), sw_uni=True)
+    with T.silence():
+        ref = build_fs(eig, klist, -0.2, 2, 0.1, harmonic_avec=avec, harmonic_rvec=rvec,
+                       harmonic_s_rcut=4.0, use_global_harmonics=False)[1]
+    assert np.allclose(captured[1], ref)
+
+
+def test_aiida_lattice_provenance_and_eliashberg_seed():
+    pa = _setup()
+    avec, _ = P.get_ptv(np.array([4., 4., 4.]), np.array([90., 90., 90.]), 1)
+    lattice = orm.Dict({'avec': avec.tolist(), 's_rcut': 4.0})
+    seen = []
+    initial_gap = P.get_initial_gap
+
+    def capture(*args, **kwargs):
+        seed = initial_gap(*args, **kwargs)
+        seen.append((args, kwargs, seed.copy()))
+        return seed
+
+    with mock.patch.object(P, 'get_initial_gap', capture), T.silence():
+        result, node = pa.eliashberg_workflow.run_get_node(
+            **_model_inputs(), gap_sym=orm.Int(1), lattice=lattice)
+    load = next(c for c in node.called if c.process_label == 'load_hoppings')
+    assert load.inputs.lattice.uuid == lattice.uuid
+    assert np.allclose(result['hoppings'].get_array('avec'), avec)
+    assert float(result['hoppings'].get_array('s_rcut')) == 4.0
+    args, kwargs, seed = seen[0]
+    assert kwargs['use_global'] is False
+    assert np.allclose(kwargs['avec'], avec)
+    assert np.allclose(seed, initial_gap(*args, **kwargs))
+
+
+def test_aiida_rejects_invalid_lattice():
+    pa = _setup()
+    for lattice in (
+        {'avec': [[1, 0], [0, 1]]},
+        {'avec': [[1, 0, 0], [0, 1, 0], [0, 0, 0]]},
+        {'avec': [[1, 0, 0], [0, 1, 0], [0, 0, 1]], 's_rcut': 0},
+        {'s_rcut': 1.0},
+        {'avec': [[1, 0, 0], [0, 1, 0], [0, 0, 1]], 'unknown': 1},
+    ):
+        with T.silence():
+            T.assert_raises(ValueError, pa.load_hoppings, orm.SinglefileData(HOP), orm.Int(1),
+                            lattice=orm.Dict(lattice))
+
+
+def test_aiida_frequency_grid_isolation_and_restoration():
+    pa = _setup()
+    try:
+        import sparse_ir  # noqa: F401
+    except ImportError:
+        T.skip('sparse-ir not installed')
+    opts = pa._opts(None)
+    ir_opts = pa._opts(orm.Dict({'freq_grid': 'ir', 'ir_wmax': 8.0, 'ir_eps': 1e-6}))
+    st = {'eig': np.array([[0.0, 1.0]])}
+    old = P.active_freq_grid()
+    grid = P.ir_grid(TEMP, 10.0, eps=1e-6)
+    hop = pa.load_hoppings(orm.SinglefileData(HOP), orm.Int(1))
+    args = (hop, orm.Float(-0.2), orm.Float(TEMP), orm.Float(U), orm.Float(0.0),
+            orm.List(MESH), orm.Int(12))
+    try:
+        P.set_freq_grid(None)
+        with T.silence():
+            ref = pa.rpa_susceptibility(*args)
+        P.set_freq_grid(grid)
+        assert P.active_freq_grid() is grid and not F.fg_is_uniform()
+        with pa._frequency_grid(opts, TEMP, -0.2, st) as selected:
+            assert selected is None and P.active_freq_grid() is None and F.fg_is_uniform()
+            eig = np.zeros((1, 1))
+            uni = np.ones((1, 1, 1), complex)
+            green = F.gen_Green0(eig, uni, 0.0, TEMP, 4)[0, 0, :, 0]
+            assert np.allclose(green, 1/(1j*P.uniform_fermion_frequencies(TEMP, 4)))
+            try:
+                with pa._frequency_grid(ir_opts, TEMP, -0.2, st) as inner:
+                    assert P.active_freq_grid() is inner and not F.fg_is_uniform()
+                    raise RuntimeError('test restoration')
+            except RuntimeError as err:
+                assert str(err) == 'test restoration'
+            assert P.active_freq_grid() is None and F.fg_is_uniform()
+        assert P.active_freq_grid() is grid and not F.fg_is_uniform()
+        with pa._frequency_grid(ir_opts, TEMP, -0.2, st) as inner:
+            assert inner is not grid and P.active_freq_grid() is inner and not F.fg_is_uniform()
+        assert P.active_freq_grid() is grid and not F.fg_is_uniform()
+        try:
+            with pa._frequency_grid(ir_opts, TEMP, -0.2, st):
+                raise RuntimeError('test IR restoration')
+        except RuntimeError as err:
+            assert str(err) == 'test IR restoration'
+        assert P.active_freq_grid() is grid and not F.fg_is_uniform()
+        with T.silence():
+            sigma = pa._arrays(sigma=np.zeros((1, 1, 1, 1), complex))
+        def incompatible_grid():
+            with pa._frequency_grid(ir_opts, TEMP, -0.2, st, sigma):
+                raise AssertionError('incompatible sigma was accepted')
+        T.assert_raises(ValueError, incompatible_grid)
+        assert P.active_freq_grid() is grid and not F.fg_is_uniform()
+        with T.silence():
+            actual = pa.rpa_susceptibility(*args)
+        assert np.allclose(actual['chi'].get_array('chis'), ref['chi'].get_array('chis'), atol=1e-12)
+        assert abs(actual['stoner'].value-ref['stoner'].value) < 1e-12
+        assert P.active_freq_grid() is grid and not F.fg_is_uniform()
+        try:
+            with pa._frequency_grid(opts, TEMP, -0.2, st):
+                raise RuntimeError('test outer restoration')
+        except RuntimeError as err:
+            assert str(err) == 'test outer restoration'
+        assert P.active_freq_grid() is grid and not F.fg_is_uniform()
+    finally:
+        P.set_freq_grid(old)
+
+
 def test_aiida_flex_workflow_matches_mkself_and_records_provenance():
     pa = _setup()
     with T.silence():
@@ -169,10 +339,11 @@ def test_aiida_eilenberger_bulk_matches_calc_eilenberger():
 
 def test_aiida_eliashberg_gap_feeds_eilenberger():
     pa = _setup()
+    lattice = orm.Dict({'avec': np.eye(3).tolist()})
     with T.silence():
         res, node = pa.eliashberg_eilenberger_workflow.run_get_node(
             **_model_inputs(), gap_sym=orm.Int(1), wc=orm.Float(EIL['wc']), coupling=orm.Float(EIL['coupling']),
-            eil_mesh=orm.List([64, 64, 1]))
+            eil_mesh=orm.List([64, 64, 1]), lattice=lattice)
     assert node.is_finished_ok
     r = res['eilenberger'].get_dict()
     assert r['form_factor'] == 'gap_wannier' and r['delta'] > 0
@@ -180,6 +351,9 @@ def test_aiida_eliashberg_gap_feeds_eilenberger():
     eil = next(c for c in node.called if c.process_label == 'eilenberger_bulk')
     el = next(c for c in node.called_descendants if c.process_label == 'linearized_eliashberg')
     assert eil.inputs.gap_wannier.uuid == el.outputs.gap_wannier.uuid == res['gap_wannier'].uuid
+    load = next(c for c in node.called_descendants if c.process_label == 'load_hoppings')
+    assert load.inputs.lattice.uuid == lattice.uuid
+    assert np.array_equal(eil.inputs.hoppings.get_array('avec'), np.eye(3))
 
 
 def test_aiida_eilenberger_surface_and_vortex_match_plibs():

@@ -81,7 +81,7 @@ def impurity_supercell(ham_r: np.ndarray, rvec: np.ndarray, cell: list, imp_site
     rint = np.rint(rlist).astype(np.int64)
     site_of = np.empty(cell, dtype=np.int64)
     site_of[rint[:, 0], rint[:, 1], rint[:, 2]] = np.arange(Nsite)
-    # gen_ham convention H(k) = sum_R H(R) exp(+2 pi i k.R): the block (site i, site i+R) is H(R)
+    # The block (site i, site i+R) is H(R); gen_ham uses exp(-2 pi i k.R).
     H4 = np.zeros((Nsite, Norb, Nsite, Norb), dtype=np.complex128)   # [site i, orb, site i+R, orb]
     src = np.arange(Nsite)
     for R, hR in zip(Ri, np.asarray(ham_r)):
@@ -93,7 +93,8 @@ def impurity_supercell(ham_r: np.ndarray, rvec: np.ndarray, cell: list, imp_site
 
 
 def unfolded_spectrum(eigs: np.ndarray, uni: np.ndarray, rlist: np.ndarray, Norb: int, klist: np.ndarray,
-                      wlist: np.ndarray, mu: float, eta: float) -> np.ndarray:
+                      wlist: np.ndarray, mu: float, eta: float,
+                      S_imp: np.ndarray | None = None) -> np.ndarray:
     """
     @brief Spectral function of the supercell eigenstates unfolded onto the primitive-cell k:
                A(k,w) = sum_n W_n(k) (eta/pi) / ((w - e_n + mu)^2 + eta^2),
@@ -111,9 +112,16 @@ def unfolded_spectrum(eigs: np.ndarray, uni: np.ndarray, rlist: np.ndarray, Norb
     @param wlist: energies relative to mu [Nw]
     @param    mu: chemical potential [eV]
     @param   eta: Lorentzian broadening [eV]
+    @param S_imp: supercell overlap, or None for an orthogonal basis.  Non-orthogonal
+                  states are unfolded after symmetric (Löwdin) orthogonalization.
     @return  Akw: spectral function [Nk, Nw]
     """
     Nsite = len(rlist)
+    if S_imp is not None:
+        eigenvalues, eigenvectors = sclin.eigh(S_imp)
+        if np.any(eigenvalues <= 0):
+            raise ValueError('unfolded_spectrum: overlap must be positive definite')
+        uni = (eigenvectors*np.sqrt(eigenvalues)) @ (eigenvectors.conj().T @ uni)
     u = np.asarray(uni).reshape(Nsite, Norb, -1)                       # [R, l, n]
     phase = np.exp(2j*np.pi*np.asarray(klist).dot(np.asarray(rlist).T))   # [k, R]
     amp = np.einsum('kr,rln->kln', phase, u)
@@ -124,7 +132,8 @@ def unfolded_spectrum(eigs: np.ndarray, uni: np.ndarray, rlist: np.ndarray, Norb
 
 def calc_impurity_spectrum(ham_r: np.ndarray, rvec: np.ndarray, cell: list, imp_sites: np.ndarray,
                            imp_V: float | np.ndarray, fill: float, temp: float, k_sets: list, kmesh: int,
-                           bvec: np.ndarray, Emin: float, Emax: float, Nw: int, eta: float) -> dict:
+                           bvec: np.ndarray, Emin: float, Emax: float, Nw: int, eta: float,
+                           S_r: np.ndarray | list | None = None) -> dict:
     """
     @brief Impurity spectral function along a symmetry line: build the supercell with
            impurity_supercell, diagonalize it, fix mu at the filling fill (electrons per site,
@@ -135,6 +144,7 @@ def calc_impurity_spectrum(ham_r: np.ndarray, rvec: np.ndarray, cell: list, imp_
     @param k_sets, kmesh, bvec: symmetry line of the primitive cell
     @param Emin, Emax, Nw: energy window relative to mu [eV] and number of points
     @param        eta: broadening [eV]
+    @param        S_r: host overlap S(R), or None for an orthogonal basis
     @return dict with spa_length, xticks, wlist, Akw [Nk, Nw], mu, eigs, Nsite, Nimp
     """
     Norb = ham_r.shape[1]
@@ -142,11 +152,14 @@ def calc_impurity_spectrum(ham_r: np.ndarray, rvec: np.ndarray, cell: list, imp_
     Nsite = len(rlist)
     print(f"impurity supercell {list(cell)}: {Nsite} sites, {len(imp_sites)} impurities "
           f"(concentration {len(imp_sites)/Nsite:.3f}), matrix size {Norb*Nsite}", flush=True)
-    eigs, uni = sclin.eigh(ham_imp)
+    S_imp = None
+    if S_r is not None and len(S_r):
+        S_imp, _ = impurity_supercell(S_r, rvec, cell, np.array([], dtype=int), 0.0)
+    eigs, uni = sclin.eigh(ham_imp, S_imp)
     mu = _bands.calc_mu_imp(eigs, Nsite, fill, temp)
     print(f'chem. pot. = {mu:7.4f}', flush=True)
     klist, spa_length, xticks = _lattice.mk_klist(k_sets, kmesh, bvec)
     wlist = np.linspace(Emin, Emax, Nw, True)
-    Akw = unfolded_spectrum(eigs, uni, rlist, Norb, klist, wlist, mu, eta)
+    Akw = unfolded_spectrum(eigs, uni, rlist, Norb, klist, wlist, mu, eta, S_imp)
     return {'spa_length': spa_length, 'xticks': xticks, 'wlist': wlist, 'Akw': Akw, 'mu': mu,
             'eigs': eigs, 'Nsite': Nsite, 'Nimp': len(imp_sites)}

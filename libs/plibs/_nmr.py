@@ -146,7 +146,7 @@ def gap_from_eliashberg(klist: np.ndarray, fname: str = 'gap_wannier',
                         sw_extrapolate: bool = True, iw_index: int = 0, n_avg: int = 1,
                         n_points: int = 4, order: int = 1, eig: np.ndarray | None = None,
                         mu: float | None = None, gap_max: float | None = None,
-                        verbose: bool = True) -> np.ndarray:
+                        verbose: bool = True, overlap: np.ndarray | None = None) -> np.ndarray:
     """
     @brief Load a self-consistent RPA/FLEX/Eliashberg gap and return Delta(k) for the BdG bubble.
 
@@ -186,6 +186,7 @@ def gap_from_eliashberg(klist: np.ndarray, fname: str = 'gap_wannier',
     @param gap_max: rescale so that the largest gap equals this value in eV;
                     None = use the stored amplitude unchanged
     @param verbose: report what was loaded and how it was rescaled
+    @param overlap: normal-state overlap S(k), used when gap_max is defined on the Fermi surface
     @return delta_k: static gap in orbital basis [Nk, Norb, Norb] complex128, laid out
                      exactly like the deltak built by the gap_sym path of sc_gap_on_mesh
     """
@@ -242,7 +243,7 @@ def gap_from_eliashberg(klist: np.ndarray, fname: str = 'gap_wannier',
               + (f', T={temp_gap:.5f} eV' if temp_gap is not None else ''), flush=True)
     if gap_max is not None:
         if eig is not None and mu is not None:
-            _, ref, _ = fermi_surface_gap(eig, mu, delta_k)
+            _, ref, _ = fermi_surface_gap(eig, mu, delta_k, overlap=overlap)
             where = 'on the Fermi surface'
         else:
             ref, where = raw_max, 'over the zone'
@@ -357,7 +358,8 @@ def _nmr_observables(chisq: np.ndarray, weight: np.ndarray, w0: float) -> tuple[
 
 
 def fermi_surface_gap(eig: np.ndarray, mu: float, delta_k: np.ndarray,
-                      window: float | None = None) -> tuple[float, float]:
+                      window: float | None = None,
+                      overlap: np.ndarray | None = None) -> tuple[float, float, float]:
     """
     @brief Gap amplitude ON the Fermi surface, and the fraction of it that is left ungapped.
 
@@ -369,6 +371,7 @@ def fermi_surface_gap(eig: np.ndarray, mu: float, delta_k: np.ndarray,
     @param      mu: chemical potential in eV
     @param delta_k: gap in orbital basis [Nk, Norb, Norb] complex128
     @param  window: half-width in eV of the shell around E_F; default 2% of the bandwidth
+    @param overlap: normal-state overlap S(k); use the symmetrically orthogonalized gap
     @return gap_fs: r.m.s. of ||Delta(k)||_F/sqrt(Norb) over k-points with a band in the
                     shell -- the scale to compare against idelta and against T
     @return gap_fs_max: largest gap on that shell (the antinodal value for a nodal gap).
@@ -386,7 +389,14 @@ def fermi_surface_gap(eig: np.ndarray, mu: float, delta_k: np.ndarray,
         window *= 2.0
     if not np.any(on_fs):
         return 0.0, 0.0, 1.0
-    d = np.sqrt(np.sum(np.abs(np.asarray(delta_k)[on_fs]) ** 2, axis=(1, 2)) / Norb)
+    gap = np.asarray(delta_k)[on_fs]
+    if overlap is not None:
+        values, vectors = np.linalg.eigh(np.asarray(overlap)[on_fs])
+        if np.any(values <= 0):
+            raise ValueError('fermi_surface_gap: overlap must be positive definite')
+        invsqrt = (vectors/np.sqrt(values)[:, None, :]) @ vectors.conj().transpose(0, 2, 1)
+        gap = invsqrt @ gap @ invsqrt
+    d = np.sqrt(np.sum(np.abs(gap) ** 2, axis=(1, 2)) / Norb)
     gap_fs = float(np.sqrt(np.mean(d ** 2)))
     gap_fs_max = float(d.max())
     f_low = float(np.count_nonzero(d < 0.1 * gap_fs) / len(d)) if gap_fs > 0 else 1.0
@@ -394,7 +404,8 @@ def fermi_surface_gap(eig: np.ndarray, mu: float, delta_k: np.ndarray,
 
 
 def nmr_scale_check(eig: np.ndarray, mu: float, idelta: float, gap0: float,
-                    delta_k: np.ndarray | None = None, verbose: bool = True) -> dict:
+                    delta_k: np.ndarray | None = None, verbose: bool = True,
+                    overlap: np.ndarray | None = None) -> dict:
     """
     @brief Verify the energy-scale hierarchy that 1/T1T from a real-frequency bubble requires.
 
@@ -472,7 +483,7 @@ def nmr_scale_check(eig: np.ndarray, mu: float, idelta: float, gap0: float,
     dE_mesh = 2.0 * win / max(n_in, 1)
     n_delta = 2.0 * idelta / dE_mesh              # k-mesh states inside one broadening
     if delta_k is not None:
-        gap_fs, gap_fs_max, f_low = fermi_surface_gap(eig, mu, delta_k)
+        gap_fs, gap_fs_max, f_low = fermi_surface_gap(eig, mu, delta_k, overlap=overlap)
     else:
         gap_fs, gap_fs_max, f_low = abs(gap0), abs(gap0), float('nan')
     fine_enough = n_delta >= N_DELTA_MIN
@@ -541,7 +552,7 @@ def nmr_qconvergence(hamk: np.ndarray, delta_k0: np.ndarray, klist: np.ndarray,
                      temp_c: float, Smat: np.ndarray, olist: np.ndarray,
                      idelta: float = 1.e-3, w0: float | None = None,
                      sw_spsym: bool = False, hf_A: float = 1.0, hf_B: float = 0.0,
-                     verbose: bool = True) -> dict:
+                     verbose: bool = True, overlap: np.ndarray | None = None) -> dict:
     """
     @brief Check the q-mesh convergence of the 1/T1T sum at a single temperature.
     Evaluates the sum on the requested q-mesh and on the mesh with half the points per
@@ -593,7 +604,7 @@ def nmr_qconvergence(hamk: np.ndarray, delta_k0: np.ndarray, klist: np.ndarray,
         res = nmr_sweep(hamk, delta_k0, klist, qlist, mu, [temp], temp_c, Smat, olist,
                         idelta=idelta, w0=w0, sw_spsym=sw_spsym,
                         hf_weight=qmult * hyperfine_form_factor(qlist, hf_A, hf_B),
-                        verbose=False)
+                        verbose=False, overlap=overlap)
         out['R_' + tag] = float(res['R_ratio'][0])
         out['Nq_' + tag] = len(qlist)
     denom = abs(out['R_fine']) if out['R_fine'] != 0 else 1.0
@@ -607,10 +618,11 @@ def nmr_qconvergence(hamk: np.ndarray, delta_k0: np.ndarray, klist: np.ndarray,
 
 
 def nmr_sweep(hamk: np.ndarray, delta_k0: np.ndarray, klist: np.ndarray, qlist: np.ndarray,
-              mu: float, temp_list: np.ndarray, temp_c: float, Smat: np.ndarray,
+              mu: float, temp_list: np.ndarray | list[float], temp_c: float, Smat: np.ndarray,
               olist: np.ndarray, idelta: float = 1.e-3, w0: float | None = None,
               sw_spsym: bool = False, hf_weight: np.ndarray | None = None,
-              verbose: bool = True, sw_scale_check: bool = True) -> dict:
+              verbose: bool = True, sw_scale_check: bool = True,
+              overlap: np.ndarray | None = None) -> dict:
     """
     @brief Temperature sweep of the SC-state NMR observables (Knight shift and 1/T1T).
     For every temperature the gap is rescaled by the BCS interpolation
@@ -639,6 +651,7 @@ def nmr_sweep(hamk: np.ndarray, delta_k0: np.ndarray, klist: np.ndarray, qlist: 
     @param sw_scale_check: run nmr_scale_check on the normal-state bands first.
                      Set False when the caller has already reported it (main.py does,
                      so the warning appears before the q-convergence probe, not after)
+    @param  overlap: normal-state overlap S(k), or None for an orthogonal basis
     @return  result: dict with keys
                      'temp'      temperatures [NT] (eV)
                      't_red'     reduced temperature T/Tc [NT]
@@ -659,9 +672,9 @@ def nmr_sweep(hamk: np.ndarray, delta_k0: np.ndarray, klist: np.ndarray, qlist: 
     weight = np.ones(len(qlist)) if hf_weight is None else np.asarray(hf_weight, dtype=np.float64)
 
     # Normal-state bands are temperature independent: diagonalise once.
-    eig_n, uni_n = flibs.get_eig(hamk)
+    eig_n, uni_n = flibs.get_eig(hamk, overlap)
     if verbose and sw_scale_check:
-        nmr_scale_check(eig_n, mu, idelta, float(np.abs(delta_k0).max()), delta_k0)
+        nmr_scale_check(eig_n, mu, idelta, float(np.abs(delta_k0).max()), delta_k0, overlap=overlap)
 
     temp_list = np.asarray(temp_list, dtype=np.float64)
     out = {k: [] for k in ('gap_ratio', 'K_sc', 'K_n', 'R_sc', 'R_n')}
@@ -686,7 +699,7 @@ def nmr_sweep(hamk: np.ndarray, delta_k0: np.ndarray, klist: np.ndarray, qlist: 
             K_sc, R_sc = K_n, R_n
         else:
             builder = _response._prepare_sc_chi0_builder(hamk, ratio * delta_k0, mu, temp,
-                                                         klist, olist, wlist, idelta, sw_spsym)
+                                                         klist, olist, wlist, idelta, sw_spsym, overlap)
             chisq_sc, _ = _response._solve_chis_path(qlist, wlist, olist, Smat, builder)
             K_sc, R_sc = _nmr_observables(chisq_sc, weight, w0)
 
