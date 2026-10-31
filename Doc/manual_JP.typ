@@ -85,7 +85,7 @@ pyrpa は, タイトバインディング模型（Wannier90 や ecalj の出力�
   [Eliashberg 方程式], [揺らぎを媒介とする超伝導のギャップ方程式。線形化した方程式の最大固有値 $lambda$ が 1 になる温度が $T_c$ です],
   [Stoner 因子], [$chi_0 U$ の最大固有値。1 に達すると磁気秩序の不安定性（RPA の発散）を意味します],
   [松原周波数, `Nw`], [温度グリーン関数の虚周波数 $omega_n = (2n+1) pi T$ と, その点数],
-  [IR 基底], [松原周波数を少数（20〜30 点程度）のサンプリング点で表す方法。`freq_grid='ir'` で使います],
+  [IR 基底], [松原周波数を少数（20〜30 点程度）のサンプリング点で表す方法。FLEX と Eliashberg の既定（`freq_grid='ir'`）],
   [MLO], [ecalj の muffin-tin 軌道に基づく非直交な局在基底。重なり行列 $S$ を伴います],
 )
 
@@ -99,7 +99,7 @@ pyrpa は, タイトバインディング模型（Wannier90 や ecalj の出力�
 - Python パッケージ:
   - `numpy`, `scipy`, `matplotlib`
   - `skimage`（フェルミ面 option=2,3, サイクロトロン質量 option=18, dHvA option=19 で使用）
-  - `sparse-ir`（任意。IR 基底 `freq_grid='ir'` で使用。1.x, 2.x; 2.1.6 で確認）
+  - `sparse-ir`（FLEX と Eliashberg の既定の IR 基底 `freq_grid='ir'` で使用。1.x, 2.x; 2.1.6 で確認。無い環境では `freq_grid='matsubara'` にしてください）
   - `aiida-core`（任意。AiiDA インターフェース `examples/aiida/` でのみ使用）
 
 計算の重い部分（$chi$, FLEX, Eliashberg など）は OpenMP 並列の Fortran カーネル `libs/libfmod.so` で行います。`libs/flibs`, `libs/plibs` はこれを呼び出す Python パッケージです。
@@ -442,7 +442,7 @@ FLEX 近似の自己エネルギー $Sigma(bold(k), i omega_n)$ を自己無撞�
 *主なパラメータ*
 
 - `U`, `J`（または `orb_dep=True` の `Umat`, `Jmat`）: 相互作用
-- `Nw`: 松原周波数の点数。または `freq_grid='ir'` で IR 基底を使います（下の「周波数格子」）
+- `freq_grid`: 周波数格子。既定は IR 基底（`'ir'`）で, 点数は基底が決めます。`'matsubara'` にすると `Nw` 点の一様な松原周波数を使います（下の「周波数格子」）
 - `sw_out_self=True`: $Sigma$ をファイルに保存します
   - `self_en.npz`: $Sigma$ と周波数 `iw`, 温度。option=15, 23 の `sw_from_file` が読みます
   - `self_en_wannier.npz`: Wannier 実空間形式。option=4 と `tau_mode='flex'` が読みます
@@ -456,7 +456,7 @@ FLEX 近似の自己エネルギー $Sigma(bold(k), i omega_n)$ を自己無撞�
   標準出力に `[FLEX] WARNING: Stoner factor >= 1 at the final iteration` が出た場合, その温度・相互作用では正常状態が磁気的に不安定で, 得られた $Sigma$ は物理的な解ではありません。温度を上げるか `U` を下げてください。
 ]
 
-*一様格子での `Nw` の選び方.* 一様な松原周波数の窓は $omega_c = (2 N_w - 1) pi T$ で, 温度に比例して狭くなります。最低温度でも $omega_c$ がバンド幅と `U` を十分上回るように `Nw` を選んでください。低温ほど大きな `Nw` が必要になるので, 低温や多軌道の計算では IR 基底（`freq_grid='ir'`）が便利です。
+*一様格子での `Nw` の選び方.* 一様な松原周波数の窓は $omega_c = (2 N_w - 1) pi T$ で, 温度に比例して狭くなります。最低温度でも $omega_c$ がバンド幅と `U` を十分上回るように `Nw` を選んでください。低温ほど大きな `Nw` が必要になるので, 通常は既定の IR 基底を使ってください。
 
 *非直交 MLO 基底（`ftype=3,4`）.* $G^(-1) = (i omega + mu) S - H - Sigma$ を使い, 粒子数は $"tr"(S G)$ で数えます（`U`, `J` の規格化は「入力ファイルについて」の節）。線形・非線形 Eliashberg とスペクトルも同じ規約です。自己エネルギーのファイルには重なり行列を保存しないので, 読み込むときは計算時と同じ模型を指定してください。`tau_mode='flex'` の輸送計算は直交基底専用です。
 
@@ -465,7 +465,7 @@ FLEX 近似の自己エネルギー $Sigma(bold(k), i omega_n)$ を自己無撞�
 
 === 継続計算（U・温度アニーリング）
 
-収束しにくい条件では, 収束しやすい条件（小さい U や高い温度）で求めた `sigma.bin` を初期値にすると安定します。`sw_in_self=True` で前回の `sigma.bin` を読み込みます。
+収束しにくい条件では, 収束しやすい条件（小さい U や高い温度）で求めた `sigma.bin` を初期値にすると安定します。`sw_in_self=True` で前回の `sigma.bin` を読み込みます。`sigma.bin` は一様な松原周波数専用なので, `freq_grid='matsubara'` で使ってください。
 
 - *U アニーリング*: `sigma_in_scale` に $(U_"new"\/U_"old")^2$ 程度を指定します（弱結合で $Sigma prop U^2$）。
 - *温度アニーリング*: 少しずつ冷やす（$T_"new"\/T_"old" gt.eq 0.8$ 程度）なら, そのまま読み込めば十分です。
@@ -489,7 +489,7 @@ FLEX 近似の自己エネルギー $Sigma(bold(k), i omega_n)$ を自己無撞�
 
 === 周波数格子: 一様な松原周波数と IR 基底（`freq_grid`）
 
-`freq_grid='ir'` にすると, 周波数方向を一様な $N_w$ 点の松原周波数ではなく, IR（intermediate representation）基底の少数のサンプリング点で扱います。option=14, 15, 16, 23 の全て（SOC あり・なし, `sw_nosym` も）に対応し, sparse-ir が必要です。
+既定（`freq_grid='ir'`）では, 周波数方向を一様な $N_w$ 点の松原周波数ではなく, IR（intermediate representation）基底の少数のサンプリング点で扱います。一様な松原周波数を使うには `freq_grid='matsubara'` にします。option=14, 15, 16, 23 の全て（SOC あり・なし, `sw_nosym` も）に対応し, sparse-ir が必要です。
 
 ```python
 freq_grid = 'ir'
@@ -500,7 +500,7 @@ ir_eps = 1.0e-8    # 基底の精度。実軸へ Padé 接続するなら 1e-14 
 - *点数*: 基底が決め, 典型的に 20〜30 点です（$Lambda = omega_"max"\/T$ と `ir_eps` に対数的にしか依存しません）。`Nw` と `sw_chi0_tail` は使われません。
 - *メモリと時間*: 大きな配列（$G$, $Sigma$, $chi$ など）は周波数の点数に比例するので, 一様格子の `Nw` に比べて「`Nw` ÷ IR の点数」倍だけ減ります。例えば 2 軌道 FLEX（$64 times 64$, $T = 0.01$ eV）のピークメモリは, `Nw=2048` で 3.9 GB, IR（22 点）で 0.18 GB でした。計算時間も数十分の 1 程度になります。
 - *精度*: 一様格子の $N_w -> infinity$ の極限とよく一致します（$mu$ と Stoner 因子で $10^(-5)$ 以下, 線形 Eliashberg の $lambda$ で $10^(-7)$ 程度）。
-- *制限*: `sigma.bin`（`sw_in_self`, および `sw_out_self` のうち `sigma.bin` の部分）は一様格子専用です。
+- *制限*: `sigma.bin`（`sw_in_self`, および `sw_out_self` のうち `sigma.bin` の部分）は一様格子専用です。継続計算をするときは `freq_grid='matsubara'` にしてください。
 - *実軸への接続*: Padé を使う場合は `ir_eps=1e-14` 程度にしてください（点数は数点増えるだけです）。
 
 #detail[
@@ -857,7 +857,7 @@ $s^plus.minus$（`gap_sym=2`）だけは例外で, シェルを対称性から�
 
 - `sw_rescale_flex` （bool）: option=14 の FLEX 計算で, 反復中に Stoner 因子が 1 に達した場合に $chi_0$ 全体を一律に $(1-10^(-4))\/S$ 倍して発散を防ぎます。収束解にバイアスは残りません（option=14 の「精度と実装上の近似」）。
 
-- `freq_grid` （`'matsubara'` / `'ir'`, 既定 `'matsubara'`）, `ir_wmax` （float または None）, `ir_eps` （float, 既定 $10^(-8)$）: option=14, 15, 16, 23 の周波数格子。`'ir'` で IR 基底のスパースサンプリングを使います（option=14 の「周波数格子」の節を参照。Padé で実軸へ接続するなら `ir_eps=1e-14` 程度）。
+- `freq_grid` （`'ir'` / `'matsubara'`, 既定 `'ir'`）, `ir_wmax` （float または None）, `ir_eps` （float, 既定 $10^(-8)$）: option=14, 15, 16, 23 の周波数格子。`'ir'` で IR 基底のスパースサンプリングを使います（option=14 の「周波数格子」の節を参照。Padé で実軸へ接続するなら `ir_eps=1e-14` 程度）。
 
 - `sw_chi0_tail` （bool）: option=14,15,23（SOC なし経路）で $chi_0$ を tail 補正付きで評価します（既定 True。IR 基底では無視されます）。打ち切り誤差が $O(1\/N_w)$ から $O(1\/N_w^2)$ に改善し, 同じ精度なら小さい `Nw` で済みます（option=14 の「精度と実装上の近似」）。
 
@@ -1023,9 +1023,9 @@ m_diis_num = 5            # DIIS Pulay 加速 + 振幅方向 Newton 加速
 
 低温（$T tilde.equiv T_c \/ 5$）では DIIS 履歴を 5–10 程度にすると収束が速くなります。
 
-== IR 基底での計算
+== 一様な松原周波数での計算
 
-低温や, バンドが高エネルギーまで延びる模型（MLO 基底など）では, 一様な松原周波数より IR 基底の方が少ない周波数点で正確です。上の FLEX + 線形 Eliashberg の流れで `freq_grid = 'ir'` を設定するだけです（設定は option=14 の「周波数格子」の節）。
+FLEX と Eliashberg の既定は IR 基底で, 上の例はどれもそのまま IR 基底で計算します（`Nw` は使われません）。`sigma.bin` による継続計算（`sw_in_self`）など一様な松原周波数が必要な場合は, `freq_grid = 'matsubara'` として `Nw` を設定します（選び方は option=14 の節）。
 
 == 超伝導状態の動的スピン感受率
 
@@ -1186,4 +1186,4 @@ python tests/run_all.py rpa        # ファイル名に "rpa" を含むものだ
 python tests/run_all.py --runslow  # slow マーカー付きのテストも含める
 ```
 
-`pytest` があれば `pytest tests` でも実行できます。各ファイルの内容は `tests/README.md` と `Doc/internals_JP.typ` を参照してください。
+`pytest` があれば `pytest tests` でも実行できます。各ファイルの内容は `tests/README_JP.md` と `Doc/internals_JP.typ` を参照してください。

@@ -84,7 +84,7 @@ Then try `option = 2` (Fermi surface), `option = 7` (spin susceptibility), `opti
   [Eliashberg equation], [The gap equation of fluctuation-mediated superconductivity. $T_c$ is where the largest eigenvalue $lambda$ of the linearized equation reaches 1],
   [Stoner factor], [The largest eigenvalue of $chi_0 U$. Reaching 1 signals a magnetic instability (divergence of the RPA)],
   [Matsubara frequency, `Nw`], [The imaginary frequencies $omega_n = (2n+1) pi T$ of the thermal Green's function, and their number],
-  [IR basis], [A representation of the Matsubara axis by a few (typically 20--30) sampling points; enabled with `freq_grid='ir'`],
+  [IR basis], [A representation of the Matsubara axis by a few (typically 20--30) sampling points; the default of FLEX and Eliashberg (`freq_grid='ir'`)],
   [MLO], [ecalj's non-orthogonal localized basis built from muffin-tin orbitals, with an overlap matrix $S$],
 )
 
@@ -98,7 +98,7 @@ Then try `option = 2` (Fermi surface), `option = 7` (spin susceptibility), `opti
 - Python packages:
   - `numpy`, `scipy`, `matplotlib`
   - `skimage` (Fermi surfaces option=2,3, cyclotron mass option=18, dHvA option=19)
-  - `sparse-ir` (optional; the IR basis `freq_grid='ir'`; 1.x, 2.x, checked with 2.1.6)
+  - `sparse-ir` (the IR basis `freq_grid='ir'`, the default of FLEX and Eliashberg; 1.x, 2.x, checked with 2.1.6; without it set `freq_grid='matsubara'`)
   - `aiida-core` (optional; only for the AiiDA interface in `examples/aiida/`)
 
 The heavy parts ($chi$, FLEX, Eliashberg, ...) run in the OpenMP-parallel Fortran kernel `libs/libfmod.so`; `libs/flibs` and `libs/plibs` are the Python packages that call it.
@@ -443,7 +443,7 @@ Solves FLEX self-consistently for the self-energy $Sigma(bold(k), i omega_n)$. T
 *Main parameters*
 
 - `U`, `J` (or `Umat`, `Jmat` with `orb_dep=True`): the interaction
-- `Nw`: the number of Matsubara frequencies; or the IR basis with `freq_grid='ir'` (see "Frequency grid" below)
+- `freq_grid`: the frequency grid; the IR basis (`'ir'`) by default, whose number of points is set by the basis; `'matsubara'` uses `Nw` uniform Matsubara frequencies (see "Frequency grid" below)
 - `sw_out_self=True`: save $Sigma$
   - `self_en.npz`: $Sigma$ with its frequencies `iw` and the temperature; read by `sw_from_file` of option=15, 23
   - `self_en_wannier.npz`: Wannier real-space form; read by option=4 and `tau_mode='flex'`
@@ -457,7 +457,7 @@ Solves FLEX self-consistently for the self-energy $Sigma(bold(k), i omega_n)$. T
   If `[FLEX] WARNING: Stoner factor >= 1 at the final iteration` is printed, the normal state is magnetically unstable at that temperature and interaction and the resulting $Sigma$ is not a physical solution. Raise the temperature or lower `U`.
 ]
 
-*Choosing `Nw` on the uniform grid.* The uniform Matsubara window is $omega_c = (2 N_w - 1) pi T$ and shrinks with the temperature. Choose `Nw` so that $omega_c$ comfortably exceeds the bandwidth and `U` even at the lowest temperature. Since lower temperatures need larger `Nw`, the IR basis (`freq_grid='ir'`) is convenient at low temperature and for multi-orbital models.
+*Choosing `Nw` on the uniform grid.* The uniform Matsubara window is $omega_c = (2 N_w - 1) pi T$ and shrinks with the temperature. Choose `Nw` so that $omega_c$ comfortably exceeds the bandwidth and `U` even at the lowest temperature. Since lower temperatures need larger `Nw`, the default IR basis is normally the better choice.
 
 *Non-orthogonal MLO basis (`ftype=3,4`).* $G^(-1) = (i omega + mu) S - H - Sigma$ is used and the particle number is $"tr"(S G)$. The normalization of `U`, `J` is described under "Input Files"; the Eliashberg equations and the spectral function use the same convention. Self-energy files do not store the overlap, so read them with the same model they were computed with. Transport with `tau_mode='flex'` remains orthogonal-basis only.
 
@@ -467,7 +467,7 @@ returned finite endpoint represents the numerically saturated Fermi function.
 
 === Continuation runs (U and temperature annealing)
 
-When a case converges poorly, start from the `sigma.bin` of an easier case (smaller U or higher temperature); `sw_in_self=True` reads the previous `sigma.bin`.
+When a case converges poorly, start from the `sigma.bin` of an easier case (smaller U or higher temperature); `sw_in_self=True` reads the previous `sigma.bin`. `sigma.bin` is for the uniform Matsubara grid only, so use it with `freq_grid='matsubara'`.
 
 - *U annealing*: set `sigma_in_scale` to about $(U_"new"\/U_"old")^2$ ($Sigma prop U^2$ at weak coupling).
 - *Temperature annealing*: for small cooling steps ($T_"new"\/T_"old" gt.eq 0.8$ or so), reading it as it is suffices.
@@ -491,7 +491,7 @@ A `sigma.bin` with a different orbital count or $bold(k)$-point count cannot be 
 
 === Frequency grid: uniform Matsubara and the IR basis (`freq_grid`)
 
-With `freq_grid='ir'` the frequency axis is represented not by $N_w$ uniform Matsubara frequencies but by a few sampling points of the IR (intermediate representation) basis. All of option=14, 15, 16, 23 support it (with and without SOC, and `sw_nosym`); sparse-ir is required.
+By default (`freq_grid='ir'`) the frequency axis is represented not by $N_w$ uniform Matsubara frequencies but by a few sampling points of the IR (intermediate representation) basis; `freq_grid='matsubara'` selects the uniform Matsubara frequencies. All of option=14, 15, 16, 23 support it (with and without SOC, and `sw_nosym`); sparse-ir is required.
 
 ```python
 freq_grid = 'ir'
@@ -502,7 +502,7 @@ ir_eps = 1.0e-8    # basis accuracy; about 1e-14 for Padé continuation
 - *Number of points*: fixed by the basis, typically 20--30 (it grows only logarithmically with $Lambda = omega_"max"\/T$ and `ir_eps`). `Nw` and `sw_chi0_tail` are not used.
 - *Memory and time*: the large arrays ($G$, $Sigma$, $chi$, ...) scale with the number of frequencies, so they shrink by a factor of `Nw` / (number of IR points). For example, the peak memory of a two-orbital FLEX ($64 times 64$, $T = 0.01$ eV) was 3.9 GB with `Nw=2048` and 0.18 GB on the IR grid (22 points). Run times drop by a factor of several tens.
 - *Accuracy*: agrees closely with the $N_w -> infinity$ limit of the uniform grid ($10^(-5)$ or better for $mu$ and the Stoner factor, about $10^(-7)$ for the linearized Eliashberg $lambda$).
-- *Limitations*: `sigma.bin` (`sw_in_self`, and the `sigma.bin` part of `sw_out_self`) is uniform-grid only.
+- *Limitations*: `sigma.bin` (`sw_in_self`, and the `sigma.bin` part of `sw_out_self`) is uniform-grid only; use `freq_grid='matsubara'` for continuation runs.
 - *Continuation to the real axis*: for Padé use `ir_eps=1e-14` or so (only a few more points).
 
 #detail[
@@ -863,7 +863,7 @@ Two caveats remain. The shell of a chiral pair is shared between its two partner
 
 - `sw_rescale_flex` (bool): For FLEX (option=14), uniformly rescale $chi_0$ by $(1-10^(-4))\/S$ whenever the Stoner factor $S$ reaches 1 during the iteration, preventing the magnetic-instability divergence. The converged solution is not biased (see "Accuracy and implementation approximations" under option=14).
 
-- `freq_grid` (`'matsubara'` / `'ir'`, default `'matsubara'`), `ir_wmax` (float or None), `ir_eps` (float, default $10^(-8)$): frequency grid of option=14, 15, 16, 23; `'ir'` uses the sparse sampling of the IR basis (see "Frequency grid" under option=14; `ir_eps=1e-14` or so for a Padé continuation).
+- `freq_grid` (`'ir'` / `'matsubara'`, default `'ir'`), `ir_wmax` (float or None), `ir_eps` (float, default $10^(-8)$): frequency grid of option=14, 15, 16, 23; `'ir'` uses the sparse sampling of the IR basis (see "Frequency grid" under option=14; `ir_eps=1e-14` or so for a Padé continuation).
 
 - `sw_chi0_tail` (bool): For option=14,15,23 (no-SOC path), evaluate $chi_0$ with the tail-corrected convolution (default True; ignored on the IR basis). The truncation error improves from $O(1\/N_w)$ to $O(1\/N_w^2)$, so a smaller `Nw` reaches the same accuracy (see "Accuracy and implementation approximations" under option=14).
 
@@ -1029,9 +1029,9 @@ m_diis_num = 5            # DIIS Pulay acceleration + amplitude-direction Newton
 
 At low temperatures ($T tilde.equiv T_c \/ 5$), increasing the DIIS history to 5–10 typically accelerates convergence.
 
-== Calculations on the IR Basis
+== Calculations on the Uniform Matsubara Grid
 
-At low temperatures, or for models whose bands reach high energies (an MLO basis, for example), the IR basis is accurate with far fewer frequencies than uniform Matsubara frequencies. Just set `freq_grid = 'ir'` in the FLEX + linearized Eliashberg flow above (see "Frequency grid" under option=14).
+FLEX and Eliashberg use the IR basis by default, so every example above runs on it as it stands (`Nw` is not used). Where uniform Matsubara frequencies are needed, as for the `sigma.bin` continuation (`sw_in_self`), set `freq_grid = 'matsubara'` and choose `Nw` (see option=14).
 
 == Dynamic Spin Susceptibility in the SC State
 

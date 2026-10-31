@@ -262,9 +262,10 @@ hall_mesh_list = None  # k-mesh convergence sweep for the Hall coefficient (opti
 # None: single mesh (Nx,Ny,Nz), no convergence information.
 sw_omega = False  # True: real freq, False: Matsubara freq.
 sw_rescale_flex = True  # True: rescale self energy to make max|Sigma|~U, False: no rescaling
-freq_grid = 'matsubara'  # Matsubara-axis grid of FLEX/Eliashberg (option 14,15,16,23): 'matsubara' = Nw uniform points,
-# 'ir' = sparse sampling of the IR basis (needs sparse-ir; Nw is then fixed by the basis, ~15-30 points, and the
-# truncation error of the uniform grid is gone). For a Pade continuation use ir_eps ~ 1e-14
+freq_grid = 'ir'  # Matsubara-axis grid of FLEX/Eliashberg (option 14,15,16,23): 'ir' = sparse sampling of the IR
+# basis (needs sparse-ir; Nw is not used, the basis fixes ~15-30 points, and there is no truncation error);
+# 'matsubara' = Nw uniform points (needed for the sigma.bin continuation, sw_in_self). For a Pade continuation
+# use ir_eps ~ 1e-14
 ir_wmax = None  # freq_grid='ir': spectral cutoff [eV]; None = 2 x the largest |e_k - mu| (FLEX spreads spectral weight
 # beyond the bare band, so the band width alone is too small for FLEX)
 ir_eps = 1.0e-8  # freq_grid='ir': accuracy of the IR basis
@@ -475,7 +476,8 @@ def setup_ir_grid(temp: float, mu: float, ham_r: np.ndarray, S_r: np.ndarray, rv
     try:
         import sparse_ir  # noqa: F401
     except ImportError:
-        raise InputError("freq_grid='ir' needs the sparse-ir package (pip install sparse-ir)") from None
+        raise InputError("freq_grid='ir' needs the sparse-ir package: pip install sparse-ir, "
+                         "or set freq_grid='matsubara' (Nw uniform points)") from None
     wmax = ir_wmax
     if wmax is None:
         _, kl = plibs.gen_klist(min(Nx, 16), min(Ny, 16), min(Nz, 16), sw_pp=False)

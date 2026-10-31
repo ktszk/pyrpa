@@ -235,7 +235,7 @@ plibs.regrid_sigma_bin(temp_new=..., Nw_new=..., w_scale=...)
 
 = テスト
 
-実行方法は `tests/README.md` とマニュアルの付録にあります。全体で約 7 分（ifx 版, 24 スレッド）かかり, その大半は `test_eliash_nosym.py`（全ブリルアンゾーンで解く）と `test_eilenberger.py`（2 次元グリッド上の自己無撞着場の問題）です。`test_aiida.py` は `aiida-core` が, `test_freq_grid.py` は `sparse-ir` が無い環境ではスキップされます。
+実行方法は `tests/README_JP.md` とマニュアルの付録にあります。全体で約 7 分（ifx 版, 24 スレッド）かかり, その大半は `test_eliash_nosym.py`（全ブリルアンゾーンで解く）と `test_eilenberger.py`（2 次元グリッド上の自己無撞着場の問題）です。`test_aiida.py` は `aiida-core` が, `test_freq_grid.py` は `sparse-ir` が無い環境ではスキップされます。
 
 #table(
   columns: (auto, 1fr),
