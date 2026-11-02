@@ -2154,7 +2154,7 @@ subroutine get_vnm(vk,vk0,mrot,uni,Nk,Norb) bind(C)
         do k=1,Norb
            do l=1,3
               do m=1,3
-                 vk(m,k,n,i)=vk(m,k,n,i)+mrot(m,l)*dble(tmp(l,k,n))
+                 vk(m,k,n,i)=vk(m,k,n,i)+mrot(m,l)*tmp(l,k,n)
               end do
            end do
         end do
@@ -2319,7 +2319,7 @@ subroutine get_vnm_mlo(vk,vk0,sk0,Ovlk,eig,mrot,uni,Nk,Norb) bind(C)
         do k=1,Norb
            do l=1,3
               do m=1,3
-                 vk(m,k,n,i)=vk(m,k,n,i)+mrot(m,l)*dble(tmp(l,k,n))
+                 vk(m,k,n,i)=vk(m,k,n,i)+mrot(m,l)*tmp(l,k,n)
               end do
            end do
         end do
